@@ -840,7 +840,7 @@ export function sidebarSendState({
       return {
         kind: "open-agent-settings",
         canSend: false,
-        label: `设置 ${boundedAgentSettingsName}`,
+        label: "连接 AI",
         reason: null,
       };
     }
@@ -865,9 +865,7 @@ export function sidebarSendState({
     return {
       kind: "open-agent-settings",
       canSend: false,
-      label: credentialKind === "api-token"
-        ? `连接 ${boundedAgentSettingsName}`
-        : `登录 ${boundedAgentSettingsName}`,
+      label: "连接 AI",
       reason: null,
     };
   }
@@ -883,7 +881,7 @@ export function sidebarSendState({
     return {
       kind: "open-agent-settings",
       canSend: false,
-      label: `设置 ${boundedAgentSettingsName}`,
+      label: "连接 AI",
       reason: null,
     };
   }
@@ -900,7 +898,7 @@ export function sidebarSendState({
       return {
         kind: "open-agent-settings",
         canSend: false,
-        label: `设置 ${boundedAgentSettingsName}`,
+        label: "连接 AI",
         reason: null,
       };
     }

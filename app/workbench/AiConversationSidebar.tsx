@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 
 import {
@@ -80,6 +81,23 @@ export type AiConversationSidebarProps = {
   onSend?: () => void;
   onAction?: (actionId: string) => void;
   onOpenAgentSettings?: () => void;
+  onSelectAgentService?: (providerId: string) => void;
+  agentServices?: readonly Readonly<{
+    providerId: string;
+    label: string;
+    status: string;
+    connected: boolean;
+  }>[];
+  serviceTriggerText?: string | null;
+  agentSetupPanel?: ReactNode;
+  recoveryBar?: Readonly<{
+    kind: string;
+    title: string;
+    detail: string;
+    primary: Readonly<{ id: string; label: string }>;
+    secondary: Readonly<{ id: string; label: string }> | null;
+  }> | null;
+  onRecoveryAction?: (actionId: string) => void;
   onSelectModel?: (modelId: string) => void;
   onSelectReasoning?: (reasoning: string) => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
@@ -204,6 +222,12 @@ export default function AiConversationSidebar({
   onSend,
   onAction,
   onOpenAgentSettings,
+  onSelectAgentService,
+  agentServices = [],
+  serviceTriggerText = null,
+  agentSetupPanel = null,
+  recoveryBar = null,
+  onRecoveryAction,
   onSelectModel,
   onSelectReasoning,
   onCopyTask,
@@ -223,7 +247,7 @@ export default function AiConversationSidebar({
   sourceFileName = null,
   handoffStatus = null,
 }: AiConversationSidebarProps) {
-  const [openChoice, setOpenChoice] = useState<null | "model" | "reasoning">(null);
+  const [openChoice, setOpenChoice] = useState<null | "service" | "model" | "reasoning">(null);
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
   const [clockNow, setClockNow] = useState(0);
@@ -232,6 +256,7 @@ export default function AiConversationSidebar({
   const liveMessageRef = useRef<HTMLElement | null>(null);
   const agentSelectorRef = useRef<HTMLDivElement | null>(null);
   const agentSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const serviceSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const reasoningSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const followingRef = useRef(true);
   const contentKeyRef = useRef<string | null>(null);
@@ -434,7 +459,11 @@ export default function AiConversationSidebar({
       if (event.key !== "Escape") return;
       event.preventDefault();
       setOpenChoice(null);
-      (openChoice === "reasoning" ? reasoningSelectorButtonRef : agentSelectorButtonRef)
+      (openChoice === "reasoning"
+        ? reasoningSelectorButtonRef
+        : openChoice === "service"
+          ? serviceSelectorButtonRef
+          : agentSelectorButtonRef)
         .current?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
@@ -761,21 +790,93 @@ export default function AiConversationSidebar({
             {send.reason}
           </p>
         ) : null}
+        {recoveryBar ? (
+          <div
+            className={styles.recoveryBar}
+            data-testid="ai-conversation-recovery"
+            data-kind={recoveryBar.kind}
+            role="status"
+            aria-live="polite"
+          >
+            <strong>{recoveryBar.title}</strong>
+            <p>{recoveryBar.detail}</p>
+            <div className={styles.recoveryActions}>
+              <button
+                type="button"
+                className={styles.send}
+                data-action-id={recoveryBar.primary.id}
+                onClick={() => onRecoveryAction?.(recoveryBar.primary.id)}
+              >
+                {recoveryBar.primary.label}
+              </button>
+              {recoveryBar.secondary ? (
+                <button
+                  type="button"
+                  className={styles.copyTask}
+                  data-action-id={recoveryBar.secondary.id}
+                  onClick={() => onRecoveryAction?.(recoveryBar.secondary?.id || "")}
+                >
+                  {recoveryBar.secondary.label}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {agentSetupPanel ? (
+          <div className={styles.setupPanel} data-testid="ai-conversation-agent-setup">
+            {agentSetupPanel}
+          </div>
+        ) : null}
 
         <div className={styles.composerActions}>
           {showComposerIdentity ? <div className={styles.identityActions}>
-            <button
-              type="button"
-              className={styles.schemeTrigger}
-              data-testid="ai-conversation-agent"
-              onClick={() => onOpenAgentSettings?.()}
-              aria-label={`当前 Agent ${schemeName}，去设置`}
-            >
-              <AgentChoiceMark label={schemeName} logoSrc={agentPresentation?.logoSrc} />
-              <span>{schemeName}</span>
-            </button>
-
             <div ref={agentSelectorRef} className={styles.identityPickers}>
+              <div className={styles.agentSelector}>
+                <button
+                  ref={serviceSelectorButtonRef}
+                  type="button"
+                  className={styles.schemeTrigger}
+                  data-testid="ai-conversation-agent"
+                  onClick={() => setOpenChoice((value) => (value === "service" ? null : "service"))}
+                  aria-expanded={openChoice === "service"}
+                  aria-controls="ai-conversation-service-choices"
+                  aria-label={`当前服务 ${serviceTriggerText || schemeName}，选择 AI 服务`}
+                >
+                  <AgentChoiceMark label={schemeName} logoSrc={agentPresentation?.logoSrc} />
+                  <span>{serviceTriggerText || schemeName}</span>
+                  <span className={styles.agentChevron} aria-hidden="true">▾</span>
+                </button>
+                {openChoice === "service" && agentServices.length ? (
+                  <div
+                    id="ai-conversation-service-choices"
+                    className={styles.agentChoices}
+                    aria-label="选择 AI 服务"
+                    data-testid="ai-conversation-service-choices"
+                  >
+                    {agentServices.map((service) => (
+                      <button
+                        key={service.providerId}
+                        type="button"
+                        aria-pressed={service.label === schemeName || serviceTriggerText?.startsWith(service.label)}
+                        className={styles.agentChoice}
+                        data-testid={`ai-conversation-service-${service.providerId}`}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                        }}
+                        onClick={() => {
+                          serviceSelectorButtonRef.current?.focus();
+                          onSelectAgentService?.(service.providerId);
+                          setOpenChoice(null);
+                        }}
+                      >
+                        <span>{service.label}</span>
+                        <small>{service.status}</small>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
               <div className={styles.agentSelector}>
                 {agentLine?.choosable ? (
                   <button

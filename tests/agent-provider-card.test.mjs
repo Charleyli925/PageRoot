@@ -62,28 +62,35 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
 });
 
 test("About is product information while Settings owns Agent checks and update controls", async () => {
-  const [about, settings] = await Promise.all([
+  const [about, settings, setup] = await Promise.all([
     source("../app/components/AboutPageRootDialog.tsx"),
     source("../app/components/SettingsPage.tsx"),
+    source("../app/components/AgentSetupPanel.tsx"),
   ]);
   assert.match(about, /源码级本地 HTML 编辑器/u);
   assert.doesNotMatch(about, /about-agent-section|Agent|更新|检查更新|Qoder/u);
-  assert.match(settings, /AI Agent/u);
+  assert.match(settings, /AI 服务/u);
   assert.match(settings, /软件更新/u);
   assert.match(settings, /document\.visibilityState === "visible"/u);
   assert.match(settings, /window\.addEventListener\("focus"/u);
   assert.match(settings, /document\.addEventListener\("visibilitychange"/u);
   assert.match(settings, /agentActionRef\.current\?\.focus\(\)/u);
+  assert.match(settings, /settings-agent-row-/u);
+  assert.match(settings, /agentServiceLabel/u);
+  assert.match(settings, /AgentSetupPanel/u);
+  assert.doesNotMatch(settings, /event\.key !== "Tab"/u);
   assert.match(settings, /onCheckForUpdates/u);
   assert.match(settings, /onDownloadUpdate/u);
   assert.match(settings, /onRequestRestart/u);
   assert.match(settings, /if \(!force && \(/u);
   assert.match(settings, /checkInFlightRef\.current/u);
+  assert.match(setup, /export default function AgentSetupPanel/u);
+  assert.match(setup, /<AgentProviderCard/u);
   assert.ok(
-    settings.indexOf("const checked = await onCheckSelection(candidateSelection)")
-      < settings.indexOf("const committed = onSelectAgentModel(modelId, selectedCard.selection)"),
+    setup.indexOf("const checked = await onCheckSelection(candidateSelection)")
+      < setup.indexOf("const committed = onSelectAgentModel(modelId, card.selection)"),
     "a model selection must validate before it becomes current",
   );
-  assert.match(settings, /checked\.status !== "succeeded"/u);
-  assert.match(settings, /onSelectAgentReasoning\(reasoning, selectedCard\.selection\)/u);
+  assert.match(setup, /checked.status !== "succeeded"/u);
+  assert.match(setup, /onSelectAgentReasoning\(reasoning, card.selection\)/u);
 });

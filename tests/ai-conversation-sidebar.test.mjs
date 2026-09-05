@@ -235,7 +235,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   assert.deepEqual(checking, {
     kind: "open-agent-settings",
     canSend: false,
-    label: "设置 Agent",
+    label: "连接 AI",
     reason: null,
   });
 
@@ -247,7 +247,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   assert.deepEqual(login, {
     kind: "open-agent-settings",
     canSend: false,
-    label: "登录 Agent",
+    label: "连接 AI",
     reason: null,
   });
 
@@ -257,7 +257,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
     credentialKind: "api-token",
     agentSettingsName: "源页 Agent",
   });
-  assert.equal(connect.label, "连接 源页 Agent");
+  assert.equal(connect.label, "连接 AI");
 
   const install = sidebarSendState({
     state: "preview-ready",
@@ -265,7 +265,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
     hasText: true,
   });
   assert.equal(install.kind, "open-agent-settings");
-  assert.equal(install.label, "设置 Agent");
+  assert.equal(install.label, "连接 AI");
 
   const unavailable = sidebarSendState({
     state: "preview-ready",
@@ -273,7 +273,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
     hasText: true,
   });
   assert.equal(unavailable.kind, "open-agent-settings");
-  assert.equal(unavailable.label, "设置 Agent");
+  assert.equal(unavailable.label, "连接 AI");
 
   const capacity = sidebarSendState({
     state: "preview-ready",
@@ -291,7 +291,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
     hasText: true,
   });
   assert.equal(timeout.kind, "open-agent-settings");
-  assert.equal(timeout.label, "设置 Agent");
+  assert.equal(timeout.label, "连接 AI");
 
   const codexLogin = sidebarSendState({
     state: "preview-ready",
@@ -304,7 +304,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   assert.deepEqual(codexLogin, {
     kind: "open-agent-settings",
     canSend: false,
-    label: "登录 Codex",
+    label: "连接 AI",
     reason: null,
   });
 

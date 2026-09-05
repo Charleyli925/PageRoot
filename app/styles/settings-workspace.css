@@ -457,6 +457,130 @@
 
 .settings-agent-rows .qoder-card-control {
   width: auto;
+}
+
+.settings-service-row + .settings-service-row {
+  border-top: 1px solid #ecebf0;
+}
+
+.settings-service-summary {
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+}
+
+.settings-service-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-service-copy strong {
+  color: #34323b;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.settings-service-copy small {
+  overflow: hidden;
+  color: #85838e;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-service-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-service-primary,
+.settings-service-more > button {
+  min-height: 30px;
+  border: 1px solid #d8d6de;
+  border-radius: 8px;
+  background: #fff;
+  color: #3a3843;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-service-primary {
+  padding: 0 11px;
+}
+
+.settings-service-primary[data-kind="connect"] {
+  border-color: #c9c4ea;
+  background: #f4f2fb;
+  color: #4b43a3;
+}
+
+.settings-service-more {
+  position: relative;
+}
+
+.settings-service-more > button {
+  width: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.settings-service-menu {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 168px;
+  display: grid;
+  padding: 6px;
+  border: 1px solid #e2e1e8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgb(32 29 49 / 10%);
+}
+
+.settings-service-menu button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #34323b;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-service-menu button:hover,
+.settings-service-menu button:focus-visible {
+  background: #f4f3f7;
+}
+
+.settings-service-menu-note {
+  margin: 4px 10px 2px;
+  color: #85838e;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.settings-service-panel {
+  padding: 0 8px 12px;
+}
+
+.settings-service-panel .qoder-availability-card,
+.settings-service-panel .codex-availability-card,
+.settings-service-panel .pageroot-availability-card {
+  border: 0;
+  border-top: 1px solid #ecebf0;
+  border-radius: 0;
+}
   min-width: 140px;
   max-width: 220px;
   min-height: 34px;

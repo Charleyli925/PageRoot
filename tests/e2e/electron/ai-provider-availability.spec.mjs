@@ -315,7 +315,7 @@ test("源页 Agent settings stays a Token card and does not block switching back
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await openQoderAvailability(launched.page);
     const settingsPage = launched.page.locator(".workbench-settings-page");
-    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
+    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "内置 AI" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
     await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
@@ -364,7 +364,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const settingsPage = await openAgentSettingsPage(launched.page);
-    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
+    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "内置 AI" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
     await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
@@ -500,7 +500,7 @@ test("源页运行时余额失败 offers only provider recovery without a false 
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const settingsPage = await openAgentSettingsPage(launched.page);
-    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
+    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "内置 AI" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
     await pagerootCard.getByLabel("API Token").fill("sk-e2e-balance");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
@@ -555,7 +555,7 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const settingsPage = await openAgentSettingsPage(launched.page);
-    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
+    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "内置 AI" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
     await pagerootCard.getByLabel("API Token").fill("sk-e2e-invalid");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
@@ -617,7 +617,7 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
 
     const settings = launched.page.locator(".workbench-settings-page");
     await expect(settings).toBeVisible();
-    await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeVisible();
+    await expect(settings.getByRole("heading", { name: "AI 服务" })).toBeVisible();
     await expect(settings.getByText("Qoder CLI", { exact: true })).toBeVisible();
     await expect(settings.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(settings.getByRole("button", { name: "登录 Qoder" }))

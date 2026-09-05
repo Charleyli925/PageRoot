@@ -1014,6 +1014,7 @@
     {
       "id": "ai-conversation-sidebar",
       "patterns": [
+        "^app/application/agent-(?:service-label|recovery-intent)\\.(?:js|d\\.ts)$",
         "^app/workbench/ai-conversation-model\\.(?:js|d\\.ts)$",
         "^app/workbench/AiConversationSidebar\\.tsx$",
         "^app/workbench/run-conversation-outlet\\.tsx$",
@@ -1025,6 +1026,8 @@
       ],
       "nodeTests": [
         "tests/ai-conversation-sidebar.test.mjs",
+        "tests/agent-service-label.test.mjs",
+        "tests/agent-recovery-intent.test.mjs",
         "tests/workbench-render-snapshot.test.mjs",
         "tests/workspace-controller.test.mjs"
       ]
@@ -1998,7 +2001,7 @@
     {
       "id": "agent-renderer-projection",
       "patterns": [
-        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard)\\.tsx$",
+        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard|AgentSetupPanel)\\.tsx$",
         "^shared/(?:agent-delivery|agent-feature-gates|openai-compatible-vendors)\\.mjs$"
       ],
       "suites": [

@@ -510,6 +510,44 @@
   white-space: nowrap;
 }
 
+.agentChoice small {
+  margin-left: auto;
+  color: #85838e;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.recoveryBar {
+  display: grid;
+  gap: 4px;
+  padding: 10px 2px 2px;
+}
+
+.recoveryBar strong {
+  color: #2f2d38;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.recoveryBar p {
+  margin: 0;
+  color: #7d7a88;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.recoveryActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.setupPanel {
+  max-height: 280px;
+  overflow: auto;
+  padding: 4px 0 0;
+}
+
 /*
  * Plain text, not a tinted card. It sits inside the Composer inside the sidebar, so
  * a fill here is a third frame — and a purple fill spends the accent on a sentence

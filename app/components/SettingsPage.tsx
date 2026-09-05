@@ -13,6 +13,7 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwis
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CloudArrowUpIcon } from "@phosphor-icons/react/dist/csr/CloudArrowUp";
 import { DesktopIcon } from "@phosphor-icons/react/dist/csr/Desktop";
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
@@ -23,12 +24,18 @@ import type {
   AgentProviderGuidanceKind,
   AgentSelection,
 } from "../domain/agent-provider-state.js";
-import AgentProviderCard from "./AgentProviderCard";
+import AgentSetupPanel from "./AgentSetupPanel";
 import type { AgentProviderCardData } from "./agent-provider-card-types";
 import type { ApplicationUpdateResult } from "../workbench/types";
 import type { WorkspacePreferences } from "./desktop-ui-preferences-api";
 import type { SettingsCategory } from "../workbench/settings-types";
 import { architectureLabel, updatePresentation } from "./update-presentation";
+import {
+  AGENT_SERVICE_ORDER,
+  agentServiceLabel,
+  agentServicePrimaryAction,
+  agentServiceStatusText,
+} from "../application/agent-service-label.js";
 
 type AgentActionOutcome = Readonly<{ status: string; reason?: string; code?: string }> | null | undefined;
 
@@ -86,14 +93,10 @@ export type SettingsPageProps = {
   ) => Promise<AgentActionOutcome>;
   onDisconnectApiKey: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onOpenVendorApiKeyPage?: (vendorId: string) => Promise<AgentActionOutcome>;
+  agentFocusProviderId?: string | null;
+  agentFocusField?: "apiKey" | "login" | "model" | "install" | null;
   onClose: () => void;
 };
-
-function focusableElements(container: HTMLElement): HTMLElement[] {
-  return [...container.querySelectorAll<HTMLElement>(
-    "button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
-  )];
-}
 
 function SettingRow({
   icon,
@@ -268,6 +271,12 @@ function GeneralSettings({
   );
 }
 
+function orderedAgentCards(cards: readonly AgentProviderCardData[]) {
+  return AGENT_SERVICE_ORDER
+    .map((providerId) => cards.find((card) => card.selection.providerId === providerId))
+    .filter((card): card is AgentProviderCardData => Boolean(card));
+}
+
 function AgentSettings({
   currentAgentName,
   choices,
@@ -275,6 +284,9 @@ function AgentSettings({
   cards,
   checking,
   actionButtonRef,
+  workspace,
+  focusProviderId = null,
+  focusField = null,
   onSelect,
   onCheck,
   onCheckSelection,
@@ -287,6 +299,7 @@ function AgentSettings({
   onOpenVendorApiKeyPage,
   onSelectAgentModel,
   onSelectAgentReasoning,
+  onUpdate,
 }: {
   currentAgentName: string;
   choices: readonly SettingsAgentChoice[];
@@ -294,6 +307,9 @@ function AgentSettings({
   cards: readonly AgentProviderCardData[];
   checking: boolean;
   actionButtonRef: Ref<HTMLButtonElement>;
+  workspace: WorkspacePreferences;
+  focusProviderId?: string | null;
+  focusField?: "apiKey" | "login" | "model" | "install" | null;
   onSelect(selection: AgentSelection): void;
   onCheck(): Promise<AgentActionOutcome>;
   onCheckSelection(selection: AgentSelection): Promise<AgentActionOutcome>;
@@ -306,25 +322,69 @@ function AgentSettings({
   onOpenVendorApiKeyPage?(vendorId: string): Promise<AgentActionOutcome>;
   onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
   onSelectAgentReasoning(reasoning: string, expectedSelection: AgentSelection): AgentSelection | null;
+  onUpdate(patch: Partial<WorkspacePreferences>): void;
 }) {
-  const selectedCard = cards.find((card) => {
-    const id = `${card.selection.providerId}:${card.selection.runtimeId}`;
-    return id === selectedChoiceId;
-  }) || cards[0] || null;
+  const orderedCards = orderedAgentCards(cards);
+  const selectedCard = orderedCards.find((card) => (
+    `${card.selection.providerId}:${card.selection.runtimeId}` === selectedChoiceId
+  )) || orderedCards[0] || null;
+  const [expandedProviderId, setExpandedProviderId] = useState<string | null>(
+    focusProviderId || selectedCard?.selection.providerId || null,
+  );
+  const [moreMenuId, setMoreMenuId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusProviderId) setExpandedProviderId(focusProviderId);
+  }, [focusProviderId]);
+
+  const expandService = (card: AgentProviderCardData) => {
+    setExpandedProviderId(card.selection.providerId);
+    setMoreMenuId(null);
+    void onCheckSelection(card.selection);
+  };
+
+  const setDefault = (card: AgentProviderCardData) => {
+    onSelect(card.selection);
+    setMoreMenuId(null);
+  };
+
+  const disableService = (providerId: string) => {
+    const next = [...workspace.disabledAgentProviderIds];
+    if (!next.includes(providerId as WorkspacePreferences["disabledAgentProviderIds"][number])) {
+      next.push(providerId as WorkspacePreferences["disabledAgentProviderIds"][number]);
+    }
+    onUpdate({ disabledAgentProviderIds: next });
+    setMoreMenuId(null);
+  };
+
+  const enableService = (providerId: string) => {
+    onUpdate({
+      disabledAgentProviderIds: workspace.disabledAgentProviderIds.filter((id) => id !== providerId),
+    });
+    setMoreMenuId(null);
+  };
+
+  const defaultName = selectedCard
+    ? agentServiceLabel(selectedCard.selection.providerId)
+    : currentAgentName;
+
   return (
     <div className="settings-page-sections">
-      <SettingsSection title="默认 Agent">
+      <SettingsSection title="默认服务">
         <SettingRow
           icon={<UserCircleIcon size={20} weight="regular" />}
-          title="默认 Agent"
-          description={`下一轮任务将使用 ${currentAgentName || "尚未选择"}`}
+          title="默认服务"
+          description={`下一轮任务将使用 ${defaultName || "尚未选择"}`}
         >
           <SettingsSelect
             value={selectedChoiceId || choices[0]?.id || ""}
             disabled={!choices.length}
-            label="默认 Agent"
+            label="默认服务"
             testId="settings-agent-scheme"
-            options={choices.map((choice) => ({ value: choice.id, label: choice.label }))}
+            options={choices.map((choice) => ({
+              value: choice.id,
+              label: agentServiceLabel(choice.selection.providerId),
+            }))}
             onChange={(id) => {
               const choice = choices.find((item) => item.id === id);
               if (choice) onSelect(choice.selection);
@@ -333,7 +393,7 @@ function AgentSettings({
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="连接状态">
+      <SettingsSection title="AI 服务">
         <div className="settings-agent-toolbar">
           <button
             className="settings-secondary-action"
@@ -346,70 +406,142 @@ function AgentSettings({
           </button>
         </div>
         <div className="settings-agent-rows">
-          {selectedCard ? (
-            <AgentProviderCard
-              key={`${selectedCard.selection.providerId}:${selectedCard.selection.runtimeId}:${selectedCard.connection?.vendorId || "none"}:${selectedCard.connection?.baseUrl || ""}:${selectedCard.selection.resolvedModelId || "none"}`}
-              availability={selectedCard.availability}
-              connection={selectedCard.connection}
-              models={selectedCard.models}
-              selectedModelId={selectedCard.selection.resolvedModelId}
-              selectedReasoningId={selectedCard.selection.reasoning.requested || "auto"}
-              presentation={selectedCard.presentation}
-              surface="settings"
-              actionButtonRef={actionButtonRef}
-              onCopyGuidance={(kind) => onCopyGuidance(kind, selectedCard.selection)}
-              onStartLogin={() => onStartLogin(selectedCard.selection)}
-              onInstall={() => onInstall(selectedCard.selection)}
-              installState={selectedCard.installState}
-              activeOperation={selectedCard.activeOperation}
-              onCancelInstall={() => onCancelInstall(selectedCard.selection)}
-              onRecheck={() => onCheckSelection(selectedCard.selection)}
-              onConnectApiKey={(apiKey, extras) => onConnectApiKey(selectedCard.selection, apiKey, extras)}
-              onDisconnectApiKey={() => onDisconnectApiKey(selectedCard.selection)}
-              onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
-              onSelectModel={async (modelId) => {
-                if (selectedCard.connection) {
-                  return onConnectApiKey(selectedCard.selection, "", {
-                    vendorId: selectedCard.connection.vendorId,
-                    baseUrl: selectedCard.connection.baseUrl,
-                    modelId: modelId.replace(/^pageroot:/u, ""),
-                  });
-                }
-                const candidateSelection = {
-                  ...selectedCard.selection,
-                  requestedModelId: modelId,
-                  resolvedModelId: modelId,
-                  reasoning: {
-                    requested: null,
-                    applied: null,
-                    resolution: "provider-default",
-                  },
-                };
-                const checked = await onCheckSelection(candidateSelection);
-                if (!checked || checked.status !== "succeeded") return checked;
-                const committed = onSelectAgentModel(modelId, selectedCard.selection);
-                return committed
-                  ? { status: "succeeded" }
-                  : { status: "rejected", reason: "模型选择已经变化，请重新选择。" };
-              }}
-              onSelectReasoning={async (reasoning) => {
-                const automatic = reasoning === "auto";
-                const candidateSelection = {
-                  ...selectedCard.selection,
-                  reasoning: automatic
-                    ? { requested: null, applied: null, resolution: "provider-default" }
-                    : { requested: reasoning, applied: reasoning, resolution: "exact" },
-                } as AgentSelection;
-                const checked = await onCheckSelection(candidateSelection);
-                if (!checked || checked.status !== "succeeded") return checked;
-                const committed = onSelectAgentReasoning(reasoning, selectedCard.selection);
-                return committed
-                  ? { status: "succeeded" }
-                  : { status: "rejected", reason: "思考深度已经变化，请重新选择。" };
-              }}
-            />
-          ) : (
-            <p className="settings-empty-state">当前没有可配置的 Agent。</p>
+          {orderedCards.length ? orderedCards.map((card) => {
+            const providerId = card.selection.providerId;
+            const isDefault = selectedCard?.selection.providerId === providerId;
+            const expanded = expandedProviderId === providerId;
+            const status = agentServiceStatusText({
+              availability: card.availability,
+              installState: card.installState,
+              activeOperation: card.activeOperation,
+              connection: card.connection,
+              isDefault,
+              providerId,
+              modelDisplayName: card.selection.resolvedModelId,
+            });
+            const primary = agentServicePrimaryAction({
+              availability: card.availability,
+              isDefault,
+            });
+            const canRemoveKey = card.presentation.credentialKind === "api-token"
+              && Boolean(card.connection || card.availability.status === "ready");
+            return (
+              <div
+                key={providerId}
+                className="settings-service-row"
+                data-testid={`settings-agent-row-${providerId}`}
+                data-expanded={expanded ? "true" : undefined}
+              >
+                <div className="settings-service-summary">
+                  <span className="settings-service-copy">
+                    <strong>{agentServiceLabel(providerId)}</strong>
+                    <small>{status}</small>
+                  </span>
+                  <span className="settings-service-actions">
+                    <button
+                      className="settings-service-primary"
+                      type="button"
+                      data-kind={primary.kind}
+                      onClick={() => {
+                        if (primary.kind === "default") {
+                          setDefault(card);
+                          return;
+                        }
+                        if (card.availability.reason === "disabled") {
+                          enableService(providerId);
+                        }
+                        expandService(card);
+                      }}
+                    >
+                      {primary.label}
+                    </button>
+                    <div className="settings-service-more">
+                      <button
+                        type="button"
+                        aria-label={`${agentServiceLabel(providerId)} 更多`}
+                        aria-expanded={moreMenuId === providerId}
+                        onClick={() => setMoreMenuId((current) => (
+                          current === providerId ? null : providerId
+                        ))}
+                      >
+                        <DotsThreeIcon aria-hidden="true" size={16} weight="bold" />
+                      </button>
+                      {moreMenuId === providerId ? (
+                        <div className="settings-service-menu" role="menu">
+                          {!isDefault ? (
+                            <button type="button" role="menuitem" onClick={() => setDefault(card)}>
+                              设为默认
+                            </button>
+                          ) : null}
+                          {card.availability.reason === "disabled" ? (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                enableService(providerId);
+                                expandService(card);
+                              }}
+                            >
+                              重新连接
+                            </button>
+                          ) : (
+                            <button type="button" role="menuitem" onClick={() => disableService(providerId)}>
+                              断开
+                            </button>
+                          )}
+                          {canRemoveKey ? (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                void onDisconnectApiKey(card.selection);
+                                setMoreMenuId(null);
+                              }}
+                            >
+                              移除 API Key
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => expandService(card)}
+                          >
+                            连接详情
+                          </button>
+                          <p className="settings-service-menu-note">
+                            {canRemoveKey ? "移除后需要重新填写。" : "断开会保留登录。"}
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+                  </span>
+                </div>
+                {expanded ? (
+                  <div className="settings-service-panel">
+                    <AgentSetupPanel
+                      card={card}
+                      surface="settings"
+                      actionButtonRef={isDefault || focusProviderId === providerId
+                        ? actionButtonRef
+                        : undefined}
+                      initialFocusField={focusProviderId === providerId ? focusField : null}
+                      onCopyGuidance={onCopyGuidance}
+                      onStartLogin={onStartLogin}
+                      onInstall={onInstall}
+                      onCancelInstall={onCancelInstall}
+                      onCheckSelection={onCheckSelection}
+                      onConnectApiKey={onConnectApiKey}
+                      onDisconnectApiKey={onDisconnectApiKey}
+                      onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
+                      onSelectAgentModel={onSelectAgentModel}
+                      onSelectAgentReasoning={onSelectAgentReasoning}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            );
+          }) : (
+            <p className="settings-empty-state">当前没有可配置的 AI 服务。</p>
           )}
         </div>
       </SettingsSection>
@@ -562,6 +694,8 @@ export default function SettingsPage({
   onConnectApiKey,
   onDisconnectApiKey,
   onOpenVendorApiKeyPage,
+  agentFocusProviderId = null,
+  agentFocusField = null,
   onClose,
 }: SettingsPageProps) {
   const pageRef = useRef<HTMLElement>(null);
@@ -650,41 +784,20 @@ export default function SettingsPage({
   }, [category, initialFocus]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab" || !pageRef.current) return;
-    const elements = focusableElements(pageRef.current);
-    if (!elements.length) {
-      event.preventDefault();
-      return;
-    }
-    const current = document.activeElement;
-    const currentIndex = elements.indexOf(current as HTMLElement);
-    if (currentIndex < 0) return;
-    const nextIndex = event.shiftKey
-      ? (currentIndex - 1 + elements.length) % elements.length
-      : (currentIndex + 1) % elements.length;
-    if (
-      (!event.shiftKey && currentIndex === elements.length - 1)
-      || (event.shiftKey && currentIndex === 0)
-    ) {
-      event.preventDefault();
-      elements[nextIndex]?.focus();
-    }
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    onClose();
   };
 
   const pageTitle = category === "general"
     ? "常规"
     : category === "agent"
-      ? "AI Agent"
+      ? "AI 服务"
       : "软件更新";
   const pageDescription = category === "general"
     ? "调整工作台布局与启动习惯。"
     : category === "agent"
-      ? "管理默认 Agent 与本机连接状态。"
+      ? "管理默认服务与本机连接状态。"
       : "检查、下载并安装源页的正式版本。";
 
   return (
@@ -723,6 +836,9 @@ export default function SettingsPage({
             cards={agentCards}
             checking={agentCheckPending}
             actionButtonRef={agentActionRef}
+            workspace={workspacePreferences}
+            focusProviderId={agentFocusProviderId}
+            focusField={agentFocusField}
             onSelect={onSelectAgent}
             onCheck={() => requestAgentCheck(true)}
             onCheckSelection={onCheckUsability}
@@ -735,6 +851,7 @@ export default function SettingsPage({
             onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
             onSelectAgentModel={onSelectAgentModel}
             onSelectAgentReasoning={onSelectAgentReasoning}
+            onUpdate={(patch) => { void onUpdateWorkspacePreference(patch); }}
           />
         ) : (
           <UpdatesSettings

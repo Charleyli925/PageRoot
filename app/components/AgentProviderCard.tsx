@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Ref } from "react";
+import { useEffect, useState, type Ref } from "react";
 import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
 import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
 
@@ -65,6 +65,7 @@ export type AgentProviderCardProps = {
   surface: "delivery" | "about" | "settings";
   disabled?: boolean;
   actionButtonRef?: Ref<HTMLButtonElement>;
+  initialFocusField?: "apiKey" | "login" | "model" | "install" | null;
   onCopyGuidance: (kind: AgentProviderGuidanceKind) => Promise<AgentActionOutcome>;
   onStartLogin?: () => Promise<AgentActionOutcome>;
   onInstall?: () => Promise<AgentActionOutcome>;
@@ -138,6 +139,7 @@ export default function AgentProviderCard({
   surface,
   disabled = false,
   actionButtonRef,
+  initialFocusField = null,
   onCopyGuidance,
   onStartLogin,
   onInstall,
@@ -155,7 +157,7 @@ export default function AgentProviderCard({
   const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState("");
   const [fieldError, setFieldError] = useState<ApiKeyField | "">("");
-  const [apiKeyOpen, setApiKeyOpen] = useState(false);
+  const [apiKeyOpen, setApiKeyOpen] = useState(initialFocusField === "apiKey");
   const [apiKey, setApiKey] = useState("");
   const [rememberKey, setRememberKey] = useState(false);
   const [vendorId, setVendorId] = useState(connection?.vendorId || provider.vendors?.[0]?.id || "deepseek");
@@ -165,6 +167,10 @@ export default function AgentProviderCard({
       ? String(selectedModelId || models[0]?.id || "").replace(/^pageroot:/u, "")
       : "",
   );
+  useEffect(() => {
+    if (initialFocusField === "apiKey") setApiKeyOpen(true);
+  }, [initialFocusField]);
+
   const presentation = provider.availability(availability);
   const installing = installState === "installing" || installPending;
   const loggingIn = activeOperation?.kind === "login"
