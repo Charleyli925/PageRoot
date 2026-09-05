@@ -7,6 +7,8 @@ import {
   legacyDriverForAgentDelivery,
   normalizeAgentDelivery,
   normalizeNewAgentDelivery,
+  publicCompatibilityDriver,
+  shippedLegacyDriver,
 } from "../shared/agent-delivery.mjs";
 
 test("structured Agent errors map technical retry safety to truthful recovery", () => {
@@ -110,6 +112,21 @@ test("unknown provider history is readable but cannot resolve to an installed st
   assert.throws(() => normalizeNewAgentDelivery(delivery), {
     code: "AGENT_PROVIDER_UNSUPPORTED",
   });
+});
+
+test("new Request validation uses the shipped binding, not a legacy driver alias", () => {
+  const qoder = defaultManagedAgentDelivery();
+  assert.equal(shippedLegacyDriver(qoder.selection), "qoder-acp");
+  assert.equal(publicCompatibilityDriver(qoder.selection), "qoder-acp");
+  const codex = {
+    providerId: "codex",
+    runtimeId: "acp",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  };
+  assert.equal(shippedLegacyDriver(codex), null);
+  assert.equal(publicCompatibilityDriver(codex), "codex");
 });
 
 test("new writers reject legacy delivery while its historical projection stays readable", () => {

@@ -403,9 +403,12 @@ Rules:
   never receives content or paths, and never registers a drain obligation for
   edit, save, switch, submit, close or update installation.
 - Provider Registry owns installed descriptors and dispatch. Agent Delivery
-  Codec owns canonical Request selection and legacy projection. Coordinator owns
-  preflight tickets and sessions. Conversation Repository is the only v2 writer;
-  v1 conversation records are never migrated in place.
+  Codec owns canonical Request selection, shipped-binding checks for new
+  managed Requests, and historical legacy-driver projection. Coordinator converts
+  a still-supported incoming driver once at its execution entry and then owns
+  preflight tickets and sessions by selection only. Public session `driver` is a
+  compatibility projection from that selection, not execution authority. Conversation Repository is
+  the only v2 writer; v1 conversation records are never migrated in place.
 
 ## 文件与历史合同
 

@@ -14,8 +14,9 @@ import {
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
 import {
   agentRecoveryKindForError,
-  defaultManagedAgentDelivery,
   normalizeAgentDelivery,
+  publicCompatibilityDriver,
+  shippedLegacyDriver,
 } from "../../shared/agent-delivery.mjs";
 import {
   PAGEROOT_PROVIDER_ID,
@@ -60,9 +61,14 @@ function validateTrustPolicy(value, status = 409) {
 function canonicalSelection(value, trustPolicyVersion) {
   return normalizeAgentDelivery({
     mode: "managed-agent",
-    selection: value || defaultManagedAgentDelivery().selection,
+    selection: value,
     trustPolicyVersion,
   }).selection;
+}
+
+function compatibilityDriverEcho({ driver, selection }) {
+  const compatibilityDriver = driver || shippedLegacyDriver(selection);
+  return compatibilityDriver ? { driver: compatibilityDriver } : {};
 }
 
 function selectionFingerprint(selection) {
@@ -263,6 +269,8 @@ export class AgentRuntimeCoordinator {
   }
 
   #selectionForInput({ selection, driver, trustPolicyAccepted } = {}) {
+    // Unique conversion for current execution. After this returns, tickets,
+    // leases and registry calls use only the canonical selection.
     if (selection) {
       const requestedSelection = trustPolicyAccepted === undefined
         ? selection
@@ -281,7 +289,11 @@ export class AgentRuntimeCoordinator {
       return requestedSelection;
     }
     if (driver) return this.#providerRegistry.selectionFromDriver(driver);
-    return defaultManagedAgentDelivery().selection;
+    failAgentRuntime(
+      "AGENT_SELECTION_UNSUPPORTED",
+      "The requested Agent provider selection is unsupported.",
+      { status: 400 },
+    );
   }
 
   #assertAcceptingStarts() {
@@ -461,13 +473,17 @@ export class AgentRuntimeCoordinator {
         ok: true,
         status: "unavailable",
         reason: "check-failed",
-        ...(driver ? { driver } : {}),
+        ...compatibilityDriverEcho({ driver, selection: requestedSelection }),
       });
     }
     const result = await this.#providerRegistry.availabilityForSelection(requestedSelection, {
       environment: this.#environmentForProvider(requestedSelection.providerId),
     });
-    return Object.freeze({ ok: true, ...result, ...(driver ? { driver } : {}) });
+    return Object.freeze({
+      ok: true,
+      ...result,
+      ...compatibilityDriverEcho({ driver, selection: requestedSelection }),
+    });
   }
 
   async diagnose({ driver, selection } = {}) {
@@ -483,7 +499,7 @@ export class AgentRuntimeCoordinator {
           checkedAt,
           activeInstallation: null,
         }),
-        ...(driver ? { driver } : {}),
+        ...compatibilityDriverEcho({ driver, selection: requestedSelection }),
       });
     }
     const result = typeof this.#providerRegistry.diagnoseForSelection === "function"
@@ -505,7 +521,7 @@ export class AgentRuntimeCoordinator {
       ok: true,
       ...result,
       diagnostic: Object.freeze({ ...diagnostic, checkedAt, operation: "diagnose" }),
-      ...(driver ? { driver } : {}),
+      ...compatibilityDriverEcho({ driver, selection: requestedSelection }),
     });
   }
 
@@ -573,7 +589,6 @@ export class AgentRuntimeCoordinator {
     this.#tickets.set(preflightId, Object.freeze({
       preflightId,
       purpose: ticketPurpose,
-      ...(driver ? { driver } : {}),
       providerId: prepared.providerId,
       runtimeId: prepared.runtimeId,
       securityProfile: prepared.securityProfile,
@@ -590,7 +605,7 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({
       ok: true,
       status: "ready",
-      ...(driver ? { driver } : {}),
+      ...compatibilityDriverEcho({ driver, selection: requestedSelection }),
       preflightId,
       trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       agentVersion: prepared.evidence.version,
@@ -622,14 +637,15 @@ export class AgentRuntimeCoordinator {
     // Consume before every verification. A drifted, cross-provider or
     // cross-purpose ticket is never replayable after the failed attempt.
     this.#tickets.delete(preflightId);
-    const selectionMismatch = selection
-      && !selectionMatchesTicket(ticket.selection, selection);
-    if (ticket.purpose !== expectedPurpose || (driver && ticket.driver !== driver)) {
+    const requestedSelection = selection || driver
+      ? this.#selectionForInput({ selection, driver })
+      : null;
+    if (ticket.purpose !== expectedPurpose) {
       failAgentRuntime("AGENT_PREFLIGHT_PURPOSE_MISMATCH", "Agent 预检与本次操作不匹配，请重新检查。", {
         status: 409,
       });
     }
-    if (selectionMismatch) {
+    if (requestedSelection && !selectionMatchesTicket(ticket.selection, requestedSelection)) {
       failAgentRuntime(
         "AGENT_PROVIDER_TICKET_INVALID",
         "Agent selection does not match its preflight ticket.",
@@ -726,15 +742,10 @@ export class AgentRuntimeCoordinator {
       entry.safeToRetry = false;
       entry.recoveryKind = "end";
       entry.errorCode = "AGENT_RESTART_RECOVERY_REQUIRED";
-      entry.errorMessage = entry.selection
-        ? this.#providerRegistry.failureMessageForSelection(
-            entry.selection,
-            "AGENT_RESTART_RECOVERY_REQUIRED",
-          )
-        : this.#providerRegistry.failureMessageForDriver(
-            entry.driver,
-            "AGENT_RESTART_RECOVERY_REQUIRED",
-          );
+      entry.errorMessage = this.#providerRegistry.failureMessageForSelection(
+        entry.selection,
+        "AGENT_RESTART_RECOVERY_REQUIRED",
+      );
       this.#touch(entry);
       return false;
     }
@@ -847,7 +858,6 @@ export class AgentRuntimeCoordinator {
       providerId: ticket.providerId,
       runtimeId: ticket.runtimeId,
       purpose: "execution",
-      ...(ticket.driver ? { driver: ticket.driver } : {}),
       projectId: identity.projectId,
       documentId: identity.documentId,
       requestId: identity.requestId,
@@ -889,7 +899,7 @@ export class AgentRuntimeCoordinator {
       selection: ticket.selection,
       providerId: ticket.providerId,
       runtimeId: ticket.runtimeId,
-      driver: ticket.driver || ticket.providerId,
+      driver: publicCompatibilityDriver(ticket.selection),
       turnId: identity.requestId,
       nextSequence: -1,
       identity,
@@ -1010,7 +1020,7 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({
       providerId: requestedSelection.providerId,
       runtimeId: requestedSelection.runtimeId,
-      driver: driver || requestedSelection.providerId,
+      driver: publicCompatibilityDriver(requestedSelection),
       state: "interrupted",
       phase: "interrupted",
       startedAt: null,

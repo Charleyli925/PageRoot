@@ -96,7 +96,7 @@ test("legacy qoder-acp dispatch resolves once to the qoder provider and ACP runt
   const { fixture, registry } = fixtureRegistry();
   const prepared = await registry.preflight({ driver: "qoder-acp", environment: {} });
 
-  assert.equal(prepared.driver, "qoder-acp");
+  assert.equal("driver" in prepared, false);
   assert.equal(prepared.providerId, "qoder");
   assert.equal(prepared.runtimeId, "acp");
   assert.equal(prepared.securityProfile, "client-mediated");
