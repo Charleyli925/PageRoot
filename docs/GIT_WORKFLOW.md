@@ -104,7 +104,8 @@ only as advisory information; it never rejects a PR for being large.
 A later commit on a Ready PR cancels the in-flight stale candidate and
 reruns the complete matrix for the new head. Returning to Draft skips the
 full matrix. `main` accepts the resulting tree only when provenance
-verification finds the fresh matching attestation; it does not repeat Node or
+verification finds the fresh matching attestation and the merge commit names
+its pull request; a missing association fails closed. It does not repeat Node or
 Browser smoke after that equality proof.
 
 GitHub deletes the remote task branch after squash merge. Local worktrees are a

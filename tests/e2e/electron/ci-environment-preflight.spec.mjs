@@ -49,7 +49,9 @@ async function stopPreflightApp(electronApp) {
   }
 }
 
-test("hosted macOS can show, schedule and paint a synthetic Electron renderer", async () => {
+test("hosted macOS can show, schedule and paint a synthetic Electron renderer", {
+  tag: "@infra-sensitive",
+}, async () => {
   const isolatedUserData = mkdtempSync(
     path.join(tmpdir(), "pageroot-native-e2e-preflight-"),
   );

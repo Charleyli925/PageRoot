@@ -5,11 +5,15 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  CI_HEALTH_BUDGETS,
   CI_HEALTH_WORKFLOW_INPUTS,
+  budgetViolations,
   extractRestList,
   fullGateRunIds,
   jobTimingStats,
   renderCiHealthMarkdown,
+  sameShaWashGreenCount,
+  shouldCreateCiHealthIssue,
   summarizeCiHealth,
   workflowRuns,
 } from "../scripts/ci-health-report.mjs";
@@ -55,6 +59,7 @@ test("CI health summarizes conclusions and retry-recovered jobs", () => {
   assert.equal(report.totals.failure, 1);
   assert.equal(report.failureRate, 0.5);
   assert.equal(report.flakyRecoveredJobs, 1);
+  assert.equal(report.sameShaWashGreen, 0);
   assert.deepEqual(report.failedJobs, ["electron-native"]);
   assert.match(renderCiHealthMarkdown(report), /electron-native/u);
 });
@@ -172,7 +177,7 @@ test("full-gate wall time splits from Draft feedback by an executed release-gate
   assert.match(markdown, /https:\/\/example\.test\/run\/101/u);
 });
 
-test("the scheduled ci-health workflow is cloud-only, read-only and non-gating", async () => {
+test("the scheduled ci-health workflow may open issues and is not a merge gate", async () => {
   const workflow = await readFile(
     path.join(productRoot, ".github/workflows/ci-health.yml"),
     "utf8",
@@ -183,7 +188,49 @@ test("the scheduled ci-health workflow is cloud-only, read-only and non-gating",
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /contents: read/u);
   assert.doesNotMatch(workflow, /secrets\.|contents: write|pull-requests: write/u);
-  assert.match(workflow, /timeout-minutes: 10/u);
+  assert.match(workflow, /timeout-minutes: 15/u);
+  assert.match(workflow, /issues: write/u);
   assert.match(workflow, /ci-health-report\.mjs/u);
   assert.match(workflow, /GITHUB_STEP_SUMMARY/u);
+});
+
+test("same SHA success after a failed attempt counts as washed green", () => {
+  assert.equal(sameShaWashGreenCount([
+    completedRun({ id: 1, head_sha: "a".repeat(40), run_attempt: 2, conclusion: "success" }),
+  ]), 0);
+  assert.equal(sameShaWashGreenCount([
+    completedRun({ id: 1, head_sha: "a".repeat(40), conclusion: "success" }),
+    completedRun({ id: 2, head_sha: "a".repeat(40), conclusion: "failure" }),
+  ]), 1);
+  assert.equal(sameShaWashGreenCount([
+    completedRun({ id: 1, head_sha: "a".repeat(40), conclusion: "success" }),
+  ]), 0);
+});
+
+test("blocking CI health budgets persist two weeks before opening an issue", () => {
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-09-05T00:00:00.000Z",
+    ciRuns: [
+      completedRun({
+        id: 7,
+        head_sha: "b".repeat(40),
+        run_attempt: 2,
+        conclusion: "success",
+      }),
+    ],
+    flakyRecords: [{ product: { failed: 0, flaky: 1, retries: 1 } }],
+  });
+  assert.equal(report.sameShaWashGreen, 0);
+  assert.equal(report.blockingProductRetries, 2);
+  const violations = budgetViolations(report);
+  assert.equal(violations.some((item) => item.code === "same-sha-wash-green" && item.blocking), false);
+  assert.equal(shouldCreateCiHealthIssue(violations, []), false);
+  assert.equal(shouldCreateCiHealthIssue(violations, violations), false);
+  assert.equal(shouldCreateCiHealthIssue(violations, violations, {
+    previousGeneratedAt: "2026-08-22T00:00:00.000Z",
+    currentGeneratedAt: "2026-09-05T00:00:00.000Z",
+  }), true);
+  assert.equal(CI_HEALTH_BUDGETS.sameShaUntriagedWashGreen, 0);
+  assert.match(renderCiHealthMarkdown(report), /Same SHA washed green: 0/u);
 });

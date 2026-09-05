@@ -4,6 +4,8 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { classifyFlakyTest } from "./source-gate-attestation-guard.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 
@@ -26,6 +28,10 @@ function parseOptions(argv) {
   return options;
 }
 
+function emptyBucket() {
+  return { failed: 0, flaky: 0, retries: 0 };
+}
+
 export function summarizeFlakyRuns(report) {
   const summary = {
     total: 0,
@@ -34,6 +40,9 @@ export function summarizeFlakyRuns(report) {
     flaky: 0,
     retries: 0,
     skipped: 0,
+    product: emptyBucket(),
+    infra: emptyBucket(),
+    tests: [],
   };
   const supportedStatuses = new Set(["expected", "unexpected", "flaky", "skipped"]);
   const walk = (suite) => {
@@ -64,6 +73,17 @@ export function summarizeFlakyRuns(report) {
           if (retry > 0) testRetries += 1;
         }
         summary.retries += testRetries;
+        const infraSensitive = classifyFlakyTest(test, spec);
+        const bucket = infraSensitive ? summary.infra : summary.product;
+        if (status === "unexpected") bucket.failed += 1;
+        else if (status === "flaky") bucket.flaky += 1;
+        bucket.retries += testRetries;
+        summary.tests.push(Object.freeze({
+          title: String(test?.title || spec?.title || ""),
+          status,
+          retries: testRetries,
+          infraSensitive,
+        }));
       }
     }
     for (const child of suite?.suites || []) walk(child);
@@ -77,6 +97,9 @@ export function summarizeFlakyRuns(report) {
       "Playwright flaky summary counts do not reconcile; refusing to write evidence.",
     );
   }
+  summary.product = Object.freeze(summary.product);
+  summary.infra = Object.freeze(summary.infra);
+  summary.tests = Object.freeze(summary.tests);
   return Object.freeze(summary);
 }
 
@@ -87,7 +110,7 @@ export async function writeFlakyEvidence(summary, destination, metadata = {}) {
   }
   await mkdir(path.dirname(resolved), { recursive: true });
   const record = Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     ...metadata,
     ...summary,
@@ -120,6 +143,8 @@ async function run() {
       "",
       `- Suite: \`${options.suite}\``,
       `- Tests: ${summary.total} total (${summary.passed} passed, ${summary.failed} failed, ${summary.flaky} flaky, ${summary.skipped} skipped)`,
+      `- Product contract: ${summary.product.failed} failed, ${summary.product.flaky} flaky, ${summary.product.retries} retries`,
+      `- Infra-sensitive: ${summary.infra.failed} failed, ${summary.infra.flaky} flaky, ${summary.infra.retries} retries`,
       `- Retry attempts: ${summary.retries}`,
       `- Evidence: \`${path.relative(productRoot, destination)}\``,
       "",

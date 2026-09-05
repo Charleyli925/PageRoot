@@ -351,6 +351,22 @@
       ]
     },
     {
+      "id": "source-gate-attestation-guard",
+      "patterns": [
+        "^scripts/source-gate-attestation-guard\\.mjs$",
+        "^scripts/playwright-retry-policy\\.mjs$",
+        "^tests/source-gate-attestation-guard\\.test\\.mjs$",
+        "^tests/e2e/browser/playwright\\.config\\.mjs$",
+        "^tests/e2e/electron/playwright\\.config\\.mjs$",
+        "^tests/e2e/electron/playwright\\.ai-closed-loop\\.config\\.mjs$",
+        "^tests/e2e/electron/playwright\\.ci-preflight\\.config\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/source-gate-attestation-guard.test.mjs"
+      ]
+    },
+    {
       "id": "pr-review-policy",
       "patterns": [
         "^scripts/check-pr-review-policy\\.mjs$",
@@ -380,6 +396,7 @@
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
         "^scripts/playwright-flaky-summary\\.mjs$",
+        "^scripts/playwright-retry-policy\\.mjs$",
         "^tests/ci-evidence\\.test\\.mjs$",
         "^tests/playwright-flaky-summary\\.test\\.mjs$",
         "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"

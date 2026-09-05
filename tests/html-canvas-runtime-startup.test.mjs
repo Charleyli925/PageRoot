@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { queuedStaticFallbackOracle } from "./e2e/electron/queued-static-fallback-oracle.mjs";
+
 function source(relativePath) {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
 }
@@ -121,4 +123,44 @@ test("reading-position restore is shared and comment layout is not frozen across
   assert.match(editor, /selectedVisible \? selectedAnchor/u);
   assert.doesNotMatch(editor, /lastValidCommentLayoutRef/u);
   assert.doesNotMatch(spec, /positioningRafSequences\.size\)\.toBeGreaterThanOrEqual\(2\)/u);
+});
+
+test("static fallback after dynamic failure can pause scheduling without marking ready", () => {
+  const editor = source("app/components/HtmlCanvasEditor.tsx");
+  const helper = callbackBody(editor, "scheduleLatestStaticFallbackAfterFailure");
+  const failRuntimeCandidate = callbackBody(editor, "failRuntimeCandidate");
+  const startRuntimeCandidate = callbackBody(editor, "startRuntimeCandidate");
+  assert.match(helper, /__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__/u);
+  assert.match(helper, /publishRuntimeDegradation\("static-preparing"\)/u);
+  assert.match(helper, /releases\.push\(run\)/u);
+  assert.doesNotMatch(helper, /publishRuntimeDegradation\("none"\)/u);
+  assert.doesNotMatch(helper, /outcome === "ready"/u);
+  assert.match(
+    failRuntimeCandidate,
+    /scheduleLatestStaticFallbackAfterFailure\(candidate\.attempt\.candidateId\)/u,
+  );
+  assert.match(
+    startRuntimeCandidate,
+    /scheduleLatestStaticFallbackAfterFailure\(attempt\.candidateId\)/u,
+  );
+});
+
+test("queued-static oracle rejects a stale R1 static frame after R2 is on disk", () => {
+  assert.throws(() => queuedStaticFallbackOracle({
+    diskHtml: "<p>静态候选必须跟随最新源码 最新来源</p><p>静态候选必须跟随最新源码 最新来源</p>",
+    visibleTexts: ["静态候选必须跟随最新源码", "静态候选必须跟随最新源码"],
+    sandbox: "allow-same-origin",
+    expectedSnippet: "最新来源",
+    expectedVisibleCount: 2,
+  }), /Visible static frame is not the latest Working HTML/u);
+});
+
+test("queued-static oracle accepts R2 on disk and in the static frame", () => {
+  queuedStaticFallbackOracle({
+    diskHtml: "<p>静态候选必须跟随最新源码 最新来源</p><p>静态候选必须跟随最新源码</p>",
+    visibleTexts: ["静态候选必须跟随最新源码 最新来源", "静态候选必须跟随最新源码"],
+    sandbox: "allow-same-origin",
+    expectedSnippet: "最新来源",
+    expectedVisibleCount: 2,
+  });
 });

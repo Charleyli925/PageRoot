@@ -2,6 +2,8 @@ import { defineConfig } from "@playwright/test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { playwrightRetries } from "../../../scripts/playwright-retry-policy.mjs";
+
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
 
@@ -10,11 +12,10 @@ export default defineConfig({
   testMatch: /(?:electron-(?:project-lifecycle|workbench-tabs|edit-runtime|native-input|comments-and-rules|source-recovery)|conflict-force-unlock)\.spec\.mjs/,
   outputDir: path.join(productRoot, "output/playwright/native-dom-electron/results"),
   workers: 1,
-  // CI absorbs one transient Electron launch/hydration stall per test. Local
-  // runs stay retry-free so caret/Selection regressions are never hidden. A
-  // retried failure keeps trace, video and screenshot evidence, and the JSON
-  // reporter feeds the machine-readable flaky summary that CI always uploads.
-  retries: process.env.CI ? 1 : 0,
+  // Product-contract Electron tests never retry. Hosted-window stalls are
+  // proven first by the @infra-sensitive CI preflight, which may retry once.
+  // release-gate refuses attestation when this suite reports flaky or retries.
+  retries: playwrightRetries(),
   reporter: [
     ["list"],
     ["json", {
