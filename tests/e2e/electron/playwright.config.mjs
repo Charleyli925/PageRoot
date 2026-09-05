@@ -9,7 +9,15 @@ const productRoot = path.resolve(currentDirectory, "../../..");
 
 export default defineConfig({
   testDir: currentDirectory,
+<<<<<<< HEAD
   testMatch: /(?:electron-(?:project-lifecycle|workbench-tabs|edit-runtime|native-input|comments-and-rules|source-recovery|runtime-continuity|runtime-scripts|seeded-faults)|conflict-force-unlock)\.spec\.mjs/,
+=======
+<<<<<<< HEAD
+  testMatch: /(?:electron-(?:project-lifecycle|workbench-tabs|edit-runtime|native-input|comments-and-rules|source-recovery|runtime-continuity)|conflict-force-unlock)\.spec\.mjs/,
+=======
+  testMatch: /(?:electron-(?:project-lifecycle|workbench-tabs|edit-runtime|native-input|comments-and-rules|source-recovery|seeded-faults)|conflict-force-unlock)\.spec\.mjs/,
+>>>>>>> test/draft-capability-canary
+>>>>>>> test/runtime-continuity-probe
   outputDir: path.join(productRoot, "output/playwright/native-dom-electron/results"),
   workers: 1,
   // Product-contract Electron tests never retry. Hosted-window stalls are
