@@ -39,6 +39,9 @@ export type InsertionPoint = {
   width: number;
 };
 
+export type { InsertionLayoutAuthority } from "./html-canvas-insertion-layout.js";
+export { insertionLayoutNeedsRefresh } from "./html-canvas-insertion-layout.js";
+
 export type CommentTargetLayout = HtmlCanvasCommentLayoutState["targets"][number];
 
 function separateCommentMarkers(
