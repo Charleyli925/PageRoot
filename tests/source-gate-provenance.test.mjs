@@ -239,7 +239,11 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.doesNotMatch(releaseGate, /Revalidate frozen head\/base|--mode revalidate/u);
   assert.match(releaseGate, /Refresh dependency and packaged-runtime baseline before attestation/u);
   assert.match(releaseGate, /npm run audit:dependencies/u);
+  assert.match(releaseGate, /Download product flaky evidence/u);
+  assert.match(releaseGate, /PageRoot-\*-evidence-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
+  assert.match(releaseGate, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/u);
   assert.match(ci, /source-gate-provenance\.mjs create/u);
+  assert.match(releaseGate, /--evidence-dir output\/ci-evidence/u);
   assert.match(ci, /steps\.provenance\.outputs\.artifact_name/u);
   assert.match(ci, /runs-on: ubuntu-24\.04/u);
   assert.match(ci, /runs-on: macos-14/u);
@@ -286,7 +290,8 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(electronAi, /Upload AI Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
   assert.match(ci, /scripts\/ci-evidence\.mjs run/u);
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
-  assert.match(ci, /--missing-association warn/u);
+  assert.match(ci, /--missing-association fail/u);
+  assert.doesNotMatch(ci, /--missing-association warn/u);
   assert.doesNotMatch(candidate, /--missing-association/u);
   assert.doesNotMatch(dryRun, /--missing-association/u);
   assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);

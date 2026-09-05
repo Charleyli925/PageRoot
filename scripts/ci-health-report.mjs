@@ -21,10 +21,96 @@ export const CI_HEALTH_WORKFLOW_INPUTS = Object.freeze({
   developerPreview: "developer-preview.yml",
 });
 
+export const CI_HEALTH_BUDGETS = Object.freeze({
+  sameShaUntriagedWashGreen: 0,
+  blockingProductRetries: 0,
+  draftP95Minutes: 5,
+  readyP95Minutes: 12,
+});
+
 function round(value, digits = 2) {
   if (!Number.isFinite(value)) return null;
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+export function sameShaWashGreenCount(ciRuns = []) {
+  const bySha = new Map();
+  for (const run of ciRuns) {
+    if (run?.status !== "completed") continue;
+    const sha = String(run.head_sha || "");
+    if (!sha) continue;
+    const entry = bySha.get(sha) || { success: false, failure: false, maxAttempt: 1 };
+    if (run.conclusion === "success") entry.success = true;
+    if (run.conclusion === "failure") entry.failure = true;
+    entry.maxAttempt = Math.max(entry.maxAttempt, Number(run.run_attempt) || 1);
+    bySha.set(sha, entry);
+  }
+  let count = 0;
+  for (const entry of bySha.values()) {
+    if (entry.success && (entry.failure || entry.maxAttempt > 1)) count += 1;
+  }
+  return count;
+}
+
+export function productRetryCount(flakyRecords = []) {
+  return (flakyRecords || []).reduce((total, record) => (
+    total
+    + (Number(record?.product?.flaky) || 0)
+    + (Number(record?.product?.retries) || 0)
+  ), 0);
+}
+
+export function budgetViolations(report) {
+  const violations = [];
+  const washGreen = Number(report?.sameShaWashGreen) || 0;
+  if (washGreen > CI_HEALTH_BUDGETS.sameShaUntriagedWashGreen) {
+    violations.push(Object.freeze({
+      code: "same-sha-wash-green",
+      blocking: true,
+      actual: washGreen,
+      limit: CI_HEALTH_BUDGETS.sameShaUntriagedWashGreen,
+    }));
+  }
+  const productRetries = Number(report?.blockingProductRetries) || 0;
+  if (productRetries > CI_HEALTH_BUDGETS.blockingProductRetries) {
+    violations.push(Object.freeze({
+      code: "blocking-product-retries",
+      blocking: true,
+      actual: productRetries,
+      limit: CI_HEALTH_BUDGETS.blockingProductRetries,
+    }));
+  }
+  const draftP95 = report?.draft?.p95Minutes;
+  if (Number.isFinite(draftP95) && draftP95 > CI_HEALTH_BUDGETS.draftP95Minutes) {
+    violations.push(Object.freeze({
+      code: "draft-p95",
+      blocking: false,
+      actual: draftP95,
+      limit: CI_HEALTH_BUDGETS.draftP95Minutes,
+    }));
+  }
+  const readyP95 = report?.fullGate?.p95Minutes;
+  if (Number.isFinite(readyP95) && readyP95 > CI_HEALTH_BUDGETS.readyP95Minutes) {
+    violations.push(Object.freeze({
+      code: "ready-p95",
+      blocking: false,
+      actual: readyP95,
+      limit: CI_HEALTH_BUDGETS.readyP95Minutes,
+    }));
+  }
+  return Object.freeze(violations);
+}
+
+export function shouldCreateCiHealthIssue(currentViolations, previousViolations) {
+  const currentBlocking = new Set(
+    (currentViolations || []).filter((item) => item.blocking).map((item) => item.code),
+  );
+  if (currentBlocking.size === 0) return false;
+  const previousBlocking = new Set(
+    (previousViolations || []).filter((item) => item.blocking).map((item) => item.code),
+  );
+  return [...currentBlocking].some((code) => previousBlocking.has(code));
 }
 
 function conclusionCounts(runs) {
@@ -157,6 +243,7 @@ export function summarizeCiHealth({
   generatedAt = new Date().toISOString(),
   ciRuns = [],
   jobsByRunId = {},
+  flakyRecords = [],
 } = {}) {
   const completed = (ciRuns || []).filter((run) => run?.status === "completed");
   const counts = conclusionCounts(completed);
@@ -164,16 +251,14 @@ export function summarizeCiHealth({
   const failed = counts.failure || 0;
   const success = counts.success || 0;
   const flakyRecovered = flakyJobCount(jobsByRunId);
-  // The wall-time split only covers runs whose jobs were actually fetched,
-  // so an unobserved run is never misclassified as Draft feedback.
   const observed = completed.filter((run) => (
     Object.hasOwn(jobsByRunId || {}, String(run.id))
   ));
   const gateIds = fullGateRunIds(jobsByRunId);
   const gateRuns = observed.filter((run) => gateIds.has(String(run.id)));
   const draftRuns = observed.filter((run) => !gateIds.has(String(run.id)));
-  return Object.freeze({
-    schemaVersion: 2,
+  const report = {
+    schemaVersion: 3,
     periodDays,
     generatedAt,
     workflow: CI_HEALTH_WORKFLOW_INPUTS.ci,
@@ -186,12 +271,16 @@ export function summarizeCiHealth({
     }),
     failureRate: total === 0 ? 0 : round(failed / total),
     flakyRecoveredJobs: flakyRecovered,
+    sameShaWashGreen: sameShaWashGreenCount(completed),
+    blockingProductRetries: productRetryCount(flakyRecords),
     failedJobs: Object.freeze(failedJobNames(jobsByRunId)),
     fullGate: Object.freeze({ runs: gateRuns.length, ...durationStats(runDurations(gateRuns)) }),
     draft: Object.freeze({ runs: draftRuns.length, ...durationStats(runDurations(draftRuns)) }),
     jobs: jobTimingStats(jobsByRunId),
     failureCauses: Object.freeze(failureCauses(observed, jobsByRunId)),
-  });
+  };
+  report.budgetViolations = budgetViolations(report);
+  return Object.freeze(report);
 }
 
 export function renderCiHealthMarkdown(report) {
@@ -223,6 +312,8 @@ export function renderCiHealthMarkdown(report) {
     `- Runs: ${report.totals.runs} (${report.totals.success} success, ${report.totals.failure} failure)`,
     `- Failure rate: ${report.failureRate ?? 0}`,
     `- Jobs that failed then succeeded on retry: ${report.flakyRecoveredJobs}`,
+    `- Same SHA washed green: ${report.sameShaWashGreen || 0}`,
+    `- Product-contract retries/flakes: ${report.blockingProductRetries || 0}`,
     `- Failed job names: ${failedJobs}`,
     bucket("Full-gate runs", report.fullGate || { runs: 0, ...durationStats([]) }),
     bucket("Draft feedback runs", report.draft || { runs: 0, ...durationStats([]) }),
@@ -233,6 +324,13 @@ export function renderCiHealthMarkdown(report) {
     "",
     "## Failed runs",
     ...(causes.length > 0 ? causes : ["- none"]),
+    "",
+    "## Budget",
+    ...((report.budgetViolations || []).length > 0
+      ? report.budgetViolations.map((item) => (
+        `- ${item.blocking ? "blocking" : "watch"} \`${item.code}\`: ${item.actual} (limit ${item.limit})`
+      ))
+      : ["- none"]),
     "",
   ].join("\n");
 }
@@ -263,18 +361,22 @@ function parseOptions(argv) {
   return options;
 }
 
-async function githubJson(url, token) {
+async function githubJson(url, token, { method = "GET", body } = {}) {
   const response = await globalThis.fetch(url, {
+    method,
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${token}`,
       "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      ...(body ? { "Content-Type": "application/json" } : {}),
     },
+    body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
-    const body = (await response.text()).slice(0, 500);
-    throw new Error(`GitHub API ${response.status} for ${url}: ${body}`);
+    const responseBody = (await response.text()).slice(0, 500);
+    throw new Error(`GitHub API ${response.status} for ${url}: ${responseBody}`);
   }
+  if (response.status === 204) return null;
   return await response.json();
 }
 
@@ -320,6 +422,70 @@ async function collectRuns(repository, token, sinceIso) {
   return { ciRuns, jobsByRunId };
 }
 
+export function ciHealthIssueBodies(report) {
+  const violations = report.budgetViolations || [];
+  const blocking = violations.filter((item) => item.blocking);
+  const lines = [
+    "PageRoot CI health found repeated blocking budget violations.",
+    "",
+    ...blocking.map((item) => `- \`${item.code}\`: ${item.actual} (limit ${item.limit})`),
+    "",
+    "This issue is opened only after two consecutive weekly reports share a blocking code.",
+    "It does not fail `release-gate`.",
+  ];
+  return Object.freeze({
+    watchTitle: "[CI health] blocking budget exceeded (week 1)",
+    issueTitle: "[CI health] blocking budget exceeded for two consecutive weeks",
+    body: lines.join("\n"),
+    watchLabels: Object.freeze(["ci-health-watch"]),
+    issueLabels: Object.freeze(["ci-health"]),
+  });
+}
+
+async function syncCiHealthIssue(repository, token, report) {
+  const blocking = (report.budgetViolations || []).filter((item) => item.blocking);
+  if (blocking.length === 0) return null;
+  const apiBase = `https://api.github.com/repos/${repository}`;
+  const [openWatch, openHealth] = await Promise.all([
+    githubJson(`${apiBase}/issues?labels=ci-health-watch&state=open&per_page=10`, token),
+    githubJson(`${apiBase}/issues?labels=ci-health&state=open&per_page=10`, token),
+  ]);
+  const bodies = ciHealthIssueBodies(report);
+  const watchIssues = Array.isArray(openWatch) ? openWatch : [];
+  const healthIssues = Array.isArray(openHealth) ? openHealth : [];
+  if (healthIssues.length > 0) {
+    const existing = healthIssues[0];
+    await githubJson(`${apiBase}/issues/${existing.number}/comments`, token, {
+      method: "POST",
+      body: { body: bodies.body },
+    });
+    return existing;
+  }
+  if (watchIssues.length === 0) {
+    return await githubJson(`${apiBase}/issues`, token, {
+      method: "POST",
+      body: {
+        title: bodies.watchTitle,
+        body: bodies.body,
+        labels: [...bodies.watchLabels],
+      },
+    });
+  }
+  const created = await githubJson(`${apiBase}/issues`, token, {
+    method: "POST",
+    body: {
+      title: bodies.issueTitle,
+      body: bodies.body,
+      labels: [...bodies.issueLabels],
+    },
+  });
+  await githubJson(`${apiBase}/issues/${watchIssues[0].number}`, token, {
+    method: "PATCH",
+    body: { state: "closed" },
+  });
+  return created;
+}
+
 async function run(options) {
   const token = process.env[options.tokenEnv] || "";
   if (!token) throw new Error(`Environment variable ${options.tokenEnv} is required.`);
@@ -340,6 +506,13 @@ async function run(options) {
   const markdown = renderCiHealthMarkdown(report);
   const markdownDestination = `${destination.replace(/\.json$/u, "")}.md`;
   await writeFile(markdownDestination, markdown, "utf8");
+  if (options.createIssue !== false) {
+    const issue = await syncCiHealthIssue(options.repository, token, report).catch((error) => {
+      console.warn(`CI health issue sync skipped: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    if (issue?.html_url) console.log(`CI health issue: ${issue.html_url}`);
+  }
   console.log(markdown);
   console.log(`CI health report: ${destination}`);
   return report;

@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { playwrightRetries } from "../../../scripts/playwright-retry-policy.mjs";
+
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
 const externalBaseUrl = process.env.PAGEROOT_BASE_URL || "";
@@ -14,11 +16,11 @@ export default defineConfig({
   outputDir: path.join(productRoot, "output/playwright/native-dom-browser/results"),
   fullyParallel: false,
   workers: 1,
-  // CI absorbs one transient environment stall per test, matching the native
-  // Electron lanes. Local runs stay retry-free so caret/Selection regressions
-  // are never hidden, and every CI retry is recorded by the JSON reporter
-  // plus the machine-readable flaky summary.
-  retries: process.env.CI ? 1 : 0,
+  // Product-contract Browser tests never retry. A same-SHA flake cannot be
+  // washed green: release-gate reads the flaky summary and refuses attestation
+  // when failed, flaky or retries are non-zero. Environment stalls belong in
+  // the @infra-sensitive preflight, not this suite.
+  retries: playwrightRetries(),
   reporter: [
     ["list"],
     ["json", {

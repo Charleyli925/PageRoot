@@ -131,7 +131,7 @@ stash.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
 5. Keep the PR Draft while implementation and focused feedback converge. Batch accepted P0/P1 product fixes before promotion. Codex findings are informational: they never block merge, and P2/P3 comments do not require a new SHA.
 6. When the head is ready, update it onto current `main` and mark the PR Ready once, or add the `full-gate` label. That starts the complete source matrix. A PR opened already Ready also takes this path because `draft == false`. Codex review is requested automatically for that head, shown on the PR, and never included in `release-gate`.
-7. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff. Do not restart already-green source lanes merely because `github.run_attempt` changed.
+7. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff. Do not restart already-green source lanes merely because `github.run_attempt` changed. A failed product suite on the same SHA cannot be washed green by rerunning; classify a true `ci_environment` failure first.
 8. Squash-merge only after authorization. GitHub deletes the remote task branch; then audit and explicitly retire the local task before fast-forwarding primary `main`.
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.

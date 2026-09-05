@@ -2,14 +2,16 @@ name: CI Health
 
 on:
   schedule:
-    # Weekly read-only report generated on GitHub-hosted runners. Nothing in
-    # this workflow runs on or touches a developer machine.
+    # Weekly report generated on GitHub-hosted runners. It may open a
+    # CI health Issue after two consecutive blocking-budget weeks, but it
+    # never writes repository contents and is not a merge gate.
     - cron: "0 1 * * 1"
   workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
+  issues: write
 
 concurrency:
   group: ci-health
@@ -19,7 +21,7 @@ jobs:
   report:
     name: ci-health-report
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -28,7 +30,7 @@ jobs:
         with:
           node-version: 22.13.0
       - name: Generate the 30-day CI health report
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-

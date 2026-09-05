@@ -56,7 +56,7 @@ earlier commit's attestation check.
 - Native Electron and deterministic AI run as separate jobs. A failure can be rerun independently. Native Electron spreads its self-contained tests across three shards, because a single-worker lane of forty tests otherwise dominated total gate latency. Every shard still runs one worker, so no two Electron apps share a runner. The shards are passed `--fully-parallel` deliberately: Playwright otherwise splits by spec file, and this two-file suite would leave one shard holding every test while the others passed vacuously.
 - Each macOS job first runs a product-independent synthetic Electron environment preflight. It proves that the hosted window is visible and that renderer timers and animation frames advance before PageRoot code or assertions begin, so an environment failure on either runner stays classified as deterministic `ci_environment` rather than degrading to `source-test/needs_triage`.
 - Every `ci.yml` step carries an explicit `timeout-minutes` bound. Browser lanes first launch the restored or freshly installed Chromium; only a failed readiness probe runs one `playwright install-deps` fallback, under a ten-minute budget. The fallback never retries apt, because killing a slow parent can leave its child holding the dpkg lock. An external apt mirror or network hang therefore costs a bounded fallback instead of every Browser lane's normal path.
-- Real HTML keeps retries at zero. The Browser shards, native Electron shards and deterministic AI lanes retry a test once in CI only, to absorb a transient environment stall; local runs stay retry-free. Retry evidence is never lost with the runner: each lane's diagnostics artifact uploads on `always()`, the config records trace, video and screenshot per failed attempt, and `scripts/playwright-flaky-summary.mjs` writes machine-readable flaky/retry counts from the JSON reporter into `output/ci-evidence/` and the step summary. Reliability remains anchored in deterministic readiness and better evidence, not blanket retrying.
+- Real HTML, Browser shards, native Electron shards and deterministic AI are product contracts and keep `retries: 0`. Only the `@infra-sensitive` hosted-window preflight may retry once in CI. `release-gate` reads the machine-readable flaky summaries and refuses attestation when a product suite has `failed`, `flaky` or `retries` above zero, or when the same SHA has an untriaged product-step failure from an earlier attempt. Environment-only step failures and an unexpired `pageroot-ci-triage` comment remain the only ways to rerun the same SHA. Reliability remains anchored in deterministic readiness and fail-closed evidence, not blanket retrying.
 - Release Dry Run has two sequential macOS jobs. The first builds metadata and an explicitly unsigned App, runs the shared packaged verifier with the dry-run signature policy and freezes a non-release checkpoint. The second restores the checkpoint in a fresh checkout, restores its exact metadata, rebuilds `dist-desktop`, reruns the same verifier, then launches the App to compare runtime name/version and Bundle ID with the source package contract. Neither job builds a DMG or sees signing/notarization inputs. Formal Candidate profiles keep their ad-hoc pre-sign and Developer ID signature gates unchanged.
 - Release Candidate has two sequential macOS jobs. `preflight-sign-and-notarize-app` first assembles an ad-hoc App, checks packaged contents (including the absence of private Codex/App Server resources), runs the complete packaged-runtime oracle, signs it and proves signed startup before the App is submitted to Apple. Only after App acceptance does it upload an archive/hash/source-bound checkpoint.
 - `package-and-verify-candidate` downloads and revalidates that checkpoint, restores the exact embedded build and telemetry metadata as comparison inputs, rebuilds only the deterministic Electron renderer as a source-comparison oracle, uses electron-builder `--prepackaged` to avoid rebuilding the App, creates updater assets, submits only the final DMG to Apple and performs final mounted/extracted verification. The fresh job never regenerates telemetry configuration or receives its project token. The jobs have 90- and 75-minute guards; App and DMG Apple steps have 45- and 50-minute limits. All non-Apple steps keep explicit 2–10 minute limits.
@@ -90,7 +90,7 @@ Use the CI incident issue template to record the final category, signature, exac
 
 1. Freeze the failing SHA while triaging. Do not create a no-op commit to obtain another run.
 2. Inspect the failed job's CI evidence, Playwright trace and first failed assertion.
-3. If evidence points to the CI environment, rerun only the failed job for the same SHA.
+3. If evidence points to the CI environment, classify it with a dated `pageroot-ci-triage` comment or confirm only environment-preflight steps failed, then rerun only the failed job for the same SHA.
    When only `package-and-verify-candidate` failed, use **Re-run failed jobs** so
    the successful signed-App checkpoint is retained. Do not use **Re-run all
    jobs**, which deliberately rebuilds the checkpoint under a new attempt.
@@ -134,12 +134,14 @@ Runner minutes and wall time are different signals. Splitting Electron lanes may
 
 `npm run ci:health` reads recent `ci.yml` Actions history and reports run and
 job outcomes, queue time separated from execution time, full-gate wall time
-separated from Draft feedback, retry-recovered jobs and per-run failure
-causes. The `CI Health` workflow publishes the same report weekly from a
-GitHub-hosted runner into the run summary and a 30-day artifact; it is
-read-only, never a merge gate, and no substitute for `release-gate`. The
-workflow files live in `CI_HEALTH_WORKFLOW_INPUTS`, so adding a workflow
-without mapping it fails the source gate.
+separated from Draft feedback, retry-recovered jobs, same-SHA wash-green
+counts, test-level product retries when flaky evidence is supplied, and
+budget violations. The `CI Health` workflow publishes the same report weekly
+from a GitHub-hosted runner; after two consecutive weeks of blocking budget
+violations it opens a `ci-health` Issue. It is not a merge gate and no
+substitute for `release-gate`. The workflow files live in
+`CI_HEALTH_WORKFLOW_INPUTS`, so adding a workflow without mapping it fails
+the source gate.
 
 ## Change control
 

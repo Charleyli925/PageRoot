@@ -5,6 +5,13 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  evaluateProductFlakyEvidence,
+  evaluateShaFailureHistory,
+  loadFlakyEvidence,
+  parseTriageRecords,
+} from "./source-gate-attestation-guard.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -192,6 +199,8 @@ function parseOptions(argv) {
     pullRequestBase: "",
     runId: "",
     runAttempt: "",
+    evidenceDir: "output/ci-evidence",
+    emergencyReason: "",
   };
   while (argv.length > 0) {
     const argument = argv.shift();
@@ -211,6 +220,8 @@ function parseOptions(argv) {
     else if (argument === "--pull-request-base") options.pullRequestBase = value;
     else if (argument === "--run-id") options.runId = value;
     else if (argument === "--run-attempt") options.runAttempt = value;
+    else if (argument === "--evidence-dir") options.evidenceDir = value;
+    else if (argument === "--emergency-reason") options.emergencyReason = value;
     else throw new Error(`Unknown argument: ${argument}`);
   }
   assertRepository(options.repository);
@@ -222,6 +233,9 @@ function parseOptions(argv) {
   }
   if (!Number.isInteger(options.retries) || options.retries < 1 || options.retries > 5) {
     throw new Error("--retries must be an integer from 1 to 5.");
+  }
+  if (options.command === "create" && !/^[\w./-]+$/u.test(options.evidenceDir || "")) {
+    throw new Error("--evidence-dir must be a repository-relative path.");
   }
   return options;
 }
@@ -248,6 +262,37 @@ async function createAttestation(options) {
   if (!/^\d+$/u.test(options.runId) || !/^\d+$/u.test(options.runAttempt)) {
     throw new Error("--run-id and --run-attempt must be positive integers.");
   }
+  const evidenceDir = path.resolve(productRoot, options.evidenceDir);
+  if (evidenceDir !== productRoot && !evidenceDir.startsWith(`${productRoot}${path.sep}`)) {
+    throw new Error("--evidence-dir must remain inside the repository.");
+  }
+  const flakyRecords = await loadFlakyEvidence(evidenceDir);
+  const flakyDecision = evaluateProductFlakyEvidence(flakyRecords);
+  if (!flakyDecision.ok) {
+    throw new Error(
+      `Refusing source-gate attestation: ${flakyDecision.reason}`
+      + ` (product failed=${flakyDecision.product.failed}`
+      + ` flaky=${flakyDecision.product.flaky}`
+      + ` retries=${flakyDecision.product.retries}`
+      + `${flakyDecision.missing.length ? `; missing ${flakyDecision.missing.join(", ")}` : ""}).`,
+    );
+  }
+  const shaHistory = await collectShaHistoryEvidence(options);
+  const shaDecision = evaluateShaFailureHistory({
+    headSha: options.pullRequestHead,
+    currentRunId: options.runId,
+    currentAttempt: options.runAttempt,
+    jobsByRunAttempt: shaHistory.jobsByRunAttempt,
+    triageRecords: parseTriageRecords(shaHistory.comments),
+  });
+  if (!shaDecision.ok) {
+    throw new Error(
+      `Refusing source-gate attestation for untriaged product failures on SHA `
+      + `${options.pullRequestHead}: ${shaDecision.failures
+        .map((failure) => `${failure.job} @ run ${failure.runId} attempt ${failure.attempt} (${failure.classification})`)
+        .join("; ")}.`,
+    );
+  }
   const artifactName = sourceGateArtifactName(identity.treeSha, identity.packageVersion);
   const attestation = Object.freeze({
     schemaVersion: 1,
@@ -264,6 +309,11 @@ async function createAttestation(options) {
     workflowRunAttempt: Number(options.runAttempt),
     artifactName,
     createdAt: new Date().toISOString(),
+    productFlaky: flakyDecision.product,
+    shaHistory: Object.freeze({
+      reason: shaDecision.reason,
+      untriagedFailuresForSameSha: shaDecision.untriagedFailuresForSameSha,
+    }),
   });
   const destination = path.resolve(productRoot, options.output);
   await mkdir(path.dirname(destination), { recursive: true });
@@ -296,6 +346,38 @@ async function githubJson(apiPath, token, { allowNotFound = false } = {}) {
     throw new Error(`GitHub API ${response.status} for ${apiPath}: ${body}`);
   }
   return await response.json();
+}
+
+async function collectShaHistoryEvidence(options) {
+  const token = process.env[options.tokenEnv] || "";
+  if (!token) throw new Error(`Environment variable ${options.tokenEnv} is required.`);
+  const repositoryPath = options.repository.split("/").map(encodeURIComponent).join("/");
+  const workflow = encodeURIComponent(options.workflow || "ci.yml");
+  const runsResponse = await githubJson(
+    `/repos/${repositoryPath}/actions/workflows/${workflow}/runs`
+    + `?event=pull_request&head_sha=${options.pullRequestHead}&per_page=20`,
+    token,
+  );
+  const jobsByRunAttempt = {};
+  for (const run of runsResponse.workflow_runs || []) {
+    const attempts = Math.max(1, Number(run.run_attempt) || 1);
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const jobsResponse = await githubJson(
+        `/repos/${repositoryPath}/actions/runs/${run.id}/attempts/${attempt}/jobs?per_page=100`,
+        token,
+        { allowNotFound: true },
+      );
+      jobsByRunAttempt[`${run.id}:${attempt}`] = jobsResponse?.jobs || [];
+    }
+  }
+  const comments = await githubJson(
+    `/repos/${repositoryPath}/issues/${options.pullRequest}/comments?per_page=100`,
+    token,
+  );
+  return {
+    jobsByRunAttempt,
+    comments: Array.isArray(comments) ? comments : [],
+  };
 }
 
 // A squash-merge subject carries its own pull-request number. That fact
@@ -439,12 +521,30 @@ async function verifyAttestation(options) {
     packageVersion: identity.packageVersion,
     maxAgeHours: options.maxAgeHours,
   }));
+  if (process.env.PAGEROOT_EMERGENCY_MAIN_BYPASS === "1" && options.emergencyReason) {
+    const destination = path.resolve(productRoot, "output/source-gate/emergency-bypass.json");
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "emergency-main-bypass",
+      repository: options.repository,
+      commitSha: identity.commitSha,
+      treeSha: identity.treeSha,
+      reason: options.emergencyReason,
+      createdAt: new Date().toISOString(),
+    }, null, 2)}\n`, "utf8");
+    console.warn(
+      `WARNING: emergency main bypass recorded for ${identity.commitSha}: ${options.emergencyReason}`,
+    );
+  }
   if (!result.trusted && options.mode === "required") {
-    if (result.reason === "association_unavailable" && options.missingAssociation === "warn") {
+    const emergencyBypass = process.env.PAGEROOT_EMERGENCY_MAIN_BYPASS === "1"
+      && Boolean(options.emergencyReason)
+      && result.reason === "association_unavailable";
+    if (emergencyBypass) {
       console.warn(
-        "WARNING: GitHub has no pull-request association for this commit and the "
-        + "commit subject names no pull request. A rerun cannot recover this, so "
-        + "the check passes with a warning instead of failing.",
+        "WARNING: GitHub has no pull-request association; emergency bypass accepted "
+        + "after writing output/source-gate/emergency-bypass.json.",
       );
     } else {
       throw new Error(`Current source is not covered by a reusable PR source gate: ${result.reason}.`);

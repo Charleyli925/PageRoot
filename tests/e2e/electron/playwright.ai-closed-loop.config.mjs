@@ -2,6 +2,8 @@ import { defineConfig } from "@playwright/test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { playwrightRetries } from "../../../scripts/playwright-retry-policy.mjs";
+
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
 const artifactRoot = path.join(
@@ -15,9 +17,10 @@ export default defineConfig({
   testMatch: /ai-(?:review-adoption|provider-availability|run-lifecycle|candidate-validation|request-comments)\.spec\.mjs/,
   outputDir: path.join(artifactRoot, "results"),
   workers: 1,
-  // CI absorbs one transient Electron launch/hydration stall per test, matching
-  // the native lane. Local runs stay retry-free.
-  retries: process.env.CI ? 1 : 0,
+  // AI closed-loop assertions are product contracts: Candidate promotion,
+  // Review and adoption must not retry. The hosted-window preflight absorbs
+  // one environment stall before this suite starts.
+  retries: playwrightRetries(),
   reporter: [
     ["list"],
     ["json", {

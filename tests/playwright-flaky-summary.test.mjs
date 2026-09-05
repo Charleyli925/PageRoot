@@ -61,6 +61,14 @@ test("flaky summary counts outcomes and retry attempts from the JSON reporter", 
     flaky: 1,
     retries: 2,
     skipped: 1,
+    product: { failed: 1, flaky: 1, retries: 2 },
+    infra: { failed: 0, flaky: 0, retries: 0 },
+    tests: [
+      { title: "green test", status: "expected", retries: 0, infraSensitive: false },
+      { title: "flaky test", status: "flaky", retries: 1, infraSensitive: false },
+      { title: "failed test", status: "unexpected", retries: 1, infraSensitive: false },
+      { title: "skipped test", status: "skipped", retries: 0, infraSensitive: false },
+    ],
   });
 });
 
@@ -96,6 +104,30 @@ test("flaky summary tolerates nested suites and missing optional fields", () => 
   assert.equal(summary.total, 2);
   assert.equal(summary.flaky, 1);
   assert.equal(summary.retries, 2);
+});
+
+test("infra-sensitive tags are counted separately from product contracts", () => {
+  const summary = summarizeFlakyRuns({
+    suites: [{
+      specs: [{
+        title: "ci-environment-preflight.spec.mjs",
+        tests: [{
+          title: "hosted macOS can show, schedule and paint a synthetic Electron renderer",
+          tags: ["@infra-sensitive"],
+          status: "flaky",
+          results: [
+            { retry: 0, status: "failed" },
+            { retry: 1, status: "passed" },
+          ],
+        }],
+      }],
+    }],
+  });
+  assert.equal(summary.flaky, 1);
+  assert.equal(summary.product.flaky, 0);
+  assert.equal(summary.product.retries, 0);
+  assert.equal(summary.infra.flaky, 1);
+  assert.equal(summary.infra.retries, 1);
 });
 
 test("legacy outcome/retries pseudoschema fails closed instead of fabricating zero counts", () => {
@@ -151,11 +183,12 @@ test("flaky evidence is written machine-readably inside the repository", async (
       { suite: "electron-native", report: "output/playwright/native-dom-electron/results.json" },
     );
     const record = JSON.parse(await readFile(destination, "utf8"));
-    assert.equal(record.schemaVersion, 1);
+    assert.equal(record.schemaVersion, 2);
     assert.equal(record.suite, "electron-native");
     assert.equal(record.flaky, 1);
     assert.equal(record.retries, 2);
     assert.equal(record.failed, 1);
+    assert.deepEqual(record.product, { failed: 1, flaky: 1, retries: 2 });
     await rm(destination, { force: true });
     await assert.rejects(
       () => writeFlakyEvidence(summarizeFlakyRuns(reporterSuite()), path.join(tempRoot, "outside.json")),

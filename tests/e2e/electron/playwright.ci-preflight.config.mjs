@@ -2,6 +2,8 @@ import { defineConfig } from "@playwright/test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { playwrightRetries } from "../../../scripts/playwright-retry-policy.mjs";
+
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
 
@@ -10,7 +12,9 @@ export default defineConfig({
   testMatch: /ci-environment-preflight\.spec\.mjs/,
   outputDir: path.join(productRoot, "output/playwright/electron-ci-preflight/results"),
   workers: 1,
-  retries: 0,
+  // This suite is the only @infra-sensitive Electron check. CI may retry it
+  // once for hosted WindowServer stalls; product suites stay retry-free.
+  retries: playwrightRetries({ infraSensitive: true }),
   reporter: [
     ["list"],
     ["html", {
