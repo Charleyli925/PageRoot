@@ -916,22 +916,29 @@ export async function assertProjectionGeometryCase(frame, geometryCase) {
       ? `focus-${displayGroupId}`
       : `focus-${changeId}-${displayGroupId}`;
   });
-  await frame.locator(
+  const regionBar = frame.locator(
     `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${focusGroupId}"]`,
-  ).first().click();
-  await expect.poll(async () => frame.locator("html").evaluate((html) => (
-    html.hasAttribute("data-pageroot-review-transitioning") ? "transitioning" : "idle"
-  )), { timeout: 30_000 }).toBe("idle");
+  ).first();
   const frames = frame.locator(
     `[data-pageroot-review-overlay-box][data-tone="${geometryCase.changeType}"][data-pageroot-review-semantic-owner="${owner}"]`,
   );
   const masks = frame.locator(
     `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
   );
-  await expect.poll(async () => frames.count(), { timeout: 30_000 })
-    .toBe(geometryCase.expectedFrameCount);
-  await expect.poll(async () => masks.count(), { timeout: 30_000 })
-    .toBe(geometryCase.expectedMaskCount);
+  // Region-bar focus can start a projection transition. Re-resolve after the
+  // frame is idle so a click during the previous transition is not treated as
+  // a missing outline.
+  await expect(async () => {
+    await expect.poll(async () => frame.locator("html").evaluate((html) => (
+      html.hasAttribute("data-pageroot-review-transitioning") ? "transitioning" : "idle"
+    )), { timeout: 15_000 }).toBe("idle");
+    await regionBar.click({ timeout: 8_000 });
+    await expect.poll(async () => frame.locator("html").evaluate((html) => (
+      html.hasAttribute("data-pageroot-review-transitioning") ? "transitioning" : "idle"
+    )), { timeout: 15_000 }).toBe("idle");
+    expect(await frames.count()).toBe(geometryCase.expectedFrameCount);
+    expect(await masks.count()).toBe(geometryCase.expectedMaskCount);
+  }).toPass({ timeout: 45_000, intervals: [250, 500, 1_000] });
   await expect.poll(() => frames.evaluate((overlay, { ownerSelector, tolerance }) => {
     const owner = document.querySelector(ownerSelector);
     if (!owner) return false;
