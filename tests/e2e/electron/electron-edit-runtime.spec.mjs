@@ -25,6 +25,7 @@ import {
   tmpdir,
   writeFileSync,
 } from "./electron-native-harness.mjs";
+import { queuedStaticFallbackOracle } from "./queued-static-fallback-oracle.mjs";
 
 async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), prefix));
@@ -70,6 +71,69 @@ async function releaseHeldRuntimeCommits(page) {
     window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = undefined;
     releases.forEach((release) => release());
   });
+}
+
+async function runtimeContractSnapshot(page) {
+  return page.evaluate(() => {
+    const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+    return {
+      degradation: editor?.getAttribute("data-runtime-degradation") || "none",
+      candidateId: editor?.getAttribute("data-runtime-candidate-id") || null,
+      candidatePhase: editor?.getAttribute("data-runtime-candidate-phase") || null,
+      nativeStartStatus: editor?.getAttribute("data-native-start-status") || null,
+      renderVerified: editor?.getAttribute("data-render-verified") || null,
+      held: window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0,
+    };
+  });
+}
+
+const QUEUED_STATIC_CASE = "runtime-queued-static-latest";
+const QUEUED_STATIC_R0 = "静态候选必须跟随最新源码";
+const QUEUED_STATIC_R2 = "最新来源";
+
+function queuedStaticFixtureHtml() {
+  return `<!doctype html>
+<html><head><title>Runtime queued static latest</title></head><body>
+  <main>
+    <p data-native-case="${QUEUED_STATIC_CASE}">${QUEUED_STATIC_R0}</p>
+  </main>
+  <script>
+    if (document.querySelectorAll('[data-native-case="${QUEUED_STATIC_CASE}"]')
+      .length > 1) {
+      throw new Error('synthetic queued Runtime activation failure');
+    }
+  </script>
+</body></html>`;
+}
+
+async function duplicateQueuedStaticWorkingHtml(page, sourcePath) {
+  const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
+  const frame = await currentEditorFrame(page);
+  const target = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`).first();
+  await target.click();
+  const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+  await expect(duplicateButton).toBeVisible();
+  await duplicateButton.click();
+  await expect.poll(() => (
+    readFileSync(workingCopyPath, "utf8")
+      .split(`data-native-case="${QUEUED_STATIC_CASE}"`).length - 1
+  )).toBeGreaterThanOrEqual(2);
+  return { editor, workingCopyPath };
+}
+
+async function collectQueuedStaticFallbackProof(page, workingCopyPath) {
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  const active = editor.locator('iframe[data-runtime-slot-role="active"]');
+  const frame = await currentEditorFrame(page);
+  const targets = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`);
+  return {
+    diskHtml: readFileSync(workingCopyPath, "utf8"),
+    visibleTexts: await targets.allTextContents(),
+    sandbox: await active.getAttribute("sandbox"),
+    expectedVisibleCount: await targets.count(),
+  };
 }
 
 async function visibleActiveFrameProof(page, nativeCase) {
@@ -428,6 +492,8 @@ async function assertRuntimeHandoff(page, {
       && sample.rafSequence >= firstActiveRaf.rafSequence
       && sample.rafSequence <= firstActiveRaf.rafSequence + 2
       && sample.oldSlotRole === "inactive"
+      && sample.oldVisibility === "hidden"
+      && Number(sample.oldOpacity) === 0
       && (sample.oldBodyChildCount === 0 || sample.oldBodyChildCount == null)
       && (sample.oldScriptCount === 0 || sample.oldScriptCount == null)
       && (sample.oldBootstrapCount === 0 || sample.oldBootstrapCount == null)
@@ -2428,74 +2494,61 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
 test("a queued static fallback follows the latest Working HTML after Native Edit", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  const html = `<!doctype html>
-<html><head><title>Runtime queued static latest</title></head><body>
-  <main>
-    <p data-native-case="runtime-queued-static-latest">静态候选必须跟随最新源码</p>
-  </main>
-  <script>
-    if (document.querySelectorAll('[data-native-case="runtime-queued-static-latest"]')
-      .length > 1) {
-      throw new Error('synthetic queued Runtime activation failure');
-    }
-  </script>
-</body></html>`;
-
   await withRuntimeProject("pageroot-runtime-queued-static-latest-e2e-", {
-    "runtime-report.html": html,
+    "runtime-report.html": queuedStaticFixtureHtml(),
   }, async ({ page, sourcePath }) => {
-    let { frame } = await loadedDiskFrame(
+    await loadedDiskFrame(page, sourcePath, QUEUED_STATIC_CASE);
+    await armRuntimeCommitHold(page);
+    const { editor, workingCopyPath } = await duplicateQueuedStaticWorkingHtml(
       page,
       sourcePath,
-      "runtime-queued-static-latest",
     );
-    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-    const target = frame.locator(
-      '[data-native-case="runtime-queued-static-latest"]',
-    ).first();
-    await target.click();
-    await page.getByRole("button", { name: "复制元素", exact: true }).evaluate((button) => {
-      button.click();
-      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
-      const activeFrame = editorElement?.querySelector('iframe:not([data-frame-role])');
-      const editTarget = activeFrame?.contentDocument?.querySelector(
-        '[data-native-case="runtime-queued-static-latest"]',
-      );
-      if (!(activeFrame instanceof HTMLIFrameElement)
-        || !(editTarget instanceof activeFrame.contentWindow.HTMLElement)) {
-        throw new Error("Queued-static Active target is missing.");
-      }
-      const rect = editTarget.getBoundingClientRect();
-      const eventInit = {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + Math.max(1, rect.width / 2),
-        clientY: rect.top + Math.max(1, rect.height / 2),
-      };
-      editTarget.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
-      editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
-    });
-    await expect.poll(() => editor.getAttribute("data-runtime-candidate-id"), {
-      timeout: 15_000,
-    }).toMatch(/.+/u);
+    const r1 = readFileSync(workingCopyPath, "utf8");
+    expect(r1).toContain(QUEUED_STATIC_R0);
+    expect(r1).not.toContain(QUEUED_STATIC_R2);
 
-    frame = await currentEditorFrame(page);
-    const activeTarget = frame.locator(
-      '[data-native-case="runtime-queued-static-latest"]',
-    ).first();
-    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
-    await expect(editor).toHaveAttribute(
-      "data-runtime-degradation",
-      "static-preparing",
-      { timeout: 12_000 },
+    await waitForHeldRuntimeCommit(page);
+    await expect.poll(() => runtimeContractSnapshot(page)).toEqual(
+      expect.objectContaining({
+        held: expect.any(Number),
+        degradation: "none",
+        renderVerified: "true",
+      }),
     );
+    expect((await runtimeContractSnapshot(page)).held).toBeGreaterThan(0);
+    const preparingNotice = page.getByTestId("edit-runtime-static-fallback");
+    if (await preparingNotice.count()) {
+      await preparingNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
+      await expect(preparingNotice).toHaveCount(0);
+    }
+
+    let frame = await currentEditorFrame(page);
+    const activeTarget = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`).first();
+    await activeTarget.dblclick();
     await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(activeTarget).toBeFocused();
+    await expect(editor).toHaveAttribute("data-native-start-status", "started");
+    await activeTarget.press("End");
+    await page.keyboard.insertText("x");
+    await expect(activeTarget).toContainText("x");
+    await page.keyboard.press("Backspace");
+    await expect(activeTarget).not.toContainText("x");
+
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect.poll(async () => (
+      await editor.getAttribute("data-runtime-degradation") || "none"
+    )).toBe("none");
+
+    await releaseHeldRuntimeCommits(page);
+    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-runtime-degradation", "static-preparing");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
 
     const revisionBeforeLatestEdit = Number(await page.locator("[data-persist-state]").first()
       .getAttribute("data-persisted-revision"));
     await activeTarget.press("End");
-    await page.keyboard.insertText(" 最新来源");
-    await expect(activeTarget).toContainText("最新来源");
+    await page.keyboard.insertText(` ${QUEUED_STATIC_R2}`);
+    await expect(activeTarget).toContainText(QUEUED_STATIC_R2);
     const latestTextRevision = await expectCheckpointPersisted(page, revisionBeforeLatestEdit);
     await page.keyboard.press("Escape");
     await expect.poll(async () => {
@@ -2518,18 +2571,65 @@ test("a queued static fallback follows the latest Working HTML after Native Edit
       /^(?:preparing|positioning|active)$/u,
     );
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
-    const staticFrame = await currentEditorFrame(page);
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
-      .toHaveAttribute("sandbox", "allow-same-origin");
-    await expect(staticFrame.locator(
-      '[data-native-case="runtime-queued-static-latest"]',
-    ).first()).toContainText("最新来源");
-    await expect(staticFrame.locator(
-      '[data-native-case="runtime-queued-static-latest"]',
-    )).toHaveCount(2);
-    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
-    expect(latestWorkingSource).toContain("最新来源");
+    queuedStaticFallbackOracle({
+      ...(await collectQueuedStaticFallbackProof(page, workingCopyPath)),
+      expectedSnippet: QUEUED_STATIC_R2,
+      expectedVisibleCount: 2,
+    });
+
+    const staticNotice = page.getByTestId("edit-runtime-static-fallback");
+    if (await staticNotice.count()) {
+      await staticNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
+      await expect(staticNotice).toHaveCount(0);
+    }
+    frame = await currentEditorFrame(page);
+    const staticTarget = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`).first();
+    await staticTarget.dblclick();
+    await expect(staticTarget).toHaveAttribute("contenteditable", "true");
+    await expect(staticTarget).toContainText(QUEUED_STATIC_R2);
+    await page.keyboard.press("Escape");
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
+test("queued static fallback keeps R1 when Native Edit does not update source", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  await withRuntimeProject("pageroot-runtime-queued-static-r1-e2e-", {
+    "runtime-report.html": queuedStaticFixtureHtml(),
+  }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, QUEUED_STATIC_CASE);
+    await armRuntimeCommitHold(page);
+    const { editor, workingCopyPath } = await duplicateQueuedStaticWorkingHtml(
+      page,
+      sourcePath,
+    );
+    await waitForHeldRuntimeCommit(page);
+    await expect.poll(async () => (
+      await editor.getAttribute("data-runtime-degradation") || "none"
+    )).toBe("none");
+    await releaseHeldRuntimeCommits(page);
+
+    await expect(editor).toHaveAttribute(
+      "data-runtime-degradation",
+      "static-visible",
+      { timeout: 12_000 },
+    );
+    const proof = await collectQueuedStaticFallbackProof(page, workingCopyPath);
+    queuedStaticFallbackOracle({
+      ...proof,
+      expectedSnippet: QUEUED_STATIC_R0,
+      expectedVisibleCount: 2,
+    });
+    expect(proof.diskHtml).not.toContain(QUEUED_STATIC_R2);
+    expect(proof.visibleTexts.join("\n")).not.toContain(QUEUED_STATIC_R2);
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
   });
 });
 

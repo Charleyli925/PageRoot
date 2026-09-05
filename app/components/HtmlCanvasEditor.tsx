@@ -1659,6 +1659,29 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
   }, [deferRuntimeCandidate]);
 
+  const scheduleLatestStaticFallbackAfterFailure = useCallback((
+    predecessorCandidateId: string,
+  ) => {
+    const run = () => {
+      publishRuntimeDegradation("static-preparing");
+      if (!deferLatestStaticRuntimeCandidate(predecessorCandidateId)) {
+        lastRuntimeCandidateFailureRef.current = null;
+        publishRuntimeDegradation("last-known-good-readonly");
+      }
+    };
+    // E2E-only: pause after the dynamic Candidate has failed, before the
+    // static-preparing lock. The callback only continues scheduling; it does
+    // not mark the failed Candidate ready.
+    if (window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true) {
+      const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__;
+      if (Array.isArray(releases)) {
+        releases.push(run);
+        return;
+      }
+    }
+    run();
+  }, [deferLatestStaticRuntimeCandidate, publishRuntimeDegradation]);
+
   const visibleAuthoritativeFrameReady = useCallback((): boolean => {
     const currentRuntime = runtimeFrameRef.current;
     if (
@@ -2163,11 +2186,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           activation: "failed",
           settled: false,
         }, "rejected");
-        publishRuntimeDegradation("static-preparing");
-        if (!deferLatestStaticRuntimeCandidate(attempt.candidateId)) {
-          lastRuntimeCandidateFailureRef.current = null;
-          publishRuntimeDegradation("last-known-good-readonly");
-        }
+        scheduleLatestStaticFallbackAfterFailure(attempt.candidateId);
       } else {
         runtimeFrameCoordinatorRef.current!.settle(attempt, "rejected");
         publishRuntimeDegradation("last-known-good-readonly");
@@ -2312,10 +2331,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     beginRuntimeAttempt,
     clearRuntimeInactiveSlot,
     completeRuntimeAttempt,
-    deferLatestStaticRuntimeCandidate,
     documentBaseHref,
     editRuntimeGrant,
     publishRuntimeDegradation,
+    scheduleLatestStaticFallbackAfterFailure,
     staticAssetBaseHref,
   ]);
   startRuntimeCandidateRef.current = startRuntimeCandidate;
@@ -2682,13 +2701,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       publishRuntimeDegradation("last-known-good-readonly");
       return true;
     }
-    publishRuntimeDegradation("static-preparing");
-    if (!deferLatestStaticRuntimeCandidate(candidate.attempt.candidateId)) {
-      lastRuntimeCandidateFailureRef.current = null;
-      publishRuntimeDegradation("last-known-good-readonly");
-    }
+    scheduleLatestStaticFallbackAfterFailure(candidate.attempt.candidateId);
     return true;
-  }, [deferLatestStaticRuntimeCandidate, publishRuntimeDegradation]);
+  }, [publishRuntimeDegradation, scheduleLatestStaticFallbackAfterFailure]);
   failRuntimeCandidateActivationRef.current = failRuntimeCandidate;
 
   const connectRuntimeCandidate = useCallback((
