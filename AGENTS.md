@@ -12,6 +12,7 @@ listed under Progressive disclosure.
 - A request to analyze, inspect, explain, diagnose or review is read-only. Do not edit, commit, push, merge, publish or change external state unless the user also requests a change.
 - For an implementation request, the default completion boundary is a tested branch and Pull Request. Do not merge, create or move a tag, publish a Release, or change repository/security settings unless the user explicitly asks.
 - Never push directly to `main`, force-push a shared branch, rewrite a published tag or replace published Release assets.
+- Unblocking local implementation choices may be decided in the task. New authority, destructive operations, merge and release need a separate explicit request.
 
 ## Standard task lifecycle
 
@@ -23,15 +24,14 @@ listed under Progressive disclosure.
 6. Open every PR as Draft. Ordinary Draft pushes run only impact-selected `pr-feedback`. Ready or the `full-gate` label starts the complete source matrix; `release-gate` is the sole required merge check. Codex review is informational and never blocks merge. Squash-merge only with explicit authorization.
 7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean. After merge, run `npm run task:audit` from the primary worktree and retire only the exact merged task with `task:retire --apply`.
 
-Command behavior, installer composition, and reporting format: `docs/CODEX_WORKFLOW.md`.
+Ordinary development stops at `gate:edit` / `task:finish` and a Draft PR.
+Installer composition and package delivery: `docs/CODEX_WORKFLOW.md`.
 Release, packaging, and Candidate publication: `docs/RELEASING.md`.
-
-Local gates: `npm run gate:edit` while editing; `npm run task:finish` before publishing.
 
 ## Product invariants
 
 - Current HTML bytes are authoritative. Preview DOM is disposable and must never be serialized back as the persistence source.
-- Visual edits use minimal source patches and preserve unrelated bytes, native selection, IME composition and source identity.
+- Visual edits enter through Stable ID semantic operations. The current source materializer and commit checks then produce complete Working HTML. SourcePatch is the current internal implementation, not a second public edit API. Preserve unrelated bytes, native selection, IME composition and source identity.
 - Irreversible source commits fail closed on ambiguous targets, stale hashes, external writes, invalid patch scope, identity failures and unsafe paths. Layout preflight, outline and other presentation checks must not refuse edit entry.
 - Privileged filesystem behavior stays behind the Electron/Bridge boundary with narrow validated IPC.
 - AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML. Weak page continuity forces review instead of failing an otherwise usable candidate.
@@ -44,21 +44,33 @@ Local gates: `npm run gate:edit` while editing; `npm run task:finish` before pub
 4. Keep changes narrowly scoped, extend existing patterns instead of creating parallel implementations, and avoid unrelated refactoring.
 5. Verify changed behavior with focused tests and update architecture documentation whenever ownership, interfaces, lifecycle, or data flow changes.
 
+## Locate, execute, and finish
+
+- Locate first through `docs/ARCHITECTURE_MAP.md` and `npm run gate:plan -- --context-domain <id>` or `--context-file <path>`. Read the matched contract, then owners, implementation, tests and named doc sections. Do not default to reading the whole repository.
+- Expand reading only when a dependency, a failing check or a contract change requires it. A smaller reading set is not permission to skip persistence, authority or cross-owner checks.
+- If guidance conflicts, name the files, quote the sentences and state the affected decision. Distinguish living contracts, historical ADR text and your own inference. Do not silently pick the stricter sentence.
+- Living ADR status lives in `docs/decisions/README.md`. Use that index and `ARCHITECTURE_MAP.md` for today's contract; do not reconstruct current architecture from historical ADR paragraphs.
+- Independent read-only investigations and edits to different owners may run in parallel. Changes that share one state owner or the same Canvas lifecycle must be integrated serially.
+- After the checks required by this change pass, enlarge or repeat verification only for new code, a new failure or a specific unresolved risk. Do not rerun the complete matrix, Browser, Electron or packaging as extra insurance. Environment flakes resume only through the existing fingerprint / `--resume` rules.
+- Node tests do not prove Enter, IME, caret or iframe continuity. Keep public-behavior evidence for those paths. Do not replace that evidence with private field names, method names or source-string checks.
+- Deliver the actual result, verification evidence and remaining limits. Do not widen the task into packaging, merge or release.
+
 ## Progressive disclosure
 
 Read only the documents needed for the task. Start architecture work at
-`docs/ARCHITECTURE_MAP.md`; read full state ownership only when crossing owners
-or persistence.
+`docs/ARCHITECTURE_MAP.md` and the capability-context query above. Read full
+state ownership only when crossing owners or persistence. Update the unique
+owner document when a contract changes; other files should keep a pointer.
 
 | Task area | Required source |
 | --- | --- |
 | Git, branches, commits, recovery, multi-PR package composition | `docs/GIT_WORKFLOW.md` |
-| Codex task automation, installer composition and final reports | `docs/CODEX_WORKFLOW.md` |
+| Ordinary Codex task commands and final reports | `docs/CODEX_WORKFLOW.md` (`## Standard commands`); installer composition stays in that file's installer section and `docs/RELEASING.md` |
 | Development environment and test lanes | `docs/DEVELOPMENT.md`, then `tests/TEST_STRATEGY.md` when test ownership changes |
-| Architecture capability map | `docs/ARCHITECTURE_MAP.md` |
-| Cross-owner contracts, source patches, persistence, IPC | `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/ENGINEERING_STANDARDS.md`, `docs/SECURITY_MODEL.md` |
+| Architecture capability map and current edit contract | `docs/ARCHITECTURE_MAP.md` |
+| Cross-owner contracts, persistence, IPC | Only when the task crosses owners or changes commit, identity or IPC: `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/SECURITY_MODEL.md`. Broader architecture narrative: `docs/ARCHITECTURE.md`. Engineering/assertion form: `docs/ENGINEERING_STANDARDS.md` |
 | User-visible blocking guards | `docs/GUARD_LEDGER.md` |
-| User flows, state or UI behavior | `docs/INTERACTION_FLOW.md`, plus the relevant focused policy document |
+| User flows, state or UI behavior | Named `docs/INTERACTION_FLOW.md` sections from capability-context, plus the relevant focused policy document |
 | UI visual language, styling standards, design QA process | `docs/DESIGN_LANGUAGE.md`, then the root `design-qa.md` log when recording QA evidence |
 | First-open import confirmation | `docs/IMPORT_CONFIRMATION_PRD.md`, then `docs/IMPORT_CONFIRMATION_PLAN.md` when implementing |
 | Change Request, schemas, AI completion or versions | `docs/CHANGE_REQUEST_PROTOCOL.md`, relevant files in `schemas/` and `fixtures/` |
@@ -83,7 +95,7 @@ Do not remove an irreversible authority-boundary protection unless an equivalent
 
 Protects against wrong-disk writes, mistaken AI adoption, wrong Version activation, destructive deletes and wrong published packages. Same fact: validate at most at ingress, after an await, and immediately before irreversible commit.
 
-- Flag any path that serializes preview DOM, rewrites unrelated HTML bytes, bypasses SourcePatchEngine, drops stale-hash or identity checks at a commit boundary, or makes concurrent writes last-writer-wins.
+- Flag any path that serializes preview DOM, rewrites unrelated HTML bytes, bypasses current hash, identity, scope or persistence checks at a commit boundary, treats SourcePatch as a second public edit API, or makes concurrent writes last-writer-wins.
 - Require negative and compatibility coverage for target resolution, source mapping, atomic writes, selection or IME behavior.
 - Require one named owner, an asynchronous outcome model and a drain-boundary decision for every new mutable or persisted state. `npm run architecture:check` must pass; never bypass it with a new view-level Bridge call, browser-storage write or duplicated compatibility branch.
 

@@ -34,7 +34,8 @@ turn into a zero-work green result.
 | 门禁 | 使用时机 | 覆盖 | 目标 |
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
-| `npm run gate:plan -- --base origin/main` | 选择或开始跑门禁前 | 输出紧凑 JSON：改动文件、owner、Node 文件、能力级 canary 与预计数量 | 不必读取整份 impact map；过宽规则只告警、不失败 |
+| `npm run gate:plan -- --base origin/main` | 选择或开始跑门禁前 | 输出紧凑 JSON：改动文件、owner、Node 文件、能力级 canary、预计数量，以及分类后的阅读集 | 不必读取整份 impact map；过宽规则只告警、不失败 |
+| `npm run gate:plan -- --context-domain <id>` | 尚未改文件、需要先定位阅读入口时 | 同一份 capability-context 阅读集；可按能力名或 `--context-file` 查询。多域共享同一文档时，整文件要求覆盖章节要求 | 不选择测试，也不改变 `task:finish` 的 `origin/main` 基准 |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关能力级 Browser/Electron/AI 冒烟 | 叶子改动只接通对应 canary；Ready PR 仍跑完整矩阵 |
 | `npm run gate:task -- --resume <run-id>` | 同一源码 Hash 上环境抖动后 | 复用已通过的 typecheck/lint/Node/build，只重跑失败与未执行 suite | 源代码、base、lockfile、Node/平台或 suite 命令变化时拒绝复用 |
 | PR `pr-feedback` | Draft PR 的 `opened/synchronize/reopened`，且无 `full-gate` label | 按影响映射选择 Node/编译检查（`gate:edit`） | 普通 Draft 推送不消费完整矩阵 |
