@@ -95,6 +95,8 @@ test("atomic install writes a validated managed layout", async (t) => {
   const command = path.join(agentsRoot, "qoder", "1.1.27", "package", "bundle", "qodercli.js");
   assert.match(await readFile(command, "utf8"), /ok/u);
   assert.equal(installer.snapshot("qoder").installState, "idle");
+  assert.equal(installer.snapshot("qoder").generation, 1);
+  assert.equal(installer.snapshot("qoder").startedAt, null);
 });
 
 test("a failed later install keeps the previous managed version", async (t) => {

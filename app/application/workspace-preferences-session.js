@@ -5,6 +5,7 @@ export const DEFAULT_WORKSPACE_PREFERENCES = Object.freeze({
   motion: "system",
   restoreTabsOnLaunch: true,
   defaultAgentProviderId: "qoder",
+  disabledAgentProviderIds: Object.freeze([]),
 });
 
 export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
@@ -17,6 +18,18 @@ const AGENT_PROVIDER_IDS = new Set(["pageroot", "qoder", "codex"]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizedDisabledAgentProviderIds(value) {
+  if (!Array.isArray(value)) return Object.freeze([]);
+  const ids = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (!AGENT_PROVIDER_IDS.has(item) || seen.has(item)) continue;
+    seen.add(item);
+    ids.push(item);
+  }
+  return Object.freeze(ids);
 }
 
 function normalizedWidth(value, fallback, { min, max }) {
@@ -47,6 +60,7 @@ export function normalizeWorkspacePreferences(value) {
     defaultAgentProviderId: AGENT_PROVIDER_IDS.has(source.defaultAgentProviderId)
       ? source.defaultAgentProviderId
       : DEFAULT_WORKSPACE_PREFERENCES.defaultAgentProviderId,
+    disabledAgentProviderIds: normalizedDisabledAgentProviderIds(source.disabledAgentProviderIds),
   });
 }
 
@@ -78,6 +92,13 @@ export function normalizeWorkspacePatch(value) {
         throw new TypeError("默认 Agent 无效。");
       }
       normalized[key] = next;
+      continue;
+    }
+    if (key === "disabledAgentProviderIds") {
+      if (!Array.isArray(next) || next.some((id) => !AGENT_PROVIDER_IDS.has(id))) {
+        throw new TypeError("停用的 AI 服务无效。");
+      }
+      normalized[key] = normalizedDisabledAgentProviderIds(next);
       continue;
     }
     const limits = WORKSPACE_PREFERENCE_LIMITS[key];

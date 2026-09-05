@@ -2176,6 +2176,10 @@ export class RunWorkflow {
     return this.#agentCatalog.selectReasoning(reasoning, expectedSelection);
   }
 
+  applyDisabledAgentProviders(ids) {
+    this.#agentCatalog.applyDisabledProviderIds(ids);
+  }
+
   connectAgentApiKey(selection, apiKey, extras) {
     return this.#agentCatalog.connectWithApiKey(selection, apiKey, extras)
       .then((connection) => succeeded({

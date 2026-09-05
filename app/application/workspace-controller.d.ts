@@ -581,6 +581,7 @@ export class WorkspaceController {
   ): import("../domain/agent-provider-state.js").AgentSelection;
   selectAgentModel(modelId: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
   selectAgentReasoning(reasoning: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
+  applyDisabledAgentProviders(ids?: readonly string[]): void;
   connectAgentApiKey(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
     apiKey: string,

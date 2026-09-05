@@ -8,6 +8,7 @@ export type WorkspacePreferences = Readonly<{
   motion: WorkspacePreferenceMotion;
   restoreTabsOnLaunch: boolean;
   defaultAgentProviderId: WorkspacePreferenceAgentId;
+  disabledAgentProviderIds: readonly WorkspacePreferenceAgentId[];
 }>;
 
 export type WorkspacePreferencesSnapshot = Readonly<{

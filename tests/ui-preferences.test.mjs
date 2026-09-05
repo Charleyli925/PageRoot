@@ -97,6 +97,7 @@ test("v1 preferences migrate without losing guide or welcome identity", async (t
     motion: "system",
     restoreTabsOnLaunch: true,
     defaultAgentProviderId: "qoder",
+    disabledAgentProviderIds: [],
   });
   assert.equal(JSON.parse(await readFile(
     path.join(userDataPath, "ui-preferences.json"),
@@ -147,10 +148,16 @@ test("workspace preference decoding clamps damaged values and strict writes reje
   assert.equal(decoded.workspace.motion, "system");
   assert.equal(decoded.workspace.restoreTabsOnLaunch, true);
   assert.equal(decoded.workspace.defaultAgentProviderId, "qoder");
+  assert.deepEqual(decoded.workspace.disabledAgentProviderIds, []);
   assert.throws(() => normalizeWorkspacePatch({ sidebarWidth: 999 }), /范围/u);
   assert.throws(() => normalizeWorkspacePatch({ unknown: true }), /未知字段/u);
   assert.throws(() => normalizeWorkspacePatch({ defaultAgentProviderId: "gemini" }), /默认 Agent/u);
+  assert.throws(() => normalizeWorkspacePatch({ disabledAgentProviderIds: ["gemini"] }), /停用的 AI 服务/u);
   assert.equal(normalizeWorkspacePatch({ defaultAgentProviderId: "pageroot" }).defaultAgentProviderId, "pageroot");
+  assert.deepEqual(
+    normalizeWorkspacePatch({ disabledAgentProviderIds: ["codex", "codex"] }).disabledAgentProviderIds,
+    ["codex"],
+  );
 });
 
 test("present and dismiss are install-level and dismissed is terminal", async (t) => {

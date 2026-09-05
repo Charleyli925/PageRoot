@@ -471,6 +471,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/agent-access-operation.mjs",
+      "export const fixtureAgentAccessOperation = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/openai-compatible-vendors.mjs",
       "export const PAGEROOT_PROVIDER_ID = 'pageroot';\n",
     ),
@@ -575,6 +580,7 @@ export async function createSyntheticAppBundle(t, {
       "source-style-value.mjs",
       "conversation.mjs",
       "agent-delivery.mjs",
+      "agent-access-operation.mjs",
       "openai-compatible-vendors.mjs",
       "supported-agent-models.mjs",
       "agent-feature-gates.mjs",

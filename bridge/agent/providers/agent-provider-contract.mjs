@@ -10,6 +10,11 @@ const CAPABILITY_NAMES = Object.freeze([
   "preflight",
   "execution",
   "modelCatalog",
+  "install",
+  "login",
+  "logout",
+  "sessionCredential",
+  "disconnect",
 ]);
 
 const PURPOSE_CAPABILITIES = Object.freeze({

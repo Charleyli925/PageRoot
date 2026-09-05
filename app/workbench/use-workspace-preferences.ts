@@ -11,6 +11,7 @@ import type { AgentSelection } from "../domain/agent-provider-state.js";
 import type { DesktopUiPreferencesApi } from "../components/desktop-ui-preferences-api";
 import {
   WorkspacePreferencesSession,
+  type WorkspacePreferenceAgentId,
   type WorkspacePreferences,
   type WorkspacePreferencesSnapshot,
 } from "../application/workspace-preferences-session.js";
@@ -32,6 +33,7 @@ export function useWorkspacePreferences(
   }: {
     workspaceController?: Readonly<{
       selectAgent(selection: AgentSelection): AgentSelection;
+      applyDisabledAgentProviders?(ids: readonly string[]): void;
     }> | null;
     agentCatalogSnapshot?: AgentCatalogSnapshot | null;
   } = {},
@@ -115,7 +117,10 @@ export function useWorkspacePreferences(
   }, [session, snapshot.workspace.rememberPanelWidths]);
   useEffect(() => {
     if (!workspaceController || !snapshot.loaded || !agentCatalogSnapshot) return;
-    const availableProviders = Object.values(agentCatalogSnapshot.providers);
+    const availableProviders = Object.values(agentCatalogSnapshot.providers)
+      .filter((provider) => !snapshot.workspace.disabledAgentProviderIds.includes(
+        provider.providerId as WorkspacePreferenceAgentId,
+      ));
     const preferred = availableProviders.find((provider) => (
       provider.providerId === snapshot.workspace.defaultAgentProviderId
     )) || availableProviders[0];
@@ -136,7 +141,11 @@ export function useWorkspacePreferences(
     if (agentCatalogSnapshot.selected?.providerId !== preferred.providerId) {
       workspaceController.selectAgent(preferred.selection);
     }
-  }, [agentCatalogSnapshot, session, snapshot.loaded, snapshot.workspace.defaultAgentProviderId, workspaceController]);
+  }, [agentCatalogSnapshot, session, snapshot.loaded, snapshot.workspace.defaultAgentProviderId, snapshot.workspace.disabledAgentProviderIds, workspaceController]);
+  useEffect(() => {
+    if (!workspaceController || !snapshot.loaded) return;
+    workspaceController.applyDisabledAgentProviders?.(snapshot.workspace.disabledAgentProviderIds);
+  }, [snapshot.loaded, snapshot.workspace.disabledAgentProviderIds, workspaceController]);
   const retry = useCallback(() => session.retry(), [session]);
   const flush = useCallback(
     (deadlineAt: number) => session.flush({ deadlineAt }),

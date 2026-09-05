@@ -31,15 +31,18 @@ codec; Codex uses the same runtime with `providerId: "codex"`; 源页 Agent uses
 Unknown providers and runtimes fail closed. The packaged application
 contains no private Codex runtime or native Codex package; Codex is resolved
 through the managed ACP catalog. Renderer
-`AgentCatalogState` owns provider-keyed availability, the canonical selected
-selection and selection-keyed preflight cache. `RunWorkflow` exposes the same
+`AgentCatalogState` owns provider-keyed availability, `enabled`, the current
+access operation, the canonical selected selection and selection-keyed
+preflight cache. `RunWorkflow` exposes the same
 projection to the delivery surface and Settings. Settings calls the separate
 side-effect-free `diagnose` route: providers may verify installation, login or
 bounded protocol/service facts, but diagnosis never creates a ticket or Agent
 session and never resolves a different model. Its four public dimensions are
 installation, authentication, protocol and service; weaker Settings evidence
-cannot overwrite a stronger preflight/use failure. Only the send path performs the complete
-use-time preflight and freezes its one-use ticket. The ACP runtime then starts
+cannot overwrite a stronger preflight/use failure. An explicit disconnect
+(`enabled=false`) also cannot be overwritten by a later ready diagnose. Only
+the send path performs the complete use-time preflight and freezes its one-use
+ticket. The ACP runtime then starts
 only a Request whose durable `agentDelivery` record authorizes the trusted-local
 policy. ACP progress is presentation evidence only: only the official finalizer
 plus Repository validation can create a pending-review Candidate, and only an

@@ -20,6 +20,7 @@ export const WORKSPACE_PREFERENCE_DEFAULTS = Object.freeze({
   motion: "system",
   restoreTabsOnLaunch: true,
   defaultAgentProviderId: "qoder",
+  disabledAgentProviderIds: Object.freeze([]),
 });
 export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
   sidebarWidth: Object.freeze({ min: 200, max: 420 }),
@@ -87,6 +88,18 @@ function normalizedAgentProviderId(value) {
     : WORKSPACE_PREFERENCE_DEFAULTS.defaultAgentProviderId;
 }
 
+function normalizedDisabledAgentProviderIds(value) {
+  if (!Array.isArray(value)) return Object.freeze([]);
+  const ids = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (!AGENT_PROVIDER_IDS.has(item) || seen.has(item)) continue;
+    seen.add(item);
+    ids.push(item);
+  }
+  return Object.freeze(ids);
+}
+
 function normalizedGuide(value, fallbackGeneration) {
   if (!isRecord(value)) return emptyGuide(fallbackGeneration);
   const generation = Number.isSafeInteger(value.generation) && value.generation >= 1
@@ -126,6 +139,7 @@ export function normalizeWorkspacePreferences(value) {
       ? source.restoreTabsOnLaunch
       : WORKSPACE_PREFERENCE_DEFAULTS.restoreTabsOnLaunch,
     defaultAgentProviderId: normalizedAgentProviderId(source.defaultAgentProviderId),
+    disabledAgentProviderIds: normalizedDisabledAgentProviderIds(source.disabledAgentProviderIds),
   });
 }
 
@@ -153,6 +167,13 @@ export function normalizeWorkspacePatch(value) {
     if (key === "defaultAgentProviderId") {
       if (!AGENT_PROVIDER_IDS.has(next)) throw new TypeError("默认 Agent 无效。");
       normalized[key] = next;
+      continue;
+    }
+    if (key === "disabledAgentProviderIds") {
+      if (!Array.isArray(next) || next.some((id) => !AGENT_PROVIDER_IDS.has(id))) {
+        throw new TypeError("停用的 AI 服务无效。");
+      }
+      normalized[key] = normalizedDisabledAgentProviderIds(next);
       continue;
     }
     const limits = WORKSPACE_PREFERENCE_LIMITS[key];

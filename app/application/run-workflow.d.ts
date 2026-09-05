@@ -188,6 +188,7 @@ export class RunWorkflow {
   selectAgent(selection: AgentSelection): AgentSelection;
   selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
+  applyDisabledAgentProviders(ids?: readonly string[]): void;
   connectAgentApiKey(
     selection: AgentSelection,
     apiKey: string,

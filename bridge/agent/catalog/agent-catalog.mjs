@@ -5,6 +5,9 @@ import path from "node:path";
 import { agentProviderError } from "../providers/agent-provider-contract.mjs";
 import { createAgentInstaller } from "./agent-installer.mjs";
 import {
+  accessOperationFromInstallSnapshot,
+} from "../../../shared/agent-access-operation.mjs";
+import {
   SHIPPED_ACP_CATALOG,
   assertInstallableCatalogEntry,
   catalogEntryByProviderId,
@@ -70,6 +73,8 @@ export function createAgentCatalog({
         installable: entry?.installable === true,
         installSource: INSTALL_SOURCES.includes(installSource) ? installSource : "none",
         installState: publicInstallState(snapshot),
+        connection: null,
+        activeOperation: accessOperationFromInstallSnapshot(snapshot),
       });
     },
     async managedCommandCandidates(providerId) {

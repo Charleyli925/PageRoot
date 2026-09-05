@@ -623,6 +623,7 @@ const workspacePreferenceKeys = new Set([
   "motion",
   "restoreTabsOnLaunch",
   "defaultAgentProviderId",
+  "disabledAgentProviderIds",
 ]);
 
 function validWorkspacePreferencePatch(value) {
@@ -640,6 +641,11 @@ function validWorkspacePreferencePatch(value) {
     if (key === "motion") return next === "system" || next === "reduced";
     if (key === "defaultAgentProviderId") {
       return next === "pageroot" || next === "qoder" || next === "codex";
+    }
+    if (key === "disabledAgentProviderIds") {
+      return Array.isArray(next) && next.every((id) => (
+        id === "pageroot" || id === "qoder" || id === "codex"
+      ));
     }
     if (key === "sidebarWidth") {
       return typeof next === "number" && Number.isFinite(next) && next >= 200 && next <= 420;
