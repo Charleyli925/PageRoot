@@ -32,7 +32,7 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers with
   assert.notEqual(CODEX_AGENT_PROVIDER.presentation.supportsReasoning, true);
   assert.deepEqual(
     PAGEROOT_AGENT_PROVIDER.presentation.vendors.map(({ id }) => id),
-    ["custom"],
+    ["deepseek", "custom"],
   );
   assert.equal(
     CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,
@@ -740,7 +740,54 @@ test("install cancellation projects cancelling state and uses the existing Bridg
   const outcome = await catalog.cancelInstall();
   assert.deepEqual(cancelled, { providerId: "qoder" });
   assert.deepEqual(states, ["cancelling"]);
-  assert.equal(outcome.installState, "idle");
+  assert.equal(catalog.provider(selected).installState, "idle");
+});
+
+test("cancelAccessOperation still posts install cancel while a managed install is pending", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let releaseInstall;
+  let cancelBody;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async installAgent() {
+        await new Promise((resolve) => {
+          releaseInstall = resolve;
+        });
+        const error = new Error("安装已取消。");
+        error.code = "AGENT_INSTALL_CANCELLED";
+        throw error;
+      },
+      async cancelAgentInstall(body) {
+        cancelBody = body;
+        releaseInstall?.();
+        return { ok: true, providerId: "qoder", installState: "idle" };
+      },
+      async agentDiagnose() {
+        return {
+          status: "not-installed",
+          diagnostic: {
+            readiness: "not-installed",
+            cause: "not-installed",
+            operation: "diagnose",
+            checkedAt: "2026-08-11T00:00:00.000Z",
+            activeInstallation: null,
+          },
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+  });
+  const pending = catalog.install(selected);
+  await Promise.resolve();
+  assert.equal(catalog.provider(selected).installState, "installing");
+  assert.equal(catalog.provider(selected).activeOperation?.kind, "install");
+  const cancelled = await catalog.cancelAccessOperation(selected);
+  assert.deepEqual(cancelBody, { providerId: "qoder" });
+  assert.equal(cancelled.installState, "idle");
+  await pending;
   assert.equal(catalog.provider(selected).installState, "idle");
 });
 
@@ -895,6 +942,8 @@ test("Token replacement publishes atomically, clears old model state, and can di
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
   assert.equal(catalog.provider().diagnostic.readiness, "ready");
   assert.equal(catalog.provider().diagnostic.facts.service.source, "preflight");
+  assert.equal(catalog.provider().activeOperation?.kind, "config-validate");
+  assert.equal(catalog.provider().activeOperation?.state, "succeeded");
   failNext = true;
   await assert.rejects(
     catalog.connectWithApiKey(catalog.freezeSelected(), "sk-bad", { vendorId: "openai" }),

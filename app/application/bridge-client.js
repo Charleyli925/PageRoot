@@ -344,6 +344,11 @@ export function createBridgeClient({
       body,
       "Agent 配置没有更新。",
     ),
+    cancelAgentConfiguration: (body) => command(
+      "/agent/configuration/cancel",
+      body,
+      "连接验证没有取消。",
+    ),
     startAgent: (body) => command(
       "/agent/start",
       body,

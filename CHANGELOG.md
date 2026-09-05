@@ -4,6 +4,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- 正式安装包可直接选择 DeepSeek 默认模型，无需 Beta 开关。源页连接表单默认只填 API Key，验证成功后才替换当前连接；可选“记住 API Key”使用系统安全存储，失败不明文降级。
 - 源页可作为默认 AI 服务并在重启后恢复；无效的本机 Qoder CLI 不再挡住健康的受管安装；Codex 能解析真实的模型目录对象。安装取消完成后可以再次安装，不会停在“正在取消”。
 - AI 服务的安装、登录等待和显式断开共用同一份接入状态：设置页与诊断看到相同的操作代次；关闭面板再打开会恢复进行中的安装；显式断开后后台扫描不会自动重新启用。
 - Qoder 与 Codex 的登录改走官方 CLI，由主进程打开允许名单内的 https 登录页；新用户不必复制命令。环境变量凭据会标明来源，应用不会把全局 Token 当成已注销。

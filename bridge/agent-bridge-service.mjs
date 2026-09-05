@@ -143,6 +143,10 @@ export class AgentBridgeService {
     return this.#coordinator.updateAgentConfiguration(providerId, candidate);
   }
 
+  cancelAgentConfiguration(providerId, generation) {
+    return this.#coordinator.cancelAgentConfiguration(providerId, generation);
+  }
+
   clearSessionCredential(providerId) {
     return this.#coordinator.clearSessionCredential(providerId);
   }

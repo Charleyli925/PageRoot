@@ -173,6 +173,7 @@ const APPROVED_PERSISTENCE_OWNERS = new Set([
   "desktop/main.mjs",
   "desktop/project-files.mjs",
   "desktop/recovery-journal-store.mjs",
+  "desktop/agent-session-credential-store.mjs",
   "desktop/ui-preferences.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/workbench-tabs-state.mjs",

@@ -3,7 +3,7 @@
 // before `releaseChannel` may become `stable`.
 
 export const SUPPORTED_AGENT_MODELS_SCHEMA_VERSION = "1.0.0";
-export const SUPPORTED_AGENT_MODELS_REVISION = "2026-09-03.1";
+export const SUPPORTED_AGENT_MODELS_REVISION = "2026-09-06.1";
 
 const AUTO = Object.freeze(["auto"]);
 const EFFORT = Object.freeze(["auto", "none", "low", "high", "max"]);
@@ -27,6 +27,8 @@ export const SUPPORTED_AGENT_MODELS = Object.freeze([
     displayName: "V4 Pro",
     recommended: true,
     requestAdapter: "deepseek",
+    releaseChannel: "stable",
+    smokeVersion: "2026-09-06.1",
     reasoningOptions: EFFORT,
     contextWindow: 1_000_000,
     recommendedMaxInputTokens: 500_000,

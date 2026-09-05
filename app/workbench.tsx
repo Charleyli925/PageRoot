@@ -4879,10 +4879,53 @@ export default function Workbench() {
   const connectAgentApiKey = useCallback(async (
     selection: AgentSelection,
     apiKey: string,
-    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>,
-  ) => (
-    workspaceController?.connectAgentApiKey(selection, apiKey, extras) ?? null
-  ), [workspaceController]);
+    extras?: Readonly<{
+      vendorId?: string;
+      baseUrl?: string;
+      modelId?: string;
+      remember?: boolean;
+    }>,
+  ) => {
+    const outcome = await workspaceController?.connectAgentApiKey(selection, apiKey, extras) ?? null;
+    if (!outcome || outcome.status !== "succeeded") return outcome;
+    const integrations = window.htmlAIIntegrations;
+    try {
+      if (extras?.remember === true && apiKey) {
+        const persisted = await integrations?.persistSessionCredential?.({
+          apiKey,
+          vendorId: extras.vendorId,
+          baseUrl: extras.baseUrl,
+        });
+        if (persisted && persisted.ok === false) {
+          return Object.freeze({
+            ...outcome,
+            reason: persisted.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
+              ? "已连接，但无法安全保存 API Key。本次仍可使用。"
+              : "已连接，但记住 API Key 失败。",
+          });
+        }
+      }
+    } catch {
+      return Object.freeze({
+        ...outcome,
+        reason: "已连接，但无法安全保存 API Key。本次仍可使用。",
+      });
+    }
+    return outcome;
+  }, [workspaceController]);
+  const openVendorApiKeyPage = useCallback(async (vendorId: string) => {
+    try {
+      const result = await window.htmlAIIntegrations?.openVendorApiKeyPage?.(vendorId);
+      return result?.opened === false
+        ? { status: "rejected", reason: "无法打开获取 API Key 页面。" }
+        : { status: "succeeded" };
+    } catch (cause) {
+      return {
+        status: "rejected",
+        reason: cause instanceof Error ? cause.message : "无法打开获取 API Key 页面。",
+      };
+    }
+  }, []);
   const disconnectAgentApiKey = useCallback(async (selection: AgentSelection) => (
     workspaceController?.disconnectAgentApiKey(selection) ?? null
   ), [workspaceController]);
@@ -6277,6 +6320,7 @@ export default function Workbench() {
           onCancelInstall={cancelAgentInstall}
           onConnectApiKey={connectAgentApiKey}
           onDisconnectApiKey={disconnectAgentApiKey}
+          onOpenVendorApiKeyPage={openVendorApiKeyPage}
           onSelectAgentModel={selectSettingsAgentModel}
           onSelectAgentReasoning={selectSettingsAgentReasoning}
         />

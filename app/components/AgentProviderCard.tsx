@@ -9,9 +9,10 @@ import type {
   AgentProviderGuidanceKind,
 } from "../domain/agent-provider-state.js";
 
-type AgentActionOutcome = Readonly<{ status: string; reason?: string }> | null | undefined;
+type AgentActionOutcome = Readonly<{ status: string; reason?: string; code?: string }> | null | undefined;
 type CardActionKind = AgentProviderGuidanceKind | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning";
-type ApiKeyExtras = Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>;
+type ApiKeyExtras = Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>;
+type ApiKeyField = "apiKey" | "baseUrl" | "modelId" | "form";
 type VendorOption = Readonly<{
   id: string;
   label: string;
@@ -71,6 +72,7 @@ export type AgentProviderCardProps = {
   onRecheck?: () => Promise<AgentActionOutcome>;
   onConnectApiKey?: (apiKey: string, extras?: ApiKeyExtras) => Promise<AgentActionOutcome>;
   onDisconnectApiKey?: () => Promise<AgentActionOutcome>;
+  onOpenVendorApiKeyPage?: (vendorId: string) => Promise<AgentActionOutcome>;
   onSelectModel?: (modelId: string) => Promise<AgentActionOutcome>;
   onSelectReasoning?: (reasoning: string) => Promise<AgentActionOutcome>;
 };
@@ -80,6 +82,21 @@ type CardAction = Readonly<{
   label: string;
   copiedLabel: string;
 }>;
+
+function fieldForConnectError(code: string | undefined): ApiKeyField {
+  switch (String(code || "")) {
+    case "AGENT_AUTH_REQUIRED":
+    case "AGENT_SESSION_CREDENTIAL_INVALID":
+      return "apiKey";
+    case "AGENT_SELECTION_UNSUPPORTED":
+    case "AGENT_MODEL_ACCESS_DENIED":
+      return "modelId";
+    case "AGENT_ENDPOINT_REGION_MISMATCH":
+      return "baseUrl";
+    default:
+      return "form";
+  }
+}
 
 function actionsForAvailability(
   availability: AgentProviderAvailabilitySnapshot,
@@ -128,6 +145,7 @@ export default function AgentProviderCard({
   onRecheck,
   onConnectApiKey,
   onDisconnectApiKey,
+  onOpenVendorApiKeyPage,
   onSelectModel,
   onSelectReasoning,
 }: AgentProviderCardProps) {
@@ -136,8 +154,10 @@ export default function AgentProviderCard({
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [fieldError, setFieldError] = useState<ApiKeyField | "">("");
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [rememberKey, setRememberKey] = useState(false);
   const [vendorId, setVendorId] = useState(connection?.vendorId || provider.vendors?.[0]?.id || "deepseek");
   const [baseUrl, setBaseUrl] = useState(connection?.vendorId === "custom" ? connection.baseUrl : "");
   const [modelId, setModelId] = useState(
@@ -261,33 +281,72 @@ export default function AgentProviderCard({
   const connectApiKey = async () => {
     if (pendingAction || disabled || !apiKey.trim() || typeof onConnectApiKey !== "function") return;
     if (selectedVendor?.needsBaseUrl && !baseUrl.trim()) {
+      setFieldError("baseUrl");
       setActionError("请填写接口地址。");
       return;
     }
     if (selectedVendor?.needsBaseUrl && !modelId.trim()) {
+      setFieldError("modelId");
       setActionError("请填写 Model ID。");
       return;
     }
     setPendingAction("api-key");
     setActionError("");
+    setFieldError("");
     try {
       const outcome = await onConnectApiKey(apiKey, {
         vendorId: selectedVendor?.id || vendorId,
         baseUrl: selectedVendor?.needsBaseUrl ? baseUrl : undefined,
         modelId: modelId.trim() || undefined,
+        remember: rememberKey,
       });
       const succeeded = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
       if (!succeeded) {
-        setActionError(outcome?.reason || "Token 没有接通。");
+        const message = outcome?.reason || "API Key 无效或已失效。";
+        setFieldError(fieldForConnectError(outcome?.code));
+        setActionError(message);
         return;
       }
       setApiKey("");
       setModelId("");
+      setRememberKey(false);
       setApiKeyOpen(false);
     } catch {
-      setActionError("Token 没有接通。");
+      setFieldError("form");
+      setActionError("连接中断，请重试。");
     } finally {
       setPendingAction(null);
+    }
+  };
+
+  const cancelConnectApiKey = async () => {
+    if (typeof onCancelInstall !== "function") return;
+    setCancelPending(true);
+    try {
+      await onCancelInstall();
+    } catch {
+      setFieldError("form");
+      setActionError("连接验证没有取消，请重试。");
+    } finally {
+      setCancelPending(false);
+      setPendingAction(null);
+    }
+  };
+
+  const openVendorKeyPage = async () => {
+    const id = selectedVendor?.id || vendorId;
+    if (!id || typeof onOpenVendorApiKeyPage !== "function") return;
+    setActionError("");
+    setFieldError("");
+    try {
+      const outcome = await onOpenVendorApiKeyPage(id);
+      if (outcome && !["succeeded", "stale"].includes(outcome.status)) {
+        setFieldError("form");
+        setActionError(outcome.reason || "无法打开获取 API Key 页面。");
+      }
+    } catch {
+      setFieldError("form");
+      setActionError("无法打开获取 API Key 页面。");
     }
   };
 
@@ -500,24 +559,63 @@ export default function AgentProviderCard({
             void connectApiKey();
           }}
         >
-          {provider.vendors && provider.vendors.length > 0 ? (
-            <select
-              className="qoder-card-apikey-vendor"
-              aria-label="厂商"
-              data-testid="settings-agent-vendor"
-              value={selectedVendor?.id || vendorId}
+          <p className="qoder-card-apikey-title">
+            连接 {selectedVendor?.label || "DeepSeek"}
+          </p>
+          <div className="qoder-card-apikey-key-row">
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="API Key"
+              aria-label="API Key"
+              aria-invalid={fieldError === "apiKey" || undefined}
+              value={apiKey}
               disabled={Boolean(pendingAction) || disabled}
               onChange={(event) => {
-                setVendorId(event.target.value);
-                setBaseUrl("");
-                setModelId("");
-                setActionError("");
+                setApiKey(event.target.value);
+                if (fieldError === "apiKey") {
+                  setFieldError("");
+                  setActionError("");
+                }
               }}
-            >
-              {provider.vendors.map((vendor) => (
-                <option key={vendor.id} value={vendor.id}>{vendor.label}</option>
-              ))}
-            </select>
+            />
+            {onOpenVendorApiKeyPage && selectedVendor?.id && selectedVendor.id !== "custom" ? (
+              <button
+                type="button"
+                className="qoder-card-apikey-get"
+                disabled={Boolean(pendingAction) || disabled}
+                onClick={() => void openVendorKeyPage()}
+              >
+                获取 API Key
+              </button>
+            ) : null}
+          </div>
+          {fieldError === "apiKey" && actionError ? (
+            <span className="qoder-card-error" role="alert">{actionError}</span>
+          ) : null}
+          {provider.vendors && provider.vendors.length > 1 ? (
+            <details className="qoder-card-apikey-vendors">
+              <summary>其他服务商</summary>
+              <select
+                className="qoder-card-apikey-vendor"
+                aria-label="服务商"
+                data-testid="settings-agent-vendor"
+                value={selectedVendor?.id || vendorId}
+                disabled={Boolean(pendingAction) || disabled}
+                onChange={(event) => {
+                  setVendorId(event.target.value);
+                  setBaseUrl("");
+                  setModelId("");
+                  setActionError("");
+                  setFieldError("");
+                }}
+              >
+                {provider.vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>{vendor.label}</option>
+                ))}
+              </select>
+            </details>
           ) : null}
           {selectedVendor?.needsBaseUrl ? (
             <input
@@ -527,11 +625,21 @@ export default function AgentProviderCard({
               autoComplete="off"
               spellCheck={false}
               placeholder="https://api.example.com/v1"
-              aria-label="Base URL"
+              aria-label="接口地址"
+              aria-invalid={fieldError === "baseUrl" || undefined}
               value={baseUrl}
               disabled={Boolean(pendingAction) || disabled}
-              onChange={(event) => setBaseUrl(event.target.value)}
+              onChange={(event) => {
+                setBaseUrl(event.target.value);
+                if (fieldError === "baseUrl") {
+                  setFieldError("");
+                  setActionError("");
+                }
+              }}
             />
+          ) : null}
+          {fieldError === "baseUrl" && actionError ? (
+            <span className="qoder-card-error" role="alert">{actionError}</span>
           ) : null}
           {selectedVendor?.needsBaseUrl ? (
             <input
@@ -541,28 +649,48 @@ export default function AgentProviderCard({
               spellCheck={false}
               placeholder="Model ID"
               aria-label="Model ID"
+              aria-invalid={fieldError === "modelId" || undefined}
               value={modelId}
               disabled={Boolean(pendingAction) || disabled}
-              onChange={(event) => setModelId(event.target.value)}
+              onChange={(event) => {
+                setModelId(event.target.value);
+                if (fieldError === "modelId") {
+                  setFieldError("");
+                  setActionError("");
+                }
+              }}
             />
           ) : null}
-          <input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="API Token"
-            aria-label="API Token"
-            value={apiKey}
-            disabled={Boolean(pendingAction) || disabled}
-            onChange={(event) => setApiKey(event.target.value)}
-          />
+          {fieldError === "modelId" && actionError ? (
+            <span className="qoder-card-error" role="alert">{actionError}</span>
+          ) : null}
+          <label className="qoder-card-apikey-remember">
+            <input
+              type="checkbox"
+              checked={rememberKey}
+              disabled={Boolean(pendingAction) || disabled}
+              onChange={(event) => setRememberKey(event.target.checked)}
+            />
+            在此 Mac 上记住 API Key
+          </label>
+          <p className="qoder-card-apikey-note">连接验证可能产生少量 API 费用。</p>
           <button
             type="submit"
             disabled={Boolean(pendingAction) || disabled || !apiKey.trim()}
           >
             {pendingAction === "api-key" ? "正在连接…" : "连接"}
           </button>
-          {actionError ? (
+          {pendingAction === "api-key" && onCancelInstall ? (
+            <button
+              type="button"
+              data-kind="cancel-validate"
+              disabled={cancelPending || disabled}
+              onClick={() => void cancelConnectApiKey()}
+            >
+              {cancelPending ? "正在取消…" : "取消"}
+            </button>
+          ) : null}
+          {actionError && (fieldError === "form" || !fieldError) ? (
             <span className="qoder-card-error" role="alert">{actionError}</span>
           ) : null}
           {connection ? (
@@ -572,7 +700,7 @@ export default function AgentProviderCard({
       ) : null}
       {provider.credentialKind === "api-token" ? (
         <p className="qoder-card-token-note">
-          Token 仅在本次打开期间保留。数据将发送给所选厂商，API 费用由厂商收取。
+          {`使用时会将任务内容发送给${selectedVendor?.label || "所选厂商"}，API 费用由${selectedVendor?.label || "厂商"}收取。${rememberKey ? "" : "未勾选记住时仅本次使用。"}`}
         </p>
       ) : null}
     </section>

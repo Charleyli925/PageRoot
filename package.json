@@ -192,6 +192,7 @@
       "desktop/application-update.mjs",
       "desktop/usage-telemetry.mjs",
       "desktop/ui-preferences.mjs",
+      "desktop/agent-session-credential-store.mjs",
       "desktop/device-identity.mjs",
       "desktop/preview-protocol.mjs",
       "desktop/imported-asset-root.mjs",
@@ -510,6 +511,10 @@
       {
         "from": "shared/agent-auth-source.mjs",
         "to": "shared/agent-auth-source.mjs"
+      },
+      {
+        "from": "shared/agent-vendor-key-url.mjs",
+        "to": "shared/agent-vendor-key-url.mjs"
       },
       {
         "from": "shared/openai-compatible-vendors.mjs",

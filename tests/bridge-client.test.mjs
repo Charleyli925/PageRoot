@@ -250,6 +250,12 @@ test("Bridge client exposes the Agent catalog, install and execution routes", as
   await client.cancelAgentInstall({ providerId: "qoder" });
   await client.loginAgent({ providerId: "qoder" });
   await client.cancelAgentLogin({ providerId: "qoder" });
+  await client.updateAgentConfiguration({
+    providerId: "pageroot",
+    apiKey: "sk-test",
+    vendorId: "deepseek",
+  });
+  await client.cancelAgentConfiguration({ providerId: "pageroot", generation: 1 });
   await client.preflightAgent({ selection: {} });
   await client.setAgentSessionCredential({
     providerId: "pageroot",
@@ -269,6 +275,8 @@ test("Bridge client exposes the Agent catalog, install and execution routes", as
     ["POST", "/agent/install/cancel"],
     ["POST", "/agent/login"],
     ["POST", "/agent/login/cancel"],
+    ["POST", "/agent/configuration"],
+    ["POST", "/agent/configuration/cancel"],
     ["POST", "/agent/preflight"],
     ["POST", "/agent/session-credential"],
     ["POST", "/agent/start"],
