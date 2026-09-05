@@ -194,7 +194,11 @@ Use the same map in two ways:
 
 `--context-domain` and `--context-file` never change test selection or the
 `task:finish` `origin/main` base. When those flags are present, the reading set
-comes only from the requested domains or paths, not from the current Git diff. Read `capabilityContext.contract.files`
+comes only from the requested domains or paths, not from the current Git diff.
+When several domains share a document, a whole-file requirement covers any
+chapter requirement for that file; chapter lists merge only when every matching
+domain is chapter-scoped. Adding a domain must not shrink an existing reading
+requirement. Read `capabilityContext.contract.files`
 first. Expand `implementationFiles`, `focusedTests` and `requiredDocs`
 (including `requiredDocs.sections`) only as needed. The flattened
 `implementation` set remains the union of those lists. Unknown paths and
@@ -203,6 +207,8 @@ map references fail map load instead of silently shrinking the estimate.
 
 Repeatable locate comparison for five representative tasks lives in
 `scripts/capability-context-locate.mjs`. It compares the frozen pre-change map
-in `tests/fixtures/capability-context/main-before-cold-start.json` with the
-current cold-start query, including contract-first bytes and whether the task
-gate would select a complete matrix.
+and frozen file-size snapshot in `tests/fixtures/capability-context/` with the
+current cold-start query. The byte columns are **preset first-locate reading
+size**, not observed Agent reading. The current map still validates that
+referenced paths and headings exist; the historical baseline does not require
+those old paths to remain in today's tree.

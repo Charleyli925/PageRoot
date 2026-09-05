@@ -16,9 +16,13 @@ import {
 import {
   assertCapabilityContextMap,
   loadCapabilityContextMap,
+  mergeRequiredDocSections,
   selectCapabilityContext,
 } from "../scripts/capability-context.mjs";
-import { parseArguments as parseGateArguments } from "../scripts/test-gate.mjs";
+import {
+  assembleGateCapabilityPlan,
+  parseArguments as parseGateArguments,
+} from "../scripts/test-gate.mjs";
 import { CI_HEALTH_WORKFLOW_INPUTS } from "../scripts/ci-health-report.mjs";
 import { nodeTestGroups } from "../scripts/test-node-group.mjs";
 
@@ -1031,6 +1035,61 @@ test("gate:plan capability-context schema v2 exposes contract-first and implemen
   assert.deepEqual(compact.capabilityContext.requiredDocs, comments.requiredDocs);
 });
 
+test("whole-file doc requirements cover chapter requirements when domains merge", () => {
+  const capabilityMap = loadCapabilityContextMap();
+  const comments = capabilityMap.domains.find((domain) => domain.id === "comments");
+  const documentSave = capabilityMap.domains.find((domain) => domain.id === "document-save");
+  const merged = mergeRequiredDocSections([comments, documentSave]);
+  assert.equal(
+    merged.some((section) => section.path === "docs/ARCHITECTURE_MAP.md"),
+    false,
+  );
+  const interaction = merged.find((section) => section.path === "docs/INTERACTION_FLOW.md");
+  assert.ok(interaction.headings.includes("## 5. 直接编辑与自动写回"));
+  assert.ok(interaction.headings.includes("## 6. 评论"));
+
+  const selected = selectCapabilityContext({
+    domainIds: ["comments", "document-save"],
+    map: capabilityMap,
+    productRoot,
+  });
+  assert.ok(selected.requiredDocs.files.includes("docs/ARCHITECTURE_MAP.md"));
+  assert.equal(
+    selected.requiredDocs.sections.some((section) => section.path === "docs/ARCHITECTURE_MAP.md"),
+    false,
+  );
+  const selectedInteraction = selected.requiredDocs.sections.find((section) => (
+    section.path === "docs/INTERACTION_FLOW.md"
+  ));
+  assert.ok(selectedInteraction.headings.includes("## 5. 直接编辑与自动写回"));
+  assert.ok(selectedInteraction.headings.includes("## 6. 评论"));
+});
+
+test("chapter-only domains merge headings for the same file", () => {
+  assert.deepEqual(
+    mergeRequiredDocSections([
+      {
+        requiredDocs: ["docs/ARCHITECTURE_MAP.md"],
+        requiredDocSections: [{
+          path: "docs/ARCHITECTURE_MAP.md",
+          headings: ["## Comment render boundary"],
+        }],
+      },
+      {
+        requiredDocs: ["docs/ARCHITECTURE_MAP.md"],
+        requiredDocSections: [{
+          path: "docs/ARCHITECTURE_MAP.md",
+          headings: ["## Capability domains"],
+        }],
+      },
+    ]),
+    [{
+      path: "docs/ARCHITECTURE_MAP.md",
+      headings: ["## Capability domains", "## Comment render boundary"],
+    }],
+  );
+});
+
 test("capability-context map rejects missing files and missing doc headings", () => {
   const capabilityMap = loadCapabilityContextMap();
   assertCapabilityContextMap(capabilityMap, productRoot);
@@ -1060,8 +1119,11 @@ test("capability-context can be queried before files change and keeps classes se
   });
   assert.deepEqual(byDomain.domains, ["canvas-runtime"]);
   assert.ok(byDomain.contract.files.includes("app/domain/edit-runtime-contract.d.ts"));
+  assert.ok(byDomain.contract.files.includes("app/components/edit-runtime-refresh-decision.d.ts"));
   assert.ok(byDomain.implementationFiles.files.includes("desktop/edit-runtime-protocol.mjs"));
+  assert.ok(byDomain.implementationFiles.files.includes("app/components/edit-runtime-refresh-decision.js"));
   assert.ok(byDomain.focusedTests.files.includes("tests/edit-runtime-contract.test.mjs"));
+  assert.ok(byDomain.focusedTests.files.includes("tests/edit-runtime-refresh-decision.test.mjs"));
   assert.ok(!byDomain.contract.files.includes("desktop/edit-runtime-protocol.mjs"));
 
   const unknownDomain = selectCapabilityContext({
@@ -1084,6 +1146,7 @@ test("capability-context can be queried before files change and keeps classes se
     ["app/lib/source-structure-edit.js", "semantic-source-editing"],
     ["app/components/html-canvas-structure-commands.ts", "semantic-source-editing"],
     ["app/domain/edit-runtime-contract.js", "canvas-runtime"],
+    ["app/components/edit-runtime-refresh-decision.js", "canvas-runtime"],
     ["bridge/agent/agent-runtime-coordinator.mjs", "agent-runtime"],
     ["desktop/main.mjs", "desktop-host"],
   ];
@@ -1108,18 +1171,57 @@ test("gate:plan context flags never affect test lanes", () => {
     () => parseGateArguments(["task", "--context-domain", "comments"]),
     /only supported for gate:plan/,
   );
-  const diffPlan = selectGatePlan({
-    map,
-    lane: "task",
-    changedFiles: ["app/application/comment-workflow.js"],
+  const capabilityMap = loadCapabilityContextMap();
+  const changedFiles = ["app/application/comment-workflow.js"];
+  const selectionOf = (assembled) => ({
+    changedFiles: assembled.testPlan.changedFiles,
+    suites: assembled.testPlan.suites.map((suite) => suite.id),
+    selectedNodeTests: assembled.testPlan.selectedNodeTests,
+    matchedOwners: assembled.testPlan.matchedOwners,
   });
-  const sameDiffPlan = selectGatePlan({
-    map,
-    lane: "task",
-    changedFiles: ["app/application/comment-workflow.js"],
+  const baseline = assembleGateCapabilityPlan({
+    changedFiles,
+    impactMap: map,
+    capabilityMap,
+    productRoot,
   });
-  assert.deepEqual(diffPlan.selectedNodeTests, sameDiffPlan.selectedNodeTests);
-  assert.deepEqual(diffPlan.matchedOwners, sameDiffPlan.matchedOwners);
+  const byDomain = assembleGateCapabilityPlan({
+    changedFiles,
+    contextDomains: ["semantic-source-editing"],
+    impactMap: map,
+    capabilityMap,
+    productRoot,
+  });
+  const byFile = assembleGateCapabilityPlan({
+    changedFiles,
+    contextFiles: ["app/lib/source-structure-edit.js"],
+    impactMap: map,
+    capabilityMap,
+    productRoot,
+  });
+  const cleanQuery = assembleGateCapabilityPlan({
+    changedFiles: [],
+    contextDomains: ["comments"],
+    impactMap: map,
+    capabilityMap,
+    productRoot,
+  });
+  assert.deepEqual(selectionOf(byDomain), selectionOf(baseline));
+  assert.deepEqual(selectionOf(byFile), selectionOf(baseline));
+  assert.deepEqual(baseline.testPlan.changedFiles, changedFiles);
+  assert.ok(baseline.testPlan.matchedOwners.includes("comment-workflow"));
+  assert.ok(baseline.capabilityContext.domains.includes("comments"));
+  assert.ok(byDomain.capabilityContext.domains.includes("semantic-source-editing"));
+  assert.ok(!byDomain.capabilityContext.domains.includes("comments"));
+  assert.ok(byFile.capabilityContext.domains.includes("semantic-source-editing"));
+  assert.ok(!byFile.capabilityContext.domains.includes("comments"));
+  assert.notDeepEqual(byDomain.capabilityContext.domains, baseline.capabilityContext.domains);
+  assert.notDeepEqual(byFile.capabilityContext.domains, baseline.capabilityContext.domains);
+  assert.deepEqual(cleanQuery.testPlan.changedFiles, []);
+  assert.deepEqual(cleanQuery.testPlan.selectedNodeTests, []);
+  assert.deepEqual(cleanQuery.testPlan.matchedOwners, []);
+  assert.ok(cleanQuery.capabilityContext.domains.includes("comments"));
+  assert.ok(cleanQuery.capabilityContext.contract.files.length > 0);
 });
 
 test("capability contracts select only their independent typecheck owner", () => {

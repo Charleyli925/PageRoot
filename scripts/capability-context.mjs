@@ -69,11 +69,25 @@ function dropMissing(set) {
   };
 }
 
-function mergeDocSections(domains) {
+function domainWholeDocFiles(domain) {
+  const sectionPaths = new Set(
+    (domain.requiredDocSections || []).map((section) => normalizeRepositoryPath(section.path)),
+  );
+  return (domain.requiredDocs || [])
+    .map(normalizeRepositoryPath)
+    .filter((docPath) => !sectionPaths.has(docPath));
+}
+
+export function mergeRequiredDocSections(domains) {
+  const wholeFiles = new Set();
+  for (const domain of domains) {
+    for (const docPath of domainWholeDocFiles(domain)) wholeFiles.add(docPath);
+  }
   const headingsByPath = new Map();
   for (const domain of domains) {
     for (const section of domain.requiredDocSections || []) {
       const docPath = normalizeRepositoryPath(section.path);
+      if (wholeFiles.has(docPath)) continue;
       const headings = headingsByPath.get(docPath) || [];
       headings.push(...(section.headings || []));
       headingsByPath.set(docPath, headings);
@@ -206,7 +220,7 @@ export function selectCapabilityContext({
   const implementationFiles = union("implementationFiles");
   const focusedTests = union("focusedTests");
   const requiredDocs = union("requiredDocs");
-  const sections = mergeDocSections(matched);
+  const sections = mergeRequiredDocSections(matched);
   const implementation = uniqueSorted([
     ...entryInterfaces,
     ...implementationFiles,

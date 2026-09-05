@@ -266,14 +266,17 @@
         "^app/domain/edit-runtime-contract",
         "^app/application/edit-author-runtime-session",
         "^app/components/desktop-edit-runtime-api",
+        "^app/components/edit-runtime-refresh-decision",
         "^desktop/edit-runtime-",
         "^tests/edit-runtime-",
-        "^tests/edit-author-runtime-session"
+        "^tests/edit-author-runtime-session",
+        "^tests/edit-runtime-refresh-decision"
       ],
       "entryInterfaces": [
         "app/domain/edit-runtime-contract.d.ts",
         "app/application/edit-author-runtime-session.d.ts",
-        "app/components/desktop-edit-runtime-api.ts"
+        "app/components/desktop-edit-runtime-api.ts",
+        "app/components/edit-runtime-refresh-decision.d.ts"
       ],
       "owners": [
         "EditAuthorRuntimeSession",
@@ -283,6 +286,7 @@
         "app/domain/edit-runtime-contract.js",
         "app/application/edit-author-runtime-session.js",
         "app/components/desktop-edit-runtime-api.ts",
+        "app/components/edit-runtime-refresh-decision.js",
         "desktop/edit-runtime-protocol.mjs",
         "desktop/edit-runtime-bootstrap.mjs",
         "desktop/edit-runtime-preparation-fence.mjs",
@@ -294,7 +298,8 @@
         "tests/edit-runtime-protocol.test.mjs",
         "tests/edit-runtime-bootstrap.test.mjs",
         "tests/edit-runtime-preparation-fence.test.mjs",
-        "tests/edit-author-runtime-session.test.mjs"
+        "tests/edit-author-runtime-session.test.mjs",
+        "tests/edit-runtime-refresh-decision.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",

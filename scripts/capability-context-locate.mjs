@@ -14,6 +14,10 @@ export const BEFORE_MAP_FIXTURE = path.join(
   PRODUCT_ROOT,
   "tests/fixtures/capability-context/main-before-cold-start.json",
 );
+export const BEFORE_SIZES_FIXTURE = path.join(
+  PRODUCT_ROOT,
+  "tests/fixtures/capability-context/main-before-cold-start.sizes.json",
+);
 
 const COMPLETE_MATRIX_SUITES = new Set([
   "node-full",
@@ -64,7 +68,10 @@ export const LOCATE_TASKS = [
     domainIds: ["canvas-runtime"],
     probeFile: "app/domain/edit-runtime-contract.js",
     expectedOwners: ["EditAuthorRuntimeSession"],
-    expectedContractFiles: ["app/domain/edit-runtime-contract.d.ts"],
+    expectedContractFiles: [
+      "app/domain/edit-runtime-contract.d.ts",
+      "app/components/edit-runtime-refresh-decision.d.ts",
+    ],
     legacyDisclosureFiles: [
       "docs/ARCHITECTURE_MAP.md",
       "docs/INTERACTION_FLOW.md",
@@ -117,38 +124,96 @@ export function markdownSectionBytes(content, heading) {
   return Buffer.byteLength(lines.slice(start, end).join("\n"), "utf8");
 }
 
-function fileBytes(productRoot, file) {
-  return statSync(path.join(productRoot, file)).size;
+function lookupFrozenBytes(file, frozenSizes) {
+  return Object.prototype.hasOwnProperty.call(frozenSizes, file) ? frozenSizes[file] : 0;
 }
 
-function filesBytes(productRoot, files) {
-  return files.reduce((total, file) => total + fileBytes(productRoot, file), 0);
+function currentFileBytes(productRoot, file) {
+  try {
+    return statSync(path.join(productRoot, file)).size;
+  } catch {
+    return 0;
+  }
 }
 
-export function scopedDocBytes(requiredDocs, productRoot) {
-  const sectionBytesByPath = new Map();
-  for (const section of requiredDocs.sections || []) {
-    const content = readFileSync(path.join(productRoot, section.path), "utf8");
-    const total = (section.headings || []).reduce(
+function currentSectionBytes(productRoot, file, headings) {
+  try {
+    const content = readFileSync(path.join(productRoot, file), "utf8");
+    return (headings || []).reduce(
       (sum, heading) => sum + markdownSectionBytes(content, heading),
       0,
     );
-    sectionBytesByPath.set(section.path, total);
+  } catch {
+    return 0;
   }
-  let estimatedBytes = 0;
+}
+
+export function uniquePresetLocateBytes({
+  contractFiles = [],
+  requiredDocs = { files: [], sections: [] },
+  wholeFileBytes,
+  sectionBytes,
+}) {
+  const counted = new Set();
+  let firstLocateBytes = 0;
+  let uniqueDocBytes = 0;
+  for (const file of contractFiles) {
+    if (counted.has(file)) continue;
+    counted.add(file);
+    firstLocateBytes += wholeFileBytes(file);
+  }
+  const headingsByPath = new Map(
+    (requiredDocs.sections || []).map((section) => [section.path, section.headings || []]),
+  );
   for (const file of requiredDocs.files || []) {
-    estimatedBytes += sectionBytesByPath.has(file)
-      ? sectionBytesByPath.get(file)
-      : fileBytes(productRoot, file);
+    if (counted.has(file)) continue;
+    counted.add(file);
+    const headings = headingsByPath.get(file);
+    const fileBytes = headings
+      ? sectionBytes(file, headings)
+      : wholeFileBytes(file);
+    uniqueDocBytes += fileBytes;
+    firstLocateBytes += fileBytes;
   }
-  return estimatedBytes;
+  return { firstLocateBytes, uniqueDocBytes };
 }
 
-function firstLocateBytes(context, productRoot) {
-  return context.contract.estimatedBytes + scopedDocBytes(context.requiredDocs, productRoot);
+export function scopedDocBytes(requiredDocs, productRoot) {
+  return uniquePresetLocateBytes({
+    contractFiles: [],
+    requiredDocs,
+    wholeFileBytes: (file) => currentFileBytes(productRoot, file),
+    sectionBytes: (file, headings) => currentSectionBytes(productRoot, file, headings),
+  }).uniqueDocBytes;
 }
 
-function summarizeContext(context, productRoot) {
+function currentPresetLocateBytes(context, productRoot) {
+  return uniquePresetLocateBytes({
+    contractFiles: context.contract?.files || [],
+    requiredDocs: context.requiredDocs || { files: [], sections: [] },
+    wholeFileBytes: (file) => currentFileBytes(productRoot, file),
+    sectionBytes: (file, headings) => currentSectionBytes(productRoot, file, headings),
+  });
+}
+
+function historicalPresetLocateBytes(context, frozenSizes) {
+  return uniquePresetLocateBytes({
+    contractFiles: context.contract?.files || [],
+    requiredDocs: {
+      files: context.requiredDocs?.files || [],
+      sections: [],
+    },
+    wholeFileBytes: (file) => lookupFrozenBytes(file, frozenSizes),
+    sectionBytes: () => 0,
+  });
+}
+
+function loadFrozenSizes(sizesPath = BEFORE_SIZES_FIXTURE) {
+  return JSON.parse(readFileSync(sizesPath, "utf8"));
+}
+
+function summarizeCurrentContext(context, productRoot) {
+  const preset = currentPresetLocateBytes(context, productRoot);
   return {
     domains: context.domains,
     owners: context.owners,
@@ -163,13 +228,8 @@ function summarizeContext(context, productRoot) {
     focusedTests: context.focusedTests?.files || [],
     requiredDocFiles: context.requiredDocs?.files || [],
     requiredDocSections: context.requiredDocs?.sections || [],
-    scopedDocBytes: context.requiredDocs
-      ? scopedDocBytes(context.requiredDocs, productRoot)
-      : 0,
-    firstLocateBytes: firstLocateBytes({
-      ...context,
-      requiredDocs: context.requiredDocs || { files: [], sections: [] },
-    }, productRoot),
+    scopedDocBytes: preset.uniqueDocBytes,
+    firstLocateBytes: preset.firstLocateBytes,
     includesHtmlCanvasEditor: (context.implementation.files || []).includes(
       "app/components/HtmlCanvasEditor.tsx",
     ),
@@ -180,6 +240,20 @@ function summarizeContext(context, productRoot) {
       .includes("docs/STATE_OWNERSHIP.md"),
     includesSecurityModel: (context.requiredDocs?.files || context.implementation.files || [])
       .includes("docs/SECURITY_MODEL.md"),
+  };
+}
+
+function summarizeHistoricalContext(context, frozenSizes) {
+  const preset = historicalPresetLocateBytes(context, frozenSizes);
+  return {
+    domains: context.domains,
+    owners: context.owners,
+    located: context.domains.length > 0,
+    firstLocateBytes: preset.firstLocateBytes,
+    implementationBytes: (context.implementation?.files || []).reduce(
+      (sum, file) => sum + lookupFrozenBytes(file, frozenSizes),
+      0,
+    ),
   };
 }
 
@@ -200,11 +274,14 @@ export function compareLocateTasks({
   productRoot = PRODUCT_ROOT,
   currentMap = loadCapabilityContextMap(),
   beforeMap,
+  frozenSizes,
   impactMap,
 } = {}) {
   const resolvedBeforeMap = beforeMap || loadCapabilityContextMap(BEFORE_MAP_FIXTURE, {
     productRoot,
+    validatePaths: false,
   });
+  const resolvedFrozenSizes = frozenSizes || loadFrozenSizes();
   const resolvedImpactMap = impactMap || validateImpactMap(JSON.parse(
     readFileSync(path.join(productRoot, "tests/test-impact-map.json"), "utf8"),
   ));
@@ -224,9 +301,12 @@ export function compareLocateTasks({
       map: resolvedBeforeMap,
       productRoot,
     });
-    const legacyBytes = filesBytes(productRoot, task.legacyDisclosureFiles);
-    const after = summarizeContext(afterByDomain, productRoot);
-    const before = summarizeContext(beforeByFile, productRoot);
+    const legacyBytes = task.legacyDisclosureFiles.reduce(
+      (sum, file) => sum + lookupFrozenBytes(file, resolvedFrozenSizes),
+      0,
+    );
+    const after = summarizeCurrentContext(afterByDomain, productRoot);
+    const before = summarizeHistoricalContext(beforeByFile, resolvedFrozenSizes);
     const gate = gateSuitesForProbe(resolvedImpactMap, task.probeFile);
     const ownerHit = task.expectedOwners.every((owner) => after.owners.includes(owner));
     const contractHit = task.expectedContractFiles.every((file) => (

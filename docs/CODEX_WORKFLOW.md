@@ -94,6 +94,8 @@ npm run gate:plan -- --context-file app/lib/source-structure-edit.js
 Those flags are plan-only. They choose the reading set from the requested
 domain or path, never from mixing in the current Git diff. They never change
 test selection, and `task:finish` keeps its fixed `origin/main` comparison base.
+When several domains share a document, a whole-file requirement covers any
+chapter requirement for that file.
 
 The compact JSON lists changed files, matched owners, Node tests, capability canaries, estimated fan-out, and a schema-v2 capability context from `scripts/capability-context.json`. Its `defaultLevel` is `contract`: read `capabilityContext.contract.files` first; it contains only the matched entry interfaces and reports their `estimatedBytes`. Expand `implementationFiles`, `focusedTests` and `requiredDocs` (with named `sections`) only when that next class is needed. The flattened `implementation` set remains their union. `owners` remains top-level capability context metadata. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
 

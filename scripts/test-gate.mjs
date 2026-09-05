@@ -50,6 +50,31 @@ function splitCsv(value) {
     .filter(Boolean);
 }
 
+export function assembleGateCapabilityPlan({
+  changedFiles = [],
+  contextDomains = [],
+  contextFiles = [],
+  impactMap,
+  capabilityMap,
+  productRoot,
+  lane = "task",
+}) {
+  if (!impactMap) throw new Error("assembleGateCapabilityPlan requires an impact map.");
+  if (!capabilityMap) throw new Error("assembleGateCapabilityPlan requires a capability-context map.");
+  const contextQuery = contextDomains.length > 0 || contextFiles.length > 0;
+  return {
+    contextQuery,
+    testPlan: selectGatePlan({ map: impactMap, lane, changedFiles }),
+    capabilityContext: selectCapabilityContext({
+      changedFiles: contextQuery ? [] : changedFiles,
+      domainIds: contextDomains,
+      queryFiles: contextFiles,
+      map: capabilityMap,
+      productRoot,
+    }),
+  };
+}
+
 export function parseArguments(argv) {
   const options = {
     lane: "task",
@@ -433,10 +458,19 @@ async function main() {
   }
   const inventory = await inventoryFiles();
   const tagCounts = await smokeTagCounts(inventory);
+  const assembled = assembleGateCapabilityPlan({
+    changedFiles: files,
+    contextDomains: options.contextDomains,
+    contextFiles: options.contextFiles,
+    impactMap: map,
+    capabilityMap: loadCapabilityContextMap(),
+    productRoot,
+    lane: selectionLane,
+  });
   const plan = {
     ...annotateGatePlan(
       omitMissingNodeTests(
-        assertFullyAutomatedPlan(selectGatePlan({ map, lane: selectionLane, changedFiles: files })),
+        assertFullyAutomatedPlan(assembled.testPlan),
         (file) => {
           const absolute = path.resolve(productRoot, file);
           return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
@@ -444,13 +478,7 @@ async function main() {
       ),
       { map, inventoryFiles: inventory, tagCounts },
     ),
-    capabilityContext: selectCapabilityContext({
-      changedFiles: contextQuery ? [] : files,
-      domainIds: options.contextDomains,
-      queryFiles: options.contextFiles,
-      map: loadCapabilityContextMap(),
-      productRoot,
-    }),
+    capabilityContext: assembled.capabilityContext,
   };
   if (contextQuery) {
     plan.warnings = [
