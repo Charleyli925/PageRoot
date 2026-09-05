@@ -451,12 +451,14 @@
       "id": "test-policy",
       "patterns": [
         "^scripts/test-(?:gate|gate-resume|node-group)(?:-core)?\\.mjs$",
-        "^scripts/capability-context\\.(?:mjs|json)$",
+        "^scripts/capability-context(?:-locate)?\\.(?:mjs|json)$",
         "^scripts/gate-smoke-suites\\.mjs$",
         "^scripts/seeded-fault-oracles\\.mjs$",
         "^tests/e2e/smoke-tags\\.mjs$",
         "^tests/test-impact-map\\.json$",
         "^tests/test-gate-selection\\.test\\.mjs$",
+        "^tests/capability-context-locate\\.test\\.mjs$",
+        "^tests/fixtures/capability-context/",
         "^tests/test-gate-resume\\.test\\.mjs$",
         "^tests/seeded-fault-oracles\\.test\\.mjs$"
       ],
@@ -464,6 +466,7 @@
       "nodeTests": [
         "tests/test-gate-selection.test.mjs",
         "tests/test-gate-resume.test.mjs",
+        "tests/capability-context-locate.test.mjs",
         "tests/seeded-fault-oracles.test.mjs"
       ]
     },

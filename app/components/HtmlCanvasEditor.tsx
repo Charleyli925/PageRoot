@@ -1665,6 +1665,29 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
   }, [deferRuntimeCandidate]);
 
+  const scheduleLatestStaticFallbackAfterFailure = useCallback((
+    predecessorCandidateId: string,
+  ) => {
+    const run = () => {
+      publishRuntimeDegradation("static-preparing");
+      if (!deferLatestStaticRuntimeCandidate(predecessorCandidateId)) {
+        lastRuntimeCandidateFailureRef.current = null;
+        publishRuntimeDegradation("last-known-good-readonly");
+      }
+    };
+    // E2E-only: pause after the dynamic Candidate has failed, before the
+    // static-preparing lock. The callback only continues scheduling; it does
+    // not mark the failed Candidate ready.
+    if (window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true) {
+      const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__;
+      if (Array.isArray(releases)) {
+        releases.push(run);
+        return;
+      }
+    }
+    run();
+  }, [deferLatestStaticRuntimeCandidate, publishRuntimeDegradation]);
+
   const visibleAuthoritativeFrameReady = useCallback((): boolean => {
     const currentRuntime = runtimeFrameRef.current;
     if (
@@ -1956,14 +1979,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     candidate.registrationCleanup();
     if (candidate.runtimeFrame) completeRuntimeAttempt(candidate.runtimeFrame, outcome);
     else runtimeFrameCoordinatorRef.current!.settle(candidate.attempt, outcome);
-    pendingSelectionRef.current = transfer
-      ? transfer.pendingSelection
-      : candidate.previousPendingSelection;
-    const restoredToolbarVisible = transfer?.pendingToolbarVisible ?? (
-      candidate.previousPendingToolbarVisible
-    );
-    pendingToolbarVisibleRef.current = restoredToolbarVisible;
-    setToolbarVisible(restoredToolbarVisible);
+    if (activeNativeEditRef.current) {
+      // Native Edit won the wait window. Keep the live toolbar/selection;
+      // restoring the Candidate's pre-edit chrome would hide the session.
+      pendingSelectionRef.current = selectedSourceSelectionRef.current;
+      pendingToolbarVisibleRef.current = true;
+    } else {
+      pendingSelectionRef.current = transfer
+        ? transfer.pendingSelection
+        : candidate.previousPendingSelection;
+      const restoredToolbarVisible = transfer?.pendingToolbarVisible ?? (
+        candidate.previousPendingToolbarVisible
+      );
+      pendingToolbarVisibleRef.current = restoredToolbarVisible;
+      setToolbarVisible(restoredToolbarVisible);
+    }
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
     runtimePromotionRef.current = null;
@@ -2164,11 +2194,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           activation: "failed",
           settled: false,
         }, "rejected");
-        publishRuntimeDegradation("static-preparing");
-        if (!deferLatestStaticRuntimeCandidate(attempt.candidateId)) {
-          lastRuntimeCandidateFailureRef.current = null;
-          publishRuntimeDegradation("last-known-good-readonly");
-        }
+        scheduleLatestStaticFallbackAfterFailure(attempt.candidateId);
       } else {
         runtimeFrameCoordinatorRef.current!.settle(attempt, "rejected");
         publishRuntimeDegradation("last-known-good-readonly");
@@ -2315,10 +2341,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     beginRuntimeAttempt,
     clearRuntimeInactiveSlot,
     completeRuntimeAttempt,
-    deferLatestStaticRuntimeCandidate,
     documentBaseHref,
     editRuntimeGrant,
     publishRuntimeDegradation,
+    scheduleLatestStaticFallbackAfterFailure,
     staticAssetBaseHref,
   ]);
   startRuntimeCandidateRef.current = startRuntimeCandidate;
@@ -2403,7 +2429,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ): boolean => {
     if (
       runtimeCandidateRef.current !== candidate
-      || runtimePromotionRef.current !== candidate
+      || runtimePromotionRef.current
       || latestSourceProjectionRef.current.source !== candidate.source
       || activeNativeEditRef.current
       || !runtimeFrameCoordinatorRef.current!.canPromote(candidate.attempt)
@@ -2418,8 +2444,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || cancelRuntimeCandidateRef.current(candidate, "superseded");
       return false;
     }
+    runtimePromotionRef.current = candidate;
     syncRuntimeCandidateDiagnostics();
 
+    const previousRenderVerified = containerRef.current?.getAttribute(
+      "data-render-verified",
+    ) ?? null;
     const previousSlotId = activeRuntimeSlotId;
     const previousRender = frameRender;
     const previousCleanup = cleanupFrameRef.current;
@@ -2462,7 +2492,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       candidate.retiredSlot = null;
       pendingFrameRestoreEpochRef.current += 1;
       runtimeCandidateRef.current = candidate;
-      runtimePromotionRef.current = candidate;
+      runtimePromotionRef.current = null;
+      if (previousRenderVerified === null) {
+        containerRef.current?.removeAttribute("data-render-verified");
+      } else {
+        containerRef.current?.setAttribute(
+          "data-render-verified",
+          previousRenderVerified,
+        );
+      }
       flushSync(() => {
         setFrameRender(previousRender);
         setRuntimeInactiveRender(null);
@@ -2535,6 +2573,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ),
       adjustOuter: true,
     });
+    if (
+      window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true
+      && window.__PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__ === true
+    ) {
+      window.__PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__ = false;
+      const marker = promotedDocument.head.querySelector<HTMLMetaElement>(
+        `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
+      );
+      marker?.setAttribute(
+        FRAME_VERIFICATION_ATTRIBUTE,
+        `${candidate.verificationToken}-invalid-commit`,
+      );
+      marker?.setAttribute("content", `${candidate.verificationToken}-invalid-commit`);
+    }
     if (!connectFrameRef.current(promotedIframe, promotedGeneration)) {
       abortCommit("failed");
       return false;
@@ -2598,14 +2650,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
     };
     recaptureAnchor();
-    runtimePromotionRef.current = candidate;
+    // Hidden size/position waits still belong to runtimeCandidateRef. The
+    // visible Active must keep accepting Native Edit until beginPositioning.
     const isCurrent = () => (
       runtimeCandidateRef.current === candidate
-      && runtimePromotionRef.current === candidate
+      && !runtimePromotionRef.current
       && runtimeCandidateIframeRef.current === iframe
       && iframe.contentDocument === documentNode
       && runtimeFrameCoordinatorRef.current!.accepts(candidate.attempt)
     );
+    const commitWhenUnblocked = () => {
+      if (!isCurrent()) return;
+      commitRuntimeCandidateRef.current(candidate, iframe);
+    };
     scheduleWhenReady({
       isCurrent,
       isReady: () => frameScrollMetricsReady(iframe, documentNode),
@@ -2625,7 +2682,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         });
         requestAnimationFrame(() => {
           if (!isCurrent()) return;
-          commitRuntimeCandidateRef.current(candidate, iframe);
+          if (window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true) {
+            const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__;
+            if (Array.isArray(releases)) {
+              releases.push(commitWhenUnblocked);
+              return;
+            }
+          }
+          commitWhenUnblocked();
         });
       },
     });
@@ -2649,13 +2713,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       publishRuntimeDegradation("last-known-good-readonly");
       return true;
     }
-    publishRuntimeDegradation("static-preparing");
-    if (!deferLatestStaticRuntimeCandidate(candidate.attempt.candidateId)) {
-      lastRuntimeCandidateFailureRef.current = null;
-      publishRuntimeDegradation("last-known-good-readonly");
-    }
+    scheduleLatestStaticFallbackAfterFailure(candidate.attempt.candidateId);
     return true;
-  }, [deferLatestStaticRuntimeCandidate, publishRuntimeDegradation]);
+  }, [publishRuntimeDegradation, scheduleLatestStaticFallbackAfterFailure]);
   failRuntimeCandidateActivationRef.current = failRuntimeCandidate;
 
   const connectRuntimeCandidate = useCallback((
@@ -4624,6 +4684,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       containerRef.current?.setAttribute("data-native-start-status", "read-only");
       return false;
     }
+    // Only the one-shot commit window sets this ref, after beginPositioning.
+    // Candidate preparation and hidden positioning must not refuse Native Edit.
     const runtimePromotion = runtimePromotionRef.current;
     if (runtimePromotion) {
       containerRef.current?.setAttribute(

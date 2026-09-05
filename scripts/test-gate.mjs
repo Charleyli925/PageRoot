@@ -46,7 +46,39 @@ const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const mapPath = path.join(productRoot, "tests/test-impact-map.json");
 
-function parseArguments(argv) {
+function splitCsv(value) {
+  return String(value || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+export function assembleGateCapabilityPlan({
+  changedFiles = [],
+  contextDomains = [],
+  contextFiles = [],
+  impactMap,
+  capabilityMap,
+  productRoot,
+  lane = "task",
+}) {
+  if (!impactMap) throw new Error("assembleGateCapabilityPlan requires an impact map.");
+  if (!capabilityMap) throw new Error("assembleGateCapabilityPlan requires a capability-context map.");
+  const contextQuery = contextDomains.length > 0 || contextFiles.length > 0;
+  return {
+    contextQuery,
+    testPlan: selectGatePlan({ map: impactMap, lane, changedFiles }),
+    capabilityContext: selectCapabilityContext({
+      changedFiles: contextQuery ? [] : changedFiles,
+      domainIds: contextDomains,
+      queryFiles: contextFiles,
+      map: capabilityMap,
+      productRoot,
+    }),
+  };
+}
+
+export function parseArguments(argv) {
   const options = {
     lane: "task",
     arch: "arm64",
@@ -57,6 +89,8 @@ function parseArguments(argv) {
     forLane: null,
     runtimes: [],
     githubOutput: null,
+    contextDomains: [],
+    contextFiles: [],
   };
   if (argv[0] && !argv[0].startsWith("--")) options.lane = argv.shift();
   while (argv.length > 0) {
@@ -74,6 +108,8 @@ function parseArguments(argv) {
         .filter(Boolean);
     }
     else if (argument === "--github-output") options.githubOutput = argv.shift() || null;
+    else if (argument === "--context-domain") options.contextDomains.push(...splitCsv(argv.shift() || ""));
+    else if (argument === "--context-file") options.contextFiles.push(...splitCsv(argv.shift() || ""));
     else throw new Error(`Unknown argument: ${argument}`);
   }
   if (!/^(?:edit|task|draft|plan|main|release|developer-package|candidate-app|artifact)$/u.test(options.lane)) {
@@ -94,6 +130,13 @@ function parseArguments(argv) {
   }
   if (options.resume && options.lane !== "task") {
     throw new Error("--resume is only supported for the task gate.");
+  }
+  const contextQuery = options.contextDomains.length > 0 || options.contextFiles.length > 0;
+  if (contextQuery && options.lane !== "plan") {
+    throw new Error(
+      "--context-domain and --context-file are only supported for gate:plan. "
+      + "They never change test selection or the task:finish origin/main base.",
+    );
   }
   if (options.arch !== "arm64") throw new Error("--arch must be arm64.");
   if (options.realHtmlPath) {
@@ -430,7 +473,8 @@ async function main() {
   const files = await changedFiles(options.base);
   const planningLane = options.lane === "plan";
   const selectionLane = planningLane ? (options.forLane || "task") : options.lane;
-  if ((selectionLane === "edit" || selectionLane === "task" || selectionLane === "draft") && files.length === 0) {
+  const contextQuery = options.contextDomains.length > 0 || options.contextFiles.length > 0;
+  if ((selectionLane === "edit" || selectionLane === "task" || selectionLane === "draft") && files.length === 0 && !contextQuery) {
     throw new Error(
       `No changed files were found for the ${options.lane} gate. `
       + "Pass --base <git-ref> for a committed task, or use the release gate for complete coverage.",
@@ -450,10 +494,19 @@ async function main() {
   }
   const inventory = await inventoryFiles();
   const tagCounts = await smokeTagCounts(inventory);
+  const assembled = assembleGateCapabilityPlan({
+    changedFiles: files,
+    contextDomains: options.contextDomains,
+    contextFiles: options.contextFiles,
+    impactMap: map,
+    capabilityMap: loadCapabilityContextMap(),
+    productRoot,
+    lane: selectionLane,
+  });
   let plan = {
     ...annotateGatePlan(
       omitMissingNodeTests(
-        assertFullyAutomatedPlan(selectGatePlan({ map, lane: selectionLane, changedFiles: files })),
+        assertFullyAutomatedPlan(assembled.testPlan),
         (file) => {
           const absolute = path.resolve(productRoot, file);
           return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
@@ -461,11 +514,7 @@ async function main() {
       ),
       { map, inventoryFiles: inventory, tagCounts },
     ),
-    capabilityContext: selectCapabilityContext({
-      changedFiles: files,
-      map: loadCapabilityContextMap(),
-      productRoot,
-    }),
+    capabilityContext: assembled.capabilityContext,
   };
   assertGateWidthPolicy(plan);
   if (options.githubOutput) {
@@ -480,6 +529,15 @@ async function main() {
   }
   if (options.runtimes.length > 0) {
     plan = filterPlanByRuntimes(plan, options.runtimes);
+  }
+  if (contextQuery) {
+    plan.warnings = [
+      ...(plan.warnings || []),
+      {
+        code: "context-query-does-not-select-tests",
+        message: "Capability-context queries choose reading sets only. Test selection still uses the real Git diff, and task:finish stays fixed to origin/main.",
+      },
+    ];
   }
   const repository = await repositoryEvidence(files);
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
