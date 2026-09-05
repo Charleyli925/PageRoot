@@ -367,7 +367,13 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     () => uiPreferences.record({ workspace: { sidebarWidth: 999 } }),
     /工作台偏好记录无效/u,
   );
+  await assert.rejects(
+    () => uiPreferences.record({ workspace: { defaultAgentProviderId: "gemini" } }),
+    /工作台偏好记录无效/u,
+  );
   assert.equal(calls.length, 2);
+  await uiPreferences.record({ workspace: { defaultAgentProviderId: "pageroot" } });
+  assert.equal(calls[2][1].workspace.defaultAgentProviderId, "pageroot");
   assert.deepEqual(Object.keys(uiPreferences).sort(), ["get", "record"]);
 });
 

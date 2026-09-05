@@ -240,6 +240,25 @@ test("ACP probe completes initialize, model catalog and cleanup", async (t) => {
   assert.equal(evidence.models[0].id.startsWith("codex:"), true);
 });
 
+test("ACP probe reads session.new models object with currentModelId and availableModels", async (t) => {
+  const evidence = await probeCodexAcp(
+    await probeCommand(await isolatedHome(t), "--object-models"),
+    process.env,
+  );
+  assert.equal(evidence.modelCount, 2);
+  assert.deepEqual(evidence.models.map((model) => model.id), ["codex:gpt-object", "codex:gpt-other"]);
+  assert.equal(evidence.models[0].isDefault, true);
+  assert.equal(evidence.models[1].isDefault, false);
+  assert.deepEqual(evidence.models[0].reasoningEfforts, ["low", "high"]);
+});
+
+test("ACP probe reports adapter error for unknown session.new models object", async (t) => {
+  await assert.rejects(
+    probeCodexAcp(await probeCommand(await isolatedHome(t), "--unknown-models"), process.env),
+    (error) => error?.code === "CODEX_PROTOCOL_UNSUPPORTED",
+  );
+});
+
 test("ACP probe classifies missing ChatGPT login as auth-required", async (t) => {
   await assert.rejects(
     probeCodexAcp(await probeCommand(await isolatedHome(t), "--auth-required"), process.env),

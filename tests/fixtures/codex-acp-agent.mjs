@@ -11,6 +11,8 @@ if (pidFileArgument) {
 }
 const hang = process.argv.includes("--hang");
 const authRequired = process.argv.includes("--auth-required");
+const objectModels = process.argv.includes("--object-models");
+const unknownModels = process.argv.includes("--unknown-models");
 if (process.argv.includes("login") && process.argv.includes("status")) {
   if (authRequired) {
     process.stderr.write("Not logged in. Login required.\n");
@@ -67,6 +69,21 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
       throw acp.RequestError.authRequired(undefined, "Not logged in. Login required.");
     }
     requestRoot = params.cwd;
+    if (unknownModels) {
+      return { sessionId, models: { currentModelId: "gpt-synthetic" } };
+    }
+    if (objectModels) {
+      return {
+        sessionId,
+        models: {
+          currentModelId: "gpt-object",
+          availableModels: [
+            { id: "gpt-object", displayName: "GPT Object", reasoningEfforts: ["low", "high"] },
+            { id: "gpt-other", displayName: "GPT Other" },
+          ],
+        },
+      };
+    }
     return { sessionId, models: [{ id: "gpt-synthetic", displayName: "GPT Synthetic", isDefault: true }] };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {

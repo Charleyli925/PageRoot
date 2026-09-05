@@ -36,7 +36,7 @@ export type FirstEditGuidePreferences = Readonly<{
     inspectorWidth?: number;
     motion?: "system" | "reduced";
     restoreTabsOnLaunch?: boolean;
-    defaultAgentProviderId?: "qoder" | "codex";
+    defaultAgentProviderId?: "pageroot" | "qoder" | "codex";
   }>;
 }>;
 

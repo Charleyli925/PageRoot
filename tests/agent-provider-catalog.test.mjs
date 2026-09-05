@@ -866,3 +866,63 @@ test("Token replacement publishes atomically, clears old model state, and can di
   assert.equal(catalog.freezeSelected().resolvedModelId, null);
   assert.equal(requests.at(-1).disconnect, true);
 });
+
+test("updating installation digest or models does not clear connection or credential flags", async () => {
+  const initial = PAGEROOT_AGENT_PROVIDER.selection;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async setAgentSessionCredential(request) {
+        return {
+          ok: true,
+          status: "ready",
+          vendorId: request.vendorId,
+          vendorDisplayName: "DeepSeek",
+          baseUrl: "https://api.deepseek.com/v1",
+          installationDigest: `sha256:${"a".repeat(64)}`,
+          selection: {
+            ...initial,
+            resolvedModelId: "pageroot:deepseek-v4-pro",
+          },
+          models: [{
+            id: "pageroot:deepseek-v4-pro",
+            isDefault: true,
+            reasoningChoices: [{ id: "auto", label: "自动" }],
+          }],
+        };
+      },
+      async preflightAgent() {
+        return {
+          status: "ready",
+          preflightId: "ticket_digest",
+          selection: {
+            ...initial,
+            resolvedModelId: "pageroot:deepseek-v4-pro",
+          },
+          expiresAt: new Date(20_000).toISOString(),
+          installationDigest: `sha256:${"b".repeat(64)}`,
+          models: [{
+            id: "pageroot:deepseek-v4-flash",
+            isDefault: true,
+            reasoningChoices: [{ id: "auto", label: "自动" }],
+          }],
+        };
+      },
+    },
+    providers: [PAGEROOT_AGENT_PROVIDER],
+    selected: initial,
+    clock: { now: () => 10 },
+  });
+
+  await catalog.connectWithApiKey(initial, "sk-keep", { vendorId: "deepseek" });
+  assert.equal(catalog.provider().credentialConfigured, true);
+  assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
+  assert.equal(catalog.provider().installable, false);
+  const previousConnection = catalog.provider().connection;
+  await catalog.preflight(catalog.freezeSelected(), { purpose: "execution" });
+  assert.equal(catalog.provider().credentialConfigured, true);
+  assert.equal(catalog.provider().connection, previousConnection);
+  assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
+  assert.equal(catalog.provider().installable, false);
+  assert.equal(catalog.provider().installationDigest, `sha256:${"b".repeat(64)}`);
+  assert.deepEqual(catalog.provider().models.map((model) => model.id), ["pageroot:deepseek-v4-flash"]);
+});

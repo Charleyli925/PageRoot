@@ -4,7 +4,7 @@ export type WorkspacePreferences = {
   inspectorWidth: number;
   motion: "system" | "reduced";
   restoreTabsOnLaunch: boolean;
-  defaultAgentProviderId: "qoder" | "codex";
+  defaultAgentProviderId: "pageroot" | "qoder" | "codex";
 };
 
 export type UiPreferencesSnapshot = {

@@ -140,7 +140,7 @@ export default function AgentProviderCard({
   );
   const presentation = provider.availability(availability);
   const installing = installState === "installing" || installPending;
-  const cancelling = installState === "cancelling" || cancelPending || cancelRequested;
+  const cancelling = installState === "cancelling" || cancelPending;
   const statusPresentation = installing && !cancelling
     ? { ...presentation, statusLabel: "正在安装…", detail: "", tone: "checking" as const }
     : cancelling
@@ -183,7 +183,7 @@ export default function AgentProviderCard({
         setActionError("安装没有取消，请重试。");
       } finally {
         setCancelPending(false);
-        if (!confirmed) setCancelRequested(false);
+        setCancelRequested(false);
       }
       return;
     }
