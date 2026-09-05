@@ -332,20 +332,22 @@ function AgentSettings({
   busyProviderId?: string | null;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(selectedChoiceId);
+  const [followedChoiceId, setFollowedChoiceId] = useState(selectedChoiceId);
   const [confirmAction, setConfirmAction] = useState<null | Readonly<{
     kind: "disconnect" | "remove-key";
     card: AgentProviderCardData;
     stopRun: boolean;
   }>>(null);
-  useEffect(() => {
+  if (followedChoiceId !== selectedChoiceId) {
+    setFollowedChoiceId(selectedChoiceId);
     setExpandedId(selectedChoiceId);
-  }, [selectedChoiceId]);
+  }
   const selectedCard = cards.find((card) => cardChoiceId(card) === (expandedId || selectedChoiceId))
     || cards[0]
     || null;
   return (
     <div className="settings-page-sections">
-      <SettingsSection title="AI 服务">
+      <SettingsSection title="默认服务">
         <SettingRow
           icon={<UserCircleIcon size={20} weight="regular" />}
           title="默认服务"

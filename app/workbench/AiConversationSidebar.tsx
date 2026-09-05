@@ -531,12 +531,9 @@ export default function AiConversationSidebar({
     return () => observer.disconnect();
   }, [contentKey, scheduleFollow]);
 
-  useEffect(() => {
-    if (!recovery || !setupProviderId || !setupCard) return;
-    if (setupCard.availability.status === "ready") {
-      setSetupProviderId(null);
-    }
-  }, [recovery, setupCard, setupProviderId]);
+  if (recovery && setupProviderId && setupCard?.availability.status === "ready") {
+    setSetupProviderId(null);
+  }
 
   return (
     <aside

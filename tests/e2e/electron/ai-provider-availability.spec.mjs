@@ -395,7 +395,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
     await expect(sidebar.getByTestId("ai-conversation-agent"))
-      .toContainText("源页", { timeout: 20_000 });
+      .toContainText("DeepSeek", { timeout: 20_000 });
     await expect(sidebar.getByTestId("ai-conversation-model")).toBeVisible();
     await expect(sidebar.getByTestId("ai-conversation-model"))
       .toContainText("V4 Pro");
@@ -576,7 +576,7 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
   }
 });
 
-test("Qoder settings entry opens Settings without restoring a Discussion composer", async () => {
+test("Qoder settings entry opens the shared access panel without restoring a Discussion composer", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("qoder-auth-required.html");
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
@@ -617,16 +617,16 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
     });
     await sidebar.getByRole("button", { name: "设置 Qoder CLI" }).click();
 
-    const settings = launched.page.locator(".workbench-settings-page");
-    await expect(settings).toBeVisible();
-    await expect(settingsPage.getByRole("heading", { name: "AI 服务" })).toBeVisible();
-    await expect(settings.getByText("Qoder CLI", { exact: true })).toBeVisible();
-    await expect(settings.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(settings.getByRole("button", { name: "登录 Qoder" }))
+    const setupPanel = sidebar.getByTestId("ai-conversation-setup-panel");
+    await expect(setupPanel).toBeVisible();
+    await expect(launched.page.locator(".workbench-settings-page")).toHaveCount(0);
+    await expect(setupPanel.getByText("Qoder CLI", { exact: true })).toBeVisible();
+    await expect(setupPanel.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(setupPanel.getByRole("button", { name: "登录 Qoder" }))
       .toBeVisible();
     await expect.poll(() => diagnoseGets).toBeGreaterThan(0);
     expect(preflightPosts).toBe(0);
-    await settings.screenshot({
+    await setupPanel.screenshot({
       path: path.join(QODER_VISUAL_OUTPUT, "real-settings-login.png"),
       animations: "disabled",
     });
@@ -637,18 +637,17 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
     });
     await launched.page.waitForTimeout(100);
     expect(preflightPosts).toBe(0);
-    await settings.getByRole("button", { name: "登录 Qoder" }).click();
-    await expect(settings.getByText("请在浏览器完成登录")).toBeVisible({ timeout: 15_000 });
-    await expect(settings.getByRole("button", { name: "取消" })).toBeVisible();
-    await settings.screenshot({
+    await setupPanel.getByRole("button", { name: "登录 Qoder" }).click();
+    await expect(setupPanel.getByText("请在浏览器完成登录")).toBeVisible({ timeout: 15_000 });
+    await expect(setupPanel.getByRole("button", { name: "取消" })).toBeVisible();
+    await setupPanel.screenshot({
       path: path.join(QODER_VISUAL_OUTPUT, "real-settings-waiting-login.png"),
       animations: "disabled",
     });
     expect(requestPosts).toBe(0);
-    await settings.getByRole("button", { name: "取消" }).click();
-    await expect(settings.getByRole("button", { name: "登录 Qoder" })).toBeVisible({ timeout: 15_000 });
+    await setupPanel.getByRole("button", { name: "取消" }).click();
+    await expect(setupPanel.getByRole("button", { name: "登录 Qoder" })).toBeVisible({ timeout: 15_000 });
 
-    await closeQoderAvailability(launched.page);
     await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
     const reopenedSettingsCard = await openQoderAvailability(launched.page);
     await expect(reopenedSettingsCard.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible();

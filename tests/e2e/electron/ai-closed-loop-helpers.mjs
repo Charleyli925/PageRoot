@@ -385,7 +385,14 @@ export async function openQoderAvailability(page) {
   await expect(sidebar).toHaveAttribute("data-open", "true");
   await sidebar.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("button", { name: "AI 服务", exact: true }).click();
-  const card = page.locator(".workbench-settings-page").locator(".qoder-availability-card").first();
+  const settings = page.locator(".workbench-settings-page");
+  await expect(settings).toBeVisible();
+  const row = settings.getByTestId("settings-agent-row-qoder");
+  await expect(row).toBeVisible();
+  if (await row.getAttribute("data-expanded") !== "true") {
+    await row.locator(".settings-agent-service-main").click();
+  }
+  const card = settings.locator(".qoder-availability-card").first();
   await expect(card).toBeVisible();
   return card;
 }
