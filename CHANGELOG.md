@@ -4,6 +4,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- 源页可作为默认 AI 服务并在重启后恢复；无效的本机 Qoder CLI 不再挡住健康的受管安装；Codex 能解析真实的模型目录对象。安装取消完成后可以再次安装，不会停在“正在取消”。
 - Agent 设置页现在只做无副作用、selection-keyed 的四项连接诊断，正式发送时才预检并冻结模型配置；Custom 接口不再假设存在 `/models`，Codex 诊断会验证 ACP 协议。受管安装期间可直接取消。DeepSeek 改为 SSE 增量接收，HTTP 与 ACP 都只在连续 45 分钟无有效协议数据时中断；运行区只显示等待时间、已接收大小和当前可执行操作。Agent 失败会立即替换“处理中”，并将技术重试安全性与认证、模型、厂商、限流或安装恢复动作分开，不生成半成品 Candidate；历史对话按日期与轮次分组。
 - 源 HTML 写入失败不再锁死整个工作台。源页独立跟踪磁盘已确认 Hash、当前工作 HTML Hash、Canvas Hash 和保护 Hash；只有后三者精确一致才放行可逆导航，`failed/conflict` 和原文件 Hash 保持真实。Main 恢复日志支持同文档路径 CAS rebase、Main/local 合并恢复、单 in-flight + latest pending 写入合并、成功保存后 CAS 退役，并在目录不可用或单记录损坏时降级而不阻止启动。得到精确恢复或导出凭证后可切换标签、关闭文档和退出；活动标签先保护再关闭，标签布局 best-effort，桌面关闭最多自动重试一次并释放精确冻结。失败横幅占用工作区自身布局，可展开和复制诊断。本项不把 Draft、`PROJECT.md`、附件或 AI 不可逆提交重分类为 HTML 保护凭证。
 - 多个 HTML 标签现在会保留受内存预算约束的只读页面缓存：最近页面可先显示、再在后台核对最新源文件，切换时不再反复空白重载。AI 候选就绪后会预热审阅；未命中缓存时也先显示修改前后页面，再补变化标注。采纳后在新版本安全提交时立即回到新 HTML，最终编辑画布与项目资料继续后台准备。

@@ -8,9 +8,11 @@
 > planned removal of the bundled Codex App Server. The catalog and installer
 > remain the authority for Codex's external managed closure.
 >
-> Implementation note (2026-09-02): ADR 0069 later authorized a PageRoot-owned
-> `pageroot`/`http` Agent with user-supplied vendor Tokens. That path is
-> `client-mediated`, not `agent-native`, and is outside this catalog/installer.
+> Implementation note (2026-09-06): Qoder discovery now collects user and
+> managed candidates before selecting one, matching the later Codex source
+> rule. A valid independent CLI still wins. A healthy managed installation is
+> not blocked by an invalid global shim. An invalid user CLI with no healthy
+> managed copy remains fail-closed.
 
 ## Context
 

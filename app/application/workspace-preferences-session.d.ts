@@ -1,5 +1,5 @@
 export type WorkspacePreferenceMotion = "system" | "reduced";
-export type WorkspacePreferenceAgentId = "qoder" | "codex";
+export type WorkspacePreferenceAgentId = "pageroot" | "qoder" | "codex";
 
 export type WorkspacePreferences = Readonly<{
   rememberPanelWidths: boolean;

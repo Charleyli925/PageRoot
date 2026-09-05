@@ -112,14 +112,29 @@ test("Qoder diagnosis uses only version and model-list commands", async (t) => {
   assert.equal(diagnostic.activeInstallation, null);
 });
 
-test("an invalid user installation is not treated as missing and does not fall through to managed", async (t) => {
+test("an invalid user installation is diagnostic-only when managed Qoder is valid", async (t) => {
   const root = await isolatedHome(t);
   const agentsRoot = path.join(root, "agents");
-  await writeManagedQoder(agentsRoot);
+  const managed = await writeManagedQoder(agentsRoot);
   const bin = path.join(root, "bin");
   await mkdir(bin, { recursive: true });
   await writeFile(path.join(bin, "qodercli"), "#!/bin/sh\necho untrusted\n", { mode: 0o755 });
   const catalog = createAgentCatalog({ agentsRoot });
+  const resolved = await resolveQoderAcpCommand({
+    environment: isolatedEnvironment(root),
+    homeDirectory: root,
+    managedCandidates: () => catalog.managedCommandCandidates("qoder"),
+  });
+  assert.equal(resolved.installSource, "managed");
+  assert.equal(resolved.command, managed);
+});
+
+test("an invalid user installation stays fail-closed when no managed Qoder exists", async (t) => {
+  const root = await isolatedHome(t);
+  const bin = path.join(root, "bin");
+  await mkdir(bin, { recursive: true });
+  await writeFile(path.join(bin, "qodercli"), "#!/bin/sh\necho untrusted\n", { mode: 0o755 });
+  const catalog = createAgentCatalog({ agentsRoot: path.join(root, "agents") });
   await assert.rejects(
     resolveQoderAcpCommand({
       environment: isolatedEnvironment(root),

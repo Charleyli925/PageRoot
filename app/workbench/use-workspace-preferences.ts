@@ -120,12 +120,18 @@ export function useWorkspacePreferences(
       provider.providerId === snapshot.workspace.defaultAgentProviderId
     )) || availableProviders[0];
     if (!preferred) return;
-    const preferredProviderId = preferred.providerId === "codex" ? "codex" : "qoder";
     const applyKey = `${snapshot.workspace.defaultAgentProviderId}:${preferred.providerId}:${preferred.runtimeId}`;
     if (defaultAgentAppliedRef.current === applyKey) return;
     defaultAgentAppliedRef.current = applyKey;
-    if (preferredProviderId !== snapshot.workspace.defaultAgentProviderId) {
-      void session.update({ defaultAgentProviderId: preferredProviderId });
+    if (
+      preferred.providerId !== snapshot.workspace.defaultAgentProviderId
+      && (
+        preferred.providerId === "pageroot"
+        || preferred.providerId === "qoder"
+        || preferred.providerId === "codex"
+      )
+    ) {
+      void session.update({ defaultAgentProviderId: preferred.providerId });
     }
     if (agentCatalogSnapshot.selected?.providerId !== preferred.providerId) {
       workspaceController.selectAgent(preferred.selection);

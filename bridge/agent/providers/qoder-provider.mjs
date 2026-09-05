@@ -428,47 +428,39 @@ export async function resolveQoderAcpCommand({
     });
   }
 
-  let discoveredError = null;
-  for (const candidate of await commandCandidates(environment, homeDirectory)) {
-    try {
-      const resolved = await validateNpmQoderCommand(candidate);
-      if (resolved) {
-        return Object.freeze({
-          ...resolved,
-          installSource: "user",
-        });
+  // Collect every source before selecting one. A stale global shim must not
+  // mask a healthy PageRoot-managed installation. Valid user CLIs still win.
+  const [userResult, managedResult] = await Promise.all([
+    commandCandidates(environment, homeDirectory),
+    typeof managedCandidates === "function"
+      ? Promise.resolve().then(() => managedCandidates()).then(
+        (value) => Array.isArray(value) ? value : [],
+        () => [],
+      )
+      : Promise.resolve([]),
+  ]);
+  const diagnostics = [];
+  const candidatesFor = async (candidates, source) => {
+    for (const candidate of candidates) {
+      try {
+        const resolved = await validateNpmQoderCommand(candidate);
+        if (resolved) return Object.freeze({ ...resolved, installSource: source });
+      } catch (cause) {
+        if (cause instanceof AgentProviderError) {
+          diagnostics.push({ source, cause });
+          continue;
+        }
+        throw cause;
       }
-    } catch (cause) {
-      if (cause instanceof AgentProviderError) {
-        discoveredError ||= cause;
-        continue;
-      }
-      throw cause;
     }
-  }
-  if (discoveredError) throw discoveredError;
+    return null;
+  };
 
-  if (typeof managedCandidates !== "function") {
-    fail("QODER_COMMAND_NOT_FOUND", "没有找到独立安装的 Qoder CLI。", { status: 404 });
-  }
-  for (const candidate of await managedCandidates()) {
-    try {
-      const resolved = await validateNpmQoderCommand(candidate);
-      if (resolved) {
-        return Object.freeze({
-          ...resolved,
-          installSource: "managed",
-        });
-      }
-    } catch (cause) {
-      if (cause instanceof AgentProviderError) {
-        discoveredError ||= cause;
-        continue;
-      }
-      throw cause;
-    }
-  }
-  if (discoveredError) throw discoveredError;
+  const user = await candidatesFor(userResult, "user");
+  if (user) return user;
+  const managed = await candidatesFor(managedResult, "managed");
+  if (managed) return managed;
+  if (diagnostics[0]?.cause) throw diagnostics[0].cause;
   fail("QODER_COMMAND_NOT_FOUND", "没有找到独立安装的 Qoder CLI。", { status: 404 });
 }
 

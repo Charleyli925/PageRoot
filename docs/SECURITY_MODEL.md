@@ -295,7 +295,8 @@ PageRoot may also keep a product-managed ACP install under Application Support
 npm integrity and package-identity checks. It is not a user document root, not
 a Request workspace, and not visible to the renderer as a path. A user-installed
 CLI still wins when it passes the current identity checks; an invalid user
-installation is never silently replaced by the managed copy.
+installation is diagnostic only when a healthy managed copy exists, and remains
+fail-closed when it is the only candidate.
 Quit, relaunch and update installation also fail closed: the Bridge stays alive
 and the desktop app remains open unless all owned Agent cleanup is confirmed.
 

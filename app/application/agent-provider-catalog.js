@@ -1302,14 +1302,9 @@ export class AgentCatalogState {
   #setProviderDigest(providerId, installationDigest) {
     const provider = this.#providers.get(providerId);
     if (!provider) return;
-    this.#providers.set(providerId, frozenProviderEntry({
+    this.#providers.set(providerId, Object.freeze({
       ...provider,
       installationDigest: installationDigest || null,
-    }, {
-      availability: provider.availability,
-      installationDigest: installationDigest || null,
-      installSource: provider.installSource,
-      installState: provider.installState,
     }));
   }
 

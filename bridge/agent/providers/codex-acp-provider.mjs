@@ -408,9 +408,38 @@ function installationDigest(command) {
   }), "utf8"));
 }
 
-function namespacedModels(rawModels) {
+function sessionModelCatalog(initializeResult, sessionResult) {
+  const candidates = [
+    sessionResult?.models,
+    sessionResult?.availableModels,
+    initializeResult?.agentCapabilities?.promptCapabilities?.models,
+    initializeResult?.models,
+  ];
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    if (Array.isArray(candidate)) {
+      return Object.freeze({ ok: true, list: candidate, currentModelId: null });
+    }
+    if (typeof candidate === "object") {
+      const list = candidate.availableModels ?? candidate.models;
+      if (!Array.isArray(list)) {
+        return Object.freeze({ ok: false, code: "CODEX_PROTOCOL_UNSUPPORTED" });
+      }
+      return Object.freeze({
+        ok: true,
+        list,
+        currentModelId: cleanProviderText(candidate.currentModelId || candidate.modelId || "", 80) || null,
+      });
+    }
+    return Object.freeze({ ok: false, code: "CODEX_PROTOCOL_UNSUPPORTED" });
+  }
+  return Object.freeze({ ok: true, list: [], currentModelId: null });
+}
+
+function namespacedModels(rawModels, currentModelId = null) {
   const seen = new Set();
   const models = [];
+  const current = cleanProviderText(currentModelId, 80);
   for (const raw of rawModels) {
     const providerModelId = cleanProviderText(
       typeof raw === "string" ? raw : raw?.id || raw?.name || "",
@@ -419,6 +448,10 @@ function namespacedModels(rawModels) {
     if (!providerModelId || !SAFE_MODEL_ID.test(providerModelId) || seen.has(providerModelId)) continue;
     seen.add(providerModelId);
     const id = providerModelId.startsWith("codex:") ? providerModelId : `codex:${providerModelId}`;
+    const matchesCurrent = Boolean(
+      current
+      && (providerModelId === current || id === current || id === `codex:${current}`),
+    );
     models.push(Object.freeze({
       id,
       providerModelId: id.slice("codex:".length),
@@ -431,7 +464,7 @@ function namespacedModels(rawModels) {
       defaultReasoningEffort: SAFE_REASONING.test(String(raw?.defaultReasoningEffort || ""))
         ? String(raw.defaultReasoningEffort)
         : null,
-      isDefault: raw?.isDefault === true,
+      isDefault: current ? matchesCurrent : raw?.isDefault === true,
     }));
     if (models.length >= MAX_PUBLIC_MODELS) break;
   }
@@ -501,6 +534,8 @@ export function codexAcpPreflightFailure(code) {
       return "Codex ACP 在预检期间发生变化。PageRoot 尚未创建本轮 Request，也没有启动变化后的命令。";
     case "CODEX_PREFLIGHT_TIMEOUT":
       return "Codex ACP 预检超时。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+    case "CODEX_PROTOCOL_UNSUPPORTED":
+      return "当前 Codex 组件的模型目录无法识别。PageRoot 尚未创建本轮 Request；请更新受验证组件或改用其他服务。";
     default:
       return "Codex ACP 预检没有完成。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
   }
@@ -681,13 +716,11 @@ export async function probeCodexAcp(command, environment = process.env) {
         status: code === "CODEX_AUTH_REQUIRED" ? 401 : 503,
       });
     }
-    const models = namespacedModels(
-      initialized.result?.agentCapabilities?.promptCapabilities?.models
-      || initialized.result?.models
-      || session.result?.models
-      || session.result?.availableModels
-      || [],
-    );
+    const catalog = sessionModelCatalog(initialized.result, session.result);
+    if (!catalog.ok) {
+      fail(catalog.code, codexAcpPreflightFailure(catalog.code), { status: 503 });
+    }
+    const models = namespacedModels(catalog.list, catalog.currentModelId);
     const publicModels = models.length > 0 ? models : Object.freeze([Object.freeze({
       id: "codex:default",
       providerModelId: "default",

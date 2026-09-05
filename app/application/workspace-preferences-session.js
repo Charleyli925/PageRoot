@@ -13,6 +13,7 @@ export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
 });
 
 const WORKSPACE_KEYS = new Set(Object.keys(DEFAULT_WORKSPACE_PREFERENCES));
+const AGENT_PROVIDER_IDS = new Set(["pageroot", "qoder", "codex"]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -43,8 +44,8 @@ export function normalizeWorkspacePreferences(value) {
     restoreTabsOnLaunch: typeof source.restoreTabsOnLaunch === "boolean"
       ? source.restoreTabsOnLaunch
       : DEFAULT_WORKSPACE_PREFERENCES.restoreTabsOnLaunch,
-    defaultAgentProviderId: source.defaultAgentProviderId === "codex"
-      ? "codex"
+    defaultAgentProviderId: AGENT_PROVIDER_IDS.has(source.defaultAgentProviderId)
+      ? source.defaultAgentProviderId
       : DEFAULT_WORKSPACE_PREFERENCES.defaultAgentProviderId,
   });
 }
@@ -73,7 +74,7 @@ export function normalizeWorkspacePatch(value) {
       continue;
     }
     if (key === "defaultAgentProviderId") {
-      if (next !== "qoder" && next !== "codex") {
+      if (!AGENT_PROVIDER_IDS.has(next)) {
         throw new TypeError("默认 Agent 无效。");
       }
       normalized[key] = next;

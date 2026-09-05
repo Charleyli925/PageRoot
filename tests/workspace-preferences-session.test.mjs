@@ -34,9 +34,10 @@ test("workspace preference session loads v2 values and writes narrow patches", a
   await session.load();
   assert.equal(session.snapshot.workspace.sidebarWidth, 300);
   assert.equal(session.snapshot.workspace.restoreTabsOnLaunch, false);
-  assert.equal(await session.update({ sidebarWidth: 340 }), true);
-  assert.deepEqual(calls, [{ workspace: { sidebarWidth: 340 } }]);
-  assert.equal(session.snapshot.workspace.sidebarWidth, 340);
+  assert.equal(session.snapshot.workspace.defaultAgentProviderId, "codex");
+  assert.equal(await session.update({ defaultAgentProviderId: "pageroot" }), true);
+  assert.deepEqual(calls, [{ workspace: { defaultAgentProviderId: "pageroot" } }]);
+  assert.equal(session.snapshot.workspace.defaultAgentProviderId, "pageroot");
   session.dispose();
 });
 
@@ -104,8 +105,9 @@ test("invalid workspace patches are rejected before they reach the port", async 
   });
   assert.throws(() => session.update({ sidebarWidth: 999 }), /范围/u);
   assert.throws(() => session.update({ unknown: true }), /未知字段/u);
+  assert.throws(() => session.update({ defaultAgentProviderId: "gemini" }), /默认 Agent/u);
   assert.equal(writes, 0);
-  assert.equal(await session.update({ restoreTabsOnLaunch: false }), true);
+  assert.equal(await session.update({ defaultAgentProviderId: "pageroot" }), true);
   assert.equal(writes, 1);
   session.dispose();
 });

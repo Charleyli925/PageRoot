@@ -638,7 +638,9 @@ function validWorkspacePreferencePatch(value) {
       return typeof next === "boolean";
     }
     if (key === "motion") return next === "system" || next === "reduced";
-    if (key === "defaultAgentProviderId") return next === "qoder" || next === "codex";
+    if (key === "defaultAgentProviderId") {
+      return next === "pageroot" || next === "qoder" || next === "codex";
+    }
     if (key === "sidebarWidth") {
       return typeof next === "number" && Number.isFinite(next) && next >= 200 && next <= 420;
     }
