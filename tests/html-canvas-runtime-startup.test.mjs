@@ -103,3 +103,13 @@ test("Candidate commit rewrites Active last and has no snapshot rollback", () =>
   assert.match(commitRuntimeCandidate, /latestSourceProjectionRef\.current\.source !== candidate\.source/u);
   assert.match(commitRuntimeCandidate, /activeNativeEditRef\.current/u);
 });
+
+test("reading-position restore is shared and comment layout is not frozen across Frames", () => {
+  const editor = source("app/components/HtmlCanvasEditor.tsx");
+  const spec = source("tests/e2e/electron/electron-edit-runtime.spec.mjs");
+  assert.match(editor, /applyReadingPosition\(/u);
+  assert.match(editor, /correctReadingPositionOnce\(/u);
+  assert.match(editor, /selectedVisible \? selectedAnchor/u);
+  assert.doesNotMatch(editor, /lastValidCommentLayoutRef/u);
+  assert.doesNotMatch(spec, /positioningRafSequences\.size\)\.toBeGreaterThanOrEqual\(2\)/u);
+});

@@ -7,8 +7,10 @@ import {
   frameDocumentMatchesExpected,
   runtimeAnchorScrollTop,
   runtimePositionWithinTolerance,
+  runtimeRectIntersectsClip,
   RUNTIME_HANDOFF_TOLERANCE_PX,
   sameRuntimeGrant,
+  outerScrollMetricsReady,
 } from "../app/components/html-canvas-frame.js";
 
 function grant(overrides = {}) {
@@ -64,4 +66,24 @@ test("runtime handoff uses the eight-pixel presentation-anchor contract", () => 
   assert.equal(RUNTIME_HANDOFF_TOLERANCE_PX, 8);
   assert.equal(runtimePositionWithinTolerance(480, 472.1), true);
   assert.equal(runtimePositionWithinTolerance(480, 471.9), false);
+});
+
+test("runtime rect intersection treats only currently visible elements as reading anchors", () => {
+  assert.equal(
+    runtimeRectIntersectsClip({ top: 120, bottom: 180 }, { top: 0, bottom: 400 }),
+    true,
+  );
+  assert.equal(
+    runtimeRectIntersectsClip({ top: -80, bottom: -10 }, { top: 0, bottom: 400 }),
+    false,
+  );
+  assert.equal(outerScrollMetricsReady(null, 240), true);
+  assert.equal(
+    outerScrollMetricsReady({ scrollHeight: 100, clientHeight: 80 }, 240),
+    false,
+  );
+  assert.equal(
+    outerScrollMetricsReady({ scrollHeight: 500, clientHeight: 200 }, 240),
+    true,
+  );
 });
