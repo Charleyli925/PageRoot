@@ -95,4 +95,3 @@ test("credential field mapping stays on structured error codes", async () => {
   assert.equal(credentialErrorField("AGENT_ENDPOINT_REGION_MISMATCH"), "baseUrl");
   assert.equal(credentialErrorField("AGENT_PROVIDER_UNAVAILABLE"), null);
 });
-
