@@ -1948,14 +1948,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     candidate.registrationCleanup();
     if (candidate.runtimeFrame) completeRuntimeAttempt(candidate.runtimeFrame, outcome);
     else runtimeFrameCoordinatorRef.current!.settle(candidate.attempt, outcome);
-    pendingSelectionRef.current = transfer
-      ? transfer.pendingSelection
-      : candidate.previousPendingSelection;
-    const restoredToolbarVisible = transfer?.pendingToolbarVisible ?? (
-      candidate.previousPendingToolbarVisible
-    );
-    pendingToolbarVisibleRef.current = restoredToolbarVisible;
-    setToolbarVisible(restoredToolbarVisible);
+    if (activeNativeEditRef.current) {
+      // Native Edit won the wait window. Keep the live toolbar/selection;
+      // restoring the Candidate's pre-edit chrome would hide the session.
+      pendingSelectionRef.current = selectedSourceSelectionRef.current;
+      pendingToolbarVisibleRef.current = true;
+    } else {
+      pendingSelectionRef.current = transfer
+        ? transfer.pendingSelection
+        : candidate.previousPendingSelection;
+      const restoredToolbarVisible = transfer?.pendingToolbarVisible ?? (
+        candidate.previousPendingToolbarVisible
+      );
+      pendingToolbarVisibleRef.current = restoredToolbarVisible;
+      setToolbarVisible(restoredToolbarVisible);
+    }
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
     runtimePromotionRef.current = null;
