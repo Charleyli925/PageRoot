@@ -141,7 +141,7 @@ export class AgentCatalogState {
   connectWithApiKey(
     selection: AgentSelection,
     apiKey: string,
-    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>,
   ): Promise<unknown>;
   disconnectApiKey(selection?: AgentSelection | null): Promise<unknown>;
   freezeSelected(): AgentSelection | null;

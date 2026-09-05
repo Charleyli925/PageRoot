@@ -380,7 +380,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     await pagerootCard.getByTestId("settings-agent-vendor").selectOption("openai");
     await pagerootCard.getByLabel("API Token").fill("sk-e2e-invalid-replacement");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
-    await expect(pagerootCard.getByText(/Token 无效|Token 没有接通/u))
+    await expect(pagerootCard.getByText(/Token 无效|API Key 无效|Token 没有接通/u))
       .toBeVisible({ timeout: 20_000 });
     await expect(pagerootCard.getByText("源页 Agent · 已连接", { exact: true })).toBeVisible();
     await expect(pagerootCard.getByTestId("settings-agent-current-connection"))
@@ -559,7 +559,7 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
     await pagerootCard.getByLabel("API Token").fill("sk-e2e-invalid");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
-    await expect(pagerootCard.getByText(/Token 无效|Token 没有接通/u))
+    await expect(pagerootCard.getByText(/Token 无效|API Key 无效|Token 没有接通/u))
       .toBeVisible({ timeout: 20_000 });
     await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true })).toBeVisible();
     await launched.page.getByRole("button", { name: "返回工作台" }).click();

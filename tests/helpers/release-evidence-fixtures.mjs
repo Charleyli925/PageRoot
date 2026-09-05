@@ -56,6 +56,7 @@ export const APP_SOURCE_FILES = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
+  "desktop/agent-session-credential-store.mjs",
   "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
@@ -476,6 +477,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/agent-vendor-key-url.mjs",
+      "export const AGENT_VENDOR_KEY_VENDOR_IDS = Object.freeze([]);\nexport const publicAgentVendorKeyUrl = () => null;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/openai-compatible-vendors.mjs",
       "export const PAGEROOT_PROVIDER_ID = 'pageroot';\n",
     ),
@@ -581,6 +587,7 @@ export async function createSyntheticAppBundle(t, {
       "conversation.mjs",
       "agent-delivery.mjs",
       "agent-access-operation.mjs",
+      "agent-vendor-key-url.mjs",
       "openai-compatible-vendors.mjs",
       "supported-agent-models.mjs",
       "agent-feature-gates.mjs",

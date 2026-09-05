@@ -44,6 +44,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | Close and drain | unique `DrainCoordinator`; tab layout is best-effort metadata | `ProjectWorkflow` close op and bounded Electron handshake | `app/application/project-workflow.js`, `desktop/close-recovery.mjs` |
 | Packaging and release | exact Git Tree | release workflows | `docs/RELEASING.md` |
 | Conversation handoff | `ConversationRepository` / `ConversationSession` | `ConversationWorkflow` | `app/workbench/AiConversationSidebar.tsx` |
+| Agent session Token | Coordinator owns the live session Token in process memory; Main `desktop/agent-session-credential-store.mjs` owns optional `safeStorage` ciphertext after an explicit remember | Catalog/Workbench persist or clear only through narrow IPC; never plaintext, logs, GET responses or `ui-preferences.json` | `desktop/agent-session-credential-store.mjs`, `shared/agent-vendor-key-url.mjs` |
 
 Project identity, hydration, switch, rename and managed-source handoff stay
 with `ProjectSession` + `ProjectWorkflow`. Open/switch/close now have
@@ -117,6 +118,7 @@ do not split one state owner across hooks only to reduce line count.
 | Save / autosave / conflict | this map, `DocumentWorkflow`, `DocumentSession`, P1-B CAS in `ProjectFileRepository` |
 | Open / switch / tabs / close | this map, `WorkbenchNavigationWorkflow`, `ProjectWorkflow`, `project/*.js` plans, `INTERACTION_FLOW.md` sections 2, 3, 4 and 12 |
 | AI submit / cancel / review | this map, `RunWorkflow`, `VersionWorkflow`, `CHANGE_REQUEST_PROTOCOL.md` |
+| Agent connection, API Key or login | this map, `STATE_OWNERSHIP.md` Agent rows, `SECURITY_MODEL.md` credentials, `agent-provider-catalog.js`, `agent-runtime-coordinator.mjs` |
 | Cross-owner or persistence | `STATE_OWNERSHIP.md` and `ARCHITECTURE_CONTRACT.md` |
 
 ## Architecture gate

@@ -378,7 +378,7 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   });
   const result = await verifySyntheticAppBundle(fixture);
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 43);
+  assert.equal(result.asarFileCount, 44);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.deepEqual(result.applicationUpdate, {

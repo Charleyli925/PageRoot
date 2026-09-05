@@ -177,6 +177,7 @@ export class AgentRuntimeCoordinator {
   #externalRedeemTicket = null;
   #sessionCredentials = new Map();
   #sessionCredentialGeneration = new Map();
+  #pendingConfigurationGeneration = new Map();
 
   constructor({
     resolveTask,
@@ -355,74 +356,104 @@ export class AgentRuntimeCoordinator {
     }
     const generation = (this.#sessionCredentialGeneration.get(id) || 0) + 1;
     this.#sessionCredentialGeneration.set(id, generation);
-    if (currentCredential) {
-      // Preserve the last usable Token/vendor while rebasing its generation.
-      // This invalidates every already-issued configuration snapshot even when
-      // the candidate validation below fails.
-      this.#sessionCredentials.set(id, Object.freeze({
-        ...currentCredential,
+    this.#pendingConfigurationGeneration.set(id, generation);
+    try {
+      if (currentCredential) {
+        // Preserve the last usable Token/vendor while rebasing its generation.
+        // This invalidates every already-issued configuration snapshot even when
+        // the candidate validation below fails.
+        this.#sessionCredentials.set(id, Object.freeze({
+          ...currentCredential,
+          credentialGeneration: generation,
+        }));
+      }
+      for (const [ticketId, ticket] of this.#tickets) {
+        if (ticket.providerId === id) this.#tickets.delete(ticketId);
+      }
+      const nextCredential = Object.freeze({
+        apiKey: key,
+        vendorId: vendor.id,
+        baseUrl: vendor.baseUrl,
         credentialGeneration: generation,
-      }));
-    }
-    for (const [ticketId, ticket] of this.#tickets) {
-      if (ticket.providerId === id) this.#tickets.delete(ticketId);
-    }
-    const nextCredential = Object.freeze({
-      apiKey: key,
-      vendorId: vendor.id,
-      baseUrl: vendor.baseUrl,
-      credentialGeneration: generation,
-    });
-    const requestedSelection = canonicalSelection(candidate.selection || {
-      providerId: PAGEROOT_PROVIDER_ID,
-      runtimeId: "http",
-      requestedModelId: null,
-      resolvedModelId: null,
-      reasoning: { requested: null, applied: null, resolution: "provider-default" },
-    }, TRUSTED_LOCAL_AGENT_POLICY_VERSION);
-    if (requestedSelection.providerId !== id || requestedSelection.runtimeId !== "http") {
-      failAgentRuntime("AGENT_SELECTION_UNSUPPORTED", "Token 与当前 Agent 选择不匹配。", { status: 409 });
-    }
-    const candidateEnvironment = Object.freeze({
-      ...this.#environment,
-      ...sessionCredentialEnvironment({
-        ...nextCredential,
-        baseUrl: httpAgentLaunchBaseUrl(this.#environment, nextCredential.baseUrl),
-      }),
-    });
-    // Validate against a candidate environment before replacing the current
-    // in-memory credential. A failed Token/vendor switch leaves the old usable
-    // connection intact; its old one-use tickets stay invalidated and require
-    // a fresh preflight before the next Request.
-    const prepared = await this.#providerRegistry.preflightForSelection(
-      requestedSelection,
-      "execution",
-      { environment: candidateEnvironment },
-    );
-    this.#assertAcceptingStarts();
-    if (this.#sessionCredentialGeneration.get(id) !== generation) {
-      failAgentRuntime(
-        "AGENT_SESSION_CREDENTIAL_STALE",
-        "更新的连接操作已取代本次结果。",
-        { status: 409 },
+      });
+      const requestedSelection = canonicalSelection(candidate.selection || {
+        providerId: PAGEROOT_PROVIDER_ID,
+        runtimeId: "http",
+        requestedModelId: null,
+        resolvedModelId: null,
+        reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      }, TRUSTED_LOCAL_AGENT_POLICY_VERSION);
+      if (requestedSelection.providerId !== id || requestedSelection.runtimeId !== "http") {
+        failAgentRuntime("AGENT_SELECTION_UNSUPPORTED", "Token 与当前 Agent 选择不匹配。", { status: 409 });
+      }
+      const candidateEnvironment = Object.freeze({
+        ...this.#environment,
+        ...sessionCredentialEnvironment({
+          ...nextCredential,
+          baseUrl: httpAgentLaunchBaseUrl(this.#environment, nextCredential.baseUrl),
+        }),
+      });
+      // Validate against a candidate environment before replacing the current
+      // in-memory credential. A failed Token/vendor switch leaves the old usable
+      // connection intact; its old one-use tickets stay invalidated and require
+      // a fresh preflight before the next Request.
+      const prepared = await this.#providerRegistry.preflightForSelection(
+        requestedSelection,
+        "execution",
+        { environment: candidateEnvironment },
       );
+      this.#assertAcceptingStarts();
+      if (this.#pendingConfigurationGeneration.get(id) !== generation
+        || this.#sessionCredentialGeneration.get(id) !== generation) {
+        failAgentRuntime(
+          "AGENT_SESSION_CREDENTIAL_STALE",
+          "更新的连接操作已取代本次结果。",
+          { status: 409 },
+        );
+      }
+      this.#sessionCredentials.set(id, nextCredential);
+      this.#pendingConfigurationGeneration.delete(id);
+      for (const [ticketId, ticket] of this.#tickets) {
+        if (ticket.providerId === id) this.#tickets.delete(ticketId);
+      }
+      return Object.freeze({
+        ok: true,
+        status: "ready",
+        providerId: id,
+        vendorId: vendor.id,
+        vendorDisplayName: vendor.displayName,
+        baseUrl: vendor.baseUrl,
+        configured: true,
+        modelCount: prepared.evidence.modelCount,
+        models: prepared.evidence.models ?? [],
+        selection: prepared.selection,
+        configuration: publicAgentConfigurationSnapshot(prepared.configuration),
+      });
+    } catch (cause) {
+      if (this.#pendingConfigurationGeneration.get(id) === generation) {
+        this.#pendingConfigurationGeneration.delete(id);
+      }
+      throw cause;
     }
-    this.#sessionCredentials.set(id, nextCredential);
-    for (const [ticketId, ticket] of this.#tickets) {
-      if (ticket.providerId === id) this.#tickets.delete(ticketId);
+  }
+
+  cancelAgentConfiguration(providerId, generation) {
+    const id = cleanAgentText(providerId, 32);
+    const expected = Number(generation);
+    if (!Number.isSafeInteger(expected) || expected < 1
+      || this.#pendingConfigurationGeneration.get(id) !== expected) {
+      return Object.freeze({
+        ok: true,
+        cancelled: false,
+        configured: this.#sessionCredentials.has(id),
+      });
     }
+    this.#pendingConfigurationGeneration.delete(id);
+    this.#sessionCredentialGeneration.set(id, expected + 1);
     return Object.freeze({
       ok: true,
-      status: "ready",
-      providerId: id,
-      vendorId: vendor.id,
-      vendorDisplayName: vendor.displayName,
-      baseUrl: vendor.baseUrl,
-      configured: true,
-      modelCount: prepared.evidence.modelCount,
-      models: prepared.evidence.models ?? [],
-      selection: prepared.selection,
-      configuration: publicAgentConfigurationSnapshot(prepared.configuration),
+      cancelled: true,
+      configured: this.#sessionCredentials.has(id),
     });
   }
 
@@ -1074,6 +1105,7 @@ export class AgentRuntimeCoordinator {
     this.#tickets.clear();
     this.#sessionCredentials.clear();
     this.#sessionCredentialGeneration.clear();
+    this.#pendingConfigurationGeneration.clear();
     this.#shutdownPromise = (async () => {
       const startTimeout = timeoutAfter(
         this.#cancelTimeoutMs,

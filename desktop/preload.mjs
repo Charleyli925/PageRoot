@@ -55,6 +55,10 @@ const appChannels = Object.freeze({
 });
 const integrationChannels = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
+  openVendorApiKey: "html-agent-access:open-vendor-key",
+  persistSessionCredential: "html-agent-access:persist-credential",
+  clearSessionCredential: "html-agent-access:clear-credential",
+  sessionCredentialStatus: "html-agent-access:credential-status",
 });
 const updateChannels = Object.freeze({
   getStatus: "html-updates:get-status",
@@ -257,6 +261,26 @@ const integrationsApi = Object.freeze({
     integrationChannels.qoderHandoff,
     payload,
   ),
+  openVendorApiKeyPage: (vendorId) => {
+    const id = String(vendorId || "").trim();
+    if (!["deepseek", "zhipu", "dashscope", "openai"].includes(id)) {
+      throw projectOperationError({
+        code: "AGENT_VENDOR_KEY_UNSUPPORTED",
+        message: "当前服务没有经过校验的 API Key 页面。",
+      });
+    }
+    return invokeProject(integrationChannels.openVendorApiKey, { vendorId: id });
+  },
+  persistSessionCredential: (payload) => invokeProject(
+    integrationChannels.persistSessionCredential,
+    {
+      vendorId: String(payload?.vendorId || "").trim(),
+      baseUrl: String(payload?.baseUrl || "").trim(),
+      apiKey: String(payload?.apiKey || ""),
+    },
+  ),
+  clearSessionCredential: () => invokeProject(integrationChannels.clearSessionCredential),
+  sessionCredentialStatus: () => invokeProject(integrationChannels.sessionCredentialStatus),
 });
 const updateStatusListeners = new Map();
 const updatesApi = Object.freeze({

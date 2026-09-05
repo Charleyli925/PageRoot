@@ -32,7 +32,7 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers with
   assert.notEqual(CODEX_AGENT_PROVIDER.presentation.supportsReasoning, true);
   assert.deepEqual(
     PAGEROOT_AGENT_PROVIDER.presentation.vendors.map(({ id }) => id),
-    ["custom"],
+    ["deepseek", "custom"],
   );
   assert.equal(
     CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,
@@ -847,6 +847,8 @@ test("Token replacement publishes atomically, clears old model state, and can di
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
   assert.equal(catalog.provider().diagnostic.readiness, "ready");
   assert.equal(catalog.provider().diagnostic.facts.service.source, "preflight");
+  assert.equal(catalog.provider().activeOperation?.kind, "config-validate");
+  assert.equal(catalog.provider().activeOperation?.state, "succeeded");
   failNext = true;
   await assert.rejects(
     catalog.connectWithApiKey(catalog.freezeSelected(), "sk-bad", { vendorId: "openai" }),

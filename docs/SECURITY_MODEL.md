@@ -345,9 +345,13 @@ The 源页 Agent may be connected with a vendor API Token (DeepSeek, 智谱,
 keeps the secret in coordinator process memory and injects only
 `PAGEROOT_API_KEY` / `PAGEROOT_API_VENDOR` / `PAGEROOT_API_BASE_URL` into this
 provider's preflight and HTTP launch. Empty `apiKey` clears it. The secret is
-never written to disk, `ui-preferences.json`, logs, GET responses or renderer
-snapshots. Shutdown discards it. Anthropic is not registered. Codex and Qoder
-do not accept a session Token.
+never written to `ui-preferences.json`, logs, GET responses or renderer
+snapshots. If the user explicitly checks “在此 Mac 上记住 API Key”, Main encrypts
+it with Electron `safeStorage` into `agent-session-credential.v1.json` and never
+returns the plaintext. Encryption unavailable refuses to persist and does not
+fall back to plaintext. Shutdown discards the session copy; a remembered
+ciphertext may be restored into Coordinator memory after Bridge is ready.
+Anthropic is not registered. Codex and Qoder do not accept a session Token.
 
 This is an explicit trusted-local-Agent policy, not hostile-process isolation.
 The Qoder subprocess still runs with the signed-in local user's OS identity and
@@ -365,7 +369,9 @@ a release gate (ADR 0056).
 Installation and login guidance is copied only after the user's explicit
 button action and must pass the same clipboard write/readback check as the
 normal portable handoff. A local availability failure never writes the
-clipboard. Neither the delivery card nor About receives or displays command
+clipboard. “获取 API Key” opens only the vendor HTTPS page returned by
+`publicAgentVendorKeyUrl()` through Main `shell.openExternal`; renderer sends
+a vendor id, never a URL. Neither the delivery card nor About receives or displays command
 paths, npm prefixes, versions or model counts; stable error classes remain in
 local diagnostics.
 
