@@ -280,11 +280,15 @@ name fails during source review rather than after formal packaging begins.
 `npm run ci:health` is a local/manual summary of recent `ci.yml` conclusions and retry-recovered jobs. It is not a scheduled workflow and not a merge gate. Reports are written under `output/ci-health/`.
 
 The native HTTP Agent has a credential-backed protocol smoke that is intentionally
-outside the synthetic test suite. Before a release candidate that changes vendor
-adapters, run `npm run smoke:agent-vendors:real` with the four
+outside the synthetic test suite. Product visibility (`releaseChannel`) is not
+acceptance. CI Electron AI, fake ACP servers and local HTTP fixtures stay
+`ci-synthetic` in `shared/agent-protocol-acceptance.mjs` and must be listed as
+未验收 on a Candidate. Before claiming real-protocol acceptance, run
+`npm run smoke:agent-vendors:real` with the four
 `PAGEROOT_SMOKE_<VENDOR>_API_KEY` secrets (and optional matching `_MODEL`
 overrides). It calls each real `/models` and `/chat/completions` endpoint, never
-prints a Token, and must pass for DeepSeek, 智谱, 阿里通义, and OpenAI.
+prints a Token, and must pass for DeepSeek, 智谱, 阿里通义, and OpenAI. Qoder and
+Codex need a clean-machine install, official login, first round and review.
 
 ## Design constraints
 
