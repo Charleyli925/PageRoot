@@ -401,6 +401,7 @@ test("Draft runs HtmlCanvasEditor canaries while edit stays Node-only", () => {
   });
   assert.deepEqual(suiteIds(edit), ["typecheck", "node-targeted"]);
   assert.ok(edit.selectedNodeTests.includes("tests/seeded-fault-oracles.test.mjs"));
+  assert.ok(edit.selectedNodeTests.includes("tests/runtime-continuity-probe.test.mjs"));
   assert.ok(edit.selectedNodeTests.length <= GATE_WIDTH_LIMITS.leafFileNodeTests);
   assert.deepEqual(edit.matchedOwners, ["runtime-continuity"]);
 

@@ -1939,26 +1939,20 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await expect.poll(() => (
       readFileSync(workingCopyPath, "utf8").split('data-native-case="runtime-latest-wins"').length - 1
     )).toBeGreaterThanOrEqual(3);
-    await page.evaluate(() => {
-      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
-      const activeFrame = editorElement?.querySelector('iframe:not([data-frame-role])');
-      const editTarget = activeFrame?.contentDocument?.querySelector(
-        '[data-native-case="runtime-latest-wins-text"]',
-      );
-      if (!(activeFrame instanceof HTMLIFrameElement)
-        || !(editTarget instanceof activeFrame.contentWindow.HTMLElement)) {
-        throw new Error("Latest-wins active heading is missing.");
-      }
-      const rect = editTarget.getBoundingClientRect();
-      const eventInit = {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + Math.max(1, rect.width / 2),
-        clientY: rect.top + Math.max(1, rect.height / 2),
-      };
-      editTarget.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
-      editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
-    });
+    await expect.poll(() => editor.locator('iframe[data-frame-role="runtime-candidate"]').count())
+      .toBe(0);
+    await expect.poll(async () => (
+      await editor.getAttribute("data-runtime-degradation") || "none"
+    )).toBe("none");
+    // Duplicate replacement can still be settling the Active frame. Re-resolve
+    // and dblclick until Native Edit actually starts, instead of firing one
+    // synthetic MouseEvent into a frame that is about to be replaced.
+    await expect(async () => {
+      frame = await currentActiveRuntimeFrame();
+      const target = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+      await target.dblclick();
+      await expect(target).toHaveAttribute("contenteditable", "true");
+    }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
     frame = await currentActiveRuntimeFrame();
     let heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await expect(heading).toHaveAttribute("contenteditable", "true");
