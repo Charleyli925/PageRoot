@@ -130,9 +130,6 @@ export type CandidateAssessment = {
   continuity: {
     status: "related" | "uncertain";
   };
-  changedStableElementIds?: string[];
-  requestedTargetElementIds?: string[];
-  outsideRequestedTargetElementIds?: string[];
   changedElementCount?: number;
   outsideTargetCount?: number;
   changedElementIdSample?: string[];

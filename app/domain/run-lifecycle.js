@@ -486,17 +486,41 @@ export function candidateAssessmentFromRecord(value) {
       status: continuity.status === "related" ? "related" : "uncertain",
     },
   };
-  const boundedImpactFields = [
-    "changedElementCount",
-    "requestedTargetCount",
-    "outsideTargetCount",
-    "changedElementIdSample",
-    "outsideTargetElementIdSample",
-    "truncated",
-  ];
-  const hasBoundedImpact = boundedImpactFields.every(
+  const impact = canonicalImpactFromRecord(value);
+  if (impact) Object.assign(assessment, impact);
+  return assessment;
+}
+
+const IMPACT_SAMPLE_LIMIT = 100;
+const BOUNDED_IMPACT_FIELDS = [
+  "changedElementCount",
+  "requestedTargetCount",
+  "outsideTargetCount",
+  "changedElementIdSample",
+  "outsideTargetElementIdSample",
+  "truncated",
+];
+const LEGACY_IMPACT_ARRAY_FIELDS = [
+  "changedStableElementIds",
+  "requestedTargetElementIds",
+  "outsideRequestedTargetElementIds",
+];
+
+function validImpactIdList(ids, { bounded } = {}) {
+  return Array.isArray(ids)
+    && (!bounded || ids.length <= IMPACT_SAMPLE_LIMIT)
+    && ids.every((id) => isValidPagerootElementId(id))
+    && new Set(ids).size === ids.length;
+}
+
+function canonicalImpactFromRecord(value) {
+  const hasBoundedImpact = BOUNDED_IMPACT_FIELDS.every(
     (field) => Object.hasOwn(value, field),
   );
+  const hasLegacyImpact = LEGACY_IMPACT_ARRAY_FIELDS.every(
+    (field) => Object.hasOwn(value, field),
+  );
+  if (hasBoundedImpact && hasLegacyImpact) return null;
   if (hasBoundedImpact) {
     const changed = Array.isArray(value.changedElementIdSample)
       ? value.changedElementIdSample.map(String)
@@ -504,11 +528,6 @@ export function candidateAssessmentFromRecord(value) {
     const outside = Array.isArray(value.outsideTargetElementIdSample)
       ? value.outsideTargetElementIdSample.map(String)
       : [];
-    const validSample = (ids) => (
-      ids.length <= 100
-      && ids.every((id) => isValidPagerootElementId(id))
-      && new Set(ids).size === ids.length
-    );
     if (
       Number.isSafeInteger(value.changedElementCount)
       && value.changedElementCount >= 0
@@ -522,18 +541,51 @@ export function candidateAssessmentFromRecord(value) {
         value.changedElementCount > changed.length
         || value.outsideTargetCount > outside.length
       )
-      && validSample(changed)
-      && validSample(outside)
+      && validImpactIdList(changed, { bounded: true })
+      && validImpactIdList(outside, { bounded: true })
     ) {
-      assessment.changedElementCount = value.changedElementCount;
-      assessment.requestedTargetCount = value.requestedTargetCount;
-      assessment.outsideTargetCount = value.outsideTargetCount;
-      assessment.changedElementIdSample = changed;
-      assessment.outsideTargetElementIdSample = outside;
-      assessment.truncated = value.truncated;
+      return {
+        changedElementCount: value.changedElementCount,
+        requestedTargetCount: value.requestedTargetCount,
+        outsideTargetCount: value.outsideTargetCount,
+        changedElementIdSample: changed,
+        outsideTargetElementIdSample: outside,
+        truncated: value.truncated,
+      };
     }
+    return null;
   }
-  return assessment;
+  if (!hasLegacyImpact) return null;
+  const changed = Array.isArray(value.changedStableElementIds)
+    ? value.changedStableElementIds.map(String)
+    : [];
+  const requested = Array.isArray(value.requestedTargetElementIds)
+    ? value.requestedTargetElementIds.map(String)
+    : [];
+  const outside = Array.isArray(value.outsideRequestedTargetElementIds)
+    ? value.outsideRequestedTargetElementIds.map(String)
+    : [];
+  const requestedTargetCount = Number.isSafeInteger(value.requestedTargetCount)
+    && value.requestedTargetCount >= 0
+    ? value.requestedTargetCount
+    : requested.length;
+  if (
+    !validImpactIdList(changed)
+    || !validImpactIdList(requested)
+    || !validImpactIdList(outside)
+    || outside.some((id) => !changed.includes(id))
+  ) {
+    return null;
+  }
+  return {
+    changedElementCount: changed.length,
+    requestedTargetCount,
+    outsideTargetCount: outside.length,
+    changedElementIdSample: changed.slice(0, IMPACT_SAMPLE_LIMIT),
+    outsideTargetElementIdSample: outside.slice(0, IMPACT_SAMPLE_LIMIT),
+    truncated: changed.length > IMPACT_SAMPLE_LIMIT
+      || outside.length > IMPACT_SAMPLE_LIMIT,
+  };
 }
 
 function isRecord(value) {

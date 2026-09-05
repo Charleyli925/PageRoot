@@ -1238,7 +1238,11 @@ reassociate a project, and grants no write authority. Remove this migration
   `basedOnVersionId` / `revision`. Unknown fields fail closed.
 - Candidate records require `identityReport` and `submittedOutputSha256`.
   `candidate-assessment.json` accepts only the current bounded impact shape.
-  Retired executable-surface fields and full-array impact facts fail closed.
+  Retired executable-surface fields and full-array impact facts fail closed
+  there. Historical Version records may still store the retired full-array
+  impact shape; `candidateAssessmentFromRecord` projects those arrays into
+  bounded counts and samples in memory and does not rewrite the file. Review
+  display consumes only that bounded result.
   Sealed HTML Hash verification still runs for current assessments.
 
 The full producer, fixture, persistence and deletion-evidence register is
