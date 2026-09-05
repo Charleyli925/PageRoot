@@ -883,11 +883,22 @@ export async function assertReviewControlDefaults(page, beforeReviewFrame) {
 }
 
 export async function assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame) {
-  await expect.poll(async () => Promise.all(
-    [beforeReviewFrame, afterReviewFrame].map(async (frame) => (
-      (await frame.locator("[data-pageroot-review-overlay-box]").count()) > 0
-    )),
-  ).then((states) => states.every(Boolean))).toBe(true);
+  // Region-bar focus can still be inside a projection transition. Overlay boxes
+  // are the user-visible change outline; wait for the transition to finish, then
+  // require an outline on both sides instead of sampling a transient empty layer.
+  for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+    await expect.poll(async () => frame.locator("html").evaluate((html) => (
+      !html.hasAttribute("data-pageroot-review-transitioning")
+    )), { timeout: 30_000 }).toBe(true);
+  }
+  await expect.poll(
+    async () => beforeReviewFrame.locator("[data-pageroot-review-overlay-box]").count(),
+    { timeout: 30_000 },
+  ).toBeGreaterThan(0);
+  await expect.poll(
+    async () => afterReviewFrame.locator("[data-pageroot-review-overlay-box]").count(),
+    { timeout: 30_000 },
+  ).toBeGreaterThan(0);
 }
 
 export async function assertProjectionGeometryCase(frame, geometryCase) {
@@ -905,17 +916,29 @@ export async function assertProjectionGeometryCase(frame, geometryCase) {
       ? `focus-${displayGroupId}`
       : `focus-${changeId}-${displayGroupId}`;
   });
-  await frame.locator(
+  const regionBar = frame.locator(
     `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${focusGroupId}"]`,
-  ).first().click();
+  ).first();
   const frames = frame.locator(
     `[data-pageroot-review-overlay-box][data-tone="${geometryCase.changeType}"][data-pageroot-review-semantic-owner="${owner}"]`,
   );
   const masks = frame.locator(
     `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
   );
-  await expect(frames).toHaveCount(geometryCase.expectedFrameCount);
-  await expect(masks).toHaveCount(geometryCase.expectedMaskCount);
+  // Region-bar focus can start a projection transition. Re-resolve after the
+  // frame is idle so a click during the previous transition is not treated as
+  // a missing outline.
+  await expect(async () => {
+    await expect.poll(async () => frame.locator("html").evaluate((html) => (
+      html.hasAttribute("data-pageroot-review-transitioning") ? "transitioning" : "idle"
+    )), { timeout: 15_000 }).toBe("idle");
+    await regionBar.click({ timeout: 8_000 });
+    await expect.poll(async () => frame.locator("html").evaluate((html) => (
+      html.hasAttribute("data-pageroot-review-transitioning") ? "transitioning" : "idle"
+    )), { timeout: 15_000 }).toBe("idle");
+    expect(await frames.count()).toBe(geometryCase.expectedFrameCount);
+    expect(await masks.count()).toBe(geometryCase.expectedMaskCount);
+  }).toPass({ timeout: 45_000, intervals: [250, 500, 1_000] });
   await expect.poll(() => frames.evaluate((overlay, { ownerSelector, tolerance }) => {
     const owner = document.querySelector(ownerSelector);
     if (!owner) return false;

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   annotateGatePlan,
   assertFullyAutomatedPlan,
+  assertGateWidthPolicy,
   compactGatePlan,
   GATE_WIDTH_LIMITS,
   omitMissingNodeTests,
@@ -392,22 +393,42 @@ test("unmapped code still falls back to the core Node group", () => {
   assert.deepEqual(plan.selectedNodeTests, []);
 });
 
-test("a file with two direct owners safely unions their coverage", () => {
-  const plan = selectGatePlan({
+test("Draft runs HtmlCanvasEditor canaries while edit stays Node-only", () => {
+  const edit = selectGatePlan({
     map,
-    lane: "task",
+    lane: "edit",
     changedFiles: ["app/components/HtmlCanvasEditor.tsx"],
   });
-  assert.ok(plan.selectedNodeTests.includes("tests/html-preview-sandbox.test.mjs"));
-  assert.ok(plan.selectedNodeTests.includes("tests/edit-runtime-contract.test.mjs"));
-  assert.deepEqual(suiteIds(plan), [
+  assert.deepEqual(suiteIds(edit), ["typecheck", "node-targeted"]);
+  assert.ok(edit.selectedNodeTests.includes("tests/seeded-fault-oracles.test.mjs"));
+  assert.ok(edit.selectedNodeTests.length <= GATE_WIDTH_LIMITS.leafFileNodeTests);
+  assert.deepEqual(edit.matchedOwners, ["runtime-continuity"]);
+
+  const draft = selectGatePlan({
+    map,
+    lane: "draft",
+    changedFiles: ["app/components/HtmlCanvasEditor.tsx"],
+  });
+  assert.deepEqual(suiteIds(draft), [
     "typecheck",
-    "lint",
     "node-targeted",
     "build-web",
     "browser-editing-smoke",
     "build-desktop",
     "electron-editing-smoke",
+  ]);
+});
+
+test("a changed Playwright spec selects itself on Draft", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "draft",
+    changedFiles: ["tests/e2e/browser/native-dom-boundaries.spec.mjs"],
+  });
+  assert.ok(suiteIds(plan).includes("browser-changed-specs"));
+  assert.ok(suiteIds(plan).includes("browser-editing-smoke"));
+  assert.deepEqual(plan.selectedChangedSpecs["browser-changed-specs"], [
+    "tests/e2e/browser/native-dom-boundaries.spec.mjs",
   ]);
 });
 
@@ -743,7 +764,7 @@ test("notification, comment, and presentation Browser owners select their smoke 
     const plan = selectGatePlan({ map, lane: "task", changedFiles: [file] });
     assert.deepEqual(
       suiteIds(plan),
-      ["typecheck", "lint", "build-web", canary],
+      ["typecheck", "lint", "build-web", "browser-changed-specs", canary],
       file,
     );
     assert.deepEqual(plan.selectedNodeTests, [], file);
@@ -899,9 +920,29 @@ test("gate plans expose owner provenance and width warnings without failing", ()
   assert.equal(plan.estimatedFanout.aiTests, 3);
   assert.ok(plan.selectedNodeTests.length > GATE_WIDTH_LIMITS.leafFileNodeTests);
   assert.ok(plan.warnings.some((warning) => warning.code === "leaf-file-node-fanout"));
+  assert.equal(plan.warnings.find((warning) => warning.code === "leaf-file-node-fanout").blocking, false);
   const compact = compactGatePlan(plan);
   assert.deepEqual(compact.changedFiles, ["bridge/project-file-repository.mjs"]);
   assert.ok(compact.warnings.some((warning) => warning.code === "leaf-file-node-fanout"));
+});
+
+test("expired width exceptions become hard failures", () => {
+  const raw = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["bridge/project-file-repository.mjs"],
+  });
+  const expired = annotateGatePlan(raw, {
+    map,
+    inventoryFiles: [
+      "bridge/project-file-repository.mjs",
+      "bridge/project-file-repository/path-safety.mjs",
+      "bridge/agent-bridge-service.mjs",
+    ],
+    now: new Date("2027-01-02T00:00:00.000Z"),
+  });
+  assert.ok(expired.warnings.some((warning) => warning.blocking));
+  assert.throws(() => assertGateWidthPolicy(expired), /width budget exceeded/u);
 });
 
 test("gate:plan capability-context schema v2 exposes contract-first and implementation reading sets", () => {

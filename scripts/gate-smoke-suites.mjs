@@ -73,12 +73,47 @@ export const GATE_WIDTH_LIMITS = {
   ruleProductionModules: 10,
 };
 
+export const CHANGED_SPEC_SUITES = {
+  "browser-changed-specs": {
+    runtime: "browser",
+    config: "tests/e2e/browser/playwright.config.mjs",
+  },
+  "electron-changed-specs": {
+    runtime: "electron",
+    config: "tests/e2e/electron/playwright.config.mjs",
+  },
+  "ai-changed-specs": {
+    runtime: "ai",
+    config: "tests/e2e/electron/playwright.ai-closed-loop.config.mjs",
+  },
+};
+
+export function classifyPlaywrightSpec(file) {
+  const normalized = String(file).replaceAll("\\", "/");
+  if (!normalized.endsWith(".spec.mjs")) return null;
+  if (normalized.startsWith("tests/e2e/browser/")) {
+    return { suiteId: "browser-changed-specs", file: normalized };
+  }
+  if (normalized.startsWith("tests/e2e/electron/ai-")) {
+    return { suiteId: "ai-changed-specs", file: normalized };
+  }
+  if (
+    normalized.startsWith("tests/e2e/electron/")
+    && !/(?:packaged-(?:runtime|startup)-smoke\.spec|playwright\.packaged)/u.test(normalized)
+  ) {
+    return { suiteId: "electron-changed-specs", file: normalized };
+  }
+  return null;
+}
+
 export function isRuntimeCanarySuite(suiteId) {
-  return Boolean(CAPABILITY_SMOKE_SUITES[suiteId]);
+  return Boolean(CAPABILITY_SMOKE_SUITES[suiteId] || CHANGED_SPEC_SUITES[suiteId]);
 }
 
 export function runtimeOfSuite(suiteId) {
-  return CAPABILITY_SMOKE_SUITES[suiteId]?.runtime || null;
+  return CAPABILITY_SMOKE_SUITES[suiteId]?.runtime
+    || CHANGED_SPEC_SUITES[suiteId]?.runtime
+    || null;
 }
 
 export function tagOfSuite(suiteId) {

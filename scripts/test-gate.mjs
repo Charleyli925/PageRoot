@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { readFile, mkdir, stat, writeFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   annotateGatePlan,
   assertFullyAutomatedPlan,
+  assertGateWidthPolicy,
   compactGatePlan,
+  draftCiOutputs,
+  filterPlanByRuntimes,
   normalizeRepositoryPath,
   omitMissingNodeTests,
   selectGatePlan,
@@ -18,7 +21,7 @@ import {
   loadCapabilityContextMap,
   selectCapabilityContext,
 } from "./capability-context.mjs";
-import { CAPABILITY_SMOKE_SUITES, countTagOccurrences } from "./gate-smoke-suites.mjs";
+import { CAPABILITY_SMOKE_SUITES, CHANGED_SPEC_SUITES, countTagOccurrences } from "./gate-smoke-suites.mjs";
 import {
   assertResumeCompatible,
   assertReusableBuildArtifacts,
@@ -83,6 +86,9 @@ export function parseArguments(argv) {
     dryRun: false,
     realHtmlPath: null,
     resume: null,
+    forLane: null,
+    runtimes: [],
+    githubOutput: null,
     contextDomains: [],
     contextFiles: [],
   };
@@ -94,14 +100,33 @@ export function parseArguments(argv) {
     else if (argument === "--arch") options.arch = argv.shift() || "";
     else if (argument === "--real-html") options.realHtmlPath = argv.shift() || null;
     else if (argument === "--resume") options.resume = argv.shift() || null;
+    else if (argument === "--for") options.forLane = argv.shift() || null;
+    else if (argument === "--runtime") {
+      options.runtimes = String(argv.shift() || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+    }
+    else if (argument === "--github-output") options.githubOutput = argv.shift() || null;
     else if (argument === "--context-domain") options.contextDomains.push(...splitCsv(argv.shift() || ""));
     else if (argument === "--context-file") options.contextFiles.push(...splitCsv(argv.shift() || ""));
     else throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!/^(?:edit|task|plan|main|release|developer-package|candidate-app|artifact)$/u.test(options.lane)) {
+  if (!/^(?:edit|task|draft|plan|main|release|developer-package|candidate-app|artifact)$/u.test(options.lane)) {
     throw new Error(
-      "Lane must be edit, task, plan, main, release, developer-package, candidate-app or artifact.",
+      "Lane must be edit, task, draft, plan, main, release, developer-package, candidate-app or artifact.",
     );
+  }
+  if (options.forLane && options.lane !== "plan") {
+    throw new Error("--for is only supported for the plan gate.");
+  }
+  if (options.forLane && !/^(?:edit|task|draft)$/u.test(options.forLane)) {
+    throw new Error("--for must be edit, task or draft.");
+  }
+  for (const runtime of options.runtimes) {
+    if (!/^(?:node|browser|electron|ai)$/u.test(runtime)) {
+      throw new Error("--runtime values must be node, browser, electron or ai.");
+    }
   }
   if (options.resume && options.lane !== "task") {
     throw new Error("--resume is only supported for the task gate.");
@@ -200,6 +225,17 @@ function commandForSuite(suiteId, context) {
     return {
       command: "npx",
       args: ["playwright", "test", "--config", smoke.config, "--grep", smoke.tag],
+    };
+  }
+  const changedSpec = CHANGED_SPEC_SUITES[suiteId];
+  if (changedSpec) {
+    const files = context.plan.selectedChangedSpecs?.[suiteId] || [];
+    if (files.length === 0) {
+      throw new Error(`Suite ${suiteId} was selected without changed Playwright spec files.`);
+    }
+    return {
+      command: "npx",
+      args: ["playwright", "test", "--config", changedSpec.config, ...files],
     };
   }
   const simple = {
@@ -436,9 +472,9 @@ async function main() {
   const map = validateImpactMap(JSON.parse(await readFile(mapPath, "utf8")));
   const files = await changedFiles(options.base);
   const planningLane = options.lane === "plan";
-  const selectionLane = planningLane ? "task" : options.lane;
+  const selectionLane = planningLane ? (options.forLane || "task") : options.lane;
   const contextQuery = options.contextDomains.length > 0 || options.contextFiles.length > 0;
-  if ((selectionLane === "edit" || selectionLane === "task") && files.length === 0 && !contextQuery) {
+  if ((selectionLane === "edit" || selectionLane === "task" || selectionLane === "draft") && files.length === 0 && !contextQuery) {
     throw new Error(
       `No changed files were found for the ${options.lane} gate. `
       + "Pass --base <git-ref> for a committed task, or use the release gate for complete coverage.",
@@ -467,7 +503,7 @@ async function main() {
     productRoot,
     lane: selectionLane,
   });
-  const plan = {
+  let plan = {
     ...annotateGatePlan(
       omitMissingNodeTests(
         assertFullyAutomatedPlan(assembled.testPlan),
@@ -480,6 +516,20 @@ async function main() {
     ),
     capabilityContext: assembled.capabilityContext,
   };
+  assertGateWidthPolicy(plan);
+  if (options.githubOutput) {
+    await appendFile(
+      options.githubOutput,
+      Object.entries(draftCiOutputs(plan)).flatMap(([key, value]) => (
+        String(value).includes("\n")
+          ? [`${key}<<EOF`, value, "EOF"]
+          : [`${key}=${value}`]
+      )).join("\n") + "\n",
+    );
+  }
+  if (options.runtimes.length > 0) {
+    plan = filterPlanByRuntimes(plan, options.runtimes);
+  }
   if (contextQuery) {
     plan.warnings = [
       ...(plan.warnings || []),

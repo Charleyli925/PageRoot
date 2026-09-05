@@ -155,6 +155,24 @@
         "build-desktop"
       ]
     },
+    "browser-changed-specs": {
+      "description": "Run the Browser Playwright spec files that changed on this branch.",
+      "prerequisites": [
+        "build-web"
+      ]
+    },
+    "electron-changed-specs": {
+      "description": "Run the Electron Playwright spec files that changed on this branch.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
+    "ai-changed-specs": {
+      "description": "Run the AI closed-loop Playwright spec files that changed on this branch.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
     "package-build": {
       "description": "Build the requested macOS candidate without rebuilding the renderer.",
       "prerequisites": [
@@ -260,11 +278,45 @@
         "ai-smoke",
         "ai-review-smoke",
         "ai-provider-smoke",
-        "ai-run-lifecycle-smoke"
+        "ai-run-lifecycle-smoke",
+        "browser-changed-specs",
+        "electron-changed-specs",
+        "ai-changed-specs"
       ],
       "alwaysForCode": [
         "typecheck",
         "lint"
+      ]
+    },
+    "draft": {
+      "description": "Draft PR canary; Node coverage plus the impacted Browser, Electron or AI runtime.",
+      "allowedSuites": [
+        "typecheck",
+        "node-targeted",
+        "node-core",
+        "node-contract",
+        "node-integration",
+        "node-package",
+        "browser-smoke",
+        "browser-editing-smoke",
+        "browser-comments-smoke",
+        "browser-review-smoke",
+        "real-html",
+        "electron-smoke",
+        "electron-editing-smoke",
+        "electron-project-lifecycle-smoke",
+        "electron-recovery-smoke",
+        "electron-agent-smoke",
+        "ai-smoke",
+        "ai-review-smoke",
+        "ai-provider-smoke",
+        "ai-run-lifecycle-smoke",
+        "browser-changed-specs",
+        "electron-changed-specs",
+        "ai-changed-specs"
+      ],
+      "alwaysForCode": [
+        "typecheck"
       ]
     },
     "main": {
@@ -317,6 +369,83 @@
       ]
     }
   },
+  "widthExceptions": [
+    {
+      "id": "source-editing-core",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing kernel/patch/identity owner; split before the exception expires."
+    },
+    {
+      "id": "project-workflow",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing project plan fanout."
+    },
+    {
+      "id": "project-runtime-state-v4-candidate-seals",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing schema seal fanout."
+    },
+    {
+      "id": "schemas",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing schema inventory fanout."
+    },
+    {
+      "id": "workspace-controller",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing workspace codec fanout."
+    },
+    {
+      "id": "project-file-lifecycle",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing repository lifecycle fanout."
+    },
+    {
+      "id": "edit-disposable-author-runtime",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing Edit runtime owner; Canvas files moved to runtime-continuity."
+    },
+    {
+      "id": "desktop-main-preload",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing desktop host fanout."
+    },
+    {
+      "id": "bridge-lifecycle",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing Bridge lifecycle fanout."
+    },
+    {
+      "id": "comment-workflow",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing comment workflow fanout."
+    },
+    {
+      "id": "workbench-tabs",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing tab shell production width."
+    },
+    {
+      "id": "project-session",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing session production width."
+    },
+    {
+      "id": "workbench-orchestration",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing workbench production width."
+    },
+    {
+      "id": "review-document-orchestrator",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing review orchestrator production width."
+    },
+    {
+      "id": "workbench-global-css",
+      "expiresOn": "2026-12-31",
+      "reason": "Pre-existing global CSS production width."
+    }
+  ],
   "rules": [
     {
       "id": "test-policy",
@@ -324,18 +453,21 @@
         "^scripts/test-(?:gate|gate-resume|node-group)(?:-core)?\\.mjs$",
         "^scripts/capability-context(?:-locate)?\\.(?:mjs|json)$",
         "^scripts/gate-smoke-suites\\.mjs$",
+        "^scripts/seeded-fault-oracles\\.mjs$",
         "^tests/e2e/smoke-tags\\.mjs$",
         "^tests/test-impact-map\\.json$",
         "^tests/test-gate-selection\\.test\\.mjs$",
         "^tests/capability-context-locate\\.test\\.mjs$",
         "^tests/fixtures/capability-context/",
-        "^tests/test-gate-resume\\.test\\.mjs$"
+        "^tests/test-gate-resume\\.test\\.mjs$",
+        "^tests/seeded-fault-oracles\\.test\\.mjs$"
       ],
       "suites": [],
       "nodeTests": [
         "tests/test-gate-selection.test.mjs",
         "tests/test-gate-resume.test.mjs",
-        "tests/capability-context-locate.test.mjs"
+        "tests/capability-context-locate.test.mjs",
+        "tests/seeded-fault-oracles.test.mjs"
       ]
     },
     {
@@ -538,7 +670,8 @@
         "^tests/document-save-plan\\.test\\.mjs$"
       ],
       "suites": [
-        "typecheck"
+        "typecheck",
+        "electron-recovery-smoke"
       ],
       "nodeTests": [
         "tests/document-workflow.test.mjs",
@@ -546,7 +679,8 @@
         "tests/document-session.test.mjs",
         "tests/source-history-session.test.mjs",
         "tests/source-history.test.mjs",
-        "tests/audit-events.test.mjs"
+        "tests/audit-events.test.mjs",
+        "tests/seeded-fault-oracles.test.mjs"
       ]
     },
     {
@@ -1023,12 +1157,13 @@
     {
       "id": "canvas-overlay-owner",
       "patterns": [
-        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|page-view|computed-style|selection-chrome(?:-contract)?))\\.(?:tsx|ts|css)$",
+        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|page-view|computed-style))\\.(?:tsx|ts|css)$",
         "^tests/(?:html-canvas-computed-style|html-canvas-selection-chrome-contract)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
-        "browser-editing-smoke"
+        "browser-editing-smoke",
+        "browser-comments-smoke"
       ],
       "nodeTests": [
         "tests/page-view-context.test.mjs",
@@ -1080,9 +1215,40 @@
       ]
     },
     {
+      "id": "runtime-continuity",
+      "patterns": [
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-presentation-scroll)\\.(?:tsx|ts|js|css|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke",
+        "electron-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/html-canvas-frame.test.mjs",
+        "tests/html-canvas-runtime-startup.test.mjs",
+        "tests/html-preview-sandbox.test.mjs",
+        "tests/seeded-fault-oracles.test.mjs"
+      ]
+    },
+    {
+      "id": "selection-hit-testing",
+      "patterns": [
+        "^app/components/html-canvas-(?:selection-chrome(?:-contract)?|source-element)\\.(?:tsx|ts)$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/html-canvas-selection-chrome-contract.test.mjs",
+        "tests/source-text-map.test.mjs"
+      ]
+    },
+    {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-presentation-scroll|html-canvas-selection-chrome(?:-contract)?|html-canvas-source-element|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|css|d\\.ts)$"
+        "^app/components/(?:html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|css|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
@@ -1092,8 +1258,6 @@
       "nodeTests": [
         "tests/align-preview-source-surface.test.mjs",
         "tests/editable-island.test.mjs",
-        "tests/source-text-map.test.mjs",
-        "tests/native-layout-guard.test.mjs",
         "tests/html-preview-sandbox.test.mjs"
       ]
     },
@@ -1102,7 +1266,6 @@
       "patterns": [
         "^app/application/edit-author-runtime-session\\.(?:js|d\\.ts)$",
         "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-selection-chrome(?:-contract)?|html-canvas-source-element|html-preview-sandbox)\\.(?:tsx|ts|js|css|d\\.ts)$",
         "^app/workbench\\.tsx$",
         "^app/workbench/WorkbenchActiveDocumentCanvas\\.tsx$",
         "^app/workbench/use-edit-runtime-preparation\\.ts$",
