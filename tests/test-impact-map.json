@@ -1927,7 +1927,9 @@
         "^bridge/agent/runtimes/http-runtime\\.mjs$",
         "^shared/openai-compatible-vendors\\.mjs$",
         "^shared/supported-agent-models\\.mjs$",
-        "^tests/fixtures/openai-compatible-http-agent\\.mjs$"
+        "^shared/agent-protocol-acceptance\\.mjs$",
+        "^tests/fixtures/openai-compatible-http-agent\\.mjs$",
+        "^tests/agent-protocol-acceptance\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1935,7 +1937,8 @@
       ],
       "nodeTests": [
         "tests/openai-compatible-agent.test.mjs",
-        "tests/agent-provider-catalog.test.mjs"
+        "tests/agent-provider-catalog.test.mjs",
+        "tests/agent-protocol-acceptance.test.mjs"
       ]
     },
     {

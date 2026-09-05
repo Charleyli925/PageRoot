@@ -1,6 +1,7 @@
 // PageRoot's native Agent is intentionally not a general-purpose model browser.
-// Every built-in model in this table must be promoted by a real provider smoke
-// before `releaseChannel` may become `stable`.
+// `releaseChannel: "stable"` only controls product visibility. Real-protocol
+// acceptance lives in `agent-protocol-acceptance.mjs` and is never granted by
+// CI fixtures.
 
 export const SUPPORTED_AGENT_MODELS_SCHEMA_VERSION = "1.0.0";
 export const SUPPORTED_AGENT_MODELS_REVISION = "2026-09-06.1";
