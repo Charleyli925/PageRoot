@@ -400,7 +400,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
     await expect(sidebar.getByTestId("ai-conversation-agent"))
-      .toContainText("源页", { timeout: 20_000 });
+      .toContainText("DeepSeek", { timeout: 20_000 });
     await expect(sidebar.getByTestId("ai-conversation-model")).toBeVisible();
     await expect(sidebar.getByTestId("ai-conversation-model"))
       .toContainText("V4 Pro");

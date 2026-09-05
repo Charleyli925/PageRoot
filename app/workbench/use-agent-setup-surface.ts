@@ -39,11 +39,13 @@ export function useAgentSetupSurface({
   const frozenProviderIdRef = useRef(frozenProviderId);
   const selectAgentRef = useRef(selectAgent);
   const persistDefaultProviderIdRef = useRef(persistDefaultProviderId);
+  const agentCardsRef = useRef(agentCards);
   useLayoutEffect(() => {
     frozenProviderIdRef.current = frozenProviderId;
     selectAgentRef.current = selectAgent;
     persistDefaultProviderIdRef.current = persistDefaultProviderId;
-  }, [frozenProviderId, persistDefaultProviderId, selectAgent]);
+    agentCardsRef.current = agentCards;
+  }, [agentCards, frozenProviderId, persistDefaultProviderId, selectAgent]);
 
   const bindOpenSettingsPage = useCallback((openPage: (() => void) | null) => {
     openSettingsPageRef.current = openPage;
@@ -55,7 +57,10 @@ export function useAgentSetupSurface({
       openSettingsPageRef.current?.();
       return;
     }
-    const providerId = focus.providerId || frozenProviderIdRef.current || null;
+    const providerId = focus.providerId
+      || frozenProviderIdRef.current
+      || agentCardsRef.current[0]?.selection.providerId
+      || null;
     if (providerId) setSidebarSetupProviderId(providerId);
   }, []);
 

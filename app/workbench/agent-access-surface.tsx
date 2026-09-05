@@ -279,6 +279,7 @@ export function AgentRunConversationOutlet({
         }),
         onRecoveryAction: handleAction,
         onAction: handleAction,
+        onOpenAgentSettings: () => openAgentSettings({ surface: "sidebar" }),
       }}
     />
   );

@@ -183,13 +183,19 @@ function SettingsSelect({
 function SettingsSection({
   title,
   children,
+  heading = true,
 }: {
   title: string;
   children: ReactNode;
+  heading?: boolean;
 }) {
   return (
-    <section className="settings-section" aria-labelledby={`settings-section-${title}`}>
-      <h2 id={`settings-section-${title}`}>{title}</h2>
+    <section
+      className="settings-section"
+      aria-labelledby={heading ? `settings-section-${title}` : undefined}
+      aria-label={heading ? undefined : title}
+    >
+      {heading ? <h2 id={`settings-section-${title}`}>{title}</h2> : null}
       <div className="settings-section-rows">{children}</div>
     </section>
   );
@@ -395,7 +401,7 @@ function AgentSettings({
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="AI 服务">
+      <SettingsSection title="AI 服务" heading={false}>
         <div className="settings-agent-toolbar">
           <button
             className="settings-secondary-action"
