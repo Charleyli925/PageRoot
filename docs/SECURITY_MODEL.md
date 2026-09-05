@@ -256,9 +256,9 @@ or missing runtime state never scans Request directories to revive an active
 Request or to adopt a replacement input-manifest digest.
 
 The packaged Qoder ACP provider/runtime path narrows the protocol surface but
-does not change that trust statement. Current execution dispatches by canonical
-provider/runtime selection; historical Request `qoder-acp` is decoded only at
-the Agent Delivery codec read boundary. Unknown identifiers fail
+does not change that trust statement. Current execution binds by canonical
+provider/runtime selection; historical `mode: "qoder-acp"` remains readable at
+the delivery codec. Unknown identifiers fail
 closed. Provider/runtime IDs, the opaque installation digest and capabilities
 remain inside the Bridge ticket, and preload exposes no executable, spawn,
 command or path capability. One restricted driver serves execution policy

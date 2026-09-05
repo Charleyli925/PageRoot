@@ -24,10 +24,9 @@ The product Agent Bridge is Bridge-owned and never owns Request, Candidate,
 Version or Working Copy state. A user may explicitly choose 源页 Agent (user
 Token, OpenAI-compatible HTTPS), a managed Qoder or Codex ACP session, or the
 existing clipboard fallback. Internally, current execution binds by canonical
-provider/runtime selection. Historical Request `mode: "qoder-acp"` is decoded
-only at the Agent Delivery codec read boundary to the `qoder` / `acp`
-selection; public session `driver: "qoder-acp"` is a compatibility projection,
-not start authority. Codex uses the same runtime with `providerId: "codex"`; 源页 Agent uses `pageroot` /
+provider/runtime selection. Historical `mode: "qoder-acp"` Request records are
+projected to the `qoder` provider and shared `acp` runtime at the delivery
+codec; Codex uses the same runtime with `providerId: "codex"`; 源页 Agent uses `pageroot` /
 `http`, with model and thinking-depth choice on the conversation sidebar.
 Unknown providers and runtimes fail closed. The packaged application
 contains no private Codex runtime or native Codex package; Codex is resolved
@@ -299,8 +298,8 @@ services.
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
 | Renderer Agent catalog, provider-keyed diagnostic projection, selected provider/runtime/model/reasoning, bounded public model catalog, selection-keyed use-time preflight and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Settings consumes `AgentDiagnosticSnapshot` and never creates an execution ticket. Neither card receives command, version, path, npm prefix or Token bytes |
 | Product ACP allowlist, managed-install inventory, in-flight install jobs and install drain | `bridge/agent/catalog/agent-catalog.mjs` and `bridge/agent/catalog/agent-installer.mjs`; Coordinator does not own install. Qoder and Codex ACP are the installable shipped ACP entries. 源页 Agent is not installable |
-| Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `bridge/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; current execution binds by canonical selection only; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
-| Trusted-local Qoder installation discovery, read-only diagnosis, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; diagnosis uses only version/model-list commands and does not open ACP. Candidates are collected before selecting a valid user CLI, then a PageRoot-managed installation. A broken lower-priority candidate is diagnostic only when a valid higher-priority candidate exists. Historical Request `qoder-acp` is decoded only by the Agent Delivery codec; public session `driver` remains a compatibility projection |
+| Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `bridge/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; current execution binds by canonical selection only; historical `mode: "qoder-acp"` conversion stays in the delivery codec; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
+| Trusted-local Qoder installation discovery, read-only diagnosis, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; diagnosis uses only version/model-list commands and does not open ACP. Candidates are collected before selecting a valid user CLI, then a PageRoot-managed installation. A broken lower-priority candidate is diagnostic only when a valid higher-priority candidate exists. Historical `mode: "qoder-acp"` remains readable at the delivery codec and status projection; current execution does not map a leftover driver alias |
 | Codex ACP installation discovery, pinned adapter+native closure, read-only login diagnosis, ACP initialize/session preflight and client-mediated launch | `bridge/agent/providers/codex-acp-provider.mjs`; candidates are collected before selecting explicit test configuration, PageRoot-managed installation, then user-global installation. A broken lower-priority candidate is diagnostic only when a valid higher-priority candidate exists. Start-time verification rechecks both the adapter and native executable identities against the ticket |
 | PageRoot native OpenAI-compatible HTTP Agent, bounded diagnosis, vendor Token preflight and model catalog | `bridge/agent/providers/openai-compatible-provider.mjs` plus `shared/openai-compatible-vendors.mjs`; built-in vendors may diagnose through `/models`, while Custom validates saved configuration without assuming that route. Session Token stays in Coordinator memory; an explicit remember writes only Main `safeStorage` ciphertext. Anthropic is not registered |
 | Provider-neutral ACP protocol, process supervisor and immutable standard event envelope | `bridge/agent/runtimes/acp-runtime.mjs`, `acp-protocol.mjs`, `acp-process.mjs` and `acp-verified-javascript.mjs`; `bridge/qoder-acp-client.mjs` is a compatibility façade |
@@ -714,11 +713,10 @@ Only a non-in-place main-frame navigation revokes renderer readiness. Canvas
 iframe loads and same-document navigation are subordinate UI activity; treating
 them as a Workbench reload would bypass the final close drain and is forbidden.
 
-Provider Registry owns the public Agent catalog and selection dispatch. The shared Agent
-Delivery codec owns durable validation and historical `qoder-acp` read
-projection; the runtime coordinator freezes canonical selection and fingerprint
-in its one-use ticket. A leftover HTTP `driver` without a selection fails closed.
-Unknown providers
+Provider Registry owns the public Agent catalog and dispatch. The shared Agent
+Delivery codec owns durable validation and legacy read projection; the runtime
+coordinator converts a still-supported incoming driver once, then freezes
+canonical selection and fingerprint in its one-use ticket. Unknown providers
 stay readable and cancellable, but they are not start authority and do not fall
 back to another shipped provider.
 Workspace Bridge exposes provider, diagnose, preflight, start, status and
