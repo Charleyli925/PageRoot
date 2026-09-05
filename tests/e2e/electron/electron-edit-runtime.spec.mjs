@@ -2904,7 +2904,9 @@ test("a Candidate commit verification failure restores the visible Active", {
       await expect(staticNotice).toHaveCount(0);
     }
     frame = await currentEditorFrame(page);
-    await activateNativeEdit(frame, "runtime-commit-verify-failure");
+    const editableTarget = frame.locator('[data-native-case="runtime-commit-verify-failure"]').first();
+    await editableTarget.dblclick();
+    await expect(editableTarget).toHaveAttribute("contenteditable", "true");
     await expect(editor).toHaveAttribute("data-native-start-status", "started");
     await page.keyboard.press("Escape");
     frame = await currentEditorFrame(page);
