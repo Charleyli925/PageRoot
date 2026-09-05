@@ -1,3 +1,5 @@
+// Test/benchmark counters for the edit pipeline. Default off; never a Session,
+// never a production event stream, and never include source HTML.
 const KIND_TO_TOTAL = {
   sourceIndexBuild: "sourceIndexBuilds",
   fullPatchApply: "fullPatchApplies",
