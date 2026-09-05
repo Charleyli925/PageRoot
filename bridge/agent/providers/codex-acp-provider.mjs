@@ -994,7 +994,6 @@ export function createCodexAcpProvider({
     displayName: "Codex",
     runtimeId: CODEX_ACP_RUNTIME_ID,
     securityProfile: "client-mediated",
-    legacyDrivers: [],
     capabilities: {
       availability: true,
       preflight: true,

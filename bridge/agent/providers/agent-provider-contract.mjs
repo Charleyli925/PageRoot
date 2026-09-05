@@ -76,9 +76,6 @@ export function defineAgentProvider(value) {
     value.securityProfile,
     "provider securityProfile",
   );
-  const legacyDrivers = Array.isArray(value.legacyDrivers)
-    ? [...new Set(value.legacyDrivers.map((driver) => assertComponentId(driver, "legacy driver")))]
-    : [];
   const capabilities = normalizedCapabilities(value.capabilities);
   const requiredMethods = [
     "resolveInstallation",
@@ -100,13 +97,13 @@ export function defineAgentProvider(value) {
       throw new TypeError(`Agent provider ${providerId} requires ${method}().`);
     }
   }
+  const { legacyDrivers: _ignoredLegacyDrivers, ...rest } = value;
   return Object.freeze({
-    ...value,
+    ...rest,
     providerId,
     runtimeId,
     displayName,
     securityProfile,
-    legacyDrivers: Object.freeze(legacyDrivers),
     capabilities,
   });
 }

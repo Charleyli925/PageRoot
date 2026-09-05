@@ -402,10 +402,9 @@ Rules:
 - Telemetry is observational and best effort. It never owns product state,
   never receives content or paths, and never registers a drain obligation for
   edit, save, switch, submit, close or update installation.
-- Provider Registry owns installed descriptors and dispatch. Agent Delivery
+- Provider Registry owns installed descriptors and selection dispatch. Agent Delivery
   Codec owns canonical Request selection, shipped-binding checks for new
-  managed Requests, and historical legacy-driver projection. Coordinator converts
-  a still-supported incoming driver once at its execution entry and then owns
+  managed Requests, and historical `qoder-acp` read projection. Coordinator owns
   preflight tickets and sessions by selection only. Public session `driver` is a
   compatibility projection from that selection, not execution authority. Conversation Repository is
   the only v2 writer; v1 conversation records are never migrated in place.

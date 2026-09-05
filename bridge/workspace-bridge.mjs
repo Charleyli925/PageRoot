@@ -46,8 +46,8 @@ import {
 } from "./workspace-bridge-shutdown.mjs";
 import {
   defaultManagedAgentDelivery,
-  legacyDriverForAgentDelivery,
   normalizeAgentDelivery,
+  publicCompatibilityDriver,
 } from "../shared/agent-delivery.mjs";
 import {
   compileTaskSpec,
@@ -1462,14 +1462,6 @@ async function resolveAgentBridgeTask(identity) {
   return { target, request: status.request || null, run };
 }
 
-function compatibilityDriverForAgentDelivery(delivery) {
-  try {
-    return legacyDriverForAgentDelivery(delivery);
-  } catch {
-    return null;
-  }
-}
-
 function agentSessionForStatus({ request, run, lifecycleStatus }) {
   const delivery = request?.request?.agentDelivery;
   if (!run || delivery?.mode === "clipboard") return null;
@@ -1479,8 +1471,7 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
   } catch {
     return null;
   }
-  const compatibilityDriver = compatibilityDriverForAgentDelivery(normalizedDelivery);
-  const publicDriver = compatibilityDriver || normalizedDelivery.selection.providerId;
+  const publicDriver = publicCompatibilityDriver(normalizedDelivery.selection);
   const identity = {
     projectId: run.projectId,
     documentId: run.documentId,
@@ -1511,7 +1502,6 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
     };
   }
   return agentBridgeService.interrupted(identity, {
-    ...(compatibilityDriver ? { driver: compatibilityDriver } : {}),
     selection: normalizedDelivery.selection,
   });
 }
@@ -1586,23 +1576,32 @@ async function cancelProjectFileRequest(body) {
   }
 }
 
+function canonicalDeliveryFromAgentBody(body) {
+  if (body?.driver && !body?.selection && !body?.agentDelivery) {
+    throw new HttpError(
+      400,
+      "AGENT_SELECTION_UNSUPPORTED",
+      "Current Agent execution requires a canonical selection.",
+    );
+  }
+  if (body?.selection) {
+    return normalizeAgentDelivery({
+      mode: "managed-agent",
+      selection: body.selection,
+      trustPolicyVersion: body.trustPolicyAccepted,
+    });
+  }
+  if (body?.agentDelivery) {
+    return normalizeAgentDelivery(body.agentDelivery);
+  }
+  return defaultManagedAgentDelivery();
+}
+
 async function preflightAgent(body) {
-  const delivery = body?.selection
-    ? normalizeAgentDelivery({
-        mode: "managed-agent",
-        selection: body.selection,
-        trustPolicyVersion: body.trustPolicyAccepted,
-      })
-    : body?.agentDelivery
-      ? normalizeAgentDelivery(body.agentDelivery)
-      : body?.driver
-        ? normalizeAgentDelivery({
-            mode: body.driver,
-            trustPolicyVersion: body.trustPolicyAccepted,
-          })
-        : defaultManagedAgentDelivery();
+  const delivery = canonicalDeliveryFromAgentBody(body);
+  const { driver: _ignored, ...rest } = body || {};
   return agentBridgeService.preflight({
-    ...body,
+    ...rest,
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
   });
@@ -1726,22 +1725,8 @@ async function startAgent(body) {
       "The Agent task identity does not match the registered Project File.",
     );
   }
-  const delivery = body?.selection
-    ? normalizeAgentDelivery({
-        mode: "managed-agent",
-        selection: body.selection,
-        trustPolicyVersion: body.trustPolicyAccepted,
-      })
-    : body?.agentDelivery
-      ? normalizeAgentDelivery(body.agentDelivery)
-      : body?.driver
-        ? normalizeAgentDelivery({
-            mode: body.driver,
-            trustPolicyVersion: body.trustPolicyAccepted,
-          })
-        : defaultManagedAgentDelivery();
+  const delivery = canonicalDeliveryFromAgentBody(body);
   return agentBridgeService.submit({
-    ...(body?.driver ? { driver: body.driver } : {}),
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
     preflightId: body.preflightId,
