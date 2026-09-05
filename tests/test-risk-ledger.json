@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "comment": "File-level risk ownership for Playwright specs. Node tests inherit primaryOwner from tests/test-impact-map.json. Delete or merge a spec only when it shares riskId, input and oracle with another living test, or the capability has retired.",
+  "files": {
+    "tests/e2e/browser/native-dom-boundaries.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-collapsed-inline-boundary.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-comment-stress.spec.mjs": {
+      "riskId": "comment-target-layout",
+      "primaryOwner": "comment-rail-layout",
+      "oracle": "source-anchored comment geometry",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-comment-tabs.spec.mjs": {
+      "riskId": "comment-target-layout",
+      "primaryOwner": "comment-rail-layout",
+      "oracle": "source-anchored comment geometry",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-compound-value-comment.spec.mjs": {
+      "riskId": "comment-target-layout",
+      "primaryOwner": "comment-rail-layout",
+      "oracle": "source-anchored comment geometry",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-computed-style.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-editable-fail-open.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-notification-recovery.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-presentation-actions.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-review-comment-binding.spec.mjs": {
+      "riskId": "comment-target-layout",
+      "primaryOwner": "comment-rail-layout",
+      "oracle": "source-anchored comment geometry",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-review-visual-observation.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-source.spec.mjs": {
+      "riskId": "source-bytes-native-edit",
+      "primaryOwner": "source-editing-core",
+      "oracle": "UTF-8 bytes + Stable ID + Document token",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-structural-text.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-svg-comment-target.spec.mjs": {
+      "riskId": "comment-target-layout",
+      "primaryOwner": "comment-rail-layout",
+      "oracle": "source-anchored comment geometry",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-v2-editable-island.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/browser/native-dom-zero-boundary.spec.mjs": {
+      "riskId": "native-dom-edit-surface",
+      "primaryOwner": "v2-island-controller",
+      "oracle": "authored host + Selection + source patch",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/electron/ai-candidate-validation.spec.mjs": {
+      "riskId": "ai-candidate-review-adoption",
+      "primaryOwner": "review-document-orchestrator",
+      "oracle": "Candidate HTML + Version identity + Review projection",
+      "stage": "ready-full"
+    },
+    "tests/e2e/electron/ai-provider-availability.spec.mjs": {
+      "riskId": "ai-provider-availability",
+      "primaryOwner": "agent-provider-registry",
+      "oracle": "provider diagnose + fail-closed start",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/electron/ai-request-comments.spec.mjs": {
+      "riskId": "ai-request-freeze",
+      "primaryOwner": "run-workflow",
+      "oracle": "frozen Request bytes + comment attachments",
+      "stage": "ready-full"
+    },
+    "tests/e2e/electron/ai-review-adoption.spec.mjs": {
+      "riskId": "ai-candidate-review-adoption",
+      "primaryOwner": "review-document-orchestrator",
+      "oracle": "Candidate HTML + Version identity + Review projection",
+      "stage": "ready-full"
+    },
+    "tests/e2e/electron/ai-run-lifecycle.spec.mjs": {
+      "riskId": "ai-request-freeze",
+      "primaryOwner": "run-workflow",
+      "oracle": "frozen Request bytes + comment attachments",
+      "stage": "ready-full"
+    },
+    "tests/e2e/electron/ci-environment-preflight.spec.mjs": {
+      "riskId": "ci-hosted-window",
+      "primaryOwner": "electron-e2e",
+      "oracle": "visible window + rAF",
+      "stage": "ready-full",
+      "infraSensitive": true
+    },
+    "tests/e2e/electron/conflict-force-unlock.spec.mjs": {
+      "riskId": "source-persistence-recovery",
+      "primaryOwner": "document-workflow",
+      "oracle": "disk bytes + reopen identity",
+      "stage": "draft-canary",
+      "seededFault": "working-html-skipped-before-save"
+    },
+    "tests/e2e/electron/electron-comments-and-rules.spec.mjs": {
+      "riskId": "comment-target-layout",
+      "primaryOwner": "comment-rail-layout",
+      "oracle": "source-anchored comment geometry",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/electron/electron-edit-runtime.spec.mjs": {
+      "riskId": "runtime-document-identity",
+      "primaryOwner": "runtime-continuity",
+      "oracle": "iframe generation + Working HTML + candidate handoff",
+      "stage": "draft-canary",
+      "seededFault": "active-iframe-cleared"
+    },
+    "tests/e2e/electron/electron-native-input.spec.mjs": {
+      "riskId": "source-bytes-native-edit",
+      "primaryOwner": "source-editing-core",
+      "oracle": "UTF-8 bytes + Stable ID + Document token",
+      "stage": "draft-canary"
+    },
+    "tests/e2e/electron/electron-project-lifecycle.spec.mjs": {
+      "riskId": "project-open-close-tabs",
+      "primaryOwner": "project-workflow",
+      "oracle": "project identity + tab restore",
+      "stage": "ready-full"
+    },
+    "tests/e2e/electron/electron-runtime-continuity.spec.mjs": {
+      "riskId": "runtime-visual-continuity",
+      "primaryOwner": "runtime-continuity",
+      "oracle": "continuity probe + working HTML bytes + caret source offset",
+      "stage": "draft-canary",
+      "seededFault": "candidate-created-during-edit"
+    },
+    "tests/e2e/electron/electron-seeded-faults.spec.mjs": {
+      "riskId": "runtime-fault-detection",
+      "primaryOwner": "runtime-continuity",
+      "oracle": "live canary fails on injected iframe/candidate faults and recovers after restore",
+      "stage": "draft-canary",
+      "seededFault": "active-iframe-cleared"
+    },
+    "tests/e2e/electron/electron-source-recovery.spec.mjs": {
+      "riskId": "source-persistence-recovery",
+      "primaryOwner": "document-workflow",
+      "oracle": "disk bytes + reopen identity",
+      "stage": "draft-canary",
+      "seededFault": "working-html-skipped-before-save"
+    },
+    "tests/e2e/electron/electron-workbench-tabs.spec.mjs": {
+      "riskId": "project-open-close-tabs",
+      "primaryOwner": "project-workflow",
+      "oracle": "project identity + tab restore",
+      "stage": "ready-full"
+    },
+    "tests/e2e/electron/packaged-runtime-smoke.spec.mjs": {
+      "riskId": "packaged-app-startup",
+      "primaryOwner": "packaged-runtime-e2e",
+      "oracle": "packaged executable launch + authored DOM",
+      "stage": "release"
+    },
+    "tests/e2e/electron/packaged-startup-smoke.spec.mjs": {
+      "riskId": "packaged-app-startup",
+      "primaryOwner": "packaged-runtime-e2e",
+      "oracle": "packaged executable launch + authored DOM",
+      "stage": "release"
+    },
+    "tests/e2e/electron/review-annotation-clarity.spec.mjs": {
+      "riskId": "ai-candidate-review-adoption",
+      "primaryOwner": "review-document-orchestrator",
+      "oracle": "Candidate HTML + Version identity + Review projection",
+      "stage": "ready-full"
+    }
+  }
+}

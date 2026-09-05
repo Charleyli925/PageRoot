@@ -50,6 +50,7 @@
     "benchmark:review-analysis": "node scripts/benchmark-review-analysis.mjs",
     "benchmark:html-workflows": "node scripts/benchmark-html-workflows.mjs",
     "benchmark:persistence": "npm run desktop:renderer && node scripts/benchmark-persistence.mjs",
+    "test:inventory": "node scripts/generate-test-inventory.mjs",
     "test:package": "node scripts/test-node-group.mjs package",
     "verify:packaged": "node scripts/verify-packaged-artifact.mjs --arch arm64",
     "release:assets": "node scripts/create-release-assets.mjs",

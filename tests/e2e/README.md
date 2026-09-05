@@ -84,47 +84,26 @@ This document defines gates; it does not record a pass for the current HEAD.
 Results become release evidence only when every command is rerun against the
 same final commit and content hash recorded by the automated gate report.
 
-- `native-dom-editing.spec.mjs`: all three capability modes, authored-host
-  activation, layout invariance, mouse/keyboard Selection, clipboard,
-  beforeinput, composition, and toolbar focus.
-- `native-dom-boundaries.spec.mjs`: iframe/script boundary, persistent
-  Document identity, scroll stability, rapid typing, target ranges, long
-  tasks, shared hover/click hits, filled-module padding, empty modules, and
-  dedicated canvas roots.
-- `native-dom-source.spec.mjs`: byte-exact UTF-8 replacement, BOM/CRLF,
-  entities/quotes/comments/duplicate attributes, exact forward bytes, and
-  blocked source-reversal shortcuts.
-- `electron-project-lifecycle.spec.mjs`, `electron-workbench-tabs.spec.mjs`,
-  `electron-edit-runtime.spec.mjs`,
-  `electron-native-input.spec.mjs`, `electron-comments-and-rules.spec.mjs`
-  and `electron-source-recovery.spec.mjs`: the same real native editing path
-  in the shipped Chromium environment, plus temporary-disk checkpoint/autosave,
-  exact forward bytes, graceful close, and cold reopen consistency. Capability
-  smoke uses Playwright tags (`@smoke-editing`, `@smoke-project-lifecycle`,
-  `@smoke-recovery`, `@smoke-agent`) rather than title regular expressions.
-  The full Electron lane still runs every test in these files.
-- `conflict-force-unlock.spec.mjs`: external Working Copy change surfaces the
-  conflict banner (including after reopening an already imported project), and
-  confirmed “采用磁盘版本” restores an editable idle project without rewriting
-  the on-disk HTML. This spec is in the full Electron lane, not the smoke grep.
-  Run it locally after `npm run desktop:renderer`:
+The live Playwright and Node inventory is generated from the repository, not
+from this list:
 
-  ```sh
-  npx playwright test --config tests/e2e/electron/playwright.config.mjs \
-    tests/e2e/electron/conflict-force-unlock.spec.mjs
-  ```
-- `ai-review-adoption.spec.mjs`, `ai-provider-availability.spec.mjs`,
-  `ai-run-lifecycle.spec.mjs`, `ai-candidate-validation.spec.mjs` and
-  `ai-request-comments.spec.mjs`: real comment UI, per-task delivery choice,
-  frozen Request, clipboard and managed Qoder ACP handoff, generated-AI/finalizer
-  result, status polling, Candidate-first review, explicit non-overwriting Version
-  adoption, and fail-closed recovery paths. Task canaries use `@smoke-review`,
-  `@smoke-provider` and `@smoke-run-lifecycle`; the original `@gate-smoke` union
-  remains the `main` lane AI smoke.
-- `packaged-runtime-smoke.spec.mjs`: the packaged `.app` executable, isolated
-  user data, authored-DOM input and byte-exact export without source-runtime substitution.
+```sh
+npm run test:inventory
+```
 
-The capability assertions use the same production contract as the canvas:
+`scripts/generate-test-inventory.mjs` walks every `*.spec.mjs` and the Node
+test groups. `tests/test-inventory.test.mjs` fails if this README names a
+spec that is no longer in the repository, or if `tests/test-risk-ledger.json`
+is missing a file-level risk owner.
+
+Capability smoke uses Playwright tags (`@smoke-editing`, `@smoke-project-lifecycle`,
+`@smoke-recovery`, `@smoke-agent`, `@smoke-review`, `@smoke-provider` and
+`@smoke-run-lifecycle`) rather than title regular expressions. Native Electron
+files are `electron-*.spec.mjs` plus `conflict-force-unlock.spec.mjs`; Runtime
+handoff and queued-static fallback live in `electron-edit-runtime.spec.mjs`,
+visual continuity in `electron-runtime-continuity.spec.mjs`, and live seeded
+faults in `electron-seeded-faults.spec.mjs`. AI Review adoption and Version
+projection stay in `ai-review-adoption.spec.mjs`.
 
 - `native-editable`: the real authored element owns the caret and is directly
   editable.
