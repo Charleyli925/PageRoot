@@ -9,7 +9,7 @@ export { parsePublicModels, resolveQoderAcpCommand } from "./agent/providers/qod
 export { AgentBridgeError, TRUSTED_LOCAL_AGENT_POLICY_VERSION };
 
 function defaultSelectionInput(input = {}) {
-  return input.selection || input.driver
+  return input.selection
     ? input
     : { selection: defaultManagedAgentDelivery().selection };
 }

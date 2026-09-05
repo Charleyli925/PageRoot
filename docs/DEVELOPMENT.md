@@ -50,8 +50,9 @@ boundary.
 
 The packaged Bridge owns the product session through
 `bridge/agent/agent-runtime-coordinator.mjs`; the old Service exports only
-delegate existing routes. Its provider registry maps legacy `qoder-acp` to
-`qoder-provider.mjs` and registers both Qoder and Codex through the single
+delegate existing routes. Current execution binds by canonical selection;
+historical `mode: "qoder-acp"` is projected at the delivery codec, not by a
+registry driver map. The registry registers both Qoder and Codex through the single
 `acp` runtime in `bridge/agent/runtimes/acp-runtime.mjs`; unknown
 provider/runtime IDs fail closed. The restricted Host Ports now live in
 `bridge/agent/hosts/`, while frozen execution policy lives in

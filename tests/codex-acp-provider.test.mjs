@@ -99,7 +99,7 @@ test("the default registry registers Codex through the shared ACP runtime", () =
     },
   });
   assert.equal(provider.securityProfile, "client-mediated");
-  assert.deepEqual(provider.legacyDrivers, []);
+  assert.equal("legacyDrivers" in provider, false);
   assert.equal(catalog.filter((entry) => entry.runtimeId === "acp").length, 2);
   assert.equal(catalog.find((entry) => entry.providerId === "pageroot")?.runtimeId, "http");
 });

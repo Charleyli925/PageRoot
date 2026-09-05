@@ -71,9 +71,6 @@ export function defineAgentProvider(value) {
     value.securityProfile,
     "provider securityProfile",
   );
-  const legacyDrivers = Array.isArray(value.legacyDrivers)
-    ? [...new Set(value.legacyDrivers.map((driver) => assertComponentId(driver, "legacy driver")))]
-    : [];
   const capabilities = normalizedCapabilities(value.capabilities);
   const requiredMethods = [
     "resolveInstallation",
@@ -101,7 +98,6 @@ export function defineAgentProvider(value) {
     runtimeId,
     displayName,
     securityProfile,
-    legacyDrivers: Object.freeze(legacyDrivers),
     capabilities,
   });
 }

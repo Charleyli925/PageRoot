@@ -1511,7 +1511,6 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
     };
   }
   return agentBridgeService.interrupted(identity, {
-    ...(compatibilityDriver ? { driver: compatibilityDriver } : {}),
     selection: normalizedDelivery.selection,
   });
 }
@@ -1603,6 +1602,7 @@ async function preflightAgent(body) {
         : defaultManagedAgentDelivery();
   return agentBridgeService.preflight({
     ...body,
+    driver: undefined,
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
   });
@@ -1711,7 +1711,6 @@ async function startAgent(body) {
           })
         : defaultManagedAgentDelivery();
   return agentBridgeService.submit({
-    ...(body?.driver ? { driver: body.driver } : {}),
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
     preflightId: body.preflightId,
