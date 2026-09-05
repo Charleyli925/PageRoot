@@ -1585,24 +1585,32 @@ async function cancelProjectFileRequest(body) {
   }
 }
 
+function canonicalDeliveryFromAgentBody(body) {
+  if (body?.driver && !body?.selection && !body?.agentDelivery) {
+    throw new HttpError(
+      400,
+      "AGENT_SELECTION_UNSUPPORTED",
+      "Current Agent execution requires a canonical selection.",
+    );
+  }
+  if (body?.selection) {
+    return normalizeAgentDelivery({
+      mode: "managed-agent",
+      selection: body.selection,
+      trustPolicyVersion: body.trustPolicyAccepted,
+    });
+  }
+  if (body?.agentDelivery) {
+    return normalizeAgentDelivery(body.agentDelivery);
+  }
+  return defaultManagedAgentDelivery();
+}
+
 async function preflightAgent(body) {
-  const delivery = body?.selection
-    ? normalizeAgentDelivery({
-        mode: "managed-agent",
-        selection: body.selection,
-        trustPolicyVersion: body.trustPolicyAccepted,
-      })
-    : body?.agentDelivery
-      ? normalizeAgentDelivery(body.agentDelivery)
-      : body?.driver
-        ? normalizeAgentDelivery({
-            mode: body.driver,
-            trustPolicyVersion: body.trustPolicyAccepted,
-          })
-        : defaultManagedAgentDelivery();
+  const delivery = canonicalDeliveryFromAgentBody(body);
+  const { driver: _ignored, ...rest } = body || {};
   return agentBridgeService.preflight({
-    ...body,
-    driver: undefined,
+    ...rest,
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
   });
@@ -1696,20 +1704,7 @@ async function startAgent(body) {
       "The Agent task identity does not match the registered Project File.",
     );
   }
-  const delivery = body?.selection
-    ? normalizeAgentDelivery({
-        mode: "managed-agent",
-        selection: body.selection,
-        trustPolicyVersion: body.trustPolicyAccepted,
-      })
-    : body?.agentDelivery
-      ? normalizeAgentDelivery(body.agentDelivery)
-      : body?.driver
-        ? normalizeAgentDelivery({
-            mode: body.driver,
-            trustPolicyVersion: body.trustPolicyAccepted,
-          })
-        : defaultManagedAgentDelivery();
+  const delivery = canonicalDeliveryFromAgentBody(body);
   return agentBridgeService.submit({
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,

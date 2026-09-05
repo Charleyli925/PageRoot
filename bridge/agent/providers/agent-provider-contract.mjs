@@ -92,8 +92,9 @@ export function defineAgentProvider(value) {
       throw new TypeError(`Agent provider ${providerId} requires ${method}().`);
     }
   }
+  const { legacyDrivers: _ignoredLegacyDrivers, ...rest } = value;
   return Object.freeze({
-    ...value,
+    ...rest,
     providerId,
     runtimeId,
     displayName,

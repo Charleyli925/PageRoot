@@ -159,8 +159,13 @@ async function createManagedRequest(t, { hang = false } = {}) {
   );
   assert.equal(unknownAvailability.response.status, 400, JSON.stringify(unknownAvailability.body));
   assert.equal(unknownAvailability.body.error.code, "AGENT_PROVIDER_UNSUPPORTED");
-  const preflight = await bridge.postJson("/agent/preflight", {
+  const driverOnly = await bridge.postJson("/agent/preflight", {
     driver: "qoder-acp",
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  });
+  assert.equal(driverOnly.response.status, 400, JSON.stringify(driverOnly.body));
+  assert.equal(driverOnly.body.error.code, "AGENT_SELECTION_UNSUPPORTED");
+  const preflight = await bridge.postJson("/agent/preflight", {
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
   assert.equal(preflight.response.status, 200, JSON.stringify(preflight.body));
@@ -200,9 +205,8 @@ async function createManagedRequest(t, { hang = false } = {}) {
     documentId: ensured.body.documentId,
     sourcePath: ensured.body.sourcePath,
     requestId: request.body.requestId,
-    attemptId: request.body.attemptId,
-    driver: "qoder-acp",
-    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+      attemptId: request.body.attemptId,
+      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: preflight.body.preflightId,
     configurationDigest: preflight.body.configuration.configurationDigest,
   });
@@ -353,7 +357,6 @@ test("Bridge crash fences an interrupted Qoder Request from restart and clipboar
   );
 
   const preflight = await restarted.postJson("/agent/preflight", {
-    driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
   const retried = await restarted.postJson("/agent/start", {
@@ -362,7 +365,6 @@ test("Bridge crash fences an interrupted Qoder Request from restart and clipboar
     sourcePath: value.ensured.sourcePath,
     requestId: value.request.requestId,
     attemptId: value.request.attemptId,
-    driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: preflight.body.preflightId,
     configurationDigest: preflight.body.configuration.configurationDigest,

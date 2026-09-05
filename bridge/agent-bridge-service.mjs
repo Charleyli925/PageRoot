@@ -9,8 +9,9 @@ export { parsePublicModels, resolveQoderAcpCommand } from "./agent/providers/qod
 export { AgentBridgeError, TRUSTED_LOCAL_AGENT_POLICY_VERSION };
 
 function defaultSelectionInput(input = {}) {
-  return input.selection
-    ? input
+  const { driver: _ignored, ...rest } = input;
+  return rest.selection
+    ? rest
     : { selection: defaultManagedAgentDelivery().selection };
 }
 
