@@ -392,7 +392,10 @@ current open document and is not formal Version history.
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,
 source-backed page view and style inspection live in the adjacent
-`html-canvas-*.ts` modules. One-shot runtime frame verification lives in
+`html-canvas-*.ts` modules. Authoritative HTML replacement writes a static
+Active frame and completes Canvas verify without waiting for author Script.
+Dynamic refresh starts those scripts only through `startRuntimeCandidate()` in
+a hidden slot. One-shot runtime frame verification lives in
 `html-canvas-frame.js`. Native deferred-command arbitration lives in
 `html-canvas-native-commands.js`. Comment-target geometry lives in
 `html-canvas-comment-layout.ts`. Selection chrome, comment markers, hover hints and
