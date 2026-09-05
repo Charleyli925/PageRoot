@@ -196,6 +196,7 @@
         "app/lib/semantic-operation-kernel.js",
         "app/lib/source-structure-edit.js",
         "app/lib/source-patch-engine.js",
+        "app/lib/source-index.js",
         "app/components/html-canvas-structure-commands.ts"
       ],
       "focusedTests": [
@@ -205,7 +206,8 @@
         "tests/source-text-map.test.mjs",
         "tests/pageroot-element-identity.test.mjs",
         "tests/edit-pipeline-baseline.test.mjs",
-        "tests/edit-pipeline-counters.test.mjs"
+        "tests/edit-pipeline-counters.test.mjs",
+        "tests/source-index-reuse.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",

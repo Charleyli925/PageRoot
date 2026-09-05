@@ -75,6 +75,100 @@ export class SourceIndexError extends Error {
   }
 }
 
+const OWNED_SOURCE_INDEXES = new WeakSet();
+
+function readOnlyMap(map) {
+  return new Proxy(map, {
+    get(target, property) {
+      if (property === "set" || property === "delete" || property === "clear") {
+        return () => {
+          throw new TypeError("SourceIndex is read-only.");
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function freezeSourceIndexValue(value, seen, skip) {
+  if (!value || typeof value !== "object" || seen.has(value) || skip.has(value)) {
+    return;
+  }
+  seen.add(value);
+  if (value instanceof Map) {
+    for (const nested of value.values()) {
+      freezeSourceIndexValue(nested, seen, skip);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const nested of value) {
+      freezeSourceIndexValue(nested, seen, skip);
+    }
+    Object.freeze(value);
+    return;
+  }
+  for (const nested of Object.values(value)) {
+    freezeSourceIndexValue(nested, seen, skip);
+  }
+  Object.freeze(value);
+}
+
+function sealBuiltSourceIndex(index) {
+  const skip = new Set();
+  if (index.document) skip.add(index.document);
+  index.byNodeId = readOnlyMap(index.byNodeId);
+  index.byPagerootId = readOnlyMap(index.byPagerootId);
+  index.elementsByTagName = readOnlyMap(index.elementsByTagName);
+  for (const element of index.elements) {
+    if (element.attributesByName instanceof Map) {
+      element.attributesByName = readOnlyMap(element.attributesByName);
+    }
+  }
+  freezeSourceIndexValue(index, new WeakSet(), skip);
+  OWNED_SOURCE_INDEXES.add(index);
+  return index;
+}
+
+export function isOwnedSourceIndex(index) {
+  return Boolean(index) && OWNED_SOURCE_INDEXES.has(index);
+}
+
+// Reuse is correspondence, not a skip-validation flag. The candidate must have
+// been produced by buildSourceIndex, its source string must be these exact
+// bytes, and its Hash must match a freshly computed Hash of those bytes.
+export function resolveOwnedSourceIndex(html, candidateIndex, options = {}) {
+  const source = String(html ?? "");
+  if (candidateIndex == null) {
+    return buildSourceIndex(source, options);
+  }
+  if (!OWNED_SOURCE_INDEXES.has(candidateIndex)) {
+    throw new SourceIndexError(
+      "SOURCE_INDEX_NOT_OWNED",
+      "Only a SourceIndex produced by buildSourceIndex can be reused.",
+    );
+  }
+  if (candidateIndex.source !== source) {
+    throw new SourceIndexError(
+      "SOURCE_INDEX_HTML_MISMATCH",
+      "The reused SourceIndex does not correspond to these source bytes.",
+    );
+  }
+  const actualSourceSha256 = sourceSha256(source);
+  if (candidateIndex.sourceSha256 !== actualSourceSha256) {
+    throw new SourceIndexError(
+      "SOURCE_INDEX_HASH_MISMATCH",
+      "The reused SourceIndex Hash does not match the current source bytes.",
+      {
+        expectedSourceSha256: candidateIndex.sourceSha256,
+        actualSourceSha256,
+      },
+    );
+  }
+  return candidateIndex;
+}
+
 function range(startOffset, endOffset) {
   return { startOffset, endOffset };
 }
@@ -707,5 +801,5 @@ export function buildSourceIndex(html, options = {}) {
     parseErrorCount: index.parseErrors.length,
     rangeErrorCount: index.rangeErrors.length,
   };
-  return index;
+  return sealBuiltSourceIndex(index);
 }

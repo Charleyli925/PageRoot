@@ -906,7 +906,10 @@ and a system-derived `identityDelta` plus a generated in-process inverse. The
 stable ID is the sole element identity; tag, parent, order and outer Hash are
 operation preconditions or change evidence, not alternate identities. Intent is lowered to SourcePatch, whose
 apply path independently re-plans the operation before enforcing exact ranges,
-outside-scope equality and parse integrity. Runtime DOM is never an input.
+outside-scope equality and parse integrity. The kernel may reuse a
+`buildSourceIndex` result only when it still corresponds to the exact current
+HTML bytes and a freshly computed Hash; that reuse is not a skip-validation
+flag and not a persisted index cache. Runtime DOM is never an input.
 Text, style, sibling reorder, insert, duplicate, delete and cross-parent move
 already use this boundary. Canvas still verifies that semantic materialization
 matches a separately applied SourcePatch result before publishing complete HTML;

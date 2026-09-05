@@ -1128,6 +1128,7 @@
         "tests/editable-island.test.mjs",
         "tests/edit-pipeline-baseline.test.mjs",
         "tests/edit-pipeline-counters.test.mjs",
+        "tests/source-index-reuse.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/native-edit-capability.test.mjs",
         "tests/native-edit-policy.test.mjs",
