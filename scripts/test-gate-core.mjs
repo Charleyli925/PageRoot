@@ -10,7 +10,7 @@ import {
 
 const CODE_PATH = /\.(?:cjs|mjs|js|jsx|ts|tsx|json)$/iu;
 const NODE_TEST_PATH = /^tests\/[^/]+\.test\.mjs$/u;
-const PRODUCTION_MODULE_PATH = /^(?:app|desktop|scripts|shared)\//u;
+const PRODUCTION_MODULE_PATH = /^(?:app|bridge|desktop|scripts|shared)\//u;
 
 export { GATE_WIDTH_LIMITS };
 
