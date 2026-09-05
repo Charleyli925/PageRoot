@@ -240,7 +240,9 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(releaseGate, /Refresh dependency and packaged-runtime baseline before attestation/u);
   assert.match(releaseGate, /npm run audit:dependencies/u);
   assert.match(releaseGate, /Download product flaky evidence/u);
-  assert.match(releaseGate, /PageRoot-\*-evidence-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
+  assert.match(releaseGate, /PageRoot-\*-evidence-\$\{\{ github\.run_id \}\}-\*/u);
+  assert.match(releaseGate, /select-source-gate-evidence\.mjs/u);
+  assert.match(releaseGate, /path: output\/ci-evidence-attempts/u);
   assert.match(releaseGate, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/u);
   assert.match(ci, /source-gate-provenance\.mjs create/u);
   assert.match(releaseGate, /--evidence-dir output\/ci-evidence/u);

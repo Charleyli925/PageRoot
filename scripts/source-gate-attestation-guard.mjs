@@ -24,9 +24,18 @@ export const PRODUCT_SOURCE_STEP_NAMES = Object.freeze(new Set([
   "Run real-html",
 ]));
 
+export const TRUSTED_TRIAGE_ASSOCIATIONS = Object.freeze(new Set([
+  "OWNER",
+  "MEMBER",
+  "COLLABORATOR",
+]));
+
+export const FLAKY_EVIDENCE_SCHEMA_VERSION = 2;
+
 const ENVIRONMENT_STEP_PATTERN = /(?:npm ci|Install npm|Playwright|preflight|Restore Electron|hosted renderer|system dependencies|Install Playwright)/iu;
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const TRIAGE_COMMENT_PATTERN = /<!--\s*pageroot-ci-triage\b([\s\S]*?)-->/u;
+const AGGREGATE_JOB_NAMES = new Set(["release-gate", "pr-feedback"]);
 
 export function classifyFlakyTest(test, spec = {}) {
   const title = `${spec.title || ""} ${test?.title || ""}`.trim();
@@ -37,8 +46,86 @@ export function classifyFlakyTest(test, spec = {}) {
   return isInfraSensitiveTest({ title, tags });
 }
 
+function nonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function bucketCounts(bucket) {
+  if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) return null;
+  const failed = nonNegativeInteger(bucket.failed);
+  const flaky = nonNegativeInteger(bucket.flaky);
+  const retries = nonNegativeInteger(bucket.retries);
+  if (failed == null || flaky == null || retries == null) return null;
+  return { failed, flaky, retries };
+}
+
+export function inspectFlakyRecord(record, expectedSuite = record?.suite) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_invalid" });
+  }
+  if (record.schemaVersion !== FLAKY_EVIDENCE_SCHEMA_VERSION) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_invalid" });
+  }
+  if (!expectedSuite || record.suite !== expectedSuite) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_invalid" });
+  }
+  const total = nonNegativeInteger(record.total);
+  const passed = nonNegativeInteger(record.passed);
+  const failed = nonNegativeInteger(record.failed);
+  const flaky = nonNegativeInteger(record.flaky);
+  const skipped = nonNegativeInteger(record.skipped);
+  const retries = nonNegativeInteger(record.retries);
+  const product = bucketCounts(record.product);
+  const infra = bucketCounts(record.infra);
+  if (
+    total == null
+    || passed == null
+    || failed == null
+    || flaky == null
+    || skipped == null
+    || retries == null
+    || !product
+    || !infra
+  ) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_invalid" });
+  }
+  if (total === 0) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_empty" });
+  }
+  if (passed + failed + flaky + skipped !== total) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_unreconciled" });
+  }
+  if (product.failed + infra.failed !== failed) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_unreconciled" });
+  }
+  if (product.flaky + infra.flaky !== flaky) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_unreconciled" });
+  }
+  if (product.retries + infra.retries !== retries) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_unreconciled" });
+  }
+  if (passed === 0 && failed === 0 && flaky === 0) {
+    return Object.freeze({ ok: false, reason: "product_flaky_evidence_all_skipped" });
+  }
+  return Object.freeze({
+    ok: true,
+    reason: "product_flaky_record_valid",
+    product,
+    infra,
+    total,
+    passed,
+    failed,
+    flaky,
+    skipped,
+    retries,
+  });
+}
+
 export function evaluateProductFlakyEvidence(records, { requiredSuites = REQUIRED_PRODUCT_FLAKY_SUITES } = {}) {
-  const bySuite = new Map((records || []).map((record) => [record.suite, record]));
+  const bySuite = new Map();
+  for (const record of records || []) {
+    if (record?.suite) bySuite.set(record.suite, record);
+  }
   const missing = requiredSuites.filter((suite) => !bySuite.has(suite));
   if (missing.length > 0) {
     return Object.freeze({
@@ -52,10 +139,19 @@ export function evaluateProductFlakyEvidence(records, { requiredSuites = REQUIRE
   let flaky = 0;
   let retries = 0;
   for (const suite of requiredSuites) {
-    const record = bySuite.get(suite);
-    failed += Number(record?.product?.failed) || 0;
-    flaky += Number(record?.product?.flaky) || 0;
-    retries += Number(record?.product?.retries) || 0;
+    const inspected = inspectFlakyRecord(bySuite.get(suite), suite);
+    if (!inspected.ok) {
+      return Object.freeze({
+        ok: false,
+        reason: inspected.reason,
+        missing: [],
+        invalidSuite: suite,
+        product: Object.freeze({ failed: 0, flaky: 0, retries: 0 }),
+      });
+    }
+    failed += inspected.product.failed;
+    flaky += inspected.product.flaky;
+    retries += inspected.product.retries;
   }
   if (failed > 0 || flaky > 0 || retries > 0) {
     return Object.freeze({
@@ -81,8 +177,13 @@ export function isEnvironmentStep(stepName) {
   return ENVIRONMENT_STEP_PATTERN.test(String(stepName || ""));
 }
 
+export function isAggregateJobName(jobName) {
+  return AGGREGATE_JOB_NAMES.has(String(jobName || ""));
+}
+
 export function classifyFailedJob(job) {
   if (!job || job.conclusion !== "failure") return null;
+  if (isAggregateJobName(job.name)) return "aggregate";
   const failedSteps = (job.steps || []).filter((step) => step?.conclusion === "failure");
   if (failedSteps.some((step) => isProductSourceStep(step.name))) return "product";
   if (failedSteps.length > 0 && failedSteps.every((step) => isEnvironmentStep(step.name))) {
@@ -91,50 +192,65 @@ export function classifyFailedJob(job) {
   return "untriaged";
 }
 
+function parseTriageFields(body) {
+  const match = TRIAGE_COMMENT_PATTERN.exec(String(body || ""));
+  if (!match) return null;
+  return Object.fromEntries(
+    match[1]
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const separator = line.indexOf(":");
+        if (separator <= 0) return null;
+        return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+      })
+      .filter(Boolean),
+  );
+}
+
 export function parseTriageRecords(comments, { now = new Date() } = {}) {
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
   const records = [];
   for (const comment of comments || []) {
-    const match = TRIAGE_COMMENT_PATTERN.exec(String(comment?.body || ""));
-    if (!match) continue;
-    const fields = Object.fromEntries(
-      match[1]
-        .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => {
-          const separator = line.indexOf(":");
-          if (separator <= 0) return null;
-          return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
-        })
-        .filter(Boolean),
-    );
+    if (!TRUSTED_TRIAGE_ASSOCIATIONS.has(String(comment?.author_association || ""))) continue;
+    const fields = parseTriageFields(comment?.body);
+    if (!fields) continue;
     if (fields.schemaVersion !== "1") continue;
     if (fields.classification !== "ci_environment") continue;
     if (!SHA_PATTERN.test(fields.sha || "")) continue;
     const runId = Number(fields.runId);
     const attempt = Number(fields.attempt);
     const expiresAt = Date.parse(fields.expiresAt || "");
+    const job = String(fields.job || "").trim();
+    const reason = String(fields.reason || "").trim();
     if (!Number.isInteger(runId) || runId <= 0) continue;
     if (!Number.isInteger(attempt) || attempt <= 0) continue;
     if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) continue;
+    if (!job || !reason) continue;
     records.push(Object.freeze({
       sha: fields.sha,
       runId,
       attempt,
+      job,
+      signature: String(fields.signature || "").trim() || null,
+      reason,
       classification: "ci_environment",
       expiresAt: new Date(expiresAt).toISOString(),
+      authorAssociation: String(comment.author_association),
     }));
   }
   return Object.freeze(records);
 }
 
-function triageCoversFailure(records, { sha, runId, attempt }) {
+function triageCoversFailure(records, { sha, runId, attempt, job, signature }) {
   return (records || []).some((record) => (
     record.sha === sha
     && record.runId === Number(runId)
     && record.attempt === Number(attempt)
+    && record.job === String(job || "")
     && record.classification === "ci_environment"
+    && (!record.signature || record.signature === String(signature || ""))
   ));
 }
 
@@ -164,11 +280,14 @@ export function evaluateShaFailureHistory({
     for (const job of jobs || []) {
       const classification = classifyFailedJob(job);
       if (!classification) continue;
-      if (classification === "ci_environment") continue;
+      if (classification === "ci_environment" || classification === "aggregate") continue;
+      const failedStep = (job.steps || []).find((step) => step?.conclusion === "failure");
       if (triageCoversFailure(triageRecords, {
         sha: headSha,
         runId: historyRunId,
         attempt: historyAttempt,
+        job: job.name,
+        signature: failedStep?.name,
       })) continue;
       untriaged.push(Object.freeze({
         runId: historyRunId,

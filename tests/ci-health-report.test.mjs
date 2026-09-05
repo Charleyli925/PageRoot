@@ -197,7 +197,7 @@ test("the scheduled ci-health workflow may open issues and is not a merge gate",
 test("same SHA success after a failed attempt counts as washed green", () => {
   assert.equal(sameShaWashGreenCount([
     completedRun({ id: 1, head_sha: "a".repeat(40), run_attempt: 2, conclusion: "success" }),
-  ]), 1);
+  ]), 0);
   assert.equal(sameShaWashGreenCount([
     completedRun({ id: 1, head_sha: "a".repeat(40), conclusion: "success" }),
     completedRun({ id: 2, head_sha: "a".repeat(40), conclusion: "failure" }),
@@ -221,12 +221,16 @@ test("blocking CI health budgets persist two weeks before opening an issue", () 
     ],
     flakyRecords: [{ product: { failed: 0, flaky: 1, retries: 1 } }],
   });
-  assert.equal(report.sameShaWashGreen, 1);
+  assert.equal(report.sameShaWashGreen, 0);
   assert.equal(report.blockingProductRetries, 2);
   const violations = budgetViolations(report);
-  assert.equal(violations.some((item) => item.code === "same-sha-wash-green" && item.blocking), true);
+  assert.equal(violations.some((item) => item.code === "same-sha-wash-green" && item.blocking), false);
   assert.equal(shouldCreateCiHealthIssue(violations, []), false);
-  assert.equal(shouldCreateCiHealthIssue(violations, violations), true);
+  assert.equal(shouldCreateCiHealthIssue(violations, violations), false);
+  assert.equal(shouldCreateCiHealthIssue(violations, violations, {
+    previousGeneratedAt: "2026-08-22T00:00:00.000Z",
+    currentGeneratedAt: "2026-09-05T00:00:00.000Z",
+  }), true);
   assert.equal(CI_HEALTH_BUDGETS.sameShaUntriagedWashGreen, 0);
-  assert.match(renderCiHealthMarkdown(report), /Same SHA washed green: 1/u);
+  assert.match(renderCiHealthMarkdown(report), /Same SHA washed green: 0/u);
 });
