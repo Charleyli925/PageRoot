@@ -588,7 +588,6 @@ export async function createSyntheticAppBundle(t, {
       "conversation.mjs",
       "agent-delivery.mjs",
       "agent-access-operation.mjs",
-      "agent-vendor-key-url.mjs",
       "openai-compatible-vendors.mjs",
       "supported-agent-models.mjs",
       "agent-feature-gates.mjs",

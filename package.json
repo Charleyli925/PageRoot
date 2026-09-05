@@ -498,10 +498,6 @@
         "to": "shared/agent-access-operation.mjs"
       },
       {
-        "from": "shared/agent-vendor-key-url.mjs",
-        "to": "shared/agent-vendor-key-url.mjs"
-      },
-      {
         "from": "shared/openai-compatible-vendors.mjs",
         "to": "shared/openai-compatible-vendors.mjs"
       },

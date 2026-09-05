@@ -157,7 +157,6 @@ const SHARED_FILES = [
   "conversation.mjs",
   "agent-delivery.mjs",
   "agent-access-operation.mjs",
-  "agent-vendor-key-url.mjs",
   "openai-compatible-vendors.mjs",
   "supported-agent-models.mjs",
   "agent-feature-gates.mjs",
@@ -254,6 +253,11 @@ test("desktop package manifest owns the exact application and Bridge resource cl
     && !entry.startsWith("!")
     && !/[?*{}[\]]/u.test(entry)
   ));
+  assert.deepEqual(
+    exactPackagedAppTargets.filter((entry) => resourceTargets.includes(entry)),
+    [],
+    "a path listed in both build.files and extraResources is copied only as a resource and never reaches app.asar",
+  );
   const packagedRuntimeTargets = new Set([
     ...resourceTargets,
     ...exactPackagedAppTargets,

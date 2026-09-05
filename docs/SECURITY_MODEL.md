@@ -370,7 +370,8 @@ Installation and login guidance is copied only after the user's explicit
 button action and must pass the same clipboard write/readback check as the
 normal portable handoff. A local availability failure never writes the
 clipboard. “获取 API Key” opens only the vendor HTTPS page returned by
-`publicAgentVendorKeyUrl()` through Main `shell.openExternal`; renderer sends
+`publicAgentVendorKeyUrl()` through Main `shell.openExternal`; that helper
+ships in app.asar and must not also be listed in extraResources. Renderer sends
 a vendor id, never a URL. Neither the delivery card nor About receives or displays command
 paths, npm prefixes, versions or model counts; stable error classes remain in
 local diagnostics.

@@ -143,7 +143,6 @@ export const REQUIRED_SHARED_FILES = [
   "conversation.mjs",
   "agent-delivery.mjs",
   "agent-access-operation.mjs",
-  "agent-vendor-key-url.mjs",
   "openai-compatible-vendors.mjs",
   "supported-agent-models.mjs",
   "agent-feature-gates.mjs",
