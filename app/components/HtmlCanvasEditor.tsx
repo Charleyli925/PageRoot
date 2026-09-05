@@ -147,9 +147,11 @@ import {
   nativeEditLeasesMatch,
 } from "./html-canvas-native-commands";
 import {
+  insertionLayoutNeedsRefresh,
   layoutCommentMarkers,
   layoutInsertionPoints,
   measureCommentTargetLayouts,
+  type InsertionLayoutAuthority,
   type InsertionPoint,
 } from "./html-canvas-comment-layout";
 import {
@@ -1160,6 +1162,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const retainNativeEditFocusRef = useRef<RetainedNativeEditFocus | null>(null);
   const blockedOuterCompositionGestureRef = useRef(false);
   const insertionPointsRef = useRef<InsertionPoint[]>([]);
+  const insertionLayoutAuthorityRef = useRef<InsertionLayoutAuthority | null>(null);
   const cleanupFrameRef = useRef<() => void>(() => undefined);
   const connectedFrameRef = useRef<{
     iframe: HTMLIFrameElement;
@@ -1402,9 +1405,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   });
   const [moveAvailability, setMoveAvailability] = useState<MoveAvailability>({ up: false, down: false });
   const [isEditing, setIsEditing] = useState(false);
-  const [, setInsertionPoints] = useState<InsertionPoint[]>([]);
   const [commentMarkers, setCommentMarkers] = useState<HtmlCanvasCommentMarker[]>([]);
-  const [, setSelectedInsertionId] = useState<string | null>(null);
   const [editFeedback, setEditFeedback] = useState<HtmlCanvasEditFeedback | null>(null);
   const [editFeedbackPaused, setEditFeedbackPaused] = useState(false);
   const [spacingMenuOpen, setSpacingMenuOpen] = useState(false);
@@ -2867,8 +2868,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         targets: [],
       });
       if (!preservePreparedFrameOverlay) setOverlayPosition(null);
-      setInsertionPoints([]);
       setCommentMarkers([]);
+      insertionLayoutAuthorityRef.current = null;
       insertionPointsRef.current = [];
       return;
     }
@@ -2938,9 +2939,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ) {
         if (!preservePreparedFrameOverlay) setOverlayPosition(null);
       }
-      setInsertionPoints([]);
       setCommentMarkers([]);
-      insertionPointsRef.current = [];
       return;
     }
     const commentTabAssociations = tabAssociations(documentNode);
@@ -2971,8 +2970,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     if (lockedRef.current) {
       setOverlayPosition(null);
-      setInsertionPoints([]);
       setCommentMarkers([]);
+      insertionLayoutAuthorityRef.current = null;
       insertionPointsRef.current = [];
       return;
     }
@@ -2981,16 +2980,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (!preservePreparedFrameOverlay) setOverlayPosition(null);
     }
 
-    const insertionLayout = layoutInsertionPoints({
-      documentNode,
-      sourceIndex: sourceIndexRef.current,
-      frameOffsetLeft,
-      frameOffsetTop,
-      frameWidth,
-      frameHeight,
-    });
-    insertionPointsRef.current = insertionLayout.allInsertionPoints;
-    setInsertionPoints(insertionLayout.visibleInsertionPoints);
+    const sourceIndex = sourceIndexRef.current;
+    const nextInsertionAuthority = sourceIndex?.sourceSha256
+      ? { sourceSha256: sourceIndex.sourceSha256, documentNode }
+      : null;
+    if (insertionLayoutNeedsRefresh(insertionLayoutAuthorityRef.current, nextInsertionAuthority)) {
+      insertionLayoutAuthorityRef.current = nextInsertionAuthority;
+      insertionPointsRef.current = nextInsertionAuthority
+        ? layoutInsertionPoints({
+          documentNode,
+          sourceIndex,
+          frameOffsetLeft,
+          frameOffsetTop,
+          frameWidth,
+          frameHeight,
+        }).allInsertionPoints
+        : [];
+    }
     setCommentMarkers(layoutCommentMarkers({
       documentNode,
       commentedTargets: commentedTargetsRef.current,
@@ -3301,7 +3307,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       selectedSourceSelectionRef.current = stableSelection;
       setSelection(stableSelection);
       setToolbarVisible(true);
-      setSelectedInsertionId(null);
       onSelectRef.current?.(stableSelection);
       if (preservesTextRange && !isTextRangeStyle) {
         selectedRangeElements = [liveTarget];
@@ -4300,7 +4305,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       containerRef.current?.setAttribute("data-render-verified", "true");
       setSelection(target);
       setToolbarVisible(true);
-      setSelectedInsertionId(null);
       onSelectRef.current?.(target);
       updateSelectedStyle();
       updateMoveAvailability();
@@ -4379,7 +4383,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     setRuntimeGeneratedSelection(false);
     setToolbarVisible(false);
     setHasTextRange(false);
-    setSelectedInsertionId(null);
     setOverlayPosition(null);
     setSpacingMenuOpen(false);
     setMoveAvailability({ up: false, down: false });
@@ -4504,7 +4507,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
       selectedElementRef.current = element;
       setSpacingMenuOpen(false);
-      setSelectedInsertionId(null);
       if (!options.preserveTextSelection) {
         activeTextRangeRef.current = null;
         setHasTextRange(false);
@@ -5373,7 +5375,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setToolbarVisible(false);
       setHasTextRange(false);
       setMoveAvailability({ up: false, down: false });
-      setSelectedInsertionId(point.selection.id);
       setSelection(point.selection);
       onSelectRef.current?.(point.selection);
       requestAnimationFrame(() => updateOverlayPosition());
@@ -5541,7 +5542,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         runtimeGeneratedSelectionRef.current = false;
         setRuntimeGeneratedSelection(false);
         setSelection(sourceSelection);
-        setSelectedInsertionId(null);
         onSelectRef.current?.(sourceSelection);
         updateSelectedStyle();
         updateMoveAvailability();
@@ -6124,10 +6124,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectedVisualHintRef.current = null;
     resizeObserverRef.current?.disconnect();
     setSelection(null);
-    setSelectedInsertionId(null);
     setOverlayPosition(null);
-    setInsertionPoints([]);
     setCommentMarkers([]);
+    insertionLayoutAuthorityRef.current = null;
+    insertionPointsRef.current = [];
     setMoveAvailability({ up: false, down: false });
     setImperativeLocked(true);
     onSelectRef.current?.(null);

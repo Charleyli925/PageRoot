@@ -75,7 +75,11 @@ Hash is recomputed from those bytes; `applyPatchPlan` may reuse that
 before-index the same way. Reuse is not a Session, not a history pool, and not a
 skip-validation flag. A caller-supplied object that was not built by
 `buildSourceIndex`, or that does not match the current HTML/Hash, is rejected.
-Built indexes are read-only.
+Built indexes are read-only. Insertion-point layout scans the preview tree only
+when the current source Hash or iframe document identity changes; overlay,
+scroll and selection updates reuse the last scan. Unused insertion-point React
+state is not a second layout owner. Geometry or outline failure still must not
+refuse edit entry.
 
 **Transitional.** Heuristic helpers may still exist in `target-resolver.js`,
 but the official entry does not call them and does not record fallback-only
@@ -87,8 +91,7 @@ scans in tests; it is not a Session and has no production stream. Live
 `SemanticDocumentState` objects may remember the owned index for their current
 bytes until they are collected; that is not a global source-index cache.
 
-**Target, not done.** Later edits should keep on-demand Canvas layout. Do not
-read that as current. `Verified*Context` objects still live only inside one
+**Target, not done.** `Verified*Context` objects still live only inside one
 operation and are not a reusable source-index cache.
 
 Living ADR status is in `docs/decisions/README.md`. Read this map and the
