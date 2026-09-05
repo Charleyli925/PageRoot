@@ -415,6 +415,8 @@ it does not skip hash, range, identity or parse-integrity checks.
 records frame lifecycle and visual samples only after a test enables it; it has
 no source, Runtime or persistence authority. `edit-pipeline-counters.js`
 likewise records index/patch/insertion-scan counts only after a test enables it.
+Canvas undo/redo restores the open-document history tuple and is counted
+separately from a new semantic `fullPatchApply`.
 
 ## Persistence
 

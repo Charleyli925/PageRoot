@@ -90,7 +90,8 @@ metrics. Canvas still constructs capability-specific SourcePatch commands
 beside kernel operations so it can recover island metadata before the single
 apply. Opt-in `edit-pipeline-counters.js` can count
 full-document index builds, full patch applies and insertion-point full-tree
-scans in tests; it is not a Session and has no production stream. Live
+scans in tests; it is not a Session and has no production stream. Undo/redo
+restores the open-document history tuple and is not a new `fullPatchApply`. Live
 `SemanticDocumentState` objects may remember the owned index for their current
 bytes until they are collected; that is not a global source-index cache.
 
