@@ -1033,6 +1033,22 @@
       ]
     },
     {
+      "id": "agent-access-surface",
+      "patterns": [
+        "^app/workbench/use-agent-setup-surface\\.ts$",
+        "^app/workbench/agent-access-surface\\.tsx$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/ai-conversation-sidebar.test.mjs",
+        "tests/agent-service-label.test.mjs",
+        "tests/agent-recovery-intent.test.mjs",
+        "tests/agent-provider-card.test.mjs"
+      ]
+    },
+    {
       "id": "comment-relink",
       "patterns": [
         "^app/workbench/comment-relink-model\\.(?:js|d\\.ts)$"

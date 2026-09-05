@@ -457,6 +457,15 @@
 
 .settings-agent-rows .qoder-card-control {
   width: auto;
+  min-width: 140px;
+  max-width: 220px;
+  min-height: 34px;
+  display: flex;
+  flex-wrap: wrap;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .settings-service-row + .settings-service-row {
@@ -580,16 +589,6 @@
   border: 0;
   border-top: 1px solid #ecebf0;
   border-radius: 0;
-}
-  min-width: 140px;
-  max-width: 220px;
-  min-height: 34px;
-  display: flex;
-  flex-wrap: wrap;
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .settings-agent-rows .qoder-card-status,

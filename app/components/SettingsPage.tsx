@@ -36,6 +36,7 @@ import {
   agentServicePrimaryAction,
   agentServiceStatusText,
 } from "../application/agent-service-label.js";
+import { useAgentAccess } from "../workbench/agent-access-surface";
 
 type AgentActionOutcome = Readonly<{ status: string; reason?: string; code?: string }> | null | undefined;
 
@@ -331,11 +332,12 @@ function AgentSettings({
   const [expandedProviderId, setExpandedProviderId] = useState<string | null>(
     focusProviderId || selectedCard?.selection.providerId || null,
   );
-  const [moreMenuId, setMoreMenuId] = useState<string | null>(null);
-
-  useEffect(() => {
+  const [appliedFocusProviderId, setAppliedFocusProviderId] = useState(focusProviderId);
+  if (focusProviderId !== appliedFocusProviderId) {
+    setAppliedFocusProviderId(focusProviderId);
     if (focusProviderId) setExpandedProviderId(focusProviderId);
-  }, [focusProviderId]);
+  }
+  const [moreMenuId, setMoreMenuId] = useState<string | null>(null);
 
   const expandService = (card: AgentProviderCardData) => {
     setExpandedProviderId(card.selection.providerId);
@@ -698,6 +700,13 @@ export default function SettingsPage({
   agentFocusField = null,
   onClose,
 }: SettingsPageProps) {
+  const access = useAgentAccess();
+  const resolvedFocusProviderId = agentFocusProviderId
+    || access?.agentAccessFocus.providerId
+    || null;
+  const resolvedFocusField = agentFocusField
+    || access?.agentAccessFocus.field
+    || null;
   const pageRef = useRef<HTMLElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const agentActionRef = useRef<HTMLButtonElement>(null);
@@ -837,8 +846,8 @@ export default function SettingsPage({
             checking={agentCheckPending}
             actionButtonRef={agentActionRef}
             workspace={workspacePreferences}
-            focusProviderId={agentFocusProviderId}
-            focusField={agentFocusField}
+            focusProviderId={resolvedFocusProviderId}
+            focusField={resolvedFocusField}
             onSelect={onSelectAgent}
             onCheck={() => requestAgentCheck(true)}
             onCheckSelection={onCheckUsability}

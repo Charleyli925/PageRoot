@@ -30,7 +30,6 @@ import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-ap
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import SettingsPage from "./components/SettingsPage";
-import AgentSetupPanel from "./components/AgentSetupPanel";
 import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import FirstEditGuideCard from "./components/FirstEditGuideCard";
@@ -38,6 +37,10 @@ import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
 import { useAiConversation } from "./workbench/use-ai-conversation";
+import {
+  AgentAccessProvider,
+  AgentRunConversationOutlet,
+} from "./workbench/agent-access-surface";
 import NoticeBar from "./components/NoticeBar";
 import {
   MAX_ATTACHMENT_BYTES,
@@ -89,14 +92,7 @@ import { agentProviderCardsFromCatalog } from "./application/agent-provider-cata
 import {
   AGENT_SERVICE_ORDER,
   agentServiceLabel,
-  agentServiceStatusText,
-  sidebarServiceTriggerText,
 } from "./application/agent-service-label.js";
-import {
-  createAgentRecoveryIntent,
-  sidebarRecoveryBar,
-  type AgentRecoveryIntent,
-} from "./application/agent-recovery-intent.js";
 import {
   DEFAULT_OPENAI_COMPATIBLE_REASONING,
   openAiCompatibleVendorDisplayNameForPublicModel,
@@ -218,7 +214,6 @@ import {
   PreviewNavigationBanner,
 } from "./workbench/presentation";
 import { deriveWorkbenchInspector } from "./workbench/inspector-presentation.js";
-import { RunConversationOutlet } from "./workbench/run-conversation-outlet";
 import { WorkbenchReviewOverlay } from "./workbench/workbench-review-overlay";
 import WorkbenchActiveDocumentCanvas from "./workbench/WorkbenchActiveDocumentCanvas";
 import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceCache";
@@ -796,25 +791,10 @@ export default function Workbench() {
     ((mode: AgentDeliveryMode) => void) | null
   >(null);
   const resumeCommentEditRef = useRef<(commentId?: string) => void>(() => {});
-  type AgentAccessFocus = Readonly<{
-    providerId?: string | null;
-    field?: "apiKey" | "login" | "model" | "install" | null;
-    surface?: "settings" | "sidebar";
-  }>;
-  const [agentAccessFocus, setAgentAccessFocus] = useState<AgentAccessFocus>({});
-  const [sidebarSetupProviderId, setSidebarSetupProviderId] = useState<string | null>(null);
-  const [pendingSidebarDefault, setPendingSidebarDefault] = useState(false);
-  const [agentRecoveryIntent, setAgentRecoveryIntent] = useState<AgentRecoveryIntent | null>(null);
   const openAgentSettingsRef = useRef<(() => void) | null>(null);
-  const openAgentSettings = useCallback((focus: AgentAccessFocus = {}) => {
-    setAgentAccessFocus(focus);
-    if (focus.surface === "settings") {
-      openAgentSettingsRef.current?.();
-      return;
-    }
-    const providerId = focus.providerId || frozenAgentSelection?.providerId || null;
-    if (providerId) setSidebarSetupProviderId(providerId);
-  }, [frozenAgentSelection?.providerId]);
+  const openAgentSettings = useCallback(() => {
+    openAgentSettingsRef.current?.();
+  }, []);
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
@@ -5688,35 +5668,15 @@ export default function Workbench() {
       "change-agent-provider",
       "repair-agent-installation",
       "switch-agent",
-      "repair-agent-connection",
     ].includes(actionId)) {
-      const providerId = frozenAgentSelection?.providerId || null;
-      const field = actionId === "change-agent-model"
-        ? "model"
-        : actionId === "repair-agent-installation"
-          ? "install"
-          : frozenProvider?.presentation?.credentialKind === "api-token"
-            ? "apiKey"
-            : "login";
-      try {
-        setAgentRecoveryIntent(createAgentRecoveryIntent({
-          originSurface: "sidebar",
-          projectId: projectId || null,
-          documentId: documentId || null,
-          requestId: activeRun?.requestId || null,
-          attemptId: activeRun?.attemptId || null,
-          providerId,
-          targetField: field,
-          errorKind: actionId,
-        }));
-      } catch {
-        setAgentRecoveryIntent(null);
-      }
-      if (actionId === "change-agent-provider" || actionId === "switch-agent") {
-        openAgentSettings({ providerId, field, surface: "settings" });
-        return;
-      }
-      openAgentSettings({ providerId, field, surface: "sidebar" });
+      void (async () => {
+        if (activeRun && !(await cancelActiveRun())) return;
+        workspaceControllerRef.current?.runs.commands.dismiss();
+        setHandoffPreviewOpen(false);
+        setCanvasMode("edit");
+        editorRef.current?.unlockNow?.();
+        openAgentSettings();
+      })();
       return;
     }
     if (actionId === "copy-task") {
@@ -5733,17 +5693,11 @@ export default function Workbench() {
       requestActiveRunEnd();
       return;
     }
-    if (actionId === "return-editing" || actionId === "dismiss" || actionId === "dismiss-recovery") {
-      setAgentRecoveryIntent(null);
-      setSidebarSetupProviderId(null);
+    if (actionId === "return-editing" || actionId === "dismiss") {
       workspaceControllerRef.current?.runs.commands.dismiss();
       setHandoffPreviewOpen(false);
       setCanvasMode("edit");
       editorRef.current?.unlockNow?.();
-      return;
-    }
-    if (actionId === "return-original-task") {
-      revealAiConversation();
       return;
     }
     if (actionId === "recopy") {
@@ -5766,137 +5720,57 @@ export default function Workbench() {
     activeRun,
     cancelActiveRun,
     openAgentSettings,
-    projectId,
-    documentId,
-    frozenAgentSelection,
-    frozenProvider,
-    revealAiConversation,
     requestActiveRunEnd,
     resolveAiConflict,
     reviewReadyResult,
   ]);
 
-  useEffect(() => {
-    if (!pendingSidebarDefault || !sidebarSetupProviderId) return;
-    const card = agentCards.find((item) => item.selection.providerId === sidebarSetupProviderId);
-    if (card?.availability.status !== "ready" || card.availability.reason === "disabled") return;
-    try {
-      const selected = workspaceController?.selectAgent(card.selection);
-      if (selected) {
-        void workspacePreferencesController.update({
-          defaultAgentProviderId: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
-        });
-      }
-    } catch (cause) {
-      reportInternalFailure({
-        area: "settings",
-        operation: "select-agent",
-        code: "default-agent-selection-failed",
-        recovered: false,
-        cause,
-      });
-    }
-    setPendingSidebarDefault(false);
-    setSidebarSetupProviderId(null);
-  }, [
+  const persistDefaultAgentProviderId = (providerId: string) => {
+    void workspacePreferencesController.update({
+      defaultAgentProviderId: providerId as WorkspacePreferences["defaultAgentProviderId"],
+    });
+  };
+  const agentConversationOutletProps = {
     agentCards,
-    pendingSidebarDefault,
-    sidebarSetupProviderId,
-    workspaceController,
-    workspacePreferencesController,
-  ]);
-
-  const sidebarSetupCard = agentCards.find((card) => (
-    card.selection.providerId === sidebarSetupProviderId
-  )) || null;
-  const agentServices = AGENT_SERVICE_ORDER.map((providerId) => {
-    const card = agentCards.find((item) => item.selection.providerId === providerId);
-    if (!card) return null;
-    return {
-      providerId,
-      label: agentServiceLabel(providerId),
-      status: agentServiceStatusText({
-        availability: card.availability,
-        installState: card.installState,
-        activeOperation: card.activeOperation,
-        connection: card.connection,
-        isDefault: frozenAgentSelection?.providerId === providerId,
-        providerId,
-        modelDisplayName: card.selection.resolvedModelId,
-      }),
-      connected: card.availability.status === "ready" && card.availability.reason !== "disabled",
-    };
-  }).filter((service): service is NonNullable<typeof service> => Boolean(service));
-  const conversationSidebarExtras = {
-    agentServices,
-    serviceTriggerText: sidebarServiceTriggerText({
-      providerId: frozenAgentSelection?.providerId || null,
-      catalogStatus: qoderAvailability.status,
-      connectionVendorName: frozenProvider?.connection?.vendorDisplayName || null,
-      modelDisplayName: selectedAgentModel?.displayName || selectedAgentModel?.id || null,
-    }),
-    onSelectAgentService: (providerId: string) => {
-      const card = agentCards.find((item) => item.selection.providerId === providerId);
-      if (!card) return;
-      if (card.availability.status === "ready" && card.availability.reason !== "disabled") {
-        try {
-          const selected = workspaceController?.selectAgent(card.selection);
-          if (selected) {
-            void workspacePreferencesController.update({
-              defaultAgentProviderId: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
-            });
-          }
-        } catch (cause) {
-          reportInternalFailure({
-            area: "settings",
-            operation: "select-agent",
-            code: "default-agent-selection-failed",
-            recovered: false,
-            cause,
-          });
-        }
-        setSidebarSetupProviderId(null);
-        setPendingSidebarDefault(false);
-        return;
-      }
-      if (card.availability.reason === "disabled") {
-        void workspacePreferencesController.update({
-          disabledAgentProviderIds: workspacePreferences.disabledAgentProviderIds.filter(
-            (id) => id !== providerId,
-          ),
+    frozenAgentSelection: frozenAgentSelection ?? null,
+    frozenProvider: frozenProvider ?? null,
+    qoderAvailability,
+    selectedAgentModel,
+    projectId: projectId || null,
+    documentId: documentId || null,
+    activeRun,
+    onSelectReadyAgent: (selection: (typeof agentCards)[number]["selection"]) => {
+      try {
+        const selected = workspaceController?.selectAgent(selection);
+        if (selected) persistDefaultAgentProviderId(selected.providerId);
+      } catch (cause) {
+        reportInternalFailure({
+          area: "settings",
+          operation: "select-agent",
+          code: "default-agent-selection-failed",
+          recovered: false,
+          cause,
         });
       }
-      setSidebarSetupProviderId(providerId);
-      setPendingSidebarDefault(true);
-      void checkAgentUsability(card.selection);
     },
-    agentSetupPanel: sidebarSetupCard ? (
-      <AgentSetupPanel
-        card={sidebarSetupCard}
-        surface="settings"
-        initialFocusField={agentAccessFocus.field || null}
-        onCopyGuidance={copyAgentGuidance}
-        onStartLogin={startAgentLogin}
-        onInstall={installAgent}
-        onCancelInstall={cancelAgentInstall}
-        onCheckSelection={checkAgentUsability}
-        onConnectApiKey={connectAgentApiKey}
-        onDisconnectApiKey={disconnectAgentApiKey}
-        onOpenVendorApiKeyPage={openVendorApiKeyPage}
-        onSelectAgentModel={selectSettingsAgentModel}
-        onSelectAgentReasoning={selectSettingsAgentReasoning}
-      />
-    ) : null,
-    recoveryBar: sidebarRecoveryBar({
-      intent: agentRecoveryIntent,
-      catalogStatus: qoderAvailability.status,
-      credentialKind: frozenProvider?.presentation?.credentialKind === "api-token"
-        ? "api-token"
-        : null,
-      currentProjectId: projectId || null,
-      currentDocumentId: documentId || null,
-    }),
-    onRecoveryAction: (actionId: string) => handleAiDecision(actionId),
+    onEnableProvider: (providerId: string) => {
+      void workspacePreferencesController.update({
+        disabledAgentProviderIds: workspacePreferences.disabledAgentProviderIds.filter(
+          (id) => id !== providerId,
+        ),
+      });
+    },
+    onCheckUsability: checkAgentUsability,
+    onCopyGuidance: copyAgentGuidance,
+    onStartLogin: startAgentLogin,
+    onInstall: installAgent,
+    onCancelInstall: cancelAgentInstall,
+    onConnectApiKey: connectAgentApiKey,
+    onDisconnectApiKey: disconnectAgentApiKey,
+    onOpenVendorApiKeyPage: openVendorApiKeyPage,
+    onSelectAgentModel: selectSettingsAgentModel,
+    onSelectAgentReasoning: selectSettingsAgentReasoning,
+    onRevealConversation: revealAiConversation,
   };
 
   const aiAssistantEntry = (
@@ -5958,15 +5832,13 @@ export default function Workbench() {
       onRevealAiTask={() => void revealAiTaskInFinder()}
       assistantEntry={aiAssistantEntry}
       sidebar={aiConversation.visible && runCapability ? (
-        <RunConversationOutlet
+        <AgentRunConversationOutlet
           capability={runCapability}
-          sidebarProps={{
-            ...aiConversation.sidebarProps,
-            ...conversationSidebarExtras,
-            onAction: handleAiDecision,
-          }}
+          sidebarProps={aiConversation.sidebarProps}
+          onAction={handleAiDecision}
           reviewing
           deliveryMode={currentAgentDeliveryMode}
+          {...agentConversationOutletProps}
         />
       ) : null}
       registerReload={(reload) => {
@@ -6145,6 +6017,13 @@ export default function Workbench() {
     `pendingWrite: ${documentSnapshot.hasPendingWrite ? "true" : "false"}`,
   ].join("\n");
   return (
+    <AgentAccessProvider
+      frozenProviderId={frozenAgentSelection?.providerId || null}
+      agentCards={agentCards}
+      selectAgent={(selection) => workspaceController?.selectAgent(selection) ?? null}
+      persistDefaultProviderId={persistDefaultAgentProviderId}
+      openSettingsPage={() => openSettingsPage("agent")}
+    >
     <>
       <RendererStartupPerformance />
       <main
@@ -6470,8 +6349,6 @@ export default function Workbench() {
           agentChoices={agentProviderChoices}
           selectedAgentChoiceId={selectedAgentChoiceId}
           agentCards={agentCards}
-          agentFocusProviderId={agentAccessFocus.providerId || null}
-          agentFocusField={agentAccessFocus.field || null}
           onUpdateWorkspacePreference={workspacePreferencesController.update}
           onRetryWorkspacePreferences={() => {
             workspacePreferencesController.retry();
@@ -6711,15 +6588,13 @@ export default function Workbench() {
               kind="inspector"
               onCommit={(width) => workspacePreferencesController.commitPanelWidth("inspector", width)}
             />
-            <RunConversationOutlet
+            <AgentRunConversationOutlet
               capability={runCapability}
-              sidebarProps={{
-                ...aiConversation.sidebarProps,
-                ...conversationSidebarExtras,
-                onAction: handleAiDecision,
-              }}
+              sidebarProps={aiConversation.sidebarProps}
+              onAction={handleAiDecision}
               reviewing={false}
               deliveryMode={currentAgentDeliveryMode}
+              {...agentConversationOutletProps}
             />
           </aside>
         ) : null}
@@ -6803,5 +6678,6 @@ export default function Workbench() {
         }}
       />
     </>
+    </AgentAccessProvider>
   );
 }

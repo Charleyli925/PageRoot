@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type Ref } from "react";
+import { useState, type Ref } from "react";
 import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
 import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
 
@@ -158,7 +158,11 @@ export default function AgentProviderCard({
   const [actionError, setActionError] = useState("");
   const [fieldError, setFieldError] = useState<ApiKeyField | "">("");
   const [apiKeyOpen, setApiKeyOpen] = useState(initialFocusField === "apiKey");
-  const [apiKey, setApiKey] = useState("");
+  const [appliedFocusField, setAppliedFocusField] = useState(initialFocusField);
+  if (initialFocusField !== appliedFocusField) {
+    setAppliedFocusField(initialFocusField);
+    if (initialFocusField === "apiKey") setApiKeyOpen(true);
+  }
   const [rememberKey, setRememberKey] = useState(false);
   const [vendorId, setVendorId] = useState(connection?.vendorId || provider.vendors?.[0]?.id || "deepseek");
   const [baseUrl, setBaseUrl] = useState(connection?.vendorId === "custom" ? connection.baseUrl : "");
@@ -167,10 +171,7 @@ export default function AgentProviderCard({
       ? String(selectedModelId || models[0]?.id || "").replace(/^pageroot:/u, "")
       : "",
   );
-  useEffect(() => {
-    if (initialFocusField === "apiKey") setApiKeyOpen(true);
-  }, [initialFocusField]);
-
+  const [apiKey, setApiKey] = useState("");
   const presentation = provider.availability(availability);
   const installing = installState === "installing" || installPending;
   const loggingIn = activeOperation?.kind === "login"
