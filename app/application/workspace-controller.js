@@ -1726,6 +1726,10 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().copyQoderGuidance(input);
   }
 
+  startAgentLogin(selection) {
+    return this.#requireRunWorkflow().startAgentLogin(selection);
+  }
+
   installQoder() {
     return this.#requireRunWorkflow().installQoder();
   }

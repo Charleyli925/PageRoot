@@ -1243,6 +1243,22 @@ test("preload exposes the narrow QoderWork handoff integration", async () => {
     "html-integrations:qoder-handoff",
     { message: "handoff" },
   ]);
+  assert.deepEqual(
+    await integrations.openAgentLogin({ providerId: "qoder" }),
+    {
+      status: "copied",
+      copied: true,
+      opened: false,
+      pasted: false,
+      reason: null,
+    },
+  );
+  assert.equal(calls[1][0], "html-agent-access:open-login");
+  assert.equal(calls[1][1].providerId, "qoder");
+  await assert.rejects(
+    () => integrations.openAgentLogin({ providerId: "pageroot" }),
+    /官方登录入口无效/u,
+  );
 });
 
 test("preload exposes update status, restart installation, and the fixed release fallback", async () => {

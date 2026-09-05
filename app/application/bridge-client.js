@@ -324,6 +324,16 @@ export function createBridgeClient({
       body,
       "Agent 安装停止结果暂时无法确认。",
     ),
+    loginAgent: (body) => command(
+      "/agent/login",
+      body,
+      "官方登录没有启动。",
+    ),
+    cancelAgentLogin: (body) => command(
+      "/agent/login/cancel",
+      body,
+      "官方登录停止结果暂时无法确认。",
+    ),
     setAgentSessionCredential: (body) => command(
       "/agent/session-credential",
       body,

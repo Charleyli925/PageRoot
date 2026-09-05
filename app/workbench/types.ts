@@ -308,6 +308,9 @@ export type DesktopIntegrationsApi = {
   handoffToQoderWork: (payload: {
     message: string;
   }) => Promise<QoderHandoffResult>;
+  openAgentLogin?: (payload: {
+    providerId: string;
+  }) => Promise<{ opened?: boolean }>;
 };
 
 export type ApplicationUpdateStatus =

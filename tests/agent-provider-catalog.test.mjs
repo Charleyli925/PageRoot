@@ -962,37 +962,59 @@ test("disabled providers stay disconnected after a ready diagnose and cannot pre
   assert.equal(catalog.provider(selected).enabled, true);
 });
 
-test("login guidance records a waiting access operation that cancel finishes", async () => {
+test("startLogin records a waiting access operation that cancel finishes", async () => {
   const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let releaseLogin;
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() { return { status: "ready" }; },
+      async loginAgent() {
+        await new Promise((resolve) => {
+          releaseLogin = resolve;
+        });
+        return { ok: true, loginState: "waiting" };
+      },
+      async cancelAgentLogin() {
+        releaseLogin?.();
+        return { ok: true, loginState: "idle" };
+      },
+      async agentDiagnose() {
+        return { status: "auth-required", diagnostic: { readiness: "auth-required" } };
+      },
     },
     providers: [QODER_AGENT_PROVIDER],
     selected,
-    handoffPort: {
-      async copy() {
-        return { status: "copied", copied: true };
-      },
-    },
     clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
   });
-  await catalog.copyGuidance("login", selected);
+  const pending = catalog.startLogin(selected);
+  await new Promise((resolve) => setTimeout(resolve, 0));
   const waiting = catalog.provider(selected).activeOperation;
   assert.equal(waiting.kind, "login");
   assert.equal(waiting.state, "waiting");
   const cancelled = await catalog.cancelAccessOperation(selected);
   assert.equal(cancelled.state, "cancelled");
   assert.equal(cancelled.cancellable, false);
+  await assert.rejects(pending, /AGENT_LOGIN_CANCELLED|登录已取消/u);
   const again = await catalog.cancelAccessOperation(selected);
   assert.equal(again.state, "cancelled");
 });
 
 test("public catalog idle install does not clear a waiting login operation", async () => {
   const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let releaseLogin;
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() { return { status: "ready" }; },
+      async loginAgent() {
+        await new Promise((resolve) => {
+          releaseLogin = resolve;
+        });
+        return { ok: true, loginState: "waiting" };
+      },
+      async cancelAgentLogin() {
+        releaseLogin?.();
+        return { ok: true, loginState: "idle" };
+      },
       async agentDiagnose() {
         return { status: "auth-required", diagnostic: { readiness: "auth-required" } };
       },
@@ -1010,15 +1032,14 @@ test("public catalog idle install does not clear a waiting login operation", asy
     },
     providers: [QODER_AGENT_PROVIDER],
     selected,
-    handoffPort: {
-      async copy() {
-        return { status: "copied", copied: true };
-      },
-    },
     clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
   });
-  await catalog.copyGuidance("login", selected);
-  await catalog.diagnose(selected).catch(() => null);
+  const pending = catalog.startLogin(selected);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await catalog.diagnose(selected);
   assert.equal(catalog.provider(selected).activeOperation?.kind, "login");
   assert.equal(catalog.provider(selected).activeOperation?.state, "waiting");
+  await catalog.cancelAccessOperation(selected);
+  await pending.catch(() => null);
 });
+

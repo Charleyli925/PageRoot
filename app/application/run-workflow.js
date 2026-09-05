@@ -706,6 +706,29 @@ export class RunWorkflow {
     }
   }
 
+  async startAgentLogin(selection = this.#agentCatalog.freezeSelected()) {
+    const frozen = selection || this.#agentCatalog.freezeSelected();
+    const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
+    if (!frozen) return rejected("AGENT_PROVIDER_UNSUPPORTED", `${displayName} 不可用。`);
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 登录已经停止。`);
+    }
+    try {
+      await this.#agentCatalog.startLogin(frozen);
+      if (this.#disposed) return stale({ kind: "agent-login" });
+      return succeeded({ availability: this.#agentCatalog.availability(frozen) });
+    } catch (cause) {
+      const cancelled = cause?.code === "AGENT_LOGIN_CANCELLED";
+      if (cancelled) {
+        return succeeded({ cancelled: true, availability: this.#agentCatalog.availability(frozen) });
+      }
+      return rejected(
+        errorCode(cause, "AGENT_LOGIN_FAILED"),
+        this.#codecs.errorMessage(cause, `暂时无法完成 ${displayName} 登录。`),
+      );
+    }
+  }
+
   async installAgent(selection = this.#agentCatalog.freezeSelected()) {
     const frozen = selection || this.#agentCatalog.freezeSelected();
     const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
@@ -751,7 +774,7 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 安装已经停止。`);
     }
     try {
-      const result = await this.#agentCatalog.cancelInstall(frozen);
+      const result = await this.#agentCatalog.cancelAccessOperation(frozen);
       return succeeded({ result, availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {
       return rejected(

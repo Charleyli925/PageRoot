@@ -120,3 +120,24 @@ export function accessOperationFromInstallSnapshot(snapshot) {
     errorCode: snapshot.errorCode || null,
   });
 }
+
+const LOGIN_STATE_TO_ACCESS = Object.freeze({
+  waiting: "waiting",
+  cancelling: "cancelling",
+  failed: "failed",
+});
+
+export function accessOperationFromLoginSnapshot(snapshot) {
+  if (!snapshot?.providerId) return null;
+  const state = LOGIN_STATE_TO_ACCESS[snapshot.loginState];
+  if (!state) return null;
+  const generation = Number(snapshot.generation);
+  return publicAccessOperation({
+    providerId: snapshot.providerId,
+    kind: "login",
+    generation: Number.isSafeInteger(generation) && generation >= 1 ? generation : 1,
+    state,
+    startedAt: snapshot.startedAt || null,
+    errorCode: snapshot.errorCode || null,
+  });
+}

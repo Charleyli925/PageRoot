@@ -1277,6 +1277,13 @@ export default function Workbench() {
             }
             return { status: "copied", copied: true };
           },
+          openLogin: async ({ providerId }: { providerId: string }) => {
+            const integrations = window.htmlAIIntegrations;
+            if (typeof integrations?.openAgentLogin !== "function") {
+              return { opened: false };
+            }
+            return integrations.openAgentLogin({ providerId });
+          },
         },
         scheduler: {
           setTimeout: (callback: () => void, delayMs: number) => (
@@ -4860,6 +4867,9 @@ export default function Workbench() {
   const copyAgentGuidance = useCallback(async (kind: "install" | "login", selection?: AgentSelection) => (
     workspaceController?.copyAgentGuidance({ kind, selection }) ?? null
   ), [workspaceController]);
+  const startAgentLogin = useCallback(async (selection?: AgentSelection | null) => (
+    workspaceController?.startAgentLogin(selection) ?? null
+  ), [workspaceController]);
   const installAgent = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.installAgent(selection) ?? null
   ), [workspaceController]);
@@ -6262,6 +6272,7 @@ export default function Workbench() {
           onOpenReleaseNotes={() => void openReleaseNotes()}
           onCheckUsability={checkAgentUsability}
           onCopyGuidance={copyAgentGuidance}
+          onStartLogin={startAgentLogin}
           onInstall={installAgent}
           onCancelInstall={cancelAgentInstall}
           onConnectApiKey={connectAgentApiKey}

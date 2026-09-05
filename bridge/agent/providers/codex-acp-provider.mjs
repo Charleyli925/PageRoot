@@ -25,6 +25,11 @@ import {
   defineAgentProvider,
 } from "./agent-provider-contract.mjs";
 import { cleanProviderText } from "./qoder-provider.mjs";
+import {
+  runOfficialAgentLogin,
+  waitForAgentAuthentication,
+} from "../catalog/agent-login-command.mjs";
+import { describeCodexAuthSource } from "../../../shared/agent-auth-source.mjs";
 
 export const CODEX_ACP_PROVIDER_ID = "codex";
 export const CODEX_ACP_RUNTIME_ID = "acp";
@@ -935,10 +940,41 @@ function resolvedSelection(selection, { evidence } = {}) {
   });
 }
 
+export async function startCodexLogin(command, {
+  environment = process.env,
+  signal,
+  onLoginUrl,
+  timeoutMs,
+  loginRunner = runOfficialAgentLogin,
+  inspectRunner = diagnoseCodexAcp,
+} = {}) {
+  const auth = describeCodexAuthSource(command, environment);
+  if (auth.authSource !== "environment-token") {
+    const executable = command.nativeCommand || command.command;
+    await loginRunner({
+      executable,
+      args: ["login"],
+      env: acpProcessEnvironment(launchEnvironment(command), environment),
+      providerId: CODEX_ACP_PROVIDER_ID,
+      signal,
+      timeoutMs,
+      onOutput({ loginUrl }) {
+        if (loginUrl) onLoginUrl?.(loginUrl);
+      },
+    });
+  }
+  await waitForAgentAuthentication(
+    () => inspectRunner(command, environment),
+    { signal, timeoutMs },
+  );
+  return auth;
+}
+
 export function createCodexAcpProvider({
   commandResolver = resolveCodexAcpCommand,
   diagnoseRunner = diagnoseCodexAcp,
   preflightRunner = probeCodexAcp,
+  loginRunner = startCodexLogin,
   policyLoader = loadExecutionPolicy,
   managedCandidates,
 } = {}) {
@@ -970,6 +1006,10 @@ export function createCodexAcpProvider({
     resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
     diagnose: (installation, { environment }) => diagnoseRunner(installation, environment),
     preflight: (installation, { environment }) => preflightRunner(installation, environment),
+    startLogin: (installation, options) => loginRunner(installation, {
+      ...options,
+      inspectRunner: diagnoseRunner,
+    }),
     assertInstallationUnchanged: assertCodexAcpInstallationUnchanged,
     installationDigest,
     availabilityFailure(cause) {

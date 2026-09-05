@@ -24,6 +24,11 @@ import {
   agentProviderError,
   defineAgentProvider,
 } from "./agent-provider-contract.mjs";
+import {
+  runOfficialAgentLogin,
+  waitForAgentAuthentication,
+} from "../catalog/agent-login-command.mjs";
+import { describeQoderAuthSource } from "../../../shared/agent-auth-source.mjs";
 
 export const QODER_PROVIDER_ID = "qoder";
 export const QODER_RUNTIME_ID = "acp";
@@ -582,10 +587,40 @@ export async function preflightQoder(command, environment) {
   }
 }
 
+export async function startQoderLogin(command, {
+  environment = process.env,
+  signal,
+  onLoginUrl,
+  timeoutMs,
+  loginRunner = runOfficialAgentLogin,
+  inspectRunner = diagnoseQoder,
+} = {}) {
+  const auth = describeQoderAuthSource(command, environment);
+  if (auth.authSource !== "environment-token") {
+    await loginRunner({
+      executable: command.command,
+      args: ["login"],
+      env: qoderAcpEnvironment({}, environment),
+      providerId: QODER_PROVIDER_ID,
+      signal,
+      timeoutMs,
+      onOutput({ loginUrl }) {
+        if (loginUrl) onLoginUrl?.(loginUrl);
+      },
+    });
+  }
+  await waitForAgentAuthentication(
+    () => inspectRunner(command, environment),
+    { signal, timeoutMs },
+  );
+  return auth;
+}
+
 export function createQoderProvider({
   commandResolver = resolveQoderAcpCommand,
   diagnoseRunner = diagnoseQoder,
   preflightRunner = preflightQoder,
+  loginRunner = startQoderLogin,
   policyLoader = loadQoderAcpTaskPolicy,
   managedCandidates,
 } = {}) {
@@ -617,6 +652,10 @@ export function createQoderProvider({
     resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
     diagnose: (installation, { environment }) => diagnoseRunner(installation, environment),
     preflight: (installation, { environment }) => preflightRunner(installation, environment),
+    startLogin: (installation, options) => loginRunner(installation, {
+      ...options,
+      inspectRunner: diagnoseRunner,
+    }),
     assertInstallationUnchanged: assertQoderInstallationUnchanged,
     installationDigest,
     availabilityFailure(cause) {

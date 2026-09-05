@@ -424,6 +424,16 @@ test("public Agent catalog exposes installable Qoder and Codex without paths", a
   const unknownInstall = await bridge.postJson("/agent/install", { providerId: "unknown-agent" });
   assert.equal(unknownInstall.response.status, 404, JSON.stringify(unknownInstall.body));
   assert.equal(unknownInstall.body.error.code, "AGENT_PROVIDER_UNSUPPORTED");
+  const pagerootLogin = await bridge.postJson("/agent/login", { providerId: "pageroot" });
+  assert.equal(pagerootLogin.body.error?.code, "AGENT_LOGIN_UNSUPPORTED");
+  const qoderLogin = await bridge.postJson("/agent/login", { providerId: "qoder" });
+  assert.equal(qoderLogin.response.status, 202, JSON.stringify(qoderLogin.body));
+  assert.equal(qoderLogin.body.ok, true);
+  const cancelledLogin = await bridge.postJson("/agent/login/cancel", { providerId: "qoder" });
+  assert.equal(cancelledLogin.response.status, 200, JSON.stringify(cancelledLogin.body));
+  const loginUrl = await bridge.requestJson("/agent/login/url?providerId=qoder");
+  assert.equal(loginUrl.response.status, 200, JSON.stringify(loginUrl.body));
+  assert.equal(loginUrl.body.loginUrl, null);
   const codexInstall = await bridge.postJson("/agent/install", { providerId: "codex" });
   assert.notEqual(codexInstall.response.status, 404, JSON.stringify(codexInstall.body));
   assert.notEqual(codexInstall.body.error?.code, "AGENT_PROVIDER_UNSUPPORTED");

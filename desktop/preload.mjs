@@ -55,6 +55,7 @@ const appChannels = Object.freeze({
 });
 const integrationChannels = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
+  openAgentLogin: "html-agent-access:open-login",
 });
 const updateChannels = Object.freeze({
   getStatus: "html-updates:get-status",
@@ -257,6 +258,13 @@ const integrationsApi = Object.freeze({
     integrationChannels.qoderHandoff,
     payload,
   ),
+  openAgentLogin: (payload) => {
+    const providerId = String(payload?.providerId || "").trim();
+    if (providerId !== "qoder" && providerId !== "codex") {
+      return Promise.reject(new TypeError("官方登录入口无效。"));
+    }
+    return invokeProject(integrationChannels.openAgentLogin, { providerId });
+  },
 });
 const updateStatusListeners = new Map();
 const updatesApi = Object.freeze({
