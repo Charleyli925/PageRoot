@@ -751,9 +751,13 @@ through the compatibility decoder; new records cannot mix the legacy and
 bounded forms, and malformed partial impact evidence is rejected at the
 durable Candidate boundary.
 
-Prepared formal-review documents are owned by a cancellable
-`ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
-multi-entry cache is byte bounded. Parsing and annotation yield between phases,
+Prepared formal-review documents are derived from a cancellable
+`ReviewAnalysisSession` that caches source-diff facts keyed to exact
+before/after Hash, source path and bootstrap mode. Comment collections and
+the current Review session are applied after a cache hit; they are not cache
+identity and never authorize Candidate adoption. The multi-entry cache is
+byte bounded at 32 MiB for those source facts only, not a second full prepared
+copy. Parsing and annotation yield between phases,
 and stale work stops before publication. Complete, valid and unique
 `data-pageroot-id` enables exact persistent continuity and current-frame visual
 enhancement. Absent, partial, malformed or duplicate identity makes visual

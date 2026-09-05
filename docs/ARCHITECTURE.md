@@ -147,8 +147,13 @@ the historical synthetic-spike decision.
   `candidateAssessmentFromRecord` and is not reinterpreted in the Review
   display. A cancellable, byte-bounded `ReviewAnalysisSession` yields
   between parse/control/pair/annotation/serialization phases and after bounded
-  semantic row/list-item batches, then caches multiple
-  exact identities. Its document analyzer first builds a hierarchy of semantic
+  semantic row/list-item batches, then caches source-diff facts for the exact
+  before/after HTML, source path and bootstrap mode. Comment text, comment
+  anchors, the current Review `sessionId` and Frame geometry stay out of that
+  cache key. A hit still rebinds comments and stamps the current session onto
+  the disposable projection; the cache is not adoption authority and never
+  reuses a previous session's Document, Element, runtime geometry or Frame.
+  The 32 MiB bound covers the source-fact cache only. The document analyzer first builds a hierarchy of semantic
   units (`direct-flow`/`br-line`, list/list item, table/row group/row/cell,
   leaf text owner and atomic non-text content such as media, controls and
   foreign-namespace graphics), then aligns only siblings of an already-paired
@@ -176,9 +181,10 @@ the historical synthetic-spike decision.
   trusted analyzer fails explicitly rather than silently discarding a 25th
   distinct fact for one element; untrusted serialized input remains bounded by
   the 24-fact/12,000-byte parser limit and fails closed when it exceeds it.
-  ready-review session prepares that immutable document pair for the exact
-  operation/source/comment identity before the React review surface mounts;
-  rerenders and bounded cache hits reuse it. The analyzer compares only frozen
+  ready-review session prepares that immutable document pair from cached source
+  facts plus the current comment set and session before the React review
+  surface mounts; rerenders reuse the projected pair, and comment-only changes
+  rebind without rerunning the HTML diff. The analyzer compares only frozen
   HTML: text uses bounded evidence ranges and semantic pairing; unique valid
   stable IDs strongly pair elements and provide movement, authored attribute,
   inline-style and CSS/Script source facts; element presence emits only the
