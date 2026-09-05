@@ -1288,6 +1288,10 @@ test("preload opens only allowlisted vendor Key pages and never reads stored sec
   assert.equal(calls[1][0], "html-agent-access:persist-credential");
   assert.equal(calls[1][1].vendorId, "deepseek");
   assert.equal(calls[1][1].apiKey, "sk-secret");
+  await integrations.restoreSessionCredential();
+  assert.equal(calls[2][0], "html-agent-access:restore-credential");
+  await integrations.clearSessionCredential();
+  assert.equal(calls[3][0], "html-agent-access:clear-credential");
 });
 
 test("preload exposes update status, restart installation, and the fixed release fallback", async () => {

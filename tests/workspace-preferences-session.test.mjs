@@ -121,3 +121,28 @@ test("invalid workspace patches are rejected before they reach the port", async 
   assert.deepEqual(session.snapshot.workspace.disabledAgentProviderIds, ["qoder"]);
   session.dispose();
 });
+
+test("a disabled default Agent stays preferred and is not persisted as another provider", async () => {
+  const {
+    resolvePreferredAgentProvider,
+    shouldPersistDefaultAgentProvider,
+    agentServiceLabel,
+  } = await import("../app/application/workspace-agent-preference.js");
+  const providers = [
+    { providerId: "pageroot", selection: { providerId: "pageroot" } },
+    { providerId: "qoder", selection: { providerId: "qoder" } },
+    { providerId: "codex", selection: { providerId: "codex" } },
+  ];
+  const preferred = resolvePreferredAgentProvider({
+    defaultAgentProviderId: "pageroot",
+    disabledAgentProviderIds: ["pageroot"],
+    providers,
+  });
+  assert.equal(preferred.providerId, "pageroot");
+  assert.equal(shouldPersistDefaultAgentProvider({
+    storedDefaultId: "pageroot",
+    preferredId: "qoder",
+    disabledAgentProviderIds: ["pageroot"],
+  }), false);
+  assert.equal(agentServiceLabel("pageroot"), "内置 AI");
+});

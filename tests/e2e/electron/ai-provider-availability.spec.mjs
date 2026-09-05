@@ -617,7 +617,7 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
 
     const settings = launched.page.locator(".workbench-settings-page");
     await expect(settings).toBeVisible();
-    await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeVisible();
+    await expect(settingsPage.getByRole("heading", { name: "AI 服务" })).toBeVisible();
     await expect(settings.getByText("Qoder CLI", { exact: true })).toBeVisible();
     await expect(settings.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(settings.getByRole("button", { name: "登录 Qoder" }))

@@ -18,6 +18,7 @@ export function registerAgentIpc({
   persistSessionCredential,
   clearSessionCredential,
   sessionCredentialStatus,
+  restoreSessionCredential,
   openAgentLogin,
 }) {
   ipcMain.handle(
@@ -114,6 +115,15 @@ export function registerAgentIpc({
       }
       return openAgentLogin(providerId);
     }, "agent_open_login"),
+  );
+  ipcMain.handle(
+    INTEGRATION_CHANNELS.restoreSessionCredential,
+    trustedProject(async () => {
+      if (typeof restoreSessionCredential !== "function") {
+        return Object.freeze({ ok: true, restored: false });
+      }
+      return restoreSessionCredential();
+    }, "agent_restore_credential"),
   );
 }
 

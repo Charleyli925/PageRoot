@@ -118,7 +118,7 @@ do not split one state owner across hooks only to reduce line count.
 | Save / autosave / conflict | this map, `DocumentWorkflow`, `DocumentSession`, P1-B CAS in `ProjectFileRepository` |
 | Open / switch / tabs / close | this map, `WorkbenchNavigationWorkflow`, `ProjectWorkflow`, `project/*.js` plans, `INTERACTION_FLOW.md` sections 2, 3, 4 and 12 |
 | AI submit / cancel / review | this map, `RunWorkflow`, `VersionWorkflow`, `CHANGE_REQUEST_PROTOCOL.md` |
-| Agent connection, API Key or login | this map, `STATE_OWNERSHIP.md` Agent rows, `SECURITY_MODEL.md` credentials, `agent-provider-catalog.js`, `agent-runtime-coordinator.mjs` |
+| Agent connection, API Key or login | this map, `STATE_OWNERSHIP.md` Agent rows, `SECURITY_MODEL.md` credentials, `agent-provider-catalog.js`, `AgentSetupPanel.tsx`, `INTERACTION_FLOW.md` settings / AI 服务 |
 | Cross-owner or persistence | `STATE_OWNERSHIP.md` and `ARCHITECTURE_CONTRACT.md` |
 
 ## Architecture gate

@@ -68,7 +68,9 @@ test("About is product information while Settings owns Agent checks and update c
   ]);
   assert.match(about, /源码级本地 HTML 编辑器/u);
   assert.doesNotMatch(about, /about-agent-section|Agent|更新|检查更新|Qoder/u);
-  assert.match(settings, /AI Agent/u);
+  assert.match(settings, /AI 服务/u);
+  assert.match(settings, /settings-agent-row-/u);
+  assert.match(settings, /AgentSetupPanel/u);
   assert.match(settings, /软件更新/u);
   assert.match(settings, /document\.visibilityState === "visible"/u);
   assert.match(settings, /window\.addEventListener\("focus"/u);
@@ -79,11 +81,25 @@ test("About is product information while Settings owns Agent checks and update c
   assert.match(settings, /onRequestRestart/u);
   assert.match(settings, /if \(!force && \(/u);
   assert.match(settings, /checkInFlightRef\.current/u);
+});
+
+test("Settings reuses AgentSetupPanel and lists every service row", async () => {
+  const [settings, panel] = await Promise.all([
+    source("../app/components/SettingsPage.tsx"),
+    source("../app/components/AgentSetupPanel.tsx"),
+  ]);
+  assert.match(panel, /import AgentProviderCard from "\.\/AgentProviderCard"/u);
+  assert.match(panel, /<AgentProviderCard \{\.\.\.props\}/u);
+  assert.match(settings, /settings-agent-row-\$\{card\.selection\.providerId\}/u);
+  assert.match(settings, /内置 AI/u);
+  assert.match(settings, /data-kind="disconnect"/u);
+  assert.match(settings, /移除 API Key/u);
+  assert.match(panel, /export function BoundAgentSetupPanel/u);
   assert.ok(
-    settings.indexOf("const checked = await onCheckSelection(candidateSelection)")
-      < settings.indexOf("const committed = onSelectAgentModel(modelId, selectedCard.selection)"),
+    panel.indexOf("const checked = await onCheckSelection(candidateSelection)")
+      < panel.indexOf("const committed = onSelectAgentModel(modelId, card.selection)"),
     "a model selection must validate before it becomes current",
   );
-  assert.match(settings, /checked\.status !== "succeeded"/u);
-  assert.match(settings, /onSelectAgentReasoning\(reasoning, selectedCard\.selection\)/u);
+  assert.match(panel, /checked\.status !== "succeeded"/u);
+  assert.match(panel, /onSelectAgentReasoning\(reasoning, card\.selection\)/u);
 });

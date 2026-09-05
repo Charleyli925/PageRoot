@@ -75,6 +75,8 @@ export type AgentProviderCardProps = {
   onOpenVendorApiKeyPage?: (vendorId: string) => Promise<AgentActionOutcome>;
   onSelectModel?: (modelId: string) => Promise<AgentActionOutcome>;
   onSelectReasoning?: (reasoning: string) => Promise<AgentActionOutcome>;
+  hideDisconnectAction?: boolean;
+  initialApiKeyOpen?: boolean;
 };
 
 type CardAction = Readonly<{
@@ -148,6 +150,8 @@ export default function AgentProviderCard({
   onOpenVendorApiKeyPage,
   onSelectModel,
   onSelectReasoning,
+  hideDisconnectAction = false,
+  initialApiKeyOpen = false,
 }: AgentProviderCardProps) {
   const [pendingAction, setPendingAction] = useState<CardActionKind | null>(null);
   const [installPending, setInstallPending] = useState(false);
@@ -155,7 +159,7 @@ export default function AgentProviderCard({
   const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState("");
   const [fieldError, setFieldError] = useState<ApiKeyField | "">("");
-  const [apiKeyOpen, setApiKeyOpen] = useState(false);
+  const [apiKeyOpen, setApiKeyOpen] = useState(initialApiKeyOpen);
   const [apiKey, setApiKey] = useState("");
   const [rememberKey, setRememberKey] = useState(false);
   const [vendorId, setVendorId] = useState(connection?.vendorId || provider.vendors?.[0]?.id || "deepseek");
@@ -480,7 +484,7 @@ export default function AgentProviderCard({
               </button>
             );
           })}
-          {connection && onDisconnectApiKey ? (
+          {connection && onDisconnectApiKey && !hideDisconnectAction ? (
             <button
               type="button"
               data-kind="disconnect"

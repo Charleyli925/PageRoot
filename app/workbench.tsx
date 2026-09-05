@@ -5238,6 +5238,52 @@ export default function Workbench() {
     return outcome.status === "succeeded";
   }, [activeRun, runCapability]);
 
+  const manageAgentAccess = useCallback(async (
+    kind: "disconnect" | "remove-key" | "reconnect",
+    selection: AgentSelection,
+    options: { stopRun?: boolean } = {},
+  ) => {
+    if (options.stopRun) {
+      const stopped = await cancelActiveRun({ agentMayBeRunning: true });
+      if (!stopped) return { status: "rejected" as const, reason: "当前任务尚未停止。" };
+    }
+    const disabledIds = workspacePreferences.disabledAgentProviderIds;
+    if (kind === "reconnect") {
+      await workspacePreferencesController.update({
+        disabledAgentProviderIds: disabledIds.filter((id) => id !== selection.providerId),
+      });
+      if (selection.providerId === "pageroot") {
+        await window.htmlAIIntegrations?.restoreSessionCredential?.();
+      }
+      return checkAgentUsability(selection);
+    }
+    if (kind === "disconnect") {
+      const nextDisabled = Array.from(new Set([...disabledIds, selection.providerId])) as WorkspacePreferences["disabledAgentProviderIds"];
+      await workspacePreferencesController.update({ disabledAgentProviderIds: nextDisabled });
+      if (selection.providerId === "pageroot") {
+        return await disconnectAgentApiKey(selection) ?? { status: "succeeded" as const };
+      }
+      return { status: "succeeded" as const };
+    }
+    const outcome = selection.providerId === "pageroot"
+      ? await disconnectAgentApiKey(selection)
+      : { status: "succeeded" as const };
+    try {
+      await window.htmlAIIntegrations?.clearSessionCredential?.();
+    } catch {
+      return { status: "rejected" as const, reason: "未能移除已记住的 API Key。" };
+    }
+    return outcome && ["succeeded", "stale"].includes(outcome.status)
+      ? outcome
+      : { status: "succeeded" as const };
+  }, [
+    cancelActiveRun,
+    checkAgentUsability,
+    disconnectAgentApiKey,
+    workspacePreferences.disabledAgentProviderIds,
+    workspacePreferencesController,
+  ]);
+
   const requestActiveRunEnd = useCallback(() => {
     if (!activeRun) return;
     if (handoffCancellationNeedsConfirmation) {
@@ -5761,6 +5807,42 @@ export default function Workbench() {
   // pre-promotion source identity. Accepting promotes the Working Copy to a
   // new path while this overlay is still visible; the live path would rebuild
   // both preview sessions (and retitle the header) mid-accept for nothing.
+  const selectDefaultAgent = (selection: AgentSelection) => {
+    try {
+      const selected = workspaceController?.selectAgent(selection);
+      if (selected) {
+        void workspacePreferencesController.update({
+          defaultAgentProviderId: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
+        });
+      }
+    } catch (cause) {
+      reportInternalFailure({
+        area: "settings",
+        operation: "select-agent",
+        code: "default-agent-selection-failed",
+        recovered: false,
+        cause,
+      });
+    }
+  };
+  const agentAccess = {
+    cards: agentCards,
+    documentId: documentId ?? "",
+    bindings: {
+      onCopyGuidance: copyAgentGuidance,
+      onStartLogin: startAgentLogin,
+      onInstall: installAgent,
+      onCancelInstall: cancelAgentInstall,
+      onCheckSelection: checkAgentUsability,
+      onConnectApiKey: connectAgentApiKey,
+      onDisconnectApiKey: disconnectAgentApiKey,
+      onOpenVendorApiKeyPage: openVendorApiKeyPage,
+      onSelectAgentModel: selectSettingsAgentModel,
+      onSelectAgentReasoning: selectSettingsAgentReasoning,
+    },
+    onSelect: selectDefaultAgent,
+    onReconnect: (selection: AgentSelection) => manageAgentAccess("reconnect", selection),
+  };
   const readyReviewOverlay = readyReviewSession ? (
     <WorkbenchReviewOverlay
       session={readyReviewSession}
@@ -5778,6 +5860,7 @@ export default function Workbench() {
           sidebarProps={{
             ...aiConversation.sidebarProps,
             onAction: handleAiDecision,
+            agentAccess,
           }}
           reviewing
           deliveryMode={currentAgentDeliveryMode}
@@ -6288,24 +6371,7 @@ export default function Workbench() {
           onRetryWorkspacePreferences={() => {
             workspacePreferencesController.retry();
           }}
-          onSelectAgent={(selection) => {
-            try {
-              const selected = workspaceController?.selectAgent(selection);
-              if (selected) {
-                void workspacePreferencesController.update({
-                  defaultAgentProviderId: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
-                });
-              }
-            } catch (cause) {
-              reportInternalFailure({
-                area: "settings",
-                operation: "select-agent",
-                code: "default-agent-selection-failed",
-                recovered: false,
-                cause,
-              });
-            }
-          }}
+          onSelectAgent={selectDefaultAgent}
           onClose={closeSettingsPage}
           onCheckForUpdates={() => void checkForApplicationUpdates()}
           onDownloadUpdate={() => void downloadAvailableUpdate()}
@@ -6320,7 +6386,11 @@ export default function Workbench() {
           onCancelInstall={cancelAgentInstall}
           onConnectApiKey={connectAgentApiKey}
           onDisconnectApiKey={disconnectAgentApiKey}
+          onDisconnectProvider={(selection, options) => manageAgentAccess("disconnect", selection, options)}
+          onRemoveRememberedKey={(selection, options) => manageAgentAccess("remove-key", selection, options)}
+          onReconnectProvider={(selection) => manageAgentAccess("reconnect", selection)}
           onOpenVendorApiKeyPage={openVendorApiKeyPage}
+          busyProviderId={runInProgress ? frozenAgentSelection?.providerId || null : null}
           onSelectAgentModel={selectSettingsAgentModel}
           onSelectAgentReasoning={selectSettingsAgentReasoning}
         />
@@ -6528,6 +6598,7 @@ export default function Workbench() {
               sidebarProps={{
                 ...aiConversation.sidebarProps,
                 onAction: handleAiDecision,
+                agentAccess,
               }}
               reviewing={false}
               deliveryMode={currentAgentDeliveryMode}

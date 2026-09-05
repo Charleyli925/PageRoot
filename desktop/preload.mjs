@@ -60,6 +60,7 @@ const integrationChannels = Object.freeze({
   clearSessionCredential: "html-agent-access:clear-credential",
   sessionCredentialStatus: "html-agent-access:credential-status",
   openAgentLogin: "html-agent-access:open-login",
+  restoreSessionCredential: "html-agent-access:restore-credential",
 });
 const updateChannels = Object.freeze({
   getStatus: "html-updates:get-status",
@@ -282,6 +283,7 @@ const integrationsApi = Object.freeze({
   ),
   clearSessionCredential: () => invokeProject(integrationChannels.clearSessionCredential),
   sessionCredentialStatus: () => invokeProject(integrationChannels.sessionCredentialStatus),
+  restoreSessionCredential: () => invokeProject(integrationChannels.restoreSessionCredential),
   openAgentLogin: (payload) => {
     const providerId = String(payload?.providerId || "").trim();
     if (providerId !== "qoder" && providerId !== "codex") {

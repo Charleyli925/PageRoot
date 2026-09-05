@@ -40,7 +40,7 @@ const SETTINGS_NAV_ITEMS: ReadonlyArray<Readonly<{
   Icon: typeof GearSixIcon;
 }>> = [
   { category: "general", label: "常规", Icon: GearSixIcon },
-  { category: "agent", label: "AI Agent", Icon: UserCircleIcon },
+  { category: "agent", label: "AI 服务", Icon: UserCircleIcon },
   { category: "updates", label: "软件更新", Icon: CloudArrowUpIcon },
 ];
 

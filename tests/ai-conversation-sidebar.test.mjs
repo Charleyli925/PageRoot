@@ -585,6 +585,19 @@ test("conflict and failed results keep their recovery decisions in the conversat
   assert.match(nonRetryable.detail, /本轮没有收到可用的完成结果。 页面未修改/u);
   assert.deepEqual(nonRetryable.actions.map((action) => action.id), ["dismiss"]);
   assert.ok(nonRetryable.actions.length <= 2);
+
+  const expiredKey = sidebarActionBar({
+    state: "run-error",
+    runStatus: "error",
+    failureMessage: "DeepSeek 的 API Key 已失效",
+    failureRecoveryKind: "reauthenticate",
+    credentialKind: "api-token",
+  });
+  assert.equal(expiredKey.title, "API Key 已失效");
+  assert.match(expiredKey.detail, /页面和本轮要求已保留/u);
+  assert.deepEqual(expiredKey.actions.map((action) => action.id), [
+    "replace-api-key", "dismiss",
+  ]);
 });
 
 test("structured recovery kinds expose only actions that can resolve the failure", () => {
@@ -1040,4 +1053,13 @@ test("every speaker has an avatar mark, so the thread reads as a chat", () => {
   assert.equal(sidebarActorInitial("pageroot"), "P");
   // An unknown actor still gets a mark rather than an empty square.
   assert.equal(sidebarActorInitial("someone-else"), "P");
+});
+
+test("the conversation sidebar reuses AgentSetupPanel and can replace an API Key in place", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../app/workbench/AiConversationSidebar.tsx", import.meta.url), "utf8");
+  assert.match(source, /BoundAgentSetupPanel/u);
+  assert.match(source, /ai-conversation-service-choices/u);
+  assert.match(source, /replace-api-key/u);
+  assert.match(source, /不会对当前文件发送/u);
 });

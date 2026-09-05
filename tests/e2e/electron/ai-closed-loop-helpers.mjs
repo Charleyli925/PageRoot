@@ -371,7 +371,7 @@ export async function openAgentSettingsPage(page) {
   }
   await expect(sidebar).toHaveAttribute("data-open", "true");
   await sidebar.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: "AI Agent", exact: true }).click();
+  await page.getByRole("button", { name: "AI 服务", exact: true }).click();
   const settings = page.locator(".workbench-settings-page");
   await expect(settings).toBeVisible();
   return settings;
@@ -384,7 +384,7 @@ export async function openQoderAvailability(page) {
   }
   await expect(sidebar).toHaveAttribute("data-open", "true");
   await sidebar.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: "AI Agent", exact: true }).click();
+  await page.getByRole("button", { name: "AI 服务", exact: true }).click();
   const card = page.locator(".workbench-settings-page").locator(".qoder-availability-card").first();
   await expect(card).toBeVisible();
   return card;

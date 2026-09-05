@@ -572,6 +572,7 @@ export function sidebarActionBar({
   failureRecoveryKind = null,
   deliveryMode = "managed-agent",
   handoffStatus = null,
+  credentialKind = null,
 } = {}) {
   if (runStatus === "awaiting-conflict-resolution") {
     return {
@@ -597,6 +598,9 @@ export function sidebarActionBar({
       ? failureRecoveryKind
       : failureRetryable !== false ? "retry" : "end";
     const reason = boundedFailureReason(failureMessage);
+    const retained = credentialKind === "api-token" && recoveryKind === "reauthenticate"
+      ? `${reason} 页面和本轮要求已保留。`
+      : `${reason} 页面未修改`;
     const recoveryActions = {
       retry: [
         { id: "resend-agent", label: "重新发送", tone: "primary" },
@@ -606,10 +610,15 @@ export function sidebarActionBar({
         { id: "retry-later", label: "稍后重试", tone: "primary" },
         { id: "dismiss", label: "结束本轮", tone: "quiet" },
       ],
-      reauthenticate: [
-        { id: "reauthenticate-agent", label: "重新登录", tone: "primary" },
-        { id: "dismiss", label: "结束本轮", tone: "quiet" },
-      ],
+      reauthenticate: credentialKind === "api-token"
+        ? [
+          { id: "replace-api-key", label: "更换 API Key", tone: "primary" },
+          { id: "dismiss", label: "结束本轮", tone: "quiet" },
+        ]
+        : [
+          { id: "reauthenticate-agent", label: "重新登录", tone: "primary" },
+          { id: "dismiss", label: "结束本轮", tone: "quiet" },
+        ],
       "change-model": [
         { id: "change-agent-model", label: "更换模型", tone: "primary" },
         { id: "dismiss", label: "结束本轮", tone: "quiet" },
@@ -626,8 +635,10 @@ export function sidebarActionBar({
     };
     return {
       kind: "blocked",
-      title: ["retry", "wait"].includes(recoveryKind) ? "生成中断" : "生成失败",
-      detail: `${reason} 页面未修改`,
+      title: credentialKind === "api-token" && recoveryKind === "reauthenticate"
+        ? "API Key 已失效"
+        : ["retry", "wait"].includes(recoveryKind) ? "生成中断" : "生成失败",
+      detail: retained,
       actions: recoveryActions[recoveryKind],
     };
   }

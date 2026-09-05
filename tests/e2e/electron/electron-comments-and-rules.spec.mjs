@@ -636,7 +636,7 @@ test("automatic update actions keep the sidebar product geometry and split About
     const settings = launched.page.locator(".workbench-settings-page");
     await expect(settings).toBeVisible();
     await expect(settings.getByRole("heading", { name: "常规" })).toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "AI Agent", exact: true }))
+    await expect(launched.page.getByRole("button", { name: "AI 服务", exact: true }))
       .toBeVisible();
     await expect(settings.getByRole("heading", { name: "常规" })).toBeFocused();
     await launched.page.getByRole("button", { name: "软件更新", exact: true }).click();

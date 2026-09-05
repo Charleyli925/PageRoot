@@ -401,11 +401,155 @@
   margin-bottom: 10px;
 }
 
-.settings-agent-rows {
+.settings-agent-service-list {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-agent-service {
   overflow: hidden;
   border: 1px solid #e2e1e8;
   border-radius: 12px;
   background: #fff;
+}
+
+.settings-agent-service-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 12px;
+}
+
+.settings-agent-service-main {
+  min-width: 0;
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-agent-service-main strong {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.settings-agent-service-main span {
+  color: #6a6774;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.settings-agent-more {
+  position: relative;
+}
+
+.settings-agent-more > summary {
+  list-style: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #5c5866;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.settings-agent-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-agent-more > summary:hover,
+.settings-agent-more[open] > summary {
+  background: #f4f3f7;
+}
+
+.settings-agent-more-menu {
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 188px;
+  padding: 8px;
+  border: 1px solid #e2e1e8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgb(32 29 49 / 10%);
+}
+
+.settings-agent-more-menu button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #25232a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-agent-more-menu button:hover {
+  background: #f4f3f7;
+}
+
+.settings-agent-more-menu small {
+  display: block;
+  padding: 0 10px 8px;
+  color: #6a6774;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.settings-agent-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid #ecebf0;
+  background: #faf9fb;
+}
+
+.settings-agent-confirm strong {
+  font-size: 13px;
+}
+
+.settings-agent-confirm p {
+  margin: 0;
+  color: #6a6774;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.settings-agent-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-agent-confirm-actions button {
+  padding: 6px 10px;
+  border: 1px solid #e2e1e8;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.settings-agent-confirm-danger {
+  border-color: #e3b4b0 !important;
+  color: #9d2f26;
+}
+
+.settings-agent-rows {
+  overflow: hidden;
+  border-top: 1px solid #ecebf0;
 }
 
 .settings-agent-rows .qoder-availability-card,

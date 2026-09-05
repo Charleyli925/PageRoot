@@ -146,6 +146,7 @@ export function sidebarActionBar(options?: {
   failureCode?: string | null;
   failureRetryable?: boolean;
   failureRecoveryKind?: "retry" | "wait" | "reauthenticate" | "change-model" | "change-provider" | "repair-installation" | "end" | null;
+  credentialKind?: "api-token" | null;
   deliveryMode?: "managed-agent" | "clipboard";
   handoffStatus?: string | null;
 }): SidebarActionBar | null;

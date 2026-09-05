@@ -320,6 +320,7 @@ export type DesktopIntegrationsApi = {
     remembered?: boolean;
     vendorId?: string | null;
   }>;
+  restoreSessionCredential?: () => Promise<{ ok?: boolean; restored?: boolean }>;
   openAgentLogin?: (payload: {
     providerId: string;
   }) => Promise<{ opened?: boolean }>;
