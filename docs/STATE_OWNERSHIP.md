@@ -323,7 +323,10 @@ Rules:
   been reused. Immediately before the commit, `HtmlCanvasEditor` re-captures
   the small Presentation Anchor from the still-visible Active frame so
   scrolling during preparation is the current user intent rather than an old
-  restoration target.
+  restoration target. A selected element becomes the viewport anchor only when
+  it is currently visible; otherwise the current reading region is kept.
+  Comment layout is measured from the currently visible frame after commit,
+  not migrated as a frozen proof that the new revision was already measured.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a

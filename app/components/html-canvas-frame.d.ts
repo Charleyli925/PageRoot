@@ -37,3 +37,74 @@ export function runtimePositionWithinTolerance(
   expected: number,
   tolerance?: number,
 ): boolean;
+
+export const READING_POSITION_READY_FRAMES: 30;
+
+export function runtimeRectIntersectsClip(
+  screenRect: { top: number; bottom: number } | null | undefined,
+  clipRect: { top: number; bottom: number } | null | undefined,
+  inset?: number,
+): boolean;
+
+export function runtimeElementScreenRect(
+  iframe: HTMLIFrameElement | null | undefined,
+  element: Element | null | undefined,
+): { top: number; bottom: number } | null;
+
+export function runtimeElementIsInReadingViewport(
+  iframe: HTMLIFrameElement | null | undefined,
+  element: Element | null | undefined,
+  clipRect: DOMRect | { top: number; bottom: number } | null | undefined,
+): boolean;
+
+export function frameScrollLimits(
+  iframe: HTMLIFrameElement | null | undefined,
+  documentNode: Document | null | undefined,
+): { maxTop: number; maxLeft: number };
+
+export function outerScrollLimits(
+  outer: HTMLElement | null | undefined,
+): { maxTop: number; maxLeft: number };
+
+export function frameScrollMetricsReady(
+  iframe: HTMLIFrameElement | null | undefined,
+  documentNode: Document | null | undefined,
+): boolean;
+
+export function outerScrollMetricsReady(
+  outer: HTMLElement | null | undefined,
+  desiredOuterTop: number | null | undefined,
+): boolean;
+
+export function scheduleWhenReady(input: {
+  isCurrent: () => boolean;
+  isReady: () => boolean;
+  remainingFrames?: number;
+  onReady: () => void;
+}): void;
+
+export type RuntimeReadingAnchor = {
+  iframeScrollLeft: number;
+  iframeScrollTop: number;
+  viewportAnchorScreenOffsetY: number | null;
+  outerScrollLeft: number | null;
+  outerScrollTop: number | null;
+};
+
+export function applyReadingPosition(input: {
+  iframe: HTMLIFrameElement;
+  documentNode: Document;
+  outer?: HTMLElement | null;
+  anchor: RuntimeReadingAnchor;
+  anchorElement?: Element | null;
+  adjustOuter?: boolean;
+}): boolean;
+
+export function correctReadingPositionOnce(input: {
+  iframe: HTMLIFrameElement;
+  documentNode: Document;
+  outer?: HTMLElement | null;
+  anchor: RuntimeReadingAnchor;
+  anchorElement?: Element | null;
+  adjustOuter?: boolean;
+}): void;
