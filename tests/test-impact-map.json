@@ -1045,7 +1045,8 @@
       "id": "review-analysis-session",
       "patterns": [
         "^app/application/review-analysis-session\\.(?:js|d\\.ts)$",
-        "^app/workbench/review-analysis\\.ts$"
+        "^app/workbench/review-analysis\\.ts$",
+        "^app/workbench/review-document\\.ts$"
       ],
       "suites": [
         "typecheck",

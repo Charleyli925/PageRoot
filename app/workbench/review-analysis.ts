@@ -1,15 +1,18 @@
 import type { ReviewAnalysisSession } from "../application/review-analysis-session.js";
 import type { VersionReviewCandidate } from "../application/version-workflow.js";
-import { browserSha256 } from "./browser-io";
 import { commentHasContent } from "./comment-relink-model.js";
 import { commentSourceAnchor } from "./comment-model";
 import {
-  buildReviewDocumentsAsync,
   buildReviewShellDocuments,
+  buildReviewSourceFactsAsync,
+  projectReviewDocuments,
   type ReviewDocuments,
   type ReviewImpact,
+  type ReviewSourceFacts,
 } from "./review-document";
 import type { CommentItem } from "./types";
+
+export type { ReviewSourceFacts };
 
 const REVIEW_IMPACT_SAMPLE_LIMIT = 100;
 
@@ -22,6 +25,19 @@ export type PreparedReviewDocuments = {
   sessionId: string;
   documents: ReviewDocuments;
 };
+
+export function reviewSourceFactsByteSize(facts: ReviewSourceFacts): number {
+  return 2 * (
+    facts.annotatedBeforeHtml.length
+    + facts.annotatedAfterHtml.length
+    + JSON.stringify(facts.changes).length
+    + JSON.stringify(facts.outline).length
+    + JSON.stringify(facts.focusGroups).length
+    + JSON.stringify(facts.diagnostics).length
+    + JSON.stringify(facts.visualBinding).length
+    + JSON.stringify(facts.visualEvidence).length
+  );
+}
 
 export function preparedReviewByteSize(prepared: PreparedReviewDocuments): number {
   return 2 * (
@@ -117,6 +133,7 @@ export function reviewCommentsForAnalysis(comments: readonly CommentItem[]): Com
     };
   });
 }
+
 export async function prepareReviewAnalysis({
   session,
   candidate,
@@ -126,7 +143,7 @@ export async function prepareReviewAnalysis({
   sessionId,
   onShell,
 }: {
-  session: ReviewAnalysisSession<PreparedReviewDocuments>;
+  session: ReviewAnalysisSession<ReviewSourceFacts>;
   candidate: VersionReviewCandidate;
   beforeHtml: string;
   comments: readonly CommentItem[];
@@ -137,40 +154,42 @@ export async function prepareReviewAnalysis({
   const reviewComments = reviewCommentsForAnalysis(comments);
   const reviewImpact = reviewImpactFromCandidate(candidate);
   const commentsKey = JSON.stringify(reviewComments);
-  const cacheKey = [
-    candidate.operationKey,
+  const sourceKey = [
     candidate.baseSnapshotSha256,
     candidate.sha256,
-    JSON.stringify(candidate.candidateAssessment || null),
     candidate.sourcePath,
     externalBootstrap ? "external" : "inline",
-    await browserSha256(commentsKey),
   ].join("\u0000");
-  const cached = session.peek(cacheKey);
-  if (cached) return cached;
-  onShell?.(buildReviewShellDocuments(beforeHtml, candidate.content, {
-    sessionId,
-    sourcePath: candidate.sourcePath,
-    externalBootstrap,
-    ...(reviewImpact ? { reviewImpact } : {}),
-  }));
-  return session.analyze({
-    key: cacheKey,
-    compute: async ({ isCancelled }) => ({
-      operationKey: candidate.operationKey,
-      beforeHtml,
-      afterHtml: candidate.content,
-      sourcePath: candidate.sourcePath,
-      commentsKey,
+  if (!session.peek(sourceKey)) {
+    onShell?.(buildReviewShellDocuments(beforeHtml, candidate.content, {
       sessionId,
-      documents: await buildReviewDocumentsAsync(beforeHtml, candidate.content, {
-        sessionId,
-        sourcePath: candidate.sourcePath,
-        externalBootstrap,
-        comments: reviewComments,
-        ...(reviewImpact ? { reviewImpact } : {}),
-      }, { isCancelled }),
-    }),
+      sourcePath: candidate.sourcePath,
+      externalBootstrap,
+      ...(reviewImpact ? { reviewImpact } : {}),
+    }));
+  }
+  const facts = await session.analyze({
+    key: sourceKey,
+    compute: async ({ isCancelled }) => buildReviewSourceFactsAsync(
+      beforeHtml,
+      candidate.content,
+      { isCancelled },
+    ),
   });
+  return {
+    operationKey: candidate.operationKey,
+    beforeHtml,
+    afterHtml: candidate.content,
+    sourcePath: candidate.sourcePath,
+    commentsKey,
+    sessionId,
+    documents: projectReviewDocuments(beforeHtml, facts, {
+      sessionId,
+      sourcePath: candidate.sourcePath,
+      externalBootstrap,
+      comments: reviewComments,
+      ...(reviewImpact ? { reviewImpact } : {}),
+    }),
+  };
 }
 

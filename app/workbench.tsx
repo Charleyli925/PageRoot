@@ -214,8 +214,8 @@ import ProjectRulesEditorPage from "./workbench/project-rules-editor";
 import { useEditRuntimePreparation } from "./workbench/use-edit-runtime-preparation";
 import {
   prepareReviewAnalysis,
-  preparedReviewByteSize,
-  type PreparedReviewDocuments,
+  reviewSourceFactsByteSize,
+  type ReviewSourceFacts,
 } from "./workbench/review-analysis";
 import {
   rememberActiveDocumentPresentation,
@@ -500,8 +500,8 @@ export default function Workbench() {
   const commentEditResumePendingRef = useRef<string | null>(null);
   const pagePresentationScrollRequestRef = useRef(0);
   const [reviewAnalysisSession] = useState(
-    () => new ReviewAnalysisSession<PreparedReviewDocuments>({
-      estimateSize: preparedReviewByteSize,
+    () => new ReviewAnalysisSession<ReviewSourceFacts>({
+      estimateSize: reviewSourceFactsByteSize,
     }),
   );
   const reviewSessionSequenceRef = useRef(0);

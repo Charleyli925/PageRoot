@@ -1,4 +1,6 @@
-// Review analysis facade: parse → pair → diff → bind → project → serialize.
+// Review analysis facade: source facts (parse → pair → diff) then
+// comment-binding / session projection. The analysis cache stores only
+// source facts; comments and Frame identity are applied afterwards.
 import {
   appendTrustedReviewProjectionFact,
   normalizeReviewFocusGroupPlans,
@@ -40,6 +42,7 @@ import {
 } from "./review/semantic-pairing";
 import {
   prepareDocument,
+  serializeReviewMarkup,
 } from "./review/serialize";
 import {
   markStructureDifferenceSteps,
@@ -50,6 +53,10 @@ import {
 import {
   annotateStableSourceDifferences,
 } from "./review/stable-source-diff";
+import type {
+  ReviewVisualSourceBinding,
+  SourceEvidence,
+} from "./review/review-visual-model.js";
 import type {
   ReviewChange,
   ReviewChangeType,
@@ -88,6 +95,17 @@ export type {
   ReviewOutlineItem,
   ReviewSide,
 } from "./review/types";
+
+export type ReviewSourceFacts = {
+  annotatedBeforeHtml: string;
+  annotatedAfterHtml: string;
+  changes: ReviewChange[];
+  outline: ReviewOutlineItem[];
+  focusGroups: ReviewFocusGroup[];
+  diagnostics: ReviewDiagnostic[];
+  visualBinding: ReviewVisualSourceBinding;
+  visualEvidence: SourceEvidence[];
+};
 
 function* changeTypesForSemanticGraphSteps(
   graph: ReviewSemanticPairGraph,
@@ -632,80 +650,53 @@ export function pageSourceOnlyReviewDiagnostics(
   return diagnostics.length ? diagnostics : null;
 }
 
-function* buildReviewDocumentSteps(
+function emptySourceFacts(
   beforeHtml: string,
   afterHtml: string,
-  options: ReviewDocumentBuildOptions,
-): Generator<string, ReviewDocuments, void> {
-  const visual = buildReviewVisualEvidence(beforeHtml, afterHtml, options.sessionId);
-  const visualStableIds = (side: "before" | "after") => visual.evidence
-    .filter((evidence) => side === "before" ? evidence.beforePresent : evidence.afterPresent)
-    .map((evidence) => evidence.stableId);
+  visual: ReturnType<typeof buildReviewVisualEvidence>,
+  diagnostics: ReviewDiagnostic[] = [],
+): ReviewSourceFacts {
+  return {
+    annotatedBeforeHtml: beforeHtml,
+    annotatedAfterHtml: afterHtml,
+    changes: [],
+    outline: [],
+    focusGroups: [],
+    diagnostics,
+    visualBinding: visual.binding,
+    visualEvidence: visual.evidence,
+  };
+}
+
+function sourceFactsFromDocuments(
+  beforeDocument: Document,
+  afterDocument: Document,
+  visual: ReturnType<typeof buildReviewVisualEvidence>,
+  extras: Pick<ReviewSourceFacts, "changes" | "outline" | "focusGroups" | "diagnostics">,
+): ReviewSourceFacts {
+  return {
+    annotatedBeforeHtml: serializeReviewMarkup(beforeDocument),
+    annotatedAfterHtml: serializeReviewMarkup(afterDocument),
+    visualBinding: visual.binding,
+    visualEvidence: visual.evidence,
+    ...extras,
+  };
+}
+
+function* buildReviewSourceFactSteps(
+  beforeHtml: string,
+  afterHtml: string,
+): Generator<string, ReviewSourceFacts, void> {
+  const visual = buildReviewVisualEvidence(beforeHtml, afterHtml, "source-facts");
   if (typeof DOMParser === "undefined") {
-    return {
-      before: beforeHtml,
-      after: afterHtml,
-      bootstrapJavaScript: {
-        before: reviewBootstrap(
-          options.sessionId,
-          "before",
-          [],
-          visualStableIds("before"),
-        ),
-        after: reviewBootstrap(
-          options.sessionId,
-          "after",
-          [],
-          visualStableIds("after"),
-        ),
-      },
-      bootstrapFallbackJavaScript: {
-        before: reviewBootstrap(
-          options.sessionId,
-          "before",
-          [],
-          visualStableIds("before"),
-        ),
-        after: reviewBootstrap(
-          options.sessionId,
-          "after",
-          [],
-          visualStableIds("after"),
-        ),
-      },
-      changes: [],
-      outline: [],
-      focusGroups: [],
-      commentGroups: [],
-      commentTargets: [],
-      visualBinding: visual.binding,
-      visualEvidence: visual.evidence,
-      diagnostics: [],
-      ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
-    };
+    return emptySourceFacts(beforeHtml, afterHtml, visual);
   }
   const parser = new DOMParser();
-  const comments = options.comments || [];
-  const beforeSourceProjection = prepareReviewCommentSourceProjection(beforeHtml, true);
-  const afterSourceProjection = prepareReviewCommentSourceProjection(afterHtml, true);
-  const beforeDocument = parser.parseFromString(beforeSourceProjection.html, "text/html");
-  const afterDocument = parser.parseFromString(afterSourceProjection.html, "text/html");
+  const beforeDocument = parser.parseFromString(beforeHtml, "text/html");
+  const afterDocument = parser.parseFromString(afterHtml, "text/html");
   clearReservedReviewMarkup(beforeDocument);
   clearReservedReviewMarkup(afterDocument);
   yield "parse";
-  const commentAnnotations = annotateReviewComments(
-    beforeDocument,
-    beforeHtml,
-    comments,
-    beforeSourceProjection.sourceIndex,
-  );
-  const commentGroups = commentAnnotations.groups;
-  const reviewCommentTargets = commentAnnotations.targets;
-  const preparedVisualStableIds = (side: "before" | "after") => [...new Set([
-    ...visualStableIds(side),
-    ...reviewCommentTargets.flatMap((target) => target.stableId ? [target.stableId] : []),
-  ])];
-  yield "comments";
   annotatePanelPairs(beforeDocument, afterDocument);
   yield "panels";
   annotateActionPairs(beforeDocument, afterDocument);
@@ -724,52 +715,12 @@ function* buildReviewDocumentSteps(
       kind,
       summary: kind === "css-source" ? "CSS 源码发生变化" : "Script 源码发生变化",
     }));
-    const reviewCommentBindings = reviewCommentBootstrapBindings(
-      beforeDocument,
-      reviewCommentTargets,
-    );
-    clearReviewCommentScopeAttributes(beforeDocument);
-    const preparedBefore = prepareDocument(
-      beforeDocument,
-      "before",
-      options.sessionId,
-      options.sourcePath,
-      options.externalBootstrap,
-      reviewCommentBindings,
-      preparedVisualStableIds("before"),
-    );
-    yield "prepare-before";
-    const preparedAfter = prepareDocument(
-      afterDocument,
-      "after",
-      options.sessionId,
-      options.sourcePath,
-      options.externalBootstrap,
-      [],
-      preparedVisualStableIds("after"),
-    );
-    yield "prepare-after";
-    return {
-      before: preparedBefore.html,
-      after: preparedAfter.html,
-      bootstrapJavaScript: {
-        before: preparedBefore.bootstrapJavaScript,
-        after: preparedAfter.bootstrapJavaScript,
-      },
-      bootstrapFallbackJavaScript: {
-        before: preparedBefore.bootstrapFallbackJavaScript,
-        after: preparedAfter.bootstrapFallbackJavaScript,
-      },
+    return sourceFactsFromDocuments(beforeDocument, afterDocument, visual, {
       changes: [],
       outline: [],
       focusGroups: [],
-      commentGroups,
-      commentTargets: reviewCommentTargets,
-      visualBinding: visual.binding,
-      visualEvidence: visual.evidence,
       diagnostics,
-      ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
-    };
+    });
   }
   // Freeze authored candidate regions and their pairing before moved-text
   // annotation inserts disposable review spans. The pre-pass may mutate text
@@ -866,26 +817,98 @@ function* buildReviewDocumentSteps(
   const focusGroups = normalizeReviewFocusGroupPlans(
     reviewFocusGroupsForDocuments(beforeDocument, afterDocument),
   ) as ReviewFocusGroup[];
+  return sourceFactsFromDocuments(beforeDocument, afterDocument, visual, {
+    changes,
+    outline,
+    focusGroups,
+    diagnostics,
+  });
+}
 
-  // Comment attributes are analyzer-only scope hints. Bind every resolved
-  // source target in the private first bootstrap, then remove the hints before
-  // either document is serialized or can be read back by authored page code.
-  const reviewCommentBindings = reviewCommentBootstrapBindings(
-    beforeDocument,
-    reviewCommentTargets,
+function visualStableIdsForFacts(
+  facts: ReviewSourceFacts,
+  side: "before" | "after",
+): string[] {
+  return facts.visualEvidence
+    .filter((evidence) => side === "before" ? evidence.beforePresent : evidence.afterPresent)
+    .map((evidence) => evidence.stableId);
+}
+
+function bindReviewComments(
+  annotatedBefore: Document,
+  sourceBeforeHtml: string,
+  comments: NonNullable<ReviewDocumentBuildOptions["comments"]>,
+) {
+  if (!comments.length) {
+    return { groups: [] as ReviewDocuments["commentGroups"], targets: [] as ReviewDocuments["commentTargets"], bindings: [] };
+  }
+  const projection = prepareReviewCommentSourceProjection(sourceBeforeHtml, true);
+  const annotations = annotateReviewComments(
+    annotatedBefore,
+    sourceBeforeHtml,
+    comments,
+    projection.sourceIndex,
   );
-  clearReviewCommentScopeAttributes(beforeDocument);
+  const bindings = reviewCommentBootstrapBindings(annotatedBefore, annotations.targets);
+  clearReviewCommentScopeAttributes(annotatedBefore);
+  return {
+    groups: annotations.groups,
+    targets: annotations.targets,
+    bindings,
+  };
+}
+
+export function projectReviewDocuments(
+  beforeHtml: string,
+  facts: ReviewSourceFacts,
+  options: ReviewDocumentBuildOptions,
+): ReviewDocuments {
+  const visualBinding = {
+    ...facts.visualBinding,
+    sessionId: options.sessionId,
+  };
+  const comments = options.comments || [];
+  if (typeof DOMParser === "undefined") {
+    return {
+      before: facts.annotatedBeforeHtml,
+      after: facts.annotatedAfterHtml,
+      bootstrapJavaScript: {
+        before: reviewBootstrap(options.sessionId, "before", [], visualStableIdsForFacts(facts, "before")),
+        after: reviewBootstrap(options.sessionId, "after", [], visualStableIdsForFacts(facts, "after")),
+      },
+      bootstrapFallbackJavaScript: {
+        before: reviewBootstrap(options.sessionId, "before", [], visualStableIdsForFacts(facts, "before")),
+        after: reviewBootstrap(options.sessionId, "after", [], visualStableIdsForFacts(facts, "after")),
+      },
+      changes: facts.changes,
+      outline: facts.outline,
+      focusGroups: facts.focusGroups,
+      commentGroups: [],
+      commentTargets: [],
+      visualBinding,
+      visualEvidence: facts.visualEvidence,
+      diagnostics: facts.diagnostics,
+      ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
+    };
+  }
+  const parser = new DOMParser();
+  const beforeDocument = parser.parseFromString(facts.annotatedBeforeHtml, "text/html");
+  const afterDocument = parser.parseFromString(facts.annotatedAfterHtml, "text/html");
+  const commentBinding = bindReviewComments(beforeDocument, beforeHtml, comments);
+  const visualStableIds = (side: "before" | "after") => [...new Set([
+    ...visualStableIdsForFacts(facts, side),
+    ...commentBinding.targets.flatMap((target) => target.stableId ? [target.stableId] : []),
+  ])];
   const preparedBefore = prepareDocument(
     beforeDocument,
     "before",
     options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
-    reviewCommentBindings,
-    preparedVisualStableIds("before"),
-    focusGroups,
+    commentBinding.bindings,
+    visualStableIds("before"),
+    facts.focusGroups,
   );
-  yield "prepare-before";
   const preparedAfter = prepareDocument(
     afterDocument,
     "after",
@@ -893,10 +916,9 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     [],
-    preparedVisualStableIds("after"),
-    focusGroups,
+    visualStableIds("after"),
+    facts.focusGroups,
   );
-  yield "prepare-after";
   return {
     before: preparedBefore.html,
     after: preparedAfter.html,
@@ -908,16 +930,29 @@ function* buildReviewDocumentSteps(
       before: preparedBefore.bootstrapFallbackJavaScript,
       after: preparedAfter.bootstrapFallbackJavaScript,
     },
-    changes,
-    outline,
-    focusGroups,
-    commentGroups,
-    commentTargets: reviewCommentTargets,
-    visualBinding: visual.binding,
-    visualEvidence: visual.evidence,
-    diagnostics,
+    changes: facts.changes,
+    outline: facts.outline,
+    focusGroups: facts.focusGroups,
+    commentGroups: commentBinding.groups,
+    commentTargets: commentBinding.targets,
+    visualBinding,
+    visualEvidence: facts.visualEvidence,
+    diagnostics: facts.diagnostics,
     ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
   };
+}
+
+function* buildReviewDocumentSteps(
+  beforeHtml: string,
+  afterHtml: string,
+  options: ReviewDocumentBuildOptions,
+): Generator<string, ReviewDocuments, void> {
+  const facts = yield* buildReviewSourceFactSteps(beforeHtml, afterHtml);
+  yield "comments";
+  const documents = projectReviewDocuments(beforeHtml, facts, options);
+  yield "prepare-before";
+  yield "prepare-after";
+  return documents;
 }
 
 export function buildReviewDocuments(
@@ -1033,36 +1068,33 @@ function measureReviewAnalysisPhase(
   }
 }
 
-export async function buildReviewDocumentsAsync(
-  beforeHtml: string,
-  afterHtml: string,
-  options: ReviewDocumentBuildOptions,
+const REVIEW_ANALYSIS_PHASES = [
+  "parse",
+  "comments",
+  "panels",
+  "actions",
+  "stable-source",
+  "candidate-sections-before",
+  "candidate-sections-after",
+  "section-pairing",
+  "semantic-row",
+  "change-annotation",
+  "prepare-before",
+  "prepare-after",
+  "complete",
+] as const;
+
+async function runYieldingAnalysis<T>(
+  steps: Generator<string, T, void>,
   control: { isCancelled?: () => boolean } = {},
-): Promise<ReviewDocuments> {
-  [
-    "parse",
-    "comments",
-    "panels",
-    "actions",
-    "stable-source",
-    "candidate-sections-before",
-    "candidate-sections-after",
-    "section-pairing",
-    "semantic-row",
-    "change-annotation",
-    "prepare-before",
-    "prepare-after",
-    "complete",
-  ].forEach((phase) => {
+): Promise<T> {
+  REVIEW_ANALYSIS_PHASES.forEach((phase) => {
     try {
-      globalThis.performance?.clearMeasures?.(
-        `pageroot:review-analysis:${phase}`,
-      );
+      globalThis.performance?.clearMeasures?.(`pageroot:review-analysis:${phase}`);
     } catch {
       // Diagnostics cannot own review analysis.
     }
   });
-  const steps = buildReviewDocumentSteps(beforeHtml, afterHtml, options);
   const assertCurrent = () => {
     if (control.isCancelled?.()) {
       throw new Error("Review document analysis was superseded.");
@@ -1091,4 +1123,27 @@ export async function buildReviewDocumentsAsync(
   }
   assertCurrent();
   return step.value;
+}
+
+export async function buildReviewSourceFactsAsync(
+  beforeHtml: string,
+  afterHtml: string,
+  control: { isCancelled?: () => boolean } = {},
+): Promise<ReviewSourceFacts> {
+  return runYieldingAnalysis(
+    buildReviewSourceFactSteps(beforeHtml, afterHtml),
+    control,
+  );
+}
+
+export async function buildReviewDocumentsAsync(
+  beforeHtml: string,
+  afterHtml: string,
+  options: ReviewDocumentBuildOptions,
+  control: { isCancelled?: () => boolean } = {},
+): Promise<ReviewDocuments> {
+  return runYieldingAnalysis(
+    buildReviewDocumentSteps(beforeHtml, afterHtml, options),
+    control,
+  );
 }

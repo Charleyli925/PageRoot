@@ -403,6 +403,10 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   }
 `;
 
+export function serializeReviewMarkup(document: Document): string {
+  return `${doctypeString(document.doctype)}\n${document.documentElement.outerHTML}`;
+}
+
 export function doctypeString(doctype: DocumentType | null): string {
   if (!doctype) return "<!DOCTYPE html>";
   const publicId = doctype.publicId ? ` PUBLIC "${doctype.publicId}"` : "";
