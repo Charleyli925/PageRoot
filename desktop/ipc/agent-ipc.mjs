@@ -19,6 +19,7 @@ export function registerAgentIpc({
   persistSessionCredential,
   clearSessionCredential,
   sessionCredentialStatus,
+  restoreSessionCredential,
 }) {
   ipcMain.handle(
     INTEGRATION_CHANNELS.qoderHandoff,
@@ -114,6 +115,15 @@ export function registerAgentIpc({
       }
       return sessionCredentialStatus();
     }, "agent_credential_status"),
+  );
+  ipcMain.handle(
+    INTEGRATION_CHANNELS.restoreSessionCredential,
+    trustedProject(async () => {
+      if (typeof restoreSessionCredential !== "function") {
+        return Object.freeze({ ok: true, restored: false });
+      }
+      return restoreSessionCredential();
+    }, "agent_restore_credential"),
   );
 }
 

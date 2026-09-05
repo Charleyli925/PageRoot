@@ -221,8 +221,8 @@ test("Electron settings routes categories and persists restore preference withou
       workspace: { restoreTabsOnLaunch: false },
     });
 
-    await first.page.getByRole("button", { name: "AI Agent", exact: true }).click();
-    await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeFocused();
+    await first.page.getByRole("button", { name: "AI 服务", exact: true }).click();
+    await expect(settings.getByRole("heading", { name: "AI 服务", level: 1 })).toBeFocused();
     await captureSettings("settings-agent-1440x1024", 1440, 1024);
     await settings.getByRole("combobox", { name: "默认 Agent" }).selectOption({ label: "Codex" });
     await expect.poll(() => {

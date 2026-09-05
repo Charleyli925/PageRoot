@@ -1619,6 +1619,7 @@
       "id": "workspace-preferences",
       "patterns": [
         "^app/application/workspace-preferences-session\\.(?:js|d\\.ts)$",
+        "^app/application/workspace-agent-preference\\.(?:js|d\\.ts)$",
         "^app/components/SettingsPage\\.tsx$",
         "^app/workbench/(?:settings-types|use-workspace-preferences)\\.(?:ts|tsx)$",
         "^app/workbench/workbench-resizer\\.tsx$",
@@ -2000,7 +2001,7 @@
     {
       "id": "agent-renderer-projection",
       "patterns": [
-        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard)\\.tsx$",
+        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard|AgentSetupPanel)\\.tsx$",
         "^shared/(?:agent-delivery|agent-feature-gates|openai-compatible-vendors)\\.mjs$"
       ],
       "suites": [

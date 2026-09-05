@@ -303,6 +303,7 @@ const INTEGRATION_CHANNELS = Object.freeze({
   persistSessionCredential: "html-agent-access:persist-credential",
   clearSessionCredential: "html-agent-access:clear-credential",
   sessionCredentialStatus: "html-agent-access:credential-status",
+  restoreSessionCredential: "html-agent-access:restore-credential",
 });
 const UPDATE_CHANNELS = Object.freeze({
   getStatus: "html-updates:get-status",
@@ -3324,22 +3325,28 @@ async function fetchBridgeCommand(pathname, body) {
 }
 
 async function restoreRememberedAgentCredential() {
-  if (process.env.PAGEROOT_E2E === "1") return;
+  if (process.env.PAGEROOT_E2E === "1") {
+    return Object.freeze({ ok: true, restored: false });
+  }
   try {
     const preferences = await readUiPreferences({
       userDataPath: app.getPath("userData"),
     });
-    if (preferences.workspace.disabledAgentProviderIds.includes("pageroot")) return;
+    if (preferences.workspace.disabledAgentProviderIds.includes("pageroot")) {
+      return Object.freeze({ ok: true, restored: false });
+    }
     const credential = await agentSessionCredentialStore.load();
-    if (!credential?.apiKey) return;
+    if (!credential?.apiKey) return Object.freeze({ ok: true, restored: false });
     await fetchBridgePost("/agent/session-credential", {
       providerId: credential.providerId,
       apiKey: credential.apiKey,
       vendorId: credential.vendorId,
       baseUrl: credential.baseUrl,
     });
+    return Object.freeze({ ok: true, restored: true });
   } catch {
     // Remembered Key restore is best-effort; the user can reconnect this session.
+    return Object.freeze({ ok: false, restored: false });
   }
 }
 
@@ -3683,6 +3690,7 @@ function registerProjectIpc() {
     persistSessionCredential: (payload) => agentSessionCredentialStore.persist(payload),
     clearSessionCredential: () => agentSessionCredentialStore.clear(),
     sessionCredentialStatus: () => agentSessionCredentialStore.publicStatus(),
+    restoreSessionCredential: () => restoreRememberedAgentCredential(),
   });
   registerUpdateIpc({
     ipcMain,

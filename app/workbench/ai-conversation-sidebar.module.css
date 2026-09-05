@@ -468,7 +468,7 @@
   z-index: 4;
   left: 0;
   bottom: calc(100% + 8px);
-  width: 180px;
+  width: 220px;
   display: grid;
   gap: 3px;
   padding: 5px;
@@ -724,4 +724,34 @@
   width: 1px;
   height: 1px;
   flex: none;
+}
+
+.recoveredBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 10px;
+  padding: 8px 10px;
+  border: 1px solid #ecebf0;
+  border-radius: 10px;
+  color: #3b3944;
+  font-size: 12px;
+}
+
+.recoveredBar button {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: #5a55df;
+  color: #fff;
+  cursor: pointer;
+}
+
+.setupPanel {
+  margin: 0 8px 10px;
+  overflow: auto;
+  max-height: 280px;
+  border: 1px solid #ecebf0;
+  border-radius: 12px;
 }

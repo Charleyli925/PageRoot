@@ -60,6 +60,7 @@ const integrationChannels = Object.freeze({
   persistSessionCredential: "html-agent-access:persist-credential",
   clearSessionCredential: "html-agent-access:clear-credential",
   sessionCredentialStatus: "html-agent-access:credential-status",
+  restoreSessionCredential: "html-agent-access:restore-credential",
 });
 const updateChannels = Object.freeze({
   getStatus: "html-updates:get-status",
@@ -289,6 +290,7 @@ const integrationsApi = Object.freeze({
   ),
   clearSessionCredential: () => invokeProject(integrationChannels.clearSessionCredential),
   sessionCredentialStatus: () => invokeProject(integrationChannels.sessionCredentialStatus),
+  restoreSessionCredential: () => invokeProject(integrationChannels.restoreSessionCredential),
 });
 const updateStatusListeners = new Map();
 const updatesApi = Object.freeze({

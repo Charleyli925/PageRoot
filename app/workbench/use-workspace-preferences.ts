@@ -15,6 +15,10 @@ import {
   type WorkspacePreferences,
   type WorkspacePreferencesSnapshot,
 } from "../application/workspace-preferences-session.js";
+import {
+  resolvePreferredAgentProvider,
+  shouldPersistDefaultAgentProvider,
+} from "../application/workspace-agent-preference.js";
 
 type AgentCatalogSnapshot = Readonly<{
   providers: Readonly<Record<string, Readonly<{
@@ -117,26 +121,21 @@ export function useWorkspacePreferences(
   }, [session, snapshot.workspace.rememberPanelWidths]);
   useEffect(() => {
     if (!workspaceController || !snapshot.loaded || !agentCatalogSnapshot) return;
-    const availableProviders = Object.values(agentCatalogSnapshot.providers)
-      .filter((provider) => !snapshot.workspace.disabledAgentProviderIds.includes(
-        provider.providerId as WorkspacePreferenceAgentId,
-      ));
-    const preferred = availableProviders.find((provider) => (
-      provider.providerId === snapshot.workspace.defaultAgentProviderId
-    )) || availableProviders[0];
+    const preferred = resolvePreferredAgentProvider({
+      defaultAgentProviderId: snapshot.workspace.defaultAgentProviderId,
+      disabledAgentProviderIds: snapshot.workspace.disabledAgentProviderIds,
+      providers: Object.values(agentCatalogSnapshot.providers),
+    });
     if (!preferred) return;
-    const applyKey = `${snapshot.workspace.defaultAgentProviderId}:${preferred.providerId}:${preferred.runtimeId}`;
+    const applyKey = `${snapshot.workspace.defaultAgentProviderId}:${preferred.providerId}:${preferred.selection.runtimeId}`;
     if (defaultAgentAppliedRef.current === applyKey) return;
     defaultAgentAppliedRef.current = applyKey;
-    if (
-      preferred.providerId !== snapshot.workspace.defaultAgentProviderId
-      && (
-        preferred.providerId === "pageroot"
-        || preferred.providerId === "qoder"
-        || preferred.providerId === "codex"
-      )
-    ) {
-      void session.update({ defaultAgentProviderId: preferred.providerId });
+    if (shouldPersistDefaultAgentProvider({
+      storedDefaultId: snapshot.workspace.defaultAgentProviderId,
+      preferredId: preferred.providerId,
+      disabledAgentProviderIds: snapshot.workspace.disabledAgentProviderIds,
+    })) {
+      void session.update({ defaultAgentProviderId: preferred.providerId as WorkspacePreferenceAgentId });
     }
     if (agentCatalogSnapshot.selected?.providerId !== preferred.providerId) {
       workspaceController.selectAgent(preferred.selection);

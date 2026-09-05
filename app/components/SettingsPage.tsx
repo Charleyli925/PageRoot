@@ -23,8 +23,9 @@ import type {
   AgentProviderGuidanceKind,
   AgentSelection,
 } from "../domain/agent-provider-state.js";
-import AgentProviderCard from "./AgentProviderCard";
+import { BoundAgentSetupPanel } from "./AgentSetupPanel";
 import type { AgentProviderCardData } from "./agent-provider-card-types";
+import { agentServiceLabel } from "../application/workspace-agent-preference.js";
 import type { ApplicationUpdateResult } from "../workbench/types";
 import type { WorkspacePreferences } from "./desktop-ui-preferences-api";
 import type { SettingsCategory } from "../workbench/settings-types";
@@ -85,15 +86,20 @@ export type SettingsPageProps = {
     extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>,
   ) => Promise<AgentActionOutcome>;
   onDisconnectApiKey: (selection: AgentSelection) => Promise<AgentActionOutcome>;
+  onDisconnectProvider?: (
+    selection: AgentSelection,
+    options?: Readonly<{ stopRun?: boolean }>,
+  ) => Promise<AgentActionOutcome>;
+  onRemoveRememberedKey?: (
+    selection: AgentSelection,
+    options?: Readonly<{ stopRun?: boolean }>,
+  ) => Promise<AgentActionOutcome>;
+  onReconnectProvider?: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onOpenVendorApiKeyPage?: (vendorId: string) => Promise<AgentActionOutcome>;
+  rememberedKey?: boolean;
+  busyProviderId?: string | null;
   onClose: () => void;
 };
-
-function focusableElements(container: HTMLElement): HTMLElement[] {
-  return [...container.querySelectorAll<HTMLElement>(
-    "button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
-  )];
-}
 
 function SettingRow({
   icon,
@@ -268,6 +274,14 @@ function GeneralSettings({
   );
 }
 
+function settingsServiceName(providerId: string, fallback: string) {
+  return agentServiceLabel(providerId, fallback);
+}
+
+function cardChoiceId(card: AgentProviderCardData) {
+  return `${card.selection.providerId}:${card.selection.runtimeId}`;
+}
+
 function AgentSettings({
   currentAgentName,
   choices,
@@ -284,9 +298,14 @@ function AgentSettings({
   onCancelInstall,
   onConnectApiKey,
   onDisconnectApiKey,
+  onDisconnectProvider,
+  onRemoveRememberedKey,
+  onReconnectProvider,
   onOpenVendorApiKeyPage,
   onSelectAgentModel,
   onSelectAgentReasoning,
+  rememberedKey = false,
+  busyProviderId = null,
 }: {
   currentAgentName: string;
   choices: readonly SettingsAgentChoice[];
@@ -303,20 +322,35 @@ function AgentSettings({
   onCancelInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>): Promise<AgentActionOutcome>;
   onDisconnectApiKey(selection: AgentSelection): Promise<AgentActionOutcome>;
+  onDisconnectProvider?(selection: AgentSelection, options?: Readonly<{ stopRun?: boolean }>): Promise<AgentActionOutcome>;
+  onRemoveRememberedKey?(selection: AgentSelection, options?: Readonly<{ stopRun?: boolean }>): Promise<AgentActionOutcome>;
+  onReconnectProvider?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onOpenVendorApiKeyPage?(vendorId: string): Promise<AgentActionOutcome>;
   onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
   onSelectAgentReasoning(reasoning: string, expectedSelection: AgentSelection): AgentSelection | null;
+  rememberedKey?: boolean;
+  busyProviderId?: string | null;
 }) {
-  const selectedCard = cards.find((card) => {
-    const id = `${card.selection.providerId}:${card.selection.runtimeId}`;
-    return id === selectedChoiceId;
-  }) || cards[0] || null;
+  const [expandedId, setExpandedId] = useState<string | null>(selectedChoiceId);
+  const [followedChoiceId, setFollowedChoiceId] = useState(selectedChoiceId);
+  const [confirmAction, setConfirmAction] = useState<null | Readonly<{
+    kind: "disconnect" | "remove-key";
+    card: AgentProviderCardData;
+    stopRun: boolean;
+  }>>(null);
+  if (followedChoiceId !== selectedChoiceId) {
+    setFollowedChoiceId(selectedChoiceId);
+    setExpandedId(selectedChoiceId);
+  }
+  const selectedCard = cards.find((card) => cardChoiceId(card) === (expandedId || selectedChoiceId))
+    || cards[0]
+    || null;
   return (
     <div className="settings-page-sections">
-      <SettingsSection title="默认 Agent">
+      <SettingsSection title="默认服务">
         <SettingRow
           icon={<UserCircleIcon size={20} weight="regular" />}
-          title="默认 Agent"
+          title="默认服务"
           description={`下一轮任务将使用 ${currentAgentName || "尚未选择"}`}
         >
           <SettingsSelect
@@ -345,72 +379,203 @@ function AgentSettings({
             {checking ? "正在检查…" : "重新检查"}
           </button>
         </div>
-        <div className="settings-agent-rows">
-          {selectedCard ? (
-            <AgentProviderCard
-              key={`${selectedCard.selection.providerId}:${selectedCard.selection.runtimeId}:${selectedCard.connection?.vendorId || "none"}:${selectedCard.connection?.baseUrl || ""}:${selectedCard.selection.resolvedModelId || "none"}`}
-              availability={selectedCard.availability}
-              connection={selectedCard.connection}
-              models={selectedCard.models}
-              selectedModelId={selectedCard.selection.resolvedModelId}
-              selectedReasoningId={selectedCard.selection.reasoning.requested || "auto"}
-              presentation={selectedCard.presentation}
-              surface="settings"
-              actionButtonRef={actionButtonRef}
-              onCopyGuidance={(kind) => onCopyGuidance(kind, selectedCard.selection)}
-              onStartLogin={() => onStartLogin(selectedCard.selection)}
-              onInstall={() => onInstall(selectedCard.selection)}
-              installState={selectedCard.installState}
-              activeOperation={selectedCard.activeOperation}
-              onCancelInstall={() => onCancelInstall(selectedCard.selection)}
-              onRecheck={() => onCheckSelection(selectedCard.selection)}
-              onConnectApiKey={(apiKey, extras) => onConnectApiKey(selectedCard.selection, apiKey, extras)}
-              onDisconnectApiKey={() => onDisconnectApiKey(selectedCard.selection)}
-              onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
-              onSelectModel={async (modelId) => {
-                if (selectedCard.connection) {
-                  return onConnectApiKey(selectedCard.selection, "", {
-                    vendorId: selectedCard.connection.vendorId,
-                    baseUrl: selectedCard.connection.baseUrl,
-                    modelId: modelId.replace(/^pageroot:/u, ""),
-                  });
-                }
-                const candidateSelection = {
-                  ...selectedCard.selection,
-                  requestedModelId: modelId,
-                  resolvedModelId: modelId,
-                  reasoning: {
-                    requested: null,
-                    applied: null,
-                    resolution: "provider-default",
-                  },
-                };
-                const checked = await onCheckSelection(candidateSelection);
-                if (!checked || checked.status !== "succeeded") return checked;
-                const committed = onSelectAgentModel(modelId, selectedCard.selection);
-                return committed
-                  ? { status: "succeeded" }
-                  : { status: "rejected", reason: "模型选择已经变化，请重新选择。" };
-              }}
-              onSelectReasoning={async (reasoning) => {
-                const automatic = reasoning === "auto";
-                const candidateSelection = {
-                  ...selectedCard.selection,
-                  reasoning: automatic
-                    ? { requested: null, applied: null, resolution: "provider-default" }
-                    : { requested: reasoning, applied: reasoning, resolution: "exact" },
-                } as AgentSelection;
-                const checked = await onCheckSelection(candidateSelection);
-                if (!checked || checked.status !== "succeeded") return checked;
-                const committed = onSelectAgentReasoning(reasoning, selectedCard.selection);
-                return committed
-                  ? { status: "succeeded" }
-                  : { status: "rejected", reason: "思考深度已经变化，请重新选择。" };
-              }}
-            />
-          ) : (
+        <div className="settings-agent-service-list">
+          {cards.length === 0 ? (
             <p className="settings-empty-state">当前没有可配置的 Agent。</p>
-          )}
+          ) : cards.map((card) => {
+            const id = cardChoiceId(card);
+            const isDefault = id === selectedChoiceId;
+            const expanded = Boolean(selectedCard) && cardChoiceId(selectedCard) === id;
+            const snapshot = card.presentation.availability(card.availability);
+            const disconnected = card.availability.reason === "disabled"
+              || card.availability.status === "unavailable" && card.availability.reason === "disabled";
+            const needsConnect = disconnected
+              || card.availability.status === "not-installed"
+              || card.availability.status === "auth-required";
+            const primaryLabel = !isDefault && card.availability.status === "ready"
+              ? "设为默认"
+              : disconnected
+                ? "重新连接"
+              : needsConnect
+                ? "连接"
+                : "管理";
+            const canRemoveKey = card.selection.providerId === "pageroot"
+              && Boolean(onRemoveRememberedKey)
+              && (rememberedKey || Boolean(card.connection));
+            const canDisconnect = Boolean(onDisconnectProvider)
+              && !disconnected
+              && (card.availability.status === "ready" || Boolean(card.connection) || card.availability.status === "auth-required");
+            const showMore = canDisconnect || canRemoveKey || (disconnected && Boolean(onReconnectProvider));
+            return (
+              <div
+                key={id}
+                className="settings-agent-service"
+                data-expanded={expanded ? "true" : undefined}
+                data-testid={`settings-agent-row-${card.selection.providerId}`}
+              >
+                <div className="settings-agent-service-row">
+                  <button
+                    type="button"
+                    className="settings-agent-service-main"
+                    aria-expanded={expanded}
+                    onClick={() => setExpandedId(expanded ? null : id)}
+                  >
+                    <strong>{settingsServiceName(card.selection.providerId, card.presentation.displayName)}</strong>
+                    <span>
+                      {disconnected
+                        ? "已断开"
+                        : isDefault && snapshot.tone === "ready"
+                          ? `${snapshot.statusLabel} · 默认`
+                          : snapshot.statusLabel}
+                    </span>
+                  </button>
+                  <button
+                    className="settings-secondary-action"
+                    type="button"
+                    data-testid={`settings-agent-row-action-${card.selection.providerId}`}
+                    onClick={() => {
+                      if (primaryLabel === "设为默认") {
+                        onSelect(card.selection);
+                        return;
+                      }
+                      if (primaryLabel === "重新连接") {
+                        void onReconnectProvider?.(card.selection);
+                      }
+                      setExpandedId(id);
+                    }}
+                  >
+                    {primaryLabel}
+                  </button>
+                  {showMore ? (
+                    <details className="settings-agent-more">
+                      <summary
+                        data-testid={`settings-agent-more-${card.selection.providerId}`}
+                        aria-label="更多"
+                      >
+                        ⋯
+                      </summary>
+                      <div className="settings-agent-more-menu" role="menu">
+                        {disconnected && onReconnectProvider ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              void onReconnectProvider(card.selection);
+                            }}
+                          >
+                            重新连接
+                          </button>
+                        ) : null}
+                        {canDisconnect ? (
+                          <>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-kind="disconnect"
+                              onClick={() => {
+                                const stopRun = busyProviderId === card.selection.providerId;
+                                if (stopRun) {
+                                  setConfirmAction({ kind: "disconnect", card, stopRun });
+                                  return;
+                                }
+                                void onDisconnectProvider?.(card.selection);
+                              }}
+                            >
+                              断开连接
+                            </button>
+                            <small>
+                              {card.selection.providerId === "pageroot"
+                                ? "断开会保留已记住的 Key"
+                                : "断开会保留登录"}
+                            </small>
+                          </>
+                        ) : null}
+                        {canRemoveKey ? (
+                          <>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-kind="remove-key"
+                              onClick={() => {
+                                setConfirmAction({
+                                  kind: "remove-key",
+                                  card,
+                                  stopRun: busyProviderId === card.selection.providerId,
+                                });
+                              }}
+                            >
+                              移除 API Key
+                            </button>
+                            <small>移除后需要重新填写</small>
+                          </>
+                        ) : null}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+                {confirmAction?.card.selection.providerId === card.selection.providerId ? (
+                  <div className="settings-agent-confirm" role="alertdialog" aria-label={confirmAction.kind === "remove-key" ? "移除 API Key？" : "断开连接？"}>
+                    <strong>
+                      {confirmAction.kind === "remove-key"
+                        ? "移除 API Key？"
+                        : `断开 ${settingsServiceName(card.selection.providerId, card.presentation.displayName)}？`}
+                    </strong>
+                    <p>
+                      {confirmAction.stopRun
+                        ? "当前任务会先停止，确认后才更改连接。"
+                        : confirmAction.kind === "remove-key"
+                          ? "移除后需要重新填写 API Key。"
+                          : card.selection.providerId === "pageroot"
+                            ? "断开会停用本应用接入，已记住的 Key 仍保留。"
+                            : "断开会停用本应用接入，本机登录仍保留。"}
+                    </p>
+                    <div className="settings-agent-confirm-actions">
+                      <button type="button" onClick={() => setConfirmAction(null)}>
+                        {confirmAction.stopRun ? "继续任务" : "取消"}
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-agent-confirm-danger"
+                        onClick={() => {
+                          const action = confirmAction;
+                          setConfirmAction(null);
+                          if (action.kind === "remove-key") {
+                            void onRemoveRememberedKey?.(action.card.selection, { stopRun: action.stopRun });
+                            return;
+                          }
+                          void onDisconnectProvider?.(action.card.selection, { stopRun: action.stopRun });
+                        }}
+                      >
+                        {confirmAction.stopRun
+                          ? confirmAction.kind === "remove-key" ? "停止并移除" : "停止并断开"
+                          : confirmAction.kind === "remove-key" ? "移除 API Key" : "断开连接"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {expanded && selectedCard ? (
+                  <div className="settings-agent-rows">
+                    <BoundAgentSetupPanel
+                      card={selectedCard}
+                      surface="settings"
+                      actionButtonRef={actionButtonRef}
+                      hideDisconnectAction
+                      onCopyGuidance={onCopyGuidance}
+                      onStartLogin={onStartLogin}
+                      onInstall={onInstall}
+                      onCancelInstall={onCancelInstall}
+                      onCheckSelection={onCheckSelection}
+                      onConnectApiKey={onConnectApiKey}
+                      onDisconnectApiKey={onDisconnectApiKey}
+                      onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
+                      onSelectAgentModel={onSelectAgentModel}
+                      onSelectAgentReasoning={onSelectAgentReasoning}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       </SettingsSection>
     </div>
@@ -428,7 +593,7 @@ function UpdatesSettings({
   onDownloadUpdate,
   onRequestRestart,
   onOpenReleaseNotes,
-}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onStartLogin" | "onInstall" | "onCancelInstall" | "onConnectApiKey" | "onDisconnectApiKey">) {
+}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onStartLogin" | "onInstall" | "onCancelInstall" | "onConnectApiKey" | "onDisconnectApiKey" | "onDisconnectProvider" | "onRemoveRememberedKey" | "onReconnectProvider" | "onOpenVendorApiKeyPage" | "rememberedKey" | "busyProviderId">) {
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -561,7 +726,12 @@ export default function SettingsPage({
   onCancelInstall,
   onConnectApiKey,
   onDisconnectApiKey,
+  onDisconnectProvider,
+  onRemoveRememberedKey,
+  onReconnectProvider,
   onOpenVendorApiKeyPage,
+  rememberedKey,
+  busyProviderId,
   onClose,
 }: SettingsPageProps) {
   const pageRef = useRef<HTMLElement>(null);
@@ -572,10 +742,19 @@ export default function SettingsPage({
   const lastCheckStartedAtRef = useRef(0);
   const lastCheckGuidanceRef = useRef("");
   const [agentCheckPending, setAgentCheckPending] = useState(false);
+  const [rememberedKeyState, setRememberedKeyState] = useState(Boolean(rememberedKey));
 
   useEffect(() => {
     agentCardsRef.current = agentCards;
   }, [agentCards]);
+
+  useEffect(() => {
+    const readStatus = window.htmlAIIntegrations?.sessionCredentialStatus;
+    if (typeof readStatus !== "function") return;
+    void readStatus().then((status) => {
+      setRememberedKeyState(status?.remembered === true);
+    }).catch(() => {});
+  }, [agentCards, category]);
 
   const requestAgentCheck = useCallback((force = false): Promise<AgentActionOutcome> => {
     const cards = agentCardsRef.current;
@@ -653,38 +832,18 @@ export default function SettingsPage({
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
-      return;
-    }
-    if (event.key !== "Tab" || !pageRef.current) return;
-    const elements = focusableElements(pageRef.current);
-    if (!elements.length) {
-      event.preventDefault();
-      return;
-    }
-    const current = document.activeElement;
-    const currentIndex = elements.indexOf(current as HTMLElement);
-    if (currentIndex < 0) return;
-    const nextIndex = event.shiftKey
-      ? (currentIndex - 1 + elements.length) % elements.length
-      : (currentIndex + 1) % elements.length;
-    if (
-      (!event.shiftKey && currentIndex === elements.length - 1)
-      || (event.shiftKey && currentIndex === 0)
-    ) {
-      event.preventDefault();
-      elements[nextIndex]?.focus();
     }
   };
 
   const pageTitle = category === "general"
     ? "常规"
     : category === "agent"
-      ? "AI Agent"
+      ? "AI 服务"
       : "软件更新";
   const pageDescription = category === "general"
     ? "调整工作台布局与启动习惯。"
     : category === "agent"
-      ? "管理默认 Agent 与本机连接状态。"
+      ? "选择默认服务，并接通内置 AI、Qoder 或 Codex。"
       : "检查、下载并安装源页的正式版本。";
 
   return (
@@ -732,9 +891,14 @@ export default function SettingsPage({
             onCancelInstall={onCancelInstall}
             onConnectApiKey={onConnectApiKey}
             onDisconnectApiKey={onDisconnectApiKey}
+            onDisconnectProvider={onDisconnectProvider}
+            onRemoveRememberedKey={onRemoveRememberedKey}
+            onReconnectProvider={onReconnectProvider}
             onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
             onSelectAgentModel={onSelectAgentModel}
             onSelectAgentReasoning={onSelectAgentReasoning}
+            rememberedKey={rememberedKeyState}
+            busyProviderId={busyProviderId}
           />
         ) : (
           <UpdatesSettings
