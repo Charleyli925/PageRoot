@@ -338,13 +338,16 @@ authority、Script activation 与最小展示锚点均通过后，两个槽一�
 Edit Frame，另一个槽为空；不存在第三个长期 retiring iframe，也不在 A/B 间同步
 Runtime DOM 或脚本状态。
 
-Candidate 准备期间 Active Frame 仍接受浏览和滚动，Active 身份也不提前换成
-Candidate。Candidate 在自己的隐藏槽位完成脚本验证和 iframe 内阅读位置恢复；
-提交前必须从仍可见的 Active Frame 重新捕获最小 Presentation Anchor，并复核
-仍是最新请求、源码 revision 未过期、当前没有原生编辑事务。只有当前可见的选中
+Candidate 准备期间 Active Frame 仍接受浏览、滚动和 Native Edit，Active 身份也不提前换成
+Candidate。Candidate 在自己的隐藏槽位完成脚本验证、尺寸就绪和 iframe 内阅读位置恢复；
+这一阶段只由 Candidate 身份表示，不设置提交锁。提交前必须从仍可见的 Active Frame
+重新捕获最小 Presentation Anchor，并复核仍是最新请求、源码 revision 未过期、当前没有
+原生编辑事务。用户一旦开始 Native Edit，这次 Candidate 不得晋升。只有当前可见的选中
 元素才优先成为视口锚点；否则保留当前阅读区域，不为恢复选中把页面拉回去。
-一次提交同时切换 Active 身份与可见性；提交前失败只丢弃 Candidate，不回滚
-Working HTML。评论布局按当前画面测量，旧画面布局不能当作新 revision 已完成
+一次提交同时切换 Active 身份与可见性。提交前失败只丢弃 Candidate，不回滚
+Working HTML。提交已经切换槽位后若 `connectFrame` 失败，只做这次提交窗口内的短事务
+回滚（恢复旧 Active 身份和 `data-render-verified`），不保留跨 Candidate 生命周期的
+Active 大快照。评论布局按当前画面测量，旧画面布局不能当作新 revision 已完成
 测量的证据。用户在等待期间产生的新滚动位置优先，不能恢复 Candidate 启动时的
 旧位置。
 静态降级后继续编辑只推进完整 Working HTML 和持久化状态，不自动运行 Script；

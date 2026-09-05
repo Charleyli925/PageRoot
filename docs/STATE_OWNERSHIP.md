@@ -315,10 +315,15 @@ Rules:
 - `RuntimeFrameCoordinator` uses exactly two fixed DOM slots. Candidate
   preparation never changes the visible active slot or Active identity.
   Hidden Candidate positioning restores the candidate iframe reading position
-  without rewriting Editor Active refs or the shared outer scroller. One
+  without rewriting Editor Active refs or the shared outer scroller, and does
+  not take the Native Edit commit lock. One
   commit then flips Active identity, slot roles and visibility together after
-  a final identity/source/native-edit check; failure before that commit
-  discards only the Candidate. The former active document is cleared on the
+  a final identity/source/native-edit check. Failure before that commit
+  discards only the Candidate. If `connectFrame` fails after the slot switch,
+  the one-shot commit restores the previous Active identity and
+  `data-render-verified` attribute; that short transactional rollback does not
+  span the Candidate lifecycle and never rolls back Working HTML. The former
+  active document is cleared on the
   next animation frame. A stale callback cannot act after its slot lease has
   been reused. Immediately before the commit, `HtmlCanvasEditor` re-captures
   the small Presentation Anchor from the still-visible Active frame so

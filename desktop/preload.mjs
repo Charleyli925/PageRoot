@@ -362,6 +362,9 @@ const desktopRuntimeCapabilities = Object.freeze({
 const e2eStaticCandidateFailure = typeof process !== "undefined"
   && process.env?.PAGEROOT_E2E === "1"
   && process.env?.PAGEROOT_E2E_STATIC_CANDIDATE_FAILURE === "1";
+const e2eRuntimeCommitHooks = typeof process !== "undefined"
+  && process.env?.PAGEROOT_E2E === "1"
+  && process.env?.PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS === "1";
 const runtimeConfig = Object.freeze({
   bridgePort,
   bridgeAuthToken,
@@ -377,7 +380,11 @@ const runtimeConfig = Object.freeze({
   },
   getStartupTiming: () => startupTiming,
   capabilities: desktopRuntimeCapabilities,
-  diagnostics: Object.freeze({ startupTiming, e2eStaticCandidateFailure }),
+  diagnostics: Object.freeze({
+    startupTiming,
+    e2eStaticCandidateFailure,
+    e2eRuntimeCommitHooks,
+  }),
 });
 
 const previewApi = Object.freeze({
