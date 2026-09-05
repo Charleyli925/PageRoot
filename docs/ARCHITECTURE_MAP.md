@@ -67,19 +67,26 @@ fail-closes unless both complete HTML/Hash results match. Target mapping still
 reads the first SourcePatch result. Official `resolveTargetRef()` uses only a
 managed unique `elementId`; missing or invalid IDs are orphaned. Selector,
 fingerprint, offset and text-affix scoring are not an official result and are
-not a live shadow path.
+not a live shadow path. Inside one kernel apply, a `SourceIndex` produced by
+`buildSourceIndex` may be reused for the exact same HTML bytes after Hash is
+recomputed from those bytes; `applyPatchPlan` may reuse that before-index the
+same way. Reuse is not a Session, not a history pool, and not a skip-validation
+flag. A caller-supplied object that was not built by `buildSourceIndex`, or that
+does not match the current HTML/Hash, is rejected. Built indexes are read-only.
 
 **Transitional.** Heuristic helpers may still exist in `target-resolver.js`,
 but the official entry does not call them and does not record fallback-only
 metrics. Canvas still constructs capability-specific SourcePatch commands
 beside kernel operations. Opt-in `edit-pipeline-counters.js` can count
 full-document index builds, full patch applies and insertion-point full-tree
-scans in tests; it is not a Session and has no production stream.
+scans in tests; it is not a Session and has no production stream. Live
+`SemanticDocumentState` objects may remember the owned index for their current
+bytes until they are collected; that is not a global source-index cache.
 
-**Target, not done.** Later edits should reuse one verified source snapshot
-inside one operation, then keep a single materialization and on-demand Canvas
-layout. Do not read those as current. `Verified*Context` objects still live
-only inside one operation and are not a reusable source-index cache.
+**Target, not done.** Later edits should keep a single materialization and
+on-demand Canvas layout. Do not read those as current. `Verified*Context`
+objects still live only inside one operation and are not a reusable
+source-index cache.
 
 Living ADR status is in `docs/decisions/README.md`. Read this map and the
 Living rows for ADR 0062, 0064 and 0065 for today's contract. Historical

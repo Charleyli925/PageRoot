@@ -361,23 +361,23 @@ test("same samples freeze kernel and dual-path computation counts", () => {
   });
 
   assert.deepEqual(kernelCounts, {
-    sourceIndexBuilds: 9,
-    fullDocumentIndexBuilds: 2,
+    sourceIndexBuilds: 3,
+    fullDocumentIndexBuilds: 3,
     fragmentIndexBuilds: 0,
-    unlabeledIndexBuilds: 7,
+    unlabeledIndexBuilds: 0,
     fullPatchApplies: 1,
     insertionPointFullTreeScans: 0,
   });
   assert.deepEqual(dualPathCounts, {
-    sourceIndexBuilds: 12,
-    fullDocumentIndexBuilds: 4,
+    sourceIndexBuilds: 6,
+    fullDocumentIndexBuilds: 5,
     fragmentIndexBuilds: 0,
-    unlabeledIndexBuilds: 8,
+    unlabeledIndexBuilds: 1,
     fullPatchApplies: 2,
     insertionPointFullTreeScans: 0,
   });
   assert.ok(manyElementCount >= 240);
-  assert.equal(manyElementCounts.fullPatchApplies, 1);
+  assert.deepEqual(manyElementCounts, kernelCounts);
   assert.ok(largeHtml.length >= 256 * 1024);
-  assert.equal(largeByteCounts.fullPatchApplies, 1);
+  assert.deepEqual(largeByteCounts, kernelCounts);
 });

@@ -128,7 +128,11 @@ export declare class SemanticOperationError extends Error {
 
 export declare function createSemanticDocumentState(
   html: string,
-  options?: { revision?: number; lineage?: SemanticLineageEntry[] },
+  options?: {
+    revision?: number;
+    lineage?: SemanticLineageEntry[];
+    sourceIndex?: unknown;
+  },
 ): SemanticDocumentState;
 
 export declare function createSemanticElementPrecondition(
@@ -146,7 +150,11 @@ export declare function deriveSemanticOperationIdentityDelta(
   beforeHtml: string,
   afterHtml: string,
   operation: SemanticOperation,
-  options?: { direction?: "forward" | "undo" | "redo" },
+  options?: {
+    direction?: "forward" | "undo" | "redo";
+    beforeIndex?: unknown;
+    afterIndex?: unknown;
+  },
 ): SemanticIdentityDelta;
 
 export declare class SemanticOperationKernel {
