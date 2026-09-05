@@ -163,7 +163,8 @@ Qoder process, so it must not be repurposed for real user Requests. See
 | Command | Purpose |
 | --- | --- |
 | `npm run gate:edit` | Fast, impact-selected feedback for uncommitted work |
-| `npm run gate:plan -- --base origin/main` | Compact JSON of the task-lane selection: owners, Node tests, capability canaries and estimated fan-out |
+| `npm run gate:plan -- --base origin/main` | Compact JSON of the task-lane selection: owners, Node tests, capability canaries, estimated fan-out and capability reading sets |
+| `npm run gate:plan -- --context-domain <id>` | Same reading map before any files have changed; does not select tests or change `task:finish` |
 | `npm run gate:task` | Static checks plus impacted Node tests and capability-level Browser/Electron/AI canaries |
 | `npm run gate:task -- --resume <run-id>` | Replay a failed task gate on the identical source hash; reuse passed suites only when fingerprints match |
 | `npm run gate:main:auto` | Optional local/diagnostic Node/browser smoke; it is not part of the automatic post-merge path |
@@ -189,7 +190,10 @@ Desktop IPC modules each have their own owner so a leaf change does not
 reselect the old wide union. Task canaries are Playwright tags such as
 `@smoke-editing`; the original global `@gate-smoke` union remains the `main`
 lane smoke. Ready PRs still run `node-full`, `browser-full`, `electron-full`,
-`ai-closed-loop` and `real-html`.
+`ai-closed-loop` and `real-html`. After the selected local gate has passed,
+do not rerun the complete matrix or packaging unless the diff changed, a check
+failed, or a specific unresolved risk remains. Node passing does not prove
+Enter, IME, caret or iframe continuity.
 
 Node business tests use public Session/algorithm outcomes rather than scanning
 Workbench, Canvas, JSX, CSS, or callback source. Explicit application

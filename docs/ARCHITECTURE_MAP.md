@@ -51,13 +51,33 @@ with `ProjectSession` + `ProjectWorkflow`. Open/switch/close now have
 `ProjectWorkflow`. Do not split that workflow for line budget, and do not
 add a second Controller.
 
+## Current edit contract
+
+Visual edits use Stable ID semantic operations as the public authorization
+entry. The current source materializer and commit checks produce complete
+Working HTML. SourcePatch is the internal implementation for scope, replay,
+inverse operations and integrity; it is not a second public edit API. Do not
+bypass hash, identity, scope or persistence checks, and do not serialize
+Runtime DOM as the save source.
+
+Living ADR status is in `docs/decisions/README.md`. Read this map and the
+Living rows for ADR 0062, 0064 and 0065 for today's contract. Historical
+paragraphs inside an ADR body, including early "do not migrate Canvas yet"
+context, are not the daily implementation entry.
+
+`HtmlCanvasEditor.tsx` and `bridge/project-file-repository.mjs` are composition
+surfaces. Start from the capability-context contract, owners and named
+symbols; do not default to reading the whole file. Independent decision
+functions may be extracted when they have explicit inputs and outputs;
+do not split one state owner across hooks only to reduce line count.
+
 ## Default reading set by task
 
 | Task | Read first |
 | --- | --- |
 | Comments UI or composer | this map, `workspace-controller-capabilities.d.ts`, `CommentWorkflow`, `CommentSession`, `comment-rail-container.tsx`, `comment-canvas-port.js`, `comment-rail-contract.ts`, focused comment tests |
 | Save / autosave / conflict | this map, `DocumentWorkflow`, `DocumentSession`, P1-B CAS in `ProjectFileRepository` |
-| Open / switch / tabs / close | this map, `WorkbenchNavigationWorkflow`, `ProjectWorkflow`, `project/*.js` plans, `INTERACTION_FLOW.md` |
+| Open / switch / tabs / close | this map, `WorkbenchNavigationWorkflow`, `ProjectWorkflow`, `project/*.js` plans, `INTERACTION_FLOW.md` sections 2, 3, 4 and 12 |
 | AI submit / cancel / review | this map, `RunWorkflow`, `VersionWorkflow`, `CHANGE_REQUEST_PROTOCOL.md` |
 | Cross-owner or persistence | `STATE_OWNERSHIP.md` and `ARCHITECTURE_CONTRACT.md` |
 
@@ -161,8 +181,22 @@ and the host callback that snapshots page presentation before a switch.
 
 ## Capability-context for `gate:plan`
 
-`npm run gate:plan` also prints a capability reading set from
-`scripts/capability-context.json`. That map is separate from
+`scripts/capability-context.json` is the reading map. It is separate from
 `tests/test-impact-map.json`. Impact-map owners choose tests; capability-context
-chooses what to read: `entryInterfaces`, `owners`, `implementationFiles`,
-`focusedTests`, `requiredDocs` and `estimatedContextBytes`.
+chooses what to read.
+
+Use the same map in two ways:
+
+| Stage | Command | Selects |
+| --- | --- | --- |
+| Before edits | `npm run gate:plan -- --context-domain <id>` or `--context-file <path>` | Owners, contract files, implementation, focused tests and named doc sections |
+| After edits | `npm run gate:plan -- --base origin/main` | The same reading set for files in the real Git diff, plus test selection |
+
+`--context-domain` and `--context-file` never change test selection or the
+`task:finish` `origin/main` base. When those flags are present, the reading set
+comes only from the requested domains or paths, not from the current Git diff. Read `capabilityContext.contract.files`
+first. Expand `implementationFiles`, `focusedTests` and `requiredDocs`
+(including `requiredDocs.sections`) only as needed. The flattened
+`implementation` set remains the union of those lists. Unknown paths and
+unknown domain ids appear as `unmatchedFiles` / `unmatchedDomains`; missing
+map references fail map load instead of silently shrinking the estimate.

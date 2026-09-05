@@ -340,13 +340,26 @@ export function annotateGatePlan(plan, { map, inventoryFiles = [], tagCounts = {
   };
 }
 
+function compactReadingSet(value) {
+  return {
+    files: value?.files || [],
+    estimatedBytes: Number(value?.estimatedBytes) || 0,
+  };
+}
+
 export function compactGatePlan(plan) {
   const capabilityContext = plan.capabilityContext || {
     domains: [],
     defaultLevel: "contract",
     owners: [],
     contract: { files: [], estimatedBytes: 0 },
+    implementationFiles: { files: [], estimatedBytes: 0 },
+    focusedTests: { files: [], estimatedBytes: 0 },
+    requiredDocs: { files: [], estimatedBytes: 0, sections: [] },
     implementation: { files: [], estimatedBytes: 0 },
+    unmatchedFiles: [],
+    unmatchedDomains: [],
+    missingFiles: [],
   };
   return {
     changedFiles: plan.changedFiles,
@@ -366,14 +379,19 @@ export function compactGatePlan(plan) {
       domains: capabilityContext.domains || [],
       defaultLevel: capabilityContext.defaultLevel || "contract",
       owners: capabilityContext.owners || [],
-      contract: {
-        files: capabilityContext.contract?.files || [],
-        estimatedBytes: Number(capabilityContext.contract?.estimatedBytes) || 0,
+      contract: compactReadingSet(capabilityContext.contract),
+      implementationFiles: compactReadingSet(capabilityContext.implementationFiles),
+      focusedTests: compactReadingSet(capabilityContext.focusedTests),
+      requiredDocs: {
+        ...compactReadingSet(capabilityContext.requiredDocs),
+        sections: Array.isArray(capabilityContext.requiredDocs?.sections)
+          ? capabilityContext.requiredDocs.sections
+          : [],
       },
-      implementation: {
-        files: capabilityContext.implementation?.files || [],
-        estimatedBytes: Number(capabilityContext.implementation?.estimatedBytes) || 0,
-      },
+      implementation: compactReadingSet(capabilityContext.implementation),
+      unmatchedFiles: capabilityContext.unmatchedFiles || [],
+      unmatchedDomains: capabilityContext.unmatchedDomains || [],
+      missingFiles: capabilityContext.missingFiles || [],
     },
   };
 }
