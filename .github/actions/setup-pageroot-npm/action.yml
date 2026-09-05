@@ -1,0 +1,41 @@
+name: Setup PageRoot npm
+description: Restore or populate the OS/lockfile node_modules cache.
+
+inputs:
+  skip-electron:
+    description: Skip the Electron binary download. Use on Ubuntu Node and Browser jobs.
+    required: false
+    default: "false"
+  install-mode:
+    description: populate installs on a cache miss; require-cache fails closed if the OS/lockfile cache is missing.
+    required: false
+    default: "populate"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      timeout-minutes: 5
+      with:
+        node-version: 22.13.0
+        cache: npm
+    - name: Restore node_modules
+      id: npm-modules
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      timeout-minutes: 5
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-${{ runner.arch }}-node-22.13.0-modules-${{ hashFiles('package-lock.json') }}-electron-${{ inputs.skip-electron }}
+    - name: Install npm dependencies
+      if: inputs.install-mode == 'populate' && steps.npm-modules.outputs.cache-hit != 'true'
+      timeout-minutes: 10
+      shell: bash
+      env:
+        ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ inputs.skip-electron == 'true' && '1' || '' }}
+      run: npm ci
+    - name: Require restored node_modules
+      if: inputs.install-mode == 'require-cache' && steps.npm-modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "node_modules cache miss for ${{ runner.os }}/${{ runner.arch }} lockfile; the populate job must run first."
+        exit 1

@@ -181,12 +181,13 @@ test("a named pull request that does not match stays a hard mismatch while empty
 });
 
 test("GitHub workflows keep one CI file, informational Codex review, and exact-tree release provenance", async () => {
-  const [ci, dryRun, candidate, release, packageText] = await Promise.all([
+  const [ci, dryRun, candidate, release, packageText, npmAction] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-dry-run.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
     readFile(path.join(productRoot, "package.json"), "utf8"),
+    readFile(path.join(productRoot, ".github/actions/setup-pageroot-npm/action.yml"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
   const prFeedback = workflowJob(ci, "pr-feedback");
@@ -211,6 +212,8 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(prFeedback, /github\.event\.pull_request\.draft == true/u);
   assert.match(prFeedback, /npm run gate:edit -- --base "\$PR_BASE_SHA"/u);
   assert.match(prFeedback, /--stage pr-feedback/u);
+  assert.match(prFeedback, /skip-electron: "true"/u);
+  assert.doesNotMatch(prFeedback, /Restore Electron download cache/u);
   assert.match(codexReview, /continue-on-error: true/u);
   assert.match(codexReview, /request-codex-review\.mjs/u);
   assert.match(codexReview, /check-pr-review-policy\.mjs/u);
@@ -220,8 +223,15 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(baselinePolicy, /name: baseline-policy/u);
   assert.match(baselinePolicy, /needs:[\s\S]*- branch-policy/u);
   assert.doesNotMatch(baselinePolicy, /review-policy|codex-review/u);
-  assert.match(baselinePolicy, /npm run audit:dependencies/u);
-  assert.match(sourceBuild, /needs:[\s\S]*- baseline-policy/u);
+  assert.match(baselinePolicy, /check-dependency-audit\.mjs/u);
+  assert.match(baselinePolicy, /--write-snapshot output\/ci-evidence\/dependency-audit\.json/u);
+  assert.match(ci, /name: linux-deps/u);
+  assert.match(ci, /name: macos-deps/u);
+  assert.match(npmAction, /ELECTRON_SKIP_BINARY_DOWNLOAD/u);
+  assert.match(npmAction, /install-mode == 'require-cache'/u);
+  assert.match(sourceBuild, /needs:[\s\S]*- baseline-policy[\s\S]*- linux-deps/u);
+  assert.match(sourceBuild, /skip-electron: "true"/u);
+  assert.doesNotMatch(sourceBuild, /Restore Electron download cache/u);
   assert.match(sourceBuild, /npm run ci:source-build/u);
   assert.doesNotMatch(sourceBuild, /ci:source-build:prepared/u);
   assert.match(sourceBuild, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
@@ -230,15 +240,22 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.doesNotMatch(sourceBuild, /PageRoot-web-build-[^\n]*run_attempt/u);
   assert.match(sourceNode, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
   assert.match(sourceBrowser, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
-  assert.match(electronNative, /needs:[\s\S]*- baseline-policy/u);
-  assert.match(electronAi, /needs:[\s\S]*- baseline-policy/u);
+  assert.match(sourceBrowser, /skip-electron: "true"/u);
+  assert.doesNotMatch(sourceBrowser, /Restore Electron download cache/u);
+  assert.match(
+    sourceBrowser,
+    /Upload browser failure diagnostics[\s\S]{0,200}if: failure\(\) \|\| cancelled\(\)/u,
+  );
+  assert.match(electronNative, /needs:[\s\S]*- baseline-policy[\s\S]*- macos-deps/u);
+  assert.match(electronAi, /needs:[\s\S]*- baseline-policy[\s\S]*- macos-deps/u);
   assert.match(ci, /name: release-gate/u);
   assert.doesNotMatch(releaseGate, /review-policy|codex-review/u);
   assert.match(releaseGate, /needs:[\s\S]*- candidate-context[\s\S]*- release-dry-run/u);
   assert.match(releaseGate, /BASELINE_RESULT: \$\{\{ needs\.baseline-policy\.result \}\}/u);
   assert.doesNotMatch(releaseGate, /Revalidate frozen head\/base|--mode revalidate/u);
-  assert.match(releaseGate, /Refresh dependency and packaged-runtime baseline before attestation/u);
-  assert.match(releaseGate, /npm run audit:dependencies/u);
+  assert.match(releaseGate, /Verify dependency and packaged-runtime baseline is unchanged/u);
+  assert.match(releaseGate, /--verify-snapshot output\/ci-evidence\/dependency-audit\.json/u);
+  assert.doesNotMatch(releaseGate, /npm run audit:dependencies/u);
   assert.match(releaseGate, /Download product flaky evidence/u);
   assert.match(releaseGate, /PageRoot-\*-evidence-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
   assert.match(releaseGate, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/u);
@@ -283,11 +300,11 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
     electronNative,
     /name: PageRoot-electron-native-\$\{\{ matrix\.label \}\}-evidence-/u,
   );
-  assert.match(electronNative, /Upload native Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
+  assert.match(electronNative, /Upload native Electron diagnostics and retry evidence[\s\S]{0,200}if: failure\(\) \|\| cancelled\(\)/u);
   assert.match(electronAi, /playwright-flaky-summary\.mjs/u);
   assert.match(electronAi, /--suite electron-ai/u);
   assert.match(electronAi, /--report output\/playwright\/ai-closed-loop\/deterministic\/results\.json/u);
-  assert.match(electronAi, /Upload AI Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
+  assert.match(electronAi, /Upload AI Electron diagnostics and retry evidence[\s\S]{0,200}if: failure\(\) \|\| cancelled\(\)/u);
   assert.match(ci, /scripts\/ci-evidence\.mjs run/u);
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
   assert.match(ci, /--missing-association fail/u);

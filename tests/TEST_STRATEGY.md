@@ -40,7 +40,8 @@ turn into a zero-work green result.
 | PR `pr-feedback` | Draft PR 的 `opened/synchronize/reopened`，且无 `full-gate` label | 按影响映射选择 Node/编译检查（`gate:edit`） | 普通 Draft 推送不消费完整矩阵 |
 | PR 完整矩阵 + `release-gate` | Ready（含直接以 Ready 开 PR）或 `full-gate` label | 全量 Node、三分片 Browser、独立 Native Electron、独立 AI 闭环、真实 HTML、依赖基线、按需 dry run、exact-tree 凭证 | `release-gate` 是唯一合并硬门；Codex 评审只展示、不阻断 |
 | `codex-review` | 与完整矩阵相同的触发条件 | 为当前 head 至多发一条 `@codex review`，并写 informational 线程快照 | `continue-on-error`；不在 `release-gate.needs` 中 |
-| `baseline-policy` | 完整矩阵路径上，分支策略通过后 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
+| `baseline-policy` | 完整矩阵路径上，分支策略通过后 | 全局依赖 advisory policy 与 packaged-runtime closure，并写下 lockfile 快照 | 基线红时不启动 Linux build、Browser 或 macOS Electron runner；`release-gate` 只核验快照 |
+| `linux-deps` / `macos-deps` | 完整矩阵路径上，基线通过后 | 按 OS + lockfile + 是否包含 Electron 填充一次 `node_modules` 缓存 | 后续分片只恢复缓存，不再各自 `npm ci`；Ubuntu 跳过 Electron 二进制 |
 | 一次性晋升 `release-gate` | baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量源码车道汇合后签发 Tree Hash 凭证 | 每个 Ready/full-gate head 跑一次；后续新 SHA 重新跑完整矩阵 |
 | `Release Dry Run` | `candidate-context` 判定完整矩阵候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 生成 stable `app-update.yml`、组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复精确 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater 制品、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
@@ -82,7 +83,7 @@ CI 可重试一次）。real HTML、Browser 三分片、native Electron 与 AI �
 `failed = 0`、`flaky = 0`、`retries = 0`。同一 SHA 若曾出现未归因的产品失败，
 不能通过重跑生成 attestation，除非失败步骤被分类为 `ci_environment`，或 PR 上存在
 未过期的 `pageroot-ci-triage` 记录。JSON reporter 仍写入
-`output/ci-evidence/`，diagnostics 在失败或 flaky 时保留。
+`output/ci-evidence/`。完整 Playwright diagnostics 只在失败或取消时上传。
 
 ## 测试类型与去重
 

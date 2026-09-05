@@ -1,6 +1,6 @@
 # Dependency security
 
-Dependency versions are pinned by `package-lock.json`, updated through Pull Requests and monitored by Dependabot. `npm run audit:dependencies` fails on any advisory that has not been explicitly reviewed or whose exception has expired, and also proves the packaged-runtime dependency closure. A promoted PR runs this command in `baseline-policy` after branch policy and before any source build or macOS Electron job; it is deliberately independent of the final review wait so deterministic safety tests and review can overlap. `release-gate` refreshes the identical check immediately before exact-tree attestation so a delayed failed-job rerun cannot reuse stale advisory evidence. The read-only `CI Health` workflow repeats the same baseline daily even when no PR is promoted.
+Dependency versions are pinned by `package-lock.json`, updated through Pull Requests and monitored by Dependabot. `npm run audit:dependencies` fails on any advisory that has not been explicitly reviewed or whose exception has expired, and also proves the packaged-runtime dependency closure. A promoted PR runs this command in `baseline-policy` after branch policy and writes a lockfile snapshot; `release-gate` verifies that snapshot instead of scanning again, so a delayed failed-job rerun cannot silently reuse stale advisory evidence unless the lockfile also changed. The `CI Health` workflow repeats the same baseline daily even when no PR is promoted.
 
 ## Update automation
 

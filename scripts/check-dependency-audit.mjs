@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -137,13 +138,64 @@ function runAudit() {
   }
 }
 
-function main() {
-  const packageJson = JSON.parse(
-    readFileSync(path.join(productRoot, "package.json"), "utf8"),
-  );
-  const packageLock = JSON.parse(
-    readFileSync(path.join(productRoot, "package-lock.json"), "utf8"),
-  );
+export function lockfileFingerprint(packageLockText) {
+  return createHash("sha256").update(String(packageLockText || ""), "utf8").digest("hex");
+}
+
+export function createDependencyAuditSnapshot({
+  packageLockText,
+  packageJsonText,
+  now = new Date(),
+}) {
+  return Object.freeze({
+    schemaVersion: 1,
+    lockfileSha256: lockfileFingerprint(packageLockText),
+    packageJsonSha256: lockfileFingerprint(packageJsonText),
+    createdAt: now instanceof Date ? now.toISOString() : String(now),
+  });
+}
+
+export function verifyDependencyAuditSnapshot(snapshot, { packageLockText, packageJsonText }) {
+  if (!snapshot || snapshot.schemaVersion !== 1) {
+    throw new Error("Dependency audit snapshot schema is unsupported.");
+  }
+  const expected = createDependencyAuditSnapshot({ packageLockText, packageJsonText });
+  if (snapshot.lockfileSha256 !== expected.lockfileSha256) {
+    throw new Error("package-lock.json changed after the baseline dependency audit.");
+  }
+  if (snapshot.packageJsonSha256 !== expected.packageJsonSha256) {
+    throw new Error("package.json changed after the baseline dependency audit.");
+  }
+  return true;
+}
+
+function parseAuditArgs(argv) {
+  const options = { writeSnapshot: "", verifySnapshot: "" };
+  while (argv.length > 0) {
+    const argument = argv.shift();
+    const value = argv.shift();
+    if (!value) throw new Error(`${argument} requires a value.`);
+    if (argument === "--write-snapshot") options.writeSnapshot = value;
+    else if (argument === "--verify-snapshot") options.verifySnapshot = value;
+    else throw new Error(`Unknown argument: ${argument}`);
+  }
+  return options;
+}
+
+function main(argv = process.argv.slice(2)) {
+  const options = parseAuditArgs(argv);
+  const packageJsonPath = path.join(productRoot, "package.json");
+  const packageLockPath = path.join(productRoot, "package-lock.json");
+  const packageJsonText = readFileSync(packageJsonPath, "utf8");
+  const packageLockText = readFileSync(packageLockPath, "utf8");
+  if (options.verifySnapshot) {
+    const snapshot = JSON.parse(readFileSync(path.resolve(productRoot, options.verifySnapshot), "utf8"));
+    verifyDependencyAuditSnapshot(snapshot, { packageLockText, packageJsonText });
+    console.log("Dependency audit snapshot matches the current lockfile and package.json.");
+    return;
+  }
+  const packageJson = JSON.parse(packageJsonText);
+  const packageLock = JSON.parse(packageLockText);
   const runtimeClosure = evaluatePackagedRuntimeClosure(
     packageJson,
     packageLock,
@@ -176,6 +228,19 @@ function main() {
         expired && `Dependency exceptions require review: ${expired}`,
       ].filter(Boolean).join("\n"),
     );
+  }
+  if (options.writeSnapshot) {
+    const destination = path.resolve(productRoot, options.writeSnapshot);
+    if (destination !== productRoot && !destination.startsWith(`${productRoot}${path.sep}`)) {
+      throw new Error("--write-snapshot must remain inside the repository.");
+    }
+    mkdirSync(path.dirname(destination), { recursive: true });
+    writeFileSync(
+      destination,
+      `${JSON.stringify(createDependencyAuditSnapshot({ packageLockText, packageJsonText }), null, 2)}\n`,
+      "utf8",
+    );
+    console.log(`Dependency audit snapshot: ${destination}`);
   }
   console.log(
     `Dependency audit policy passed; ${runtimeClosure.managedModules.length} packaged runtime module(s) form one hoisted closure and no unreviewed advisory is present.`,
