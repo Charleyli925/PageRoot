@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   activateNativeEdit,
+  closePageRootGracefully,
   currentEditorFrame,
   documentToken,
   ECHARTS_STUB,
@@ -47,10 +48,44 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
       },
       sourcePath,
       isolatedUserData: session.isolatedUserData,
+      relaunch: async () => {
+        if (!session.electronApp || !session.page) {
+          throw new Error("PageRoot session is not running.");
+        }
+        const closedApp = session.electronApp;
+        const closedPage = session.page;
+        session.electronApp = null;
+        session.page = null;
+        let closedProcess = null;
+        try {
+          closedProcess = closedApp.process();
+        } catch {
+          closedProcess = null;
+        }
+        await closePageRootGracefully(closedApp, closedPage);
+        if (closedProcess && closedProcess.exitCode == null && !closedProcess.killed) {
+          await Promise.race([
+            new Promise((resolve) => closedProcess.once("exit", resolve)),
+            new Promise((resolve) => {
+              setTimeout(resolve, 15_000);
+            }),
+          ]);
+        }
+        Object.assign(session, await launchPageRoot({
+          isolatedUserData: session.isolatedUserData,
+        }));
+        return session;
+      },
     });
   } finally {
     if (session.electronApp && session.isolatedUserData) {
-      await stopPageRoot(session.electronApp, session.isolatedUserData);
+      try {
+        await stopPageRoot(session.electronApp, session.isolatedUserData);
+      } catch {
+        removeValidatedTemporaryDirectory(session.isolatedUserData, "pageroot-native-e2e-");
+      }
+    } else if (session.isolatedUserData) {
+      removeValidatedTemporaryDirectory(session.isolatedUserData, "pageroot-native-e2e-");
     }
     removeValidatedTemporaryDirectory(sourceDirectory, prefix);
   }
@@ -169,18 +204,48 @@ test("continuous editing keeps the Runtime document through type, Enter, style a
     const saved = readFileSync(workingCopyPath, "utf8");
     expect(saved).toContain(typed);
     expect(saved).toMatch(/font-weight:\s*700/u);
-    const tabs = page.getByRole("tablist", { name: "已打开的页面" });
-    const documentTab = tabs.getByRole("tab").first();
-    await page.getByRole("button", { name: "新标签页" }).click();
-    await documentTab.click();
-    frame = (await loadedDiskFrame(page, workingCopyPath, "continuity-static")).frame;
+    const reopened = await relaunch();
+    frame = (await loadedDiskFrame(reopened.page, workingCopyPath, "continuity-static")).frame;
     await expect(frame.locator('[data-native-case="continuity-static"]'))
       .toContainText(typed);
     expect(readFileSync(workingCopyPath, "utf8")).toContain(typed);
   });
 });
 
-test("comment rail and canvas width stay visually continuous while typing in a nested scroller", async () => {
+test("continuous editing on a Script page keeps the Runtime document", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const typed = "DYNAMIC_CONTINUITY_MARKER";
+  await withRuntimeProject("pageroot-continuity-dynamic-e2e-", {
+    "runtime-report.html": CHART_PAGE,
+    "echarts.js": ECHARTS_STUB,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "continuity-blank-caret");
+    await expect(frame.locator("#chart canvas")).toHaveCount(1);
+    const { target } = await enterNativeEdit(page, frame, "continuity-blank-caret");
+    await enableContinuityProbe(page);
+    const beforeDocument = await documentToken(page);
+    const beforeGeneration = await page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
+    for (const character of typed) {
+      await page.keyboard.insertText(character);
+    }
+    await expect(target).toContainText(typed);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    const duringEdit = await continuitySummary(page);
+    expect(duringEdit.frameCreated).toBe(0);
+    expect(duringEdit.candidateCreated).toBe(0);
+    expect(duringEdit.unexpectedCandidate).toBe(false);
+  });
+});
+
+test("comment rail and canvas width stay visually continuous while typing in a nested scroller", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
   await withRuntimeProject("pageroot-continuity-nested-e2e-", {
     "runtime-report.html": NESTED_SCROLL_PAGE,
   }, async ({ page, sourcePath }) => {
@@ -231,9 +296,24 @@ test("double-clicking the sixth blank line after a Runtime refresh places the ca
     const duringEdit = await continuitySummary(page);
     expect(duringEdit.frameCreated).toBe(0);
     expect(duringEdit.candidateCreated).toBe(0);
+    const beforeDocument = await documentToken(page);
+    const beforeGeneration = await page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
 
     await page.keyboard.press("Escape");
     await expect(target).not.toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
+    await expect.poll(async () => {
+      const generation = await page.getByTestId("html-canvas-editor")
+        .locator('iframe:not([data-frame-role])')
+        .getAttribute("data-frame-generation");
+      const token = await documentToken(page);
+      const summary = await continuitySummary(page);
+      return generation !== beforeGeneration
+        || token !== beforeDocument
+        || summary.frameCreated > 0
+        || summary.framePromoted > 0;
+    }).toBe(true);
     await expect.poll(() => page.locator(".canvas-edit-surface")
       .getAttribute("data-edit-runtime-outcome")).toBe("ready");
     frame = await currentEditorFrame(page);
@@ -257,7 +337,7 @@ test("double-clicking the sixth blank line after a Runtime refresh places the ca
         y: glyph.height >= 1 ? glyph.top - host.top + Math.max(2, glyph.height / 2) : fallbackY,
       };
     });
-    await target.dblclick({ position: sixthBreak, force: true });
+    await target.dblclick({ position: sixthBreak });
     await expect(target).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
     await page.keyboard.insertText(marker);
     await expect(target).toContainText(marker);
