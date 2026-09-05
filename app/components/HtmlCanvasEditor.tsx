@@ -45,7 +45,6 @@ import {
   applyPatchPlan,
   buildSourceIndex,
   createTargetRef,
-  planSemanticOperationPatch,
   planSourcePatch,
   resolveTargetRef,
 } from "../lib/source-patch-core.js";
@@ -3465,24 +3464,29 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
 
     try {
+      const documentState = createSemanticDocumentState(currentSource, {
+        revision: semanticRevisionRef.current,
+        sourceIndex,
+      });
       const directSemanticOperation = command.type === "direct-semantic-operation"
         ? command.operation
         : null;
-      let semanticResult = directSemanticOperation
-        ? applySemanticOperation(
-          createSemanticDocumentState(currentSource, {
-            revision: semanticRevisionRef.current,
-          }),
-          directSemanticOperation,
-        )
-        : null;
-      const directSemanticMaterialization = semanticResult?.materialization
-        .sourcePatchResult as ReturnType<typeof applyPatchPlan> | undefined;
-      const semanticCommand = directSemanticMaterialization?.inversePlan?.metadata
-        ?.semanticCommand;
-      const forwardPlan = directSemanticOperation
-        ? planSemanticOperationPatch(sourceIndex, semanticCommand) as SourcePatchPlan
+      const plannedCommand = directSemanticOperation
+        ? null
         : planSourcePatch(command, sourceIndex) as SourcePatchPlan;
+      const semanticOperation = directSemanticOperation
+        || semanticOperationForSourceCommand(
+          command as SourcePatchCommand,
+          plannedCommand as SourcePatchPlan,
+          sourceIndex,
+          mutation,
+          semanticRevisionRef.current,
+        );
+      if (!semanticOperation) {
+        throw new Error("当前画布命令无法降低为语义操作。");
+      }
+      const operationTargetRefs = plannedCommand?.targetRefs
+        ?? [sourceTargetRefForSelection(mutation.target)];
       const ambientTargets = uniqueSelections([
         ...commentedTargetsRef.current.map((entry) => entry.target),
         ...trackedTargetsRef.current,
@@ -3493,40 +3497,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ]);
       const trackedTargetRefs = trackedSourceTargetRefs(
         originalTargets,
-        forwardPlan.targetRefs,
+        operationTargetRefs,
       );
-      const mappedResult = applyPatchPlan(
-        forwardPlan,
-        currentSource,
+      const semanticResult = applySemanticOperation(
+        documentState,
+        semanticOperation,
         { trackedTargetRefs },
       );
-      if (mappedResult.html === currentSource) return null;
-      const semanticOperation = directSemanticOperation
-        || semanticOperationForSourceCommand(
-          command as SourcePatchCommand,
-          forwardPlan,
-          sourceIndex,
-          mutation,
-          semanticRevisionRef.current,
-        );
-      semanticResult = semanticResult || (semanticOperation
-        ? applySemanticOperation(
-          createSemanticDocumentState(currentSource, {
-            revision: semanticRevisionRef.current,
-          }),
-          semanticOperation,
-        )
-        : null);
-      const semanticMaterialization = semanticResult?.materialization
+      const result = semanticResult.materialization
         .sourcePatchResult as ReturnType<typeof applyPatchPlan> | undefined;
-      const result = semanticMaterialization ?? mappedResult;
-      if (semanticOperation && (
-        !semanticMaterialization
-        || mappedResult.html !== semanticMaterialization.html
-        || mappedResult.sourceSha256 !== semanticMaterialization.sourceSha256
-      )) {
-        throw new Error("语义操作不能独立重放已接受的 SourcePatch 结果。");
+      if (!result) {
+        throw new Error("语义操作未产出可发布的源码物化结果。");
       }
+      if (result.html === currentSource) return null;
+      const forwardPlan = plannedCommand ?? {
+        type: String(result.inversePlan?.metadata?.originalType ?? ""),
+        targetRefs: operationTargetRefs,
+      } as SourcePatchPlan;
       options.validateResult?.(result);
       const currentRuntime = runtimeFrameRef.current;
       const runtimeIsCurrent = Boolean(
@@ -3542,12 +3529,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           !== editRuntimeProgramIdentity(result.html)
         ),
       });
-      const targetUpdates = deterministicTargetUpdates(mappedResult, originalTargets);
+      const targetUpdates = deterministicTargetUpdates(result, originalTargets);
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
       );
       const operationTargetUpdate = deterministicOperationTargetUpdate(
-        mappedResult,
+        result,
         mutation.target,
       );
       const appliedMutation: HtmlCanvasMutation = {

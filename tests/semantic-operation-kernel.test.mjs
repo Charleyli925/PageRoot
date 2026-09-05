@@ -435,3 +435,29 @@ test("is deterministic for the same state, operation and allocated identity stre
   assert.equal(left.sourceSha256, right.sourceSha256);
   assert.deepEqual(left.lineageEntry, right.lineageEntry);
 });
+
+test("kernel apply remaps tracked comment targets without a second patch apply", () => {
+  const documentState = state();
+  const index = buildSourceIndex(documentState.html);
+  const trackedComment = createTargetRef(
+    index,
+    index.byPagerootId.get(IDS.paragraph),
+    { targetId: "comment_target_paragraph" },
+  );
+  const result = applySemanticOperation(
+    documentState,
+    operation(documentState, "op_track_style_1", "setStyle", {
+      target: target(documentState, IDS.section),
+      property: "color",
+      value: "red",
+      important: true,
+    }),
+    { trackedTargetRefs: [trackedComment] },
+  );
+  const materialization = result.materialization.sourcePatchResult;
+  assert.match(result.html, /color: red/u);
+  assert.equal(materialization.refreshedTrackedTargetRefs.length, 1);
+  assert.equal(materialization.refreshedTrackedTargetRefs[0].targetId, "comment_target_paragraph");
+  assert.equal(materialization.refreshedTrackedTargetRefs[0].elementId, IDS.paragraph);
+  assert.equal(materialization.refreshedTrackedTargetRefs[0].resolution, "exact");
+});

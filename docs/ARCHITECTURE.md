@@ -342,11 +342,11 @@ services.
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, `IslandEditingController`,
 `SemanticOperationKernel` owns the pure stable-ID operation contract and lowers
-to `SourcePatchEngine`. Canvas currently still dual-materializes: it applies a
-SourcePatch plan and the semantic kernel, then fail-closes unless the complete
-HTML/Hash results match. That comparison is transitional, not the target single
-path. The complete next HTML remains source-derived and Runtime DOM is never
-serialized. `SourcePatchEngine` and the atomic source writer may be split only around a
+to `SourcePatchEngine`. Canvas materializes once: it lowers the command to a
+semantic operation, applies the kernel, and publishes that complete HTML/Hash.
+SourcePatch remains internal. The complete next HTML remains source-derived and
+Runtime DOM is never serialized. `SourcePatchEngine` and the atomic source writer
+may be split only around a
 proven invariant, not to satisfy a line-count target. The retired V1
 `NativeEditingController`, its per-keystroke tracker, shadow block draft,
 FormatSkeleton and structural planner have been removed. The architecture gate
@@ -405,8 +405,9 @@ the edit toolbar are presented by `html-canvas-selection-chrome.tsx`; they
 receive snapshots and callbacks only. Those helpers do not gain a second source or
 editing authority; `IslandEditingController` owns native text interaction,
 `SemanticOperationKernel` is the public authorization entry, and
-`SourcePatchEngine` remains the private range materializer. Canvas currently
-compares both materializations before publishing. Inside one semantic apply,
+`SourcePatchEngine` remains the private range materializer. Canvas publishes
+the kernel's single materialization, including tracked target mappings. Inside
+one semantic apply,
 the kernel reuses the owned before-index for target checks and planning, and
 reuses `applyPatchPlan`'s after-index for identity delta and the next state;
 it does not skip hash, range, identity or parse-integrity checks.
