@@ -31,6 +31,7 @@ import {
   attachRuntimeContinuityProbe,
   recordRuntimeContinuityEvent,
 } from "./runtime-continuity-probe.js";
+import { installEditPipelineTestHooks } from "../lib/edit-pipeline-counters.js";
 import { createSourceOperationId } from "../domain/source-history.js";
 import {
   createPagePresentationAction,
@@ -1423,7 +1424,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
   }, []);
 
-  useEffect(() => attachRuntimeContinuityProbe(() => containerRef.current), []);
+  useEffect(() => {
+    installEditPipelineTestHooks();
+    return attachRuntimeContinuityProbe(() => containerRef.current);
+  }, []);
 
   useEffect(() => {
     if (pointerCapabilityHoverEnabled) return;
@@ -2990,10 +2994,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? layoutInsertionPoints({
           documentNode,
           sourceIndex,
-          frameOffsetLeft,
-          frameOffsetTop,
-          frameWidth,
-          frameHeight,
         }).allInsertionPoints
         : [];
     }

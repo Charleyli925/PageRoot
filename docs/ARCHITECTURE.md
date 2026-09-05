@@ -315,7 +315,7 @@ services.
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Canvas disposable runtime frame identity and exact-program reuse | `app/components/html-canvas-frame.js`; `HtmlCanvasEditor` owns iframe mount/reload |
 | Native deferred-command arbitration (user-explicit vs system, lease matching, stale drain) | `app/components/html-canvas-native-commands.js`; the editor supplies the live session/lease and still retires the queue before host replacement |
-| Canvas comment-target measurement, insertion-point and marker layout | `app/components/html-canvas-comment-layout.ts`; disposable geometry only |
+| Canvas comment-target measurement, insertion-point identities and marker layout | `app/components/html-canvas-comment-layout.ts`, `app/components/html-canvas-insertion-layout.js`; insertion identities cache on source Hash plus document identity; comment geometry remains disposable |
 | Canvas selection chrome, comment markers, hover hints and edit toolbar presentation | `app/components/html-canvas-selection-chrome.tsx`; snapshots and callbacks only, no source or editing authority |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |

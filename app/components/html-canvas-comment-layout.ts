@@ -1,6 +1,9 @@
 import { recordEditPipelineCount } from "../lib/edit-pipeline-counters.js";
 import { createInsertionPointTargetRef, resolveTargetRef } from "../lib/source-patch-core.js";
 import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
+import {
+  uniqueStructuralInsertionPoints,
+} from "./html-canvas-insertion-layout.js";
 import type { PageTabAssociation } from "../lib/page-presentation-dom";
 import type {
   HtmlCanvasCommentedTarget,
@@ -32,11 +35,7 @@ import {
 
 export type InsertionPoint = {
   selection: HtmlCanvasSelection;
-  anchorElement: HTMLElement;
   kind: "page-start" | "boundary";
-  left: number;
-  top: number;
-  width: number;
 };
 
 export type { InsertionLayoutAuthority } from "./html-canvas-insertion-layout.js";
@@ -186,22 +185,10 @@ export function measureCommentTargetLayouts(options: {
 export function layoutInsertionPoints(options: {
   documentNode: Document;
   sourceIndex: SourceIndexValue | null;
-  frameOffsetLeft: number;
-  frameOffsetTop: number;
-  frameWidth: number;
-  frameHeight: number;
 }): {
   allInsertionPoints: InsertionPoint[];
-  visibleInsertionPoints: InsertionPoint[];
 } {
-  const {
-    documentNode,
-    sourceIndex,
-    frameOffsetLeft,
-    frameOffsetTop,
-    frameWidth,
-    frameHeight,
-  } = options;
+  const { documentNode, sourceIndex } = options;
   recordEditPipelineCount("insertionPointFullTreeScan", {
     caller: "layoutInsertionPoints",
   });
@@ -212,18 +199,17 @@ export function layoutInsertionPoints(options: {
     }
   });
 
-  const dedupedInsertionPoints = new Map<string, InsertionPoint>();
+  const collectedInsertionPoints: InsertionPoint[] = [];
   moduleParents.forEach((parent) => {
+    const htmlElement = documentNode.defaultView?.HTMLElement;
     const children = Array.from(parent.children).filter(
-      (child): child is HTMLElement => child instanceof documentNode.defaultView!.HTMLElement,
+      (child): child is HTMLElement => Boolean(htmlElement && child instanceof htmlElement),
     );
     const parentSelector = selectorForElement(parent);
     const parentElementId = sourceElementId(parent);
 
     const addBoundary = (
-      moduleElement: HTMLElement,
       beforeSibling: HTMLElement | null,
-      boundaryTop: number,
       label: string,
     ) => {
       const beforeSiblingElementId = sourceElementId(beforeSibling);
@@ -239,90 +225,45 @@ export function layoutInsertionPoints(options: {
           insertionTargetRef = null;
         }
       }
-      const moduleRect = moduleElement.getBoundingClientRect();
-      const adjacentRect = beforeSibling && inferSelectionLevel(beforeSibling) === "module"
-        ? beforeSibling.getBoundingClientRect()
-        : null;
-      const leftInFrame = Math.max(
-        8,
-        adjacentRect ? Math.min(moduleRect.left, adjacentRect.left) : moduleRect.left,
-      );
-      const rightInFrame = Math.min(
-        frameWidth - 8,
-        adjacentRect ? Math.max(moduleRect.right, adjacentRect.right) : moduleRect.right,
-      );
       const fallbackBoundary = beforeSiblingElementId || `end_${parentSelector}`;
       const fallbackTargetId = `target_insertion_${encodeURIComponent(parentSelector)}_${encodeURIComponent(fallbackBoundary)}`;
-      const selectionValue: HtmlCanvasSelection = {
-        id: insertionTargetRef?.targetId || fallbackTargetId,
-        label,
-        selector: insertionTargetRef?.selector || parentSelector,
-        level: "insertion",
-        tagName: "insertion",
-        text: "",
-        resolution: insertionTargetRef ? "exact" : "orphaned",
-        ...(insertionTargetRef?.sourceAnchor
-          ? { sourceAnchor: insertionTargetRef.sourceAnchor }
-          : {}),
-        ...(insertionTargetRef?.fingerprint
-          ? { fingerprint: insertionTargetRef.fingerprint }
-          : {}),
-      };
-      const point: InsertionPoint = {
-        selection: selectionValue,
-        anchorElement: beforeSibling || moduleElement,
+      collectedInsertionPoints.push({
         kind: "boundary",
-        left: frameOffsetLeft + leftInFrame,
-        top: frameOffsetTop + boundaryTop,
-        width: Math.max(120, rightInFrame - leftInFrame),
-      };
-      const boundaryKey = insertionTargetRef?.sourceAnchor
-        ? `${insertionTargetRef.selector}:${insertionTargetRef.sourceAnchor.startOffset}`
-        : fallbackTargetId;
-      if (!dedupedInsertionPoints.has(boundaryKey)) {
-        dedupedInsertionPoints.set(boundaryKey, point);
-      }
+        selection: {
+          id: insertionTargetRef?.targetId || fallbackTargetId,
+          label,
+          selector: insertionTargetRef?.selector || parentSelector,
+          level: "insertion",
+          tagName: "insertion",
+          text: "",
+          resolution: insertionTargetRef ? "exact" : "orphaned",
+          ...(insertionTargetRef?.sourceAnchor
+            ? { sourceAnchor: insertionTargetRef.sourceAnchor }
+            : {}),
+          ...(insertionTargetRef?.fingerprint
+            ? { fingerprint: insertionTargetRef.fingerprint }
+            : {}),
+        },
+      });
     };
 
     children.forEach((moduleElement, childIndex) => {
       if (inferSelectionLevel(moduleElement) !== "module") return;
-      const moduleRect = moduleElement.getBoundingClientRect();
       const previousElement = children[childIndex - 1] || null;
       const nextElement = children[childIndex + 1] || null;
-      const previousModuleRect = previousElement && inferSelectionLevel(previousElement) === "module"
-        ? previousElement.getBoundingClientRect()
-        : null;
-      const beforeTop = previousModuleRect && moduleRect.top >= previousModuleRect.bottom - 3
-        ? previousModuleRect.bottom + (moduleRect.top - previousModuleRect.bottom) / 2
-        : moduleRect.top;
       const beforeLabel = previousElement && inferSelectionLevel(previousElement) === "module"
         ? `在「${readableLabel(previousElement)}」与「${readableLabel(moduleElement)}」之间`
         : `在「${readableLabel(moduleElement)}」之前`;
-      addBoundary(moduleElement, moduleElement, beforeTop, beforeLabel);
+      addBoundary(moduleElement, beforeLabel);
 
-      // Consecutive modules share one boundary: the next module's "before"
-      // point is also this module's "after" point.
+      // Consecutive modules share one source boundary: the next module's
+      // "before" point is also this module's "after" point.
       if (nextElement && inferSelectionLevel(nextElement) === "module") return;
-      addBoundary(
-        moduleElement,
-        nextElement,
-        moduleRect.bottom,
-        `在「${readableLabel(moduleElement)}」之后`,
-      );
+      addBoundary(nextElement, `在「${readableLabel(moduleElement)}」之后`);
     });
   });
 
-  const sourceDistinctInsertionPoints = [...dedupedInsertionPoints.values()].sort(
-    (left, right) => left.top - right.top || left.left - right.left,
-  );
-  const allInsertionPoints = sourceDistinctInsertionPoints.filter((point, pointIndex, points) => (
-    !points.slice(0, pointIndex).some((existing) => {
-      if (Math.abs(existing.top - point.top) > 3) return false;
-      const overlap = Math.min(existing.left + existing.width, point.left + point.width)
-        - Math.max(existing.left, point.left);
-      return overlap >= Math.min(existing.width, point.width) * 0.8;
-    })
-  ));
+  const allInsertionPoints = uniqueStructuralInsertionPoints(collectedInsertionPoints);
   const pageStartPoint = allInsertionPoints[0];
   if (pageStartPoint) {
     pageStartPoint.kind = "page-start";
@@ -331,16 +272,7 @@ export function layoutInsertionPoints(options: {
       label: "在页面顶部添加内容建议",
     };
   }
-  const visibleInsertionPoints = allInsertionPoints.flatMap((point) => {
-    const topInFrame = point.top - frameOffsetTop;
-    if (topInFrame < -12 || topInFrame > frameHeight + 12) return [];
-    return [{
-      ...point,
-      // The first/last boundary must remain fully visible inside the clipped editor.
-      top: frameOffsetTop + Math.max(20, Math.min(frameHeight - 20, topInFrame)),
-    }];
-  });
-  return { allInsertionPoints, visibleInsertionPoints };
+  return { allInsertionPoints };
 }
 
 export function layoutCommentMarkers(options: {
