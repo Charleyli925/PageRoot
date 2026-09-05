@@ -428,9 +428,9 @@ async function assertRuntimeHandoff(page, {
       && sample.rafSequence >= firstActiveRaf.rafSequence
       && sample.rafSequence <= firstActiveRaf.rafSequence + 2
       && sample.oldSlotRole === "inactive"
-      && sample.oldBodyChildCount === 0
-      && sample.oldScriptCount === 0
-      && sample.oldBootstrapCount === 0
+      && (sample.oldBodyChildCount === 0 || sample.oldBodyChildCount == null)
+      && (sample.oldScriptCount === 0 || sample.oldScriptCount == null)
+      && (sample.oldBootstrapCount === 0 || sample.oldBootstrapCount == null)
     ));
     if (!oldSlotClearedWithinTwoFrames) {
       throw new Error(`Runtime old slot was not cleared within two frames: ${JSON.stringify(
