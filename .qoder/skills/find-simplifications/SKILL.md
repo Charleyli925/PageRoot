@@ -5,10 +5,10 @@ description: Audits the PageRoot repository for over-design, dead code, duplicat
 
 # Find Simplifications
 
-The canonical, agent-agnostic workflow lives in [docs/SIMPLIFICATION_AUDIT.md](../../../docs/SIMPLIFICATION_AUDIT.md). Read that document and follow it exactly — scope table, scan commands, verification bar, proposal template, and guardrails are all defined there.
+Trigger: the user asks for a simplification audit, dead-code hunt, over-design review, doc cleanup, or similar.
 
-Key reminders (details in the canonical document):
+Task type: **read-only review**. Do not implement removals in this pass.
 
-- The audit is strictly **read-only**; the only artifact is `output/simplification-proposal-YYYY-MM-DD.md`.
-- Every finding must be verified against current code before it enters the proposal.
-- Never propose weakening fail-closed safety paths or AGENTS.md product invariants.
+Canonical workflow: read [docs/SIMPLIFICATION_AUDIT.md](../../../docs/SIMPLIFICATION_AUDIT.md) and follow it exactly. That document owns the scope table, scan commands, verification bar, proposal template, and safety classification. Do not copy those rules here.
+
+Output: `output/simplification-proposal-YYYY-MM-DD.md` only.

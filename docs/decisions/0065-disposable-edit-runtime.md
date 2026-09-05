@@ -137,8 +137,12 @@ saved fact.**
   layout as proof that the new revision has already been measured. The old
   iframe remains the visible, interactive authority while the candidate is
   prepared and restores its own iframe reading position. One commit then
-  switches Active identity and visibility together; failure before that commit
-  discards only the Candidate. The old iframe is retired on the next frame.
+  switches Active identity and visibility together. Failure before that commit
+  discards only the Candidate. The one-shot commit may still restore the
+  previous Active identity and `data-render-verified` attribute if
+  `connectFrame` fails after the slot switch; that short transactional rollback
+  does not span the Candidate lifecycle and never rolls back Working HTML. The
+  old iframe is retired on the next frame.
   This is a presentation handoff only, not Runtime DOM persistence or
   Script-state migration.
 - Every completed operation materializes complete next HTML before ordinary
