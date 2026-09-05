@@ -402,7 +402,9 @@ a hidden slot. One-shot runtime frame verification lives in
 the edit toolbar are presented by `html-canvas-selection-chrome.tsx`; they
 receive snapshots and callbacks only. Those helpers do not gain a second source or
 editing authority; `IslandEditingController` and `SourcePatchEngine` remain
-the only production text and source-mutation route.
+the only production text and source-mutation route. `runtime-continuity-probe.js`
+records frame lifecycle and visual samples only after a test enables it; it has
+no source, Runtime or persistence authority.
 
 ## Persistence
 

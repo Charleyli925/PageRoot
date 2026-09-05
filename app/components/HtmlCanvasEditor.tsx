@@ -27,6 +27,10 @@ import {
   decideEditRuntimeRefresh,
   type EditRuntimeRefreshDecision,
 } from "./edit-runtime-refresh-decision.js";
+import {
+  attachRuntimeContinuityProbe,
+  recordRuntimeContinuityEvent,
+} from "./runtime-continuity-probe.js";
 import { createSourceOperationId } from "../domain/source-history.js";
 import {
   createPagePresentationAction,
@@ -1419,6 +1423,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
   }, []);
 
+  useEffect(() => attachRuntimeContinuityProbe(() => containerRef.current), []);
+
   useEffect(() => {
     if (pointerCapabilityHoverEnabled) return;
     hoverControllerRef.current?.hide();
@@ -1680,6 +1686,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const sourceRevision = latest.source === source && latest.sourceIndex
         ? latest.sourceIndex.sourceSha256
         : buildSourceIndex(source).sourceSha256;
+      recordRuntimeContinuityEvent("runtimeRefreshRequested", { reason: "dynamic" });
       return Boolean(deferRuntimeCandidate(source, sourceRevision, "dynamic"));
     } catch {
       deferredRuntimeCandidateRef.current = null;
@@ -1887,6 +1894,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     containerRef.current?.setAttribute("data-render-verified", "false");
     const remountGeneration = frameLoadGenerationRef.current;
     const replaceFrameElement = () => {
+      recordRuntimeContinuityEvent("frameCreated", { reason: options.immediate ? "immediate" : "scheduled" });
       setFrameRender({
         html: prepared,
         elementGeneration: remountGeneration,
@@ -2300,6 +2308,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     deferredRuntimeCandidateRef.current = null;
     setRuntimeCandidateRender(candidate.render);
+    recordRuntimeContinuityEvent("candidateCreated", { reason: candidateKind });
+    recordRuntimeContinuityEvent("framePrepared", { reason: candidateKind });
     return true;
   }, [
     beginRuntimeAttempt,
@@ -2501,6 +2511,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setRuntimeCandidateRender(null);
       setActiveRuntimeSlotId(candidate.attempt.slotId);
     });
+    recordRuntimeContinuityEvent("framePromoted");
+    recordRuntimeContinuityEvent("frameCleared", { reason: "promoted" });
     const promotedIframe = iframeRef.current;
     if (!promotedIframe || promotedIframe !== iframe) {
       abortCommit("failed");
