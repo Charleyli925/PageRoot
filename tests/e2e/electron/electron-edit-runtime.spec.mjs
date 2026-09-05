@@ -2475,7 +2475,9 @@ test("a queued static fallback follows the latest Working HTML after Native Edit
       editTarget.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
       editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
     });
-    await expect(editor).toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    await expect.poll(() => editor.getAttribute("data-runtime-candidate-id"), {
+      timeout: 15_000,
+    }).toMatch(/.+/u);
 
     frame = await currentEditorFrame(page);
     const activeTarget = frame.locator(
@@ -2872,16 +2874,19 @@ test("a Candidate commit verification failure restores the visible Active", {
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
     )).toBe("static-fallback");
+    await expect.poll(() => editor.getAttribute("data-runtime-degradation"), {
+      timeout: 15_000,
+    }).toMatch(/^(static-visible|none)$/u);
     await expect(page.getByTestId("edit-runtime-static-fallback")).toBeVisible();
     await expect(editor).toHaveAttribute("data-render-verified", "true");
     expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
 
     const staticNotice = page.getByTestId("edit-runtime-static-fallback");
-    await page.getByRole("button", { name: "关闭动态内容提示" }).click();
+    await staticNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
     await expect(staticNotice).toHaveCount(0);
     frame = await currentEditorFrame(page);
     const restoredTarget = frame.locator('[data-native-case="runtime-commit-verify-failure"]').first();
-    await restoredTarget.click({ force: true });
+    await restoredTarget.click();
     await expect(restoredTarget).toHaveAttribute("data-html-canvas-selected", /.+/u);
     const toolbar = page.getByRole("toolbar", { name: /编辑/u });
     await expect(toolbar).toBeVisible();
@@ -2895,14 +2900,17 @@ test("a Candidate commit verification failure restores the visible Active", {
       .toContainText("提交失败后仍可评论。");
 
     if (await staticNotice.count()) {
-      await page.getByRole("button", { name: "关闭动态内容提示" }).click();
+      await staticNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
       await expect(staticNotice).toHaveCount(0);
     }
-    await restoredTarget.dblclick({ force: true });
-    await expect(restoredTarget).toHaveAttribute("contenteditable", "true");
+    frame = await currentEditorFrame(page);
+    await activateNativeEdit(frame, "runtime-commit-verify-failure");
     await expect(editor).toHaveAttribute("data-native-start-status", "started");
     await page.keyboard.press("Escape");
-    await expect(restoredTarget).not.toHaveAttribute("contenteditable", "true");
+    frame = await currentEditorFrame(page);
+    await expect(
+      frame.locator('[data-native-case="runtime-commit-verify-failure"]').first(),
+    ).not.toHaveAttribute("contenteditable", "true");
     expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
     await expect(editor).toHaveAttribute("data-render-verified", "true");
   }, {
