@@ -28,3 +28,15 @@ export declare function recordEditPipelineCount(
   },
 ): void;
 export declare function readEditPipelineCounters(): EditPipelineCounterSnapshot;
+export declare function installEditPipelineTestHooks(
+  target?: Window & typeof globalThis,
+): void;
+
+declare global {
+  interface Window {
+    __PAGEROOT_ENABLE_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
+    __PAGEROOT_DISABLE_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
+    __PAGEROOT_RESET_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
+    __PAGEROOT_READ_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
+  }
+}

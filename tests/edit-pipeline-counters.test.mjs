@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   disableEditPipelineCounters,
   enableEditPipelineCounters,
+  installEditPipelineTestHooks,
   readEditPipelineCounters,
   recordEditPipelineCount,
   resetEditPipelineCounters,
@@ -97,4 +98,21 @@ test("unknown counter kinds and source payloads are ignored", () => {
     codeUnitLength: 12,
   });
   disableEditPipelineCounters();
+});
+
+test("edit-pipeline test hooks install enable, reset and read without source payloads", () => {
+  const target = {};
+  installEditPipelineTestHooks(target);
+  target.__PAGEROOT_ENABLE_EDIT_PIPELINE_COUNTERS__();
+  target.__PAGEROOT_RESET_EDIT_PIPELINE_COUNTERS__();
+  recordEditPipelineCount("fullPatchApply", {
+    caller: "applyPatchPlan",
+    html: "<p>secret</p>",
+  });
+  const snapshot = target.__PAGEROOT_READ_EDIT_PIPELINE_COUNTERS__();
+  assert.equal(snapshot.fullPatchApplies, 1);
+  assert.equal(Object.hasOwn(snapshot.events[0], "html"), false);
+  target.__PAGEROOT_DISABLE_EDIT_PIPELINE_COUNTERS__();
+  recordEditPipelineCount("fullPatchApply", { caller: "applyPatchPlan" });
+  assert.equal(target.__PAGEROOT_READ_EDIT_PIPELINE_COUNTERS__().fullPatchApplies, 0);
 });

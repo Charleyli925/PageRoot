@@ -140,10 +140,10 @@ function applyIslandText(state, operationId, elementId, text, nextInnerHtml) {
   }));
 }
 
-function canvasSingleSetStyle(documentState) {
+function kernelSingleSetStyle(documentState) {
   return applySemanticOperation(documentState, operation(
     documentState,
-    "op_canvas_style_01",
+    "op_kernel_style_01",
     "setStyle",
     {
       target: target(documentState, IDS.section),
@@ -306,7 +306,7 @@ test("kernel text, space, blank-line, style and structure actions keep identity 
   assert.equal(identityFacts(deleted.html).sourceSha256, deleted.sourceSha256);
 });
 
-test("same samples freeze kernel and single-path canvas computation counts", () => {
+test("same samples freeze kernel computation counts", () => {
   const kernelCounts = withCounters(() => {
     const baseline = createSemanticDocumentState(baselineHtml());
     applySemanticOperation(baseline, operation(
@@ -317,8 +317,8 @@ test("same samples freeze kernel and single-path canvas computation counts", () 
     ));
     return countSnapshot();
   });
-  const canvasPathCounts = withCounters(() => {
-    canvasSingleSetStyle(createSemanticDocumentState(baselineHtml()));
+  const kernelStyleCounts = withCounters(() => {
+    kernelSingleSetStyle(createSemanticDocumentState(baselineHtml()));
     return countSnapshot();
   });
   const manyHtml = manyElementHtml();
@@ -353,7 +353,7 @@ test("same samples freeze kernel and single-path canvas computation counts", () 
     fullPatchApplies: 1,
     insertionPointFullTreeScans: 0,
   });
-  assert.deepEqual(canvasPathCounts, {
+  assert.deepEqual(kernelStyleCounts, {
     sourceIndexBuilds: 3,
     fullDocumentIndexBuilds: 3,
     fragmentIndexBuilds: 0,

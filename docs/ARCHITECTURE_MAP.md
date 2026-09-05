@@ -75,11 +75,14 @@ Hash is recomputed from those bytes; `applyPatchPlan` may reuse that
 before-index the same way. Reuse is not a Session, not a history pool, and not a
 skip-validation flag. A caller-supplied object that was not built by
 `buildSourceIndex`, or that does not match the current HTML/Hash, is rejected.
-Built indexes are read-only. Insertion-point layout scans the preview tree only
-when the current source Hash or iframe document identity changes; overlay,
-scroll and selection updates reuse the last scan. Unused insertion-point React
-state is not a second layout owner. Geometry or outline failure still must not
-refuse edit entry.
+Built indexes are read-only. Insertion-point identities (parent, sibling and
+sourceAnchor) scan the preview tree only when the current source Hash or iframe
+document identity changes; overlay, scroll, resize and selection updates reuse
+those identities. Coordinates, visibility and geometric overlap are not part of
+that cache and have no remaining Canvas consumers, so they are not stored or
+refreshed. Comment-target geometry is still measured from the current layout on
+each overlay tick. Unused insertion-point React state is not a second layout
+owner. Geometry or outline failure still must not refuse edit entry.
 
 **Transitional.** Heuristic helpers may still exist in `target-resolver.js`,
 but the official entry does not call them and does not record fallback-only
@@ -87,7 +90,8 @@ metrics. Canvas still constructs capability-specific SourcePatch commands
 beside kernel operations so it can recover island metadata before the single
 apply. Opt-in `edit-pipeline-counters.js` can count
 full-document index builds, full patch applies and insertion-point full-tree
-scans in tests; it is not a Session and has no production stream. Live
+scans in tests; it is not a Session and has no production stream. Undo/redo
+restores the open-document history tuple and is not a new `fullPatchApply`. Live
 `SemanticDocumentState` objects may remember the owned index for their current
 bytes until they are collected; that is not a global source-index cache.
 
