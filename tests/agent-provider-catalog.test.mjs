@@ -744,6 +744,54 @@ test("install cancellation projects cancelling state and uses the existing Bridg
   assert.equal(catalog.provider(selected).installState, "idle");
 });
 
+test("cancelAccessOperation still posts install cancel while a managed install is pending", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let releaseInstall;
+  let cancelBody;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async installAgent() {
+        await new Promise((resolve) => {
+          releaseInstall = resolve;
+        });
+        const error = new Error("安装已取消。");
+        error.code = "AGENT_INSTALL_CANCELLED";
+        throw error;
+      },
+      async cancelAgentInstall(body) {
+        cancelBody = body;
+        releaseInstall?.();
+        return { ok: true, providerId: "qoder", installState: "idle" };
+      },
+      async agentDiagnose() {
+        return {
+          status: "not-installed",
+          diagnostic: {
+            readiness: "not-installed",
+            cause: "not-installed",
+            operation: "diagnose",
+            checkedAt: "2026-08-11T00:00:00.000Z",
+            activeInstallation: null,
+          },
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+  });
+  const pending = catalog.install(selected);
+  await Promise.resolve();
+  assert.equal(catalog.provider(selected).installState, "installing");
+  assert.equal(catalog.provider(selected).activeOperation?.kind, "install");
+  const cancelled = await catalog.cancelAccessOperation(selected);
+  assert.deepEqual(cancelBody, { providerId: "qoder" });
+  assert.equal(cancelled.installState, "idle");
+  await pending;
+  assert.equal(catalog.provider(selected).installState, "idle");
+});
+
 test("selectModel changes only the selected model identity", () => {
   const catalog = new AgentCatalogState({
     bridgeClient: {
