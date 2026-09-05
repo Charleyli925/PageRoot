@@ -18,17 +18,6 @@ const IDENTITY = Object.freeze({
   attemptId: "attempt_001",
   sourcePath: "/tmp/runtime-contract.html",
 });
-const SYNTHETIC_SELECTION = Object.freeze({
-  providerId: "synthetic-provider",
-  runtimeId: "synthetic-runtime",
-  requestedModelId: null,
-  resolvedModelId: null,
-  reasoning: Object.freeze({
-    requested: null,
-    applied: null,
-    resolution: "provider-default",
-  }),
-});
 const CONFIGURATION = Object.freeze({
   schemaVersion: "1.0.0",
   providerId: "synthetic-provider",
@@ -179,7 +168,7 @@ test("Frozen Requests cannot alter configuration audit fields behind a valid dig
     await assert.rejects(
       coordinator.submit({
         ...IDENTITY,
-        selection: SYNTHETIC_SELECTION,
+        selection: ticket.selection,
         trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         preflightId: ticket.preflightId,
         configurationDigest: ticket.configuration.configurationDigest,
@@ -193,7 +182,17 @@ test("Frozen Requests cannot alter configuration audit fields behind a valid dig
 
 async function ready(coordinator, purpose = "execution") {
   return coordinator.preflight({
-    selection: SYNTHETIC_SELECTION,
+    selection: Object.freeze({
+      providerId: "synthetic-provider",
+      runtimeId: "synthetic-runtime",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: Object.freeze({
+        requested: null,
+        applied: null,
+        resolution: "provider-default",
+      }),
+    }),
     purpose,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
@@ -229,7 +228,6 @@ test("preflight rejects removed purposes and execution tickets are one-use, TTL-
   const singleUse = await ready(coordinator);
   await coordinator.redeemCommandTicket(singleUse.preflightId, {
     purpose: "execution",
-    selection: SYNTHETIC_SELECTION,
   });
   await assert.rejects(
     coordinator.redeemCommandTicket(singleUse.preflightId, { purpose: "execution" }),
@@ -367,7 +365,7 @@ test("release false keeps the lease fence and blocks shutdown", async () => {
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    selection: SYNTHETIC_SELECTION,
+    selection: ticket.selection,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -398,7 +396,7 @@ test("runtime failure keeps retry safety separate from the recovery action", asy
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    selection: SYNTHETIC_SELECTION,
+    selection: ticket.selection,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -432,7 +430,7 @@ test("durable cancellation is never written after cleanup or lease release fails
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    selection: SYNTHETIC_SELECTION,
+    selection: ticket.selection,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -543,7 +541,7 @@ test("execution status projects only public Agent text with frozen provider iden
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    selection: SYNTHETIC_SELECTION,
+    selection: ticket.selection,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -596,7 +594,7 @@ test("cancellation keeps late Agent narration out of the public session", async 
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    selection: SYNTHETIC_SELECTION,
+    selection: ticket.selection,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -652,7 +650,9 @@ test("an unknown historical provider stays readable but cannot become start auth
     reasoning: { requested: null, applied: null, resolution: "provider-default" },
   };
   const interrupted = coordinator.interrupted(IDENTITY, { selection });
-  assert.equal(interrupted.driver, "future-provider");
+  assert.equal(interrupted.providerId, "future-provider");
+  assert.equal(interrupted.runtimeId, "future-runtime");
+  assert.equal("driver" in interrupted, false);
   assert.equal(interrupted.state, "interrupted");
   assert.equal(interrupted.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
   assert.equal(interrupted.safeToRetry, false);
@@ -664,8 +664,19 @@ test("an unknown historical provider stays readable but cannot become start auth
   );
 });
 
-test("current execution requires a canonical selection and never converts a leftover driver", async () => {
+test("current execution binds by selection and rejects a leftover driver-only start", async () => {
   const coordinator = new AgentRuntimeCoordinator({ providerRegistry: registry() });
+  const selection = Object.freeze({
+    providerId: "synthetic-provider",
+    runtimeId: "synthetic-runtime",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  });
   await assert.rejects(
     coordinator.preflight({
       driver: "synthetic-driver",
@@ -681,13 +692,12 @@ test("current execution requires a canonical selection and never converts a left
   );
 
   const fromSelection = await coordinator.preflight({
-    selection: SYNTHETIC_SELECTION,
+    selection,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
   assert.equal("driver" in fromSelection, false);
   const redeemed = await coordinator.redeemCommandTicket(fromSelection.preflightId, {
     purpose: "execution",
-    selection: SYNTHETIC_SELECTION,
   });
   assert.equal("driver" in redeemed, false);
   assert.equal(redeemed.selection.providerId, "synthetic-provider");

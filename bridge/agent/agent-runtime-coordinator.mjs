@@ -15,8 +15,6 @@ import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs
 import {
   agentRecoveryKindForError,
   normalizeAgentDelivery,
-  publicCompatibilityDriver,
-  shippedLegacyDriver,
 } from "../../shared/agent-delivery.mjs";
 import {
   PAGEROOT_PROVIDER_ID,
@@ -64,11 +62,6 @@ function canonicalSelection(value, trustPolicyVersion) {
     selection: value,
     trustPolicyVersion,
   }).selection;
-}
-
-function compatibilityDriverEcho(selection) {
-  const compatibilityDriver = shippedLegacyDriver(selection);
-  return compatibilityDriver ? { driver: compatibilityDriver } : {};
 }
 
 function selectionFingerprint(selection) {
@@ -269,16 +262,18 @@ export class AgentRuntimeCoordinator {
   }
 
   #selectionForInput({ selection, trustPolicyAccepted } = {}) {
-    if (selection) {
-      return trustPolicyAccepted === undefined
-        ? selection
-        : canonicalSelection(selection, trustPolicyAccepted);
+    // Current execution binds only by canonical selection. Historical
+    // `mode: "qoder-acp"` records are converted at the delivery codec, not here.
+    if (!selection) {
+      failAgentRuntime(
+        "AGENT_SELECTION_UNSUPPORTED",
+        "The requested Agent provider selection is unsupported.",
+        { status: 400 },
+      );
     }
-    failAgentRuntime(
-      "AGENT_SELECTION_UNSUPPORTED",
-      "The requested Agent provider selection is unsupported.",
-      { status: 400 },
-    );
+    return trustPolicyAccepted === undefined
+      ? selection
+      : canonicalSelection(selection, trustPolicyAccepted);
   }
 
   #assertAcceptingStarts() {
@@ -458,7 +453,6 @@ export class AgentRuntimeCoordinator {
         ok: true,
         status: "unavailable",
         reason: "check-failed",
-        ...compatibilityDriverEcho(requestedSelection),
       });
     }
     const result = await this.#providerRegistry.availabilityForSelection(requestedSelection, {
@@ -467,7 +461,6 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({
       ok: true,
       ...result,
-      ...compatibilityDriverEcho(requestedSelection),
     });
   }
 
@@ -484,7 +477,6 @@ export class AgentRuntimeCoordinator {
           checkedAt,
           activeInstallation: null,
         }),
-        ...compatibilityDriverEcho(requestedSelection),
       });
     }
     const result = typeof this.#providerRegistry.diagnoseForSelection === "function"
@@ -506,7 +498,6 @@ export class AgentRuntimeCoordinator {
       ok: true,
       ...result,
       diagnostic: Object.freeze({ ...diagnostic, checkedAt, operation: "diagnose" }),
-      ...compatibilityDriverEcho(requestedSelection),
     });
   }
 
@@ -589,7 +580,6 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({
       ok: true,
       status: "ready",
-      ...compatibilityDriverEcho(resolvedSelection),
       preflightId,
       trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       agentVersion: prepared.evidence.version,
@@ -879,7 +869,6 @@ export class AgentRuntimeCoordinator {
       selection: ticket.selection,
       providerId: ticket.providerId,
       runtimeId: ticket.runtimeId,
-      driver: publicCompatibilityDriver(ticket.selection),
       turnId: identity.requestId,
       nextSequence: -1,
       identity,
@@ -1000,7 +989,6 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({
       providerId: requestedSelection.providerId,
       runtimeId: requestedSelection.runtimeId,
-      driver: publicCompatibilityDriver(requestedSelection),
       state: "interrupted",
       phase: "interrupted",
       startedAt: null,
