@@ -92,9 +92,13 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
 }
 
 async function enableContinuityProbe(page) {
-  await expect.poll(() => page.evaluate(() => (
-    typeof window.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__
-  ))).toBe("function");
+  await expect.poll(() => page.evaluate(() => ({
+    editor: Boolean(document.querySelector('[data-testid="html-canvas-editor"]')),
+    enable: typeof window.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__,
+  })), { timeout: 30_000 }).toEqual({
+    editor: true,
+    enable: "function",
+  });
   await page.evaluate(() => window.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__());
 }
 
