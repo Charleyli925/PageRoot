@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import AgentProviderCard from "./AgentProviderCard";
 import type { AgentProviderCardProps } from "./AgentProviderCard";
 import type { AgentProviderCardData } from "./agent-provider-card-types";
@@ -51,6 +53,12 @@ export function BoundAgentSetupPanel({
   onSelectAgentModel,
   onSelectAgentReasoning,
 }: BoundAgentSetupPanelProps) {
+  useEffect(() => {
+    void onCheckSelection(card.selection);
+    // Entering the panel starts the necessary check once per service identity.
+    // Availability snapshots change during diagnose and must not retrigger it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- provider/runtime identity only
+  }, [card.selection.providerId, card.selection.runtimeId, onCheckSelection]);
   return (
     <AgentProviderCard
       key={`${card.selection.providerId}:${card.selection.runtimeId}:${card.connection?.vendorId || "none"}:${card.connection?.baseUrl || ""}:${card.selection.resolvedModelId || "none"}`}

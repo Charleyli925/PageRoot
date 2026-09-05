@@ -95,6 +95,8 @@ test("Settings reuses AgentSetupPanel and lists every service row", async () => 
   assert.match(settings, /data-kind="disconnect"/u);
   assert.match(settings, /移除 API Key/u);
   assert.match(panel, /export function BoundAgentSetupPanel/u);
+  assert.match(panel, /void onCheckSelection\(card\.selection\)/u);
+  assert.match(panel, /Entering the panel starts the necessary check/u);
   assert.ok(
     panel.indexOf("const checked = await onCheckSelection(candidateSelection)")
       < panel.indexOf("const committed = onSelectAgentModel(modelId, card.selection)"),
