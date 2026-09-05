@@ -3,11 +3,16 @@ import {
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "./agent/agent-runtime-coordinator.mjs";
 import { AgentProviderError as AgentBridgeError } from "./agent/providers/agent-provider-contract.mjs";
+import { defaultManagedAgentDelivery } from "../shared/agent-delivery.mjs";
 
 export { parsePublicModels, resolveQoderAcpCommand } from "./agent/providers/qoder-provider.mjs";
 export { AgentBridgeError, TRUSTED_LOCAL_AGENT_POLICY_VERSION };
 
-const LEGACY_DRIVER = "qoder-acp";
+function defaultSelectionInput(input = {}) {
+  return input.selection || input.driver
+    ? input
+    : { selection: defaultManagedAgentDelivery().selection };
+}
 
 // Compatibility façade for existing routes. It owns no runtime facts.
 export class AgentBridgeService {
@@ -62,15 +67,11 @@ export class AgentBridgeService {
   }
 
   availability(input = {}) {
-    return this.#coordinator.availability(
-      input.selection || input.driver ? input : { driver: LEGACY_DRIVER },
-    );
+    return this.#coordinator.availability(defaultSelectionInput(input));
   }
 
   diagnose(input = {}) {
-    return this.#coordinator.diagnose(
-      input.selection || input.driver ? input : { driver: LEGACY_DRIVER },
-    );
+    return this.#coordinator.diagnose(defaultSelectionInput(input));
   }
 
   preflight(input) { return this.#coordinator.preflight(input); }
@@ -96,10 +97,7 @@ export class AgentBridgeService {
   }
 
   interrupted(input, options = {}) {
-    return this.#coordinator.interrupted(
-      input,
-      options.selection || options.driver ? options : { driver: LEGACY_DRIVER },
-    );
+    return this.#coordinator.interrupted(input, defaultSelectionInput(options));
   }
 
   cancel(input) { return this.#coordinator.cancelExecution(input); }

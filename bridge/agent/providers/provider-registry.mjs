@@ -226,7 +226,7 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     return binding;
   };
 
-  const prepareForSelection = async (selection, purpose, environment, legacyDriver = null) => {
+  const prepareForSelection = async (selection, purpose, environment) => {
     const { provider } = resolveSelection(selection);
     const requestedSelection = assertResolvedSelection(selection, provider);
     const resolvesSelection = typeof provider.resolveSelection === "function";
@@ -269,7 +269,6 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
         capabilityRevision: provider.capabilityRevision || evidence.capabilityRevision || evidence.version,
       });
       return Object.freeze({
-        ...(legacyDriver ? { driver: legacyDriver } : {}),
         purpose,
         providerId: provider.providerId,
         runtimeId: provider.runtimeId,
@@ -417,7 +416,7 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
       return this.availabilityForSelection(selectionFromDriver(driver), { environment });
     },
     preflight({ driver, environment, purpose = "execution" }) {
-      return prepareForSelection(selectionFromDriver(driver), purpose, environment, driver);
+      return prepareForSelection(selectionFromDriver(driver), purpose, environment);
     },
     async verifyTicket(ticket, { purpose = ticket?.purpose, environment } = {}) {
       const { provider } = resolveTicket(ticket, purpose);

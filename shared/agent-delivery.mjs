@@ -255,27 +255,42 @@ function shippedManagedBinding(selection) {
   )) || null;
 }
 
+function unsupportedProviderError() {
+  const error = new Error("The persisted Agent provider is not installed in this build.");
+  error.name = "AgentDeliveryError";
+  error.code = "AGENT_PROVIDER_UNSUPPORTED";
+  return error;
+}
+
+function assertShippedManagedSelection(selection) {
+  const binding = shippedManagedBinding(selection);
+  if (!binding) throw unsupportedProviderError();
+  return binding;
+}
+
+export function shippedLegacyDriver(selection) {
+  return shippedManagedBinding(selection)?.legacyDriver || null;
+}
+
+export function publicCompatibilityDriver(selection) {
+  return shippedLegacyDriver(selection) || selection?.providerId || null;
+}
+
 export function legacyDriverForAgentDelivery(value) {
   const delivery = normalizeAgentDelivery(value);
   if (delivery.mode !== MANAGED_AGENT_MODE) return null;
-  const binding = shippedManagedBinding(delivery.selection);
-  if (!binding) {
-    const error = new Error("The persisted Agent provider is not installed in this build.");
-    error.name = "AgentDeliveryError";
-    error.code = "AGENT_PROVIDER_UNSUPPORTED";
-    throw error;
-  }
-  return binding.legacyDriver;
+  return assertShippedManagedSelection(delivery.selection).legacyDriver;
 }
 
 // New durable writes are narrower than historical reads. Unknown providers are
 // retained by normalizeAgentDelivery so their records remain inspectable and
 // cancellable, but a build may create a managed Request only for a binding it
-// can actually dispatch now.
+// can actually dispatch now. That check is the shipped provider/runtime pair,
+// not the presence of a legacy driver alias.
 export function normalizeNewAgentDelivery(value) {
   const delivery = normalizeAgentDelivery(value, { allowLegacy: false });
   if (delivery.mode === MANAGED_AGENT_MODE) {
-    legacyDriverForAgentDelivery(delivery);
+    assertShippedManagedSelection(delivery.selection);
     if (!delivery.configuration) {
       throw deliveryError("New managed Agent Requests require a configuration snapshot.");
     }
