@@ -92,6 +92,8 @@ CI 可重试一次）。real HTML、Browser 三分片、native Electron 与 AI �
 
 - 核心 Node：算法、状态机、序列化、事务、错误关闭和 forward/inverse 不变量。
 - Runtime Continuity Probe：`runtime-continuity-probe.js` 只在测试调用 enable 后记录 `frameCreated` / `candidateCreated`、canvas/评论栏宽度、scrollTop 和可见 Frame。生产路径默认静默。Electron `electron-runtime-continuity.spec.mjs` 用静态页、嵌套滚动页和 Script 图表页证明连续编辑不重建 Runtime、评论栏宽度不闪、以及重建后第 6 个空行的 Caret 落点。`electron-seeded-faults.spec.mjs` 在同一探针上注入 Active iframe 消失和编辑中 Candidate iframe，证明 canary 会失败并在恢复后收敛。
+- 编辑链路计算计数：`edit-pipeline-counters.js` 只在测试显式 enable 后累计整文 `buildSourceIndex`、完整 `applyPatchPlan` 和插入点全树扫描。默认关闭，事件不含 HTML。`tests/edit-pipeline-baseline.test.mjs` 冻结当前 kernel 与 Canvas 双路对照次数；后续删除重复工作时必须更新这些数字。片段解析、浏览器 DOM 解析和独立持久化验证不计入同一组。
+- 已删除的 Canvas `useCallback` 源码切片断言由既有 Electron 行为测试接替，映射写在 `tests/html-canvas-runtime-startup.test.mjs`。保留的只是退役路径禁令（例如 `forceRuntimeHandoff`、`lastValidCommentLayoutRef`）和 queued-static oracle。
 - 测试 Inventory 与风险账本：`npm run test:inventory` 从实际 Playwright 配置的 `testMatch` 生成执行清单（含 Ready / Draft smoke / packaged / real-html / review-annotation），并核对 `tests/test-risk-ledger.json` 的 `ready-full` 文件确实被某个 Ready 配置选中。源码正则只用于辅助提取标题与 Tag，不能单独证明用例会被执行。
 - `DocumentWorkflow`：fake Scheduler、Hash、RecoveryStore、Canvas Port 和 Bridge
   验证 100ms 非 checkpoint 合并写入、native-edit checkpoint 立即 flush、单飞 flush、未登记首次登记、精确 HTML/Hash/revision/history
@@ -320,7 +322,12 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   `skip-12` 或 `authorize-12-pr1` 决策；不同 SHA、并行负载或旧诊断样本
   不得混合。
 
-- 完整 HTML 工作流性能诊断：`npm run benchmark:html-workflows -- --app
+- 完整 HTML 工作流性能诊断：`npm run benchmark:html-workflows` 的默认
+  `--app` 指向打包 Developer Preview，默认 `--html-dir` 指向本机测试 HTML
+  目录。不得用默认参数把旧安装版结果当作当前分支证据。本轮编辑链路对照
+  优先使用精确 HEAD 的 Electron 测试入口；若使用该打包基准，必须显式传入
+  `--app`、`--html-dir`、`--commit` 和 `--label`，绑定本次构建与合成样本。
+  命令 `npm run benchmark:html-workflows -- --app
   <Developer Preview.app> --html-dir <真实 HTML 目录> --output <隔离输出目录>
   --commit <精确 SHA> --label <样本标签>` 串行测量打开、编辑、Preview、
   最多 20 标签切换、Review、采纳和采纳后再打开。它必须使用新打包 App、
@@ -406,8 +413,9 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 `tests/generated-source-invariants.test.mjs` 用固定种子生成 BOM、LF/CRLF、单双引号、多语言 Unicode、entity、注释和脚本文本组合。每个失败都带 seed；测试用独立字节替换 oracle 验证未命中范围、inverse 原子恢复和同一计划重放，而不是复用被测实现计算期望值。
 
 画布撤销/重做不得使用 Chromium DOM history，也不得维护整页 HTML
-快照栈。每次被接受的 SourcePatch 把实际 forward Patch、exact inverse
-Patch、前后 Hash 和目标写入有界持久日志；Node 证明文字、样式、结构和
+快照栈。每次被接受的编辑把实际 forward Patch、exact inverse
+Patch、前后 Hash 和目标写入当前打开文档的内存 `SourceHistorySession`
+（最多 20 条）；Node 证明文字、样式、结构和
 排序共享一个严格 cursor，新修改截断 redo，篡改或不连续 Hash
 fail-closed。Bridge 故障注入分别覆盖 source commit point 前后的
 HTML/历史联合恢复，以及稳定 action ID 的结果未知重放。

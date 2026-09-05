@@ -1,3 +1,4 @@
+import { recordEditPipelineCount } from "../lib/edit-pipeline-counters.js";
 import { createInsertionPointTargetRef, resolveTargetRef } from "../lib/source-patch-core.js";
 import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
 import type { PageTabAssociation } from "../lib/page-presentation-dom";
@@ -198,6 +199,9 @@ export function layoutInsertionPoints(options: {
     frameWidth,
     frameHeight,
   } = options;
+  recordEditPipelineCount("insertionPointFullTreeScan", {
+    caller: "layoutInsertionPoints",
+  });
   const moduleParents = new Set<HTMLElement>();
   documentNode.body.querySelectorAll<HTMLElement>("*").forEach((candidate) => {
     if (inferSelectionLevel(candidate) === "module" && candidate.parentElement) {

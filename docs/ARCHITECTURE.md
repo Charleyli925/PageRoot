@@ -342,8 +342,10 @@ services.
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, `IslandEditingController`,
 `SemanticOperationKernel` owns the pure stable-ID operation contract and lowers
-to `SourcePatchEngine`; PR4 does not yet switch Canvas, history or persistence.
-The complete next HTML remains source-derived and Runtime DOM is never
+to `SourcePatchEngine`. Canvas currently still dual-materializes: it applies a
+SourcePatch plan and the semantic kernel, then fail-closes unless the complete
+HTML/Hash results match. That comparison is transitional, not the target single
+path. The complete next HTML remains source-derived and Runtime DOM is never
 serialized. `SourcePatchEngine` and the atomic source writer may be split only around a
 proven invariant, not to satisfy a line-count target. The retired V1
 `NativeEditingController`, its per-keystroke tracker, shadow block draft,
@@ -401,10 +403,13 @@ a hidden slot. One-shot runtime frame verification lives in
 `html-canvas-comment-layout.ts`. Selection chrome, comment markers, hover hints and
 the edit toolbar are presented by `html-canvas-selection-chrome.tsx`; they
 receive snapshots and callbacks only. Those helpers do not gain a second source or
-editing authority; `IslandEditingController` and `SourcePatchEngine` remain
-the only production text and source-mutation route. `runtime-continuity-probe.js`
+editing authority; `IslandEditingController` owns native text interaction,
+`SemanticOperationKernel` is the public authorization entry, and
+`SourcePatchEngine` remains the private range materializer. Canvas currently
+compares both materializations before publishing. `runtime-continuity-probe.js`
 records frame lifecycle and visual samples only after a test enables it; it has
-no source, Runtime or persistence authority.
+no source, Runtime or persistence authority. `edit-pipeline-counters.js`
+likewise records index/patch/insertion-scan counts only after a test enables it.
 
 ## Persistence
 

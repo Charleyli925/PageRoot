@@ -7,6 +7,7 @@ import {
   PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
   isValidPagerootElementId,
 } from "./pageroot-element-identity.js";
+import { recordEditPipelineCount } from "./edit-pipeline-counters.js";
 
 export const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
 // parseKey / nodeId is a single-parse handle inside SourceIndex. It must not
@@ -347,7 +348,15 @@ export function compareParseIntegrity(baseIndex, nextIndex) {
   };
 }
 
-export function buildSourceIndex(html) {
+// options.scope/caller classify opt-in test counters only. They never skip
+// validation or mark an index as already verified.
+export function buildSourceIndex(html, options = {}) {
+  const sourceText = String(html ?? "");
+  recordEditPipelineCount("sourceIndexBuild", {
+    scope: options.scope,
+    caller: options.caller || "buildSourceIndex",
+    codeUnitLength: sourceText.length,
+  });
   const parsed = parseHtmlSource(html);
   const source = parsed.source;
   const index = {
