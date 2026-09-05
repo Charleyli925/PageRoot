@@ -53,7 +53,7 @@ import {
   waitForBridgeReady,
 } from "./bridge-startup.mjs";
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
-import { publicAgentLoginUrl } from "../shared/agent-login-url.mjs";
+import { publicAgentLoginUrl } from "./agent-login-url.mjs";
 import {
   createExternalFileOpenDeliveryCoordinator,
   createExternalFileOpenExitHandoff,

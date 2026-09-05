@@ -50,7 +50,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   ticket. Arbitrary command overrides are enabled only when both dedicated E2E
   environment fences are present. Official Qoder/Codex login is started by the
   already-verified installation's `login` command; Main opens only an https URL
-  whose host is on that provider's allowlist. The renderer may request
+  whose host is on that provider's allowlist. Main restates that allowlist in
+  `desktop/agent-login-url.mjs` because `shared/agent-login-url.mjs` ships as a
+  Bridge extraResource and cannot be imported from asar. The renderer may request
   `html-agent-access:open-login` with `providerId` only and never supplies a URL,
   command or path. Public catalog snapshots expose `loginUrlPresent` without the
   OAuth URL. Environment PAT/API keys are reported as `environment` auth scope

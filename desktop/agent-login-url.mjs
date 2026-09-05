@@ -1,5 +1,9 @@
-// Canonical login-host allowlist for Bridge. Main cannot import this file in
-// the packaged app; `desktop/agent-login-url.mjs` restates the same rules.
+// Official login hosts are restated here because `shared/agent-login-url.mjs`
+// ships through electron-builder extraResources into Resources/shared, while
+// this file is packaged inside app.asar through `build.files`. Listing the
+// shared module in both places copies it only as a resource; a relative import
+// across that boundary resolves in development and fails in the packaged app.
+// `tests/agent-access-auth.test.mjs` pins the two copies together.
 
 const HTTPS_URL = /https:\/\/[^\s<>"'`]+/giu;
 

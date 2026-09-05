@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createAgentAccessAuth } from "../bridge/agent/catalog/agent-access-auth.mjs";
+import {
+  extractAgentLoginUrl as extractDesktopAgentLoginUrl,
+  publicAgentLoginUrl as publicDesktopAgentLoginUrl,
+} from "../desktop/agent-login-url.mjs";
 import { extractAgentLoginUrl, publicAgentLoginUrl } from "../shared/agent-login-url.mjs";
 import { describeQoderAuthSource, describeCodexAuthSource } from "../shared/agent-auth-source.mjs";
 
@@ -24,6 +28,31 @@ test("login URLs accept only https hosts for the selected provider", () => {
   assert.equal(
     extractAgentLoginUrl("Open https://auth.qoder.ai/start then continue.", { providerId: "qoder" }),
     "https://auth.qoder.ai/start",
+  );
+});
+
+test("the packaged and shared login URL allowlists stay in agreement", () => {
+  const samples = [
+    ["https://auth.qoder.ai/device?code=1", "qoder"],
+    ["https://chatgpt.com/auth/login", "codex"],
+    ["https://auth.openai.com/authorize", "codex"],
+    ["http://qoder.ai/login", "qoder"],
+    ["https://evil.example/qoder.ai", "qoder"],
+    ["https://chatgpt.com/auth", "qoder"],
+  ];
+  for (const [value, providerId] of samples) {
+    assert.equal(
+      publicDesktopAgentLoginUrl(value, { providerId }),
+      publicAgentLoginUrl(value, { providerId }),
+    );
+  }
+  assert.equal(
+    extractDesktopAgentLoginUrl("Open https://auth.qoder.ai/start then continue.", {
+      providerId: "qoder",
+    }),
+    extractAgentLoginUrl("Open https://auth.qoder.ai/start then continue.", {
+      providerId: "qoder",
+    }),
   );
 });
 

@@ -63,7 +63,7 @@ export const APP_SOURCE_FILES = [
   "desktop/edit-runtime-library-store.mjs",
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
-  "shared/agent-login-url.mjs",
+  "desktop/agent-login-url.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/index.html",

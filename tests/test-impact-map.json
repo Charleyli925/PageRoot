@@ -1850,6 +1850,7 @@
         "^app/domain/agent-provider-state\\.(?:js|d\\.ts)$",
         "^shared/agent-access-operation\\.mjs$",
         "^shared/agent-login-url\\.mjs$",
+        "^desktop/agent-login-url\\.mjs$",
         "^shared/agent-auth-source\\.mjs$"
       ],
       "suites": [
@@ -1868,6 +1869,7 @@
         "^bridge/agent/catalog/",
         "^shared/agent-access-operation\\.mjs$",
         "^shared/agent-login-url\\.mjs$",
+        "^desktop/agent-login-url\\.mjs$",
         "^shared/agent-auth-source\\.mjs$"
       ],
       "suites": [

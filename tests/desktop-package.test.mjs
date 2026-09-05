@@ -50,7 +50,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/edit-runtime-library-store.mjs",
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
-  "shared/agent-login-url.mjs",
+  "desktop/agent-login-url.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/**/*",
@@ -256,6 +256,11 @@ test("desktop package manifest owns the exact application and Bridge resource cl
     && !entry.startsWith("!")
     && !/[?*{}[\]]/u.test(entry)
   ));
+  assert.deepEqual(
+    exactPackagedAppTargets.filter((entry) => resourceTargets.includes(entry)),
+    [],
+    "a path listed in both build.files and extraResources is copied only as a resource and never reaches app.asar",
+  );
   const packagedRuntimeTargets = new Set([
     ...resourceTargets,
     ...exactPackagedAppTargets,
