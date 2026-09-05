@@ -8,6 +8,7 @@ export type ContinuityEventName =
 
 export type ContinuityVisualSample = {
   t: number;
+  stageWidth: number;
   canvasWidth: number;
   commentRailWidth: number;
   iframeRect: { x: number; y: number; width: number; height: number } | null;
@@ -62,8 +63,19 @@ export function summarizeRuntimeContinuity(trace: ContinuityTrace): {
   frameCreated: number;
   candidateCreated: number;
   runtimeRefreshRequested: number;
+  framePrepared: number;
+  frameCleared: number;
+  framePromoted: number;
+  insufficientSamples: boolean;
   maxCanvasWidthDelta: number;
   railDisappeared: boolean;
+  railNarrowed: boolean;
   jumpedToTop: boolean;
   missingVisibleFrame: boolean;
+  unexpectedCandidate: boolean;
+  latest: {
+    visibleFrameCount: number;
+    candidatePresent: boolean;
+    canvasWidth: number;
+  } | null;
 };

@@ -83,7 +83,7 @@ function fakeWindow() {
     },
     cancelAnimationFrame() {},
     getComputedStyle() {
-      return { visibility: "visible", opacity: "1" };
+      return { display: "block", visibility: "visible", opacity: "1" };
     },
   };
   return { window, editor, stage, iframe, rail };
@@ -126,3 +126,37 @@ test("runtime continuity probe records lifecycle events and visual regressions",
   assert.equal(summary.missingVisibleFrame, true);
   assert.ok(summary.maxCanvasWidthDelta > 50);
 });
+
+test("continuity summary fails closed on empty samples and counts a zero-width canvas", () => {
+  assert.equal(summarizeRuntimeContinuity({ events: [], samples: [] }).insufficientSamples, true);
+  assert.equal(summarizeRuntimeContinuity({ events: [], samples: [] }).missingVisibleFrame, true);
+  const collapsed = summarizeRuntimeContinuity({
+    events: [],
+    samples: [
+      { canvasWidth: 640, commentRailWidth: 280, outerScrollTop: 480, innerScrollTop: 480, visibleFrameCount: 1, candidatePresent: false },
+      { canvasWidth: 0, commentRailWidth: 120, outerScrollTop: 480, innerScrollTop: 0, visibleFrameCount: 1, candidatePresent: false },
+    ],
+  });
+  assert.equal(collapsed.maxCanvasWidthDelta, 640);
+  assert.equal(collapsed.railDisappeared, false);
+  assert.equal(collapsed.railNarrowed, true);
+  assert.equal(collapsed.jumpedToTop, true);
+});
+
+test("display:none and zero-size frames count as a missing visible frame", () => {
+  const { window, editor, iframe } = fakeWindow();
+  window.getComputedStyle = (node) => (
+    node === iframe
+      ? { display: "none", visibility: "visible", opacity: "1" }
+      : { display: "block", visibility: "visible", opacity: "1" }
+  );
+  enableRuntimeContinuityProbe(window);
+  attachRuntimeContinuityProbe(() => editor, window);
+  const hidden = sampleRuntimeContinuityVisuals(editor, window);
+  assert.equal(hidden.visibleFrameCount, 0);
+  iframe.getBoundingClientRect = () => ({ x: 0, y: 0, width: 0, height: 0 });
+  window.getComputedStyle = () => ({ display: "block", visibility: "visible", opacity: "1" });
+  const zero = sampleRuntimeContinuityVisuals(editor, window);
+  assert.equal(zero.visibleFrameCount, 0);
+});
+
