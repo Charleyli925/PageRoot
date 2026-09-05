@@ -1,6 +1,8 @@
 import {
   buildSourceIndex,
   compareParseIntegrity,
+  resolveOwnedSourceIndex,
+  SourceIndexError,
   sourceSha256,
 } from "./source-index.js";
 import { recordEditPipelineCount } from "./edit-pipeline-counters.js";
@@ -2538,10 +2540,18 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
     caller: "applyPatchPlan",
     codeUnitLength: source.length,
   });
-  const baseIndex = buildSourceIndex(source, {
-    scope: "full-document",
-    caller: "applyPatchPlan:before",
-  });
+  let baseIndex;
+  try {
+    baseIndex = resolveOwnedSourceIndex(source, options.baseIndex ?? null, {
+      scope: "full-document",
+      caller: "applyPatchPlan:before",
+    });
+  } catch (error) {
+    if (error instanceof SourceIndexError) {
+      fail(error.code, error.message, error.details);
+    }
+    throw error;
+  }
   const authorization = authorizePatchPlan(plan, baseIndex, patches);
   for (const patch of patches) {
     const actual = source.slice(patch.startOffset, patch.endOffset);

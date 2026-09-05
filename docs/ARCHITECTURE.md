@@ -406,7 +406,11 @@ receive snapshots and callbacks only. Those helpers do not gain a second source 
 editing authority; `IslandEditingController` owns native text interaction,
 `SemanticOperationKernel` is the public authorization entry, and
 `SourcePatchEngine` remains the private range materializer. Canvas currently
-compares both materializations before publishing. `runtime-continuity-probe.js`
+compares both materializations before publishing. Inside one semantic apply,
+the kernel reuses the owned before-index for target checks and planning, and
+reuses `applyPatchPlan`'s after-index for identity delta and the next state;
+it does not skip hash, range, identity or parse-integrity checks.
+`runtime-continuity-probe.js`
 records frame lifecycle and visual samples only after a test enables it; it has
 no source, Runtime or persistence authority. `edit-pipeline-counters.js`
 likewise records index/patch/insertion-scan counts only after a test enables it.

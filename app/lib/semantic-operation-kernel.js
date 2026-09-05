@@ -11,7 +11,7 @@ import {
   planSiblingReorderPatch,
   planTextRangeStylePatch,
 } from "./source-patch-engine.js";
-import { buildSourceIndex, sourceSha256 } from "./source-index.js";
+import { buildSourceIndex, resolveOwnedSourceIndex, sourceSha256 } from "./source-index.js";
 import { buildSourceTextMap, textRangeToSourceSegments } from "./source-text-map.js";
 import { createTargetRef } from "./target-resolver.js";
 import {
@@ -36,6 +36,7 @@ const OPERATION_TYPES = new Set([
 ]);
 const OPERATION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{7,95}$/u;
 const TRUSTED_RESTORE_OPERATIONS = new WeakMap();
+const STATE_SOURCE_INDEXES = new WeakMap();
 
 export class SemanticOperationError extends Error {
   constructor(code, message, details = {}) {
@@ -48,6 +49,17 @@ export class SemanticOperationError extends Error {
 
 function fail(code, message, details = {}) {
   throw new SemanticOperationError(code, message, details);
+}
+
+function resolveKernelIndex(html, candidateIndex, options) {
+  try {
+    return resolveOwnedSourceIndex(html, candidateIndex, options);
+  } catch (error) {
+    if (error?.name === "SourceIndexError") {
+      fail(error.code, error.message, error.details || {});
+    }
+    throw error;
+  }
 }
 
 function assertRevision(revision, fieldName = "revision") {
@@ -92,19 +104,24 @@ export function createSemanticDocumentState(html, options = {}) {
   const source = String(html);
   const revision = options.revision ?? 0;
   assertRevision(revision);
-  const index = buildSourceIndex(source);
+  const index = resolveKernelIndex(source, options.sourceIndex ?? null, {
+    scope: "full-document",
+    caller: "createSemanticDocumentState",
+  });
   assertManagedIdentity(index, "Semantic document state");
   const lineage = cloneLineage(options.lineage ?? []);
   if (lineage.some((entry) => entry.nextRevision > revision)) {
     fail("SEMANTIC_LINEAGE_REVISION_INVALID", "Semantic lineage extends beyond the declared document revision.");
   }
-  return {
+  const state = {
     schemaVersion: SEMANTIC_OPERATION_SCHEMA_VERSION,
     revision,
     sourceSha256: index.sourceSha256,
     html: source,
     lineage,
   };
+  STATE_SOURCE_INDEXES.set(state, index);
+  return state;
 }
 
 function assertState(state) {
@@ -118,6 +135,7 @@ function assertState(state) {
   return createSemanticDocumentState(state.html, {
     revision: state.revision,
     lineage: state.lineage,
+    sourceIndex: STATE_SOURCE_INDEXES.get(state) ?? null,
   });
 }
 
@@ -210,7 +228,12 @@ function elementPrecondition(index, target, fieldName) {
 }
 
 export function createSemanticElementPrecondition(indexOrHtml, elementId) {
-  const index = typeof indexOrHtml === "string" ? buildSourceIndex(indexOrHtml) : indexOrHtml;
+  const index = typeof indexOrHtml === "string"
+    ? buildSourceIndex(indexOrHtml, {
+      scope: "full-document",
+      caller: "createSemanticElementPrecondition",
+    })
+    : resolveKernelIndex(indexOrHtml?.source, indexOrHtml);
   assertManagedIdentity(index, "Semantic target precondition");
   const element = index.byPagerootId.get(String(elementId)) ?? null;
   if (!element) {
@@ -262,7 +285,10 @@ function allocateId(randomUUID, reservedIds) {
 
 function materializeNewFragment(rawHtml, documentIndex, options = {}) {
   const html = String(rawHtml ?? "");
-  const index = buildSourceIndex(html);
+  const index = buildSourceIndex(html, {
+    scope: "fragment",
+    caller: "materializeNewFragment",
+  });
   const root = fragmentRoot(index, html);
   const existingIdentity = index.elements.find((element) => element.pagerootIdAttribute);
   if (existingIdentity) {
@@ -281,7 +307,10 @@ function materializeNewFragment(rawHtml, documentIndex, options = {}) {
   for (const identity of [...identities].sort((left, right) => right.offset - left.offset)) {
     identified = `${identified.slice(0, identity.offset)} ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${identity.elementId}"${identified.slice(identity.offset)}`;
   }
-  const nextIndex = buildSourceIndex(identified);
+  const nextIndex = buildSourceIndex(identified, {
+    scope: "fragment",
+    caller: "materializeNewFragment:identified",
+  });
   assertManagedIdentity(nextIndex, "Materialized structural HTML");
   return {
     html: identified,
@@ -292,7 +321,10 @@ function materializeNewFragment(rawHtml, documentIndex, options = {}) {
 
 function materializeReplacementFragment(rawHtml, documentIndex, target, options = {}) {
   const html = String(rawHtml ?? "");
-  const index = buildSourceIndex(html);
+  const index = buildSourceIndex(html, {
+    scope: "fragment",
+    caller: "materializeReplacementFragment",
+  });
   const root = fragmentRoot(index, html);
   if (index.elements.some((element) => element.pagerootIdAttribute)) {
     fail(
@@ -473,6 +505,7 @@ function appliedResult(
   materialization,
   allocation = {},
   identityDelta = null,
+  afterIndex = null,
 ) {
   const nextRevision = state.revision + 1;
   const afterSourceSha256 = sourceSha256(html);
@@ -487,6 +520,7 @@ function appliedResult(
   const nextState = createSemanticDocumentState(html, {
     revision: nextRevision,
     lineage: [...state.lineage, lineageEntry],
+    sourceIndex: afterIndex,
   });
   const inverseOperation = createTrustedRestoreOperation(
     inverseOperationId(operation.operationId, nextRevision, state.sourceSha256),
@@ -538,10 +572,20 @@ export function deriveSemanticOperationIdentityDelta(
   beforeHtml,
   afterHtml,
   operation,
-  { direction = "forward" } = {},
+  { direction = "forward", beforeIndex = null, afterIndex = null } = {},
 ) {
-  const beforeSnapshot = semanticIdentitySnapshot(buildSourceIndex(String(beforeHtml)));
-  const afterSnapshot = semanticIdentitySnapshot(buildSourceIndex(String(afterHtml)));
+  const beforeSnapshot = semanticIdentitySnapshot(
+    resolveKernelIndex(String(beforeHtml), beforeIndex, {
+      scope: "full-document",
+      caller: "deriveSemanticOperationIdentityDelta:before",
+    }),
+  );
+  const afterSnapshot = semanticIdentitySnapshot(
+    resolveKernelIndex(String(afterHtml), afterIndex, {
+      scope: "full-document",
+      caller: "deriveSemanticOperationIdentityDelta:after",
+    }),
+  );
   const identityDelta = deriveSemanticIdentityDelta(
     beforeSnapshot,
     afterSnapshot,
@@ -566,12 +610,15 @@ function applyTrustedRestore(state, operation) {
       "Exact-source restore operations must be generated by this kernel and cannot be cloned or authored.",
     );
   }
-  const index = buildSourceIndex(trusted.html);
+  const index = buildSourceIndex(trusted.html, {
+    scope: "full-document",
+    caller: "applyTrustedRestore",
+  });
   assertManagedIdentity(index, "Exact semantic restore");
   return appliedResult(state, operation, trusted.html, {
     kind: "trusted-exact-source-restore",
     source: "authoritative-source-history",
-  });
+  }, {}, null, index);
 }
 
 export function applySemanticOperation(inputState, operation, options = {}) {
@@ -580,7 +627,10 @@ export function applySemanticOperation(inputState, operation, options = {}) {
   if (operation.type === "restoreExactSource") {
     return applyTrustedRestore(state, operation);
   }
-  const index = buildSourceIndex(state.html);
+  const index = STATE_SOURCE_INDEXES.get(state);
+  if (!index) {
+    fail("SEMANTIC_STATE_INVALID", "Semantic document state is missing its owned source index.");
+  }
   const { command, allocation } = semanticSourceCommand(state, index, operation, options);
   const targetElement = command.targetElementId
     ? index.byPagerootId.get(command.targetElementId)
@@ -647,7 +697,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       expectedSourceSha256: state.sourceSha256,
     })
     : planSemanticOperationPatch(index, command);
-  const materialization = applyPatchPlan(plan, state.html);
+  const materialization = applyPatchPlan(plan, state.html, { baseIndex: index });
   assertManagedIdentity(materialization.sourceIndex, "Semantic operation output");
   if (operation.type === "insertElement" || operation.type === "moveElement") {
     const expectedParent = materialization.sourceIndex.byPagerootId.get(
@@ -697,6 +747,10 @@ export function applySemanticOperation(inputState, operation, options = {}) {
     state.html,
     materialization.html,
     operation,
+    {
+      beforeIndex: index,
+      afterIndex: materialization.sourceIndex,
+    },
   );
   return appliedResult(state, operation, materialization.html, {
     kind: "source-patch",
@@ -705,7 +759,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
     scopeReport: materialization.scopeReport,
     parseIntegrity: materialization.parseIntegrity,
     sourcePatchResult: materialization,
-  }, allocation, identityDelta);
+  }, allocation, identityDelta, materialization.sourceIndex);
 }
 
 export class SemanticOperationKernel {
