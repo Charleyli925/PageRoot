@@ -268,12 +268,10 @@ function assertShippedManagedSelection(selection) {
   return binding;
 }
 
-export function shippedLegacyDriver(selection) {
-  return shippedManagedBinding(selection)?.legacyDriver || null;
-}
-
-export function publicCompatibilityDriver(selection) {
-  return shippedLegacyDriver(selection) || selection?.providerId || null;
+export function legacyDriverForAgentDelivery(value) {
+  const delivery = normalizeAgentDelivery(value);
+  if (delivery.mode !== MANAGED_AGENT_MODE) return null;
+  return assertShippedManagedSelection(delivery.selection).legacyDriver;
 }
 
 // New durable writes are narrower than historical reads. Unknown providers are

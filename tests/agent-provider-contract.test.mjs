@@ -92,7 +92,7 @@ test("shared host and policy sources contain no provider or transport ownership 
   for (const source of sources) assert.doesNotMatch(source, forbidden);
 });
 
-test("selection-first dispatch resolves to the qoder provider and ACP runtime", async () => {
+test("qoder selection dispatch resolves once to the qoder provider and ACP runtime", async () => {
   const { fixture, registry } = fixtureRegistry();
   const prepared = await registry.preflightForSelection(providerSelection(), "execution", {
     environment: {},
@@ -131,7 +131,7 @@ test("selection-first dispatch resolves to the qoder provider and ACP runtime", 
   ]);
 });
 
-test("selection-first dispatch supports a registered provider without leftover driver adapters", async () => {
+test("selection-first dispatch supports a provider without a leftover driver field", async () => {
   const { fixture, registry } = fixtureRegistry();
   const selection = providerSelection();
 
@@ -145,6 +145,7 @@ test("selection-first dispatch supports a registered provider without leftover d
   });
   assert.equal("driver" in prepared, false);
   assert.deepEqual(prepared.selection, selection);
+  assert.equal("legacyDrivers" in fixture.provider, false);
 
   const ticket = Object.freeze({
     ...prepared,
@@ -209,7 +210,7 @@ test("provider capability is enforced at preflight, ticket verification, and sta
   );
 });
 
-test("a registered provider accepts only its provider default unless it advertises a selector", async () => {
+test("a provider without an explicit selector accepts only its provider default", async () => {
   const { registry } = fixtureRegistry();
   const selectedModel = {
     ...providerSelection(),
@@ -331,7 +332,6 @@ test("Bridge keeps preflight internals private while public execution sessions i
   assert.deepEqual(await service.availability(), {
     ok: true,
     status: "ready",
-    driver: "qoder-acp",
   });
   const mismatchedTicket = await service.preflight({
     selection: providerSelection(),
@@ -359,7 +359,7 @@ test("Bridge keeps preflight internals private while public execution sessions i
     selection: providerSelection(),
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
-  assert.equal(ready.driver, "qoder-acp");
+  assert.equal("driver" in ready, false);
   assert.equal(ready.agentVersion, "1.1.27");
   assert.equal(ready.modelCount, 1);
   for (const internal of ["providerId", "runtimeId", "installation", "installationDigest", "capabilities"]) {
@@ -375,7 +375,7 @@ test("Bridge keeps preflight internals private while public execution sessions i
     configurationDigest: ready.configuration.configurationDigest,
   });
   assert.equal(started.accepted, true);
-  assert.equal(started.session.driver, "qoder-acp");
+  assert.equal("driver" in started.session, false);
   assert.equal(started.session.providerId, "qoder");
   assert.equal(started.session.runtimeId, "acp");
   for (const internal of ["installation", "installationDigest", "capabilities"]) {

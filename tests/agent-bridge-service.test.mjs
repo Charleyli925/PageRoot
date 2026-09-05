@@ -20,11 +20,11 @@ import {
   resolveQoderAcpCommand,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../bridge/agent-bridge-service.mjs";
+import { defaultManagedAgentDelivery } from "../shared/agent-delivery.mjs";
 import {
   cancelDurableRequestAfterAgentCleanup,
   closeWorkspaceBridgeAfterAgentCleanup,
 } from "../bridge/workspace-bridge-shutdown.mjs";
-import { defaultManagedAgentDelivery } from "../shared/agent-delivery.mjs";
 
 const IDENTITY = Object.freeze({
   projectId: `project_${"a".repeat(16)}`,
@@ -33,6 +33,7 @@ const IDENTITY = Object.freeze({
   attemptId: "attempt_001",
   sourcePath: "/tmp/pageroot-agent-bridge.html",
 });
+const QODER_SELECTION = defaultManagedAgentDelivery().selection;
 
 async function createFakeCommand(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-service-"));
@@ -162,7 +163,7 @@ function fakePolicy() {
 
 async function preflight(service) {
   const ticket = await service.preflight({
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
   preflightTickets.set(service, ticket);
@@ -220,7 +221,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
   t.after(() => service.dispose());
 
   await assert.rejects(
-    service.preflight({ selection: defaultManagedAgentDelivery().selection }),
+    service.preflight({ selection: QODER_SELECTION }),
     (error) => error?.code === "AGENT_TRUST_POLICY_REQUIRED",
   );
   const ticket = await preflight(service);
@@ -231,7 +232,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
 
   const started = await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -249,7 +250,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
 
   const duplicate = await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: "not-used-for-idempotent-session",
   });
@@ -295,7 +296,7 @@ test("verified npm Qoder uses the trusted runtime under Finder's sparse PATH", a
   assert.equal("command" in ticket, false);
   await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -322,7 +323,6 @@ test("local availability reads installation identity without running Qoder", asy
   assert.deepEqual(availability, {
     ok: true,
     status: "ready",
-    driver: "qoder-acp",
   });
   assert.equal(preflightCalls, 0);
   assert.equal("command" in availability, false);
@@ -395,7 +395,6 @@ test("local availability distinguishes unsupported or invalid installs from abse
       ok: true,
       status: "unavailable",
       reason: "invalid-installation",
-      driver: "qoder-acp",
     });
   });
 
@@ -577,7 +576,7 @@ test("Agent Bridge cancellation aborts the managed task before reporting stopped
   const ticket = await preflight(service);
   await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -622,7 +621,7 @@ test("Agent Bridge cancellation never reports stopped after cleanup is unconfirm
   const ticket = await preflight(service);
   await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -665,7 +664,7 @@ test("Agent Bridge cancellation timeout stays live and fails closed", async (t) 
   const ticket = await preflight(service);
   await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -762,7 +761,7 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
   const firstTicket = await preflight(first);
   await first.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: firstTicket.preflightId,
     configurationDigest: firstTicket.configuration.configurationDigest,
@@ -777,7 +776,7 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
   await assert.rejects(
     second.submit({
       ...IDENTITY,
-      selection: defaultManagedAgentDelivery().selection,
+      selection: QODER_SELECTION,
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: secondTicket.preflightId,
       configurationDigest: secondTicket.configuration.configurationDigest,
@@ -805,7 +804,7 @@ test("Agent Bridge rejects a policy retry that would overwrite an unfinalized ou
   await assert.rejects(
     service.submit({
       ...IDENTITY,
-      selection: defaultManagedAgentDelivery().selection,
+      selection: QODER_SELECTION,
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: ticket.preflightId,
       configurationDigest: ticket.configuration.configurationDigest,
@@ -838,7 +837,7 @@ test("Agent Bridge uses only a structured Qoder credit-limit error after Request
   const ticket = await preflight(service);
   await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -878,7 +877,7 @@ test("Agent Bridge marks output written before failure as cancel-and-new only", 
   const ticket = await preflight(service);
   await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -921,7 +920,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
   const firstTicket = await preflight(service);
   await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: firstTicket.preflightId,
     configurationDigest: firstTicket.configuration.configurationDigest,
@@ -936,7 +935,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
   await assert.rejects(
     service.submit({
       ...IDENTITY,
-      selection: defaultManagedAgentDelivery().selection,
+      selection: QODER_SELECTION,
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: retryTicket.preflightId,
       configurationDigest: retryTicket.configuration.configurationDigest,
@@ -981,7 +980,7 @@ test("cleanup-unconfirmed fences survive terminal TTL and capacity pruning", asy
     const ticket = await preflight(service);
     await service.submit({
       ...identity,
-      selection: defaultManagedAgentDelivery().selection,
+      selection: QODER_SELECTION,
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: ticket.preflightId,
       configurationDigest: ticket.configuration.configurationDigest,
@@ -1023,7 +1022,7 @@ test("Agent Bridge shutdown rejects when an owned Agent never confirms cleanup",
   const ticket = await preflight(service);
   await service.submit({
     ...IDENTITY,
-    selection: defaultManagedAgentDelivery().selection,
+    selection: QODER_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -1113,7 +1112,7 @@ test("Agent Bridge treats directories and special files at result paths as resid
       const ticket = await preflight(service);
       await service.submit({
         ...IDENTITY,
-        selection: defaultManagedAgentDelivery().selection,
+        selection: QODER_SELECTION,
         trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         preflightId: ticket.preflightId,
         configurationDigest: ticket.configuration.configurationDigest,
