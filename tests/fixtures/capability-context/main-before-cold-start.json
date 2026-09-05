@@ -7,10 +7,8 @@
       "patterns": [
         "^app/application/comment(?:-workflow|-session|-workflow-codecs)?",
         "^app/application/comment/",
-        "^app/lib/runtime-comment-hint",
         "^app/workbench/comment-(?:rail|canvas)",
-        "^tests/comment-",
-        "^tests/runtime-comment-hint"
+        "^tests/comment-"
       ],
       "entryInterfaces": [
         "app/application/comment-workflow.d.ts",
@@ -30,7 +28,6 @@
         "app/application/comment/commit-plan.js",
         "app/lib/target-resolver.js",
         "app/lib/comment-text-locator.js",
-        "app/lib/runtime-comment-hint.js",
         "app/workbench/comment-canvas-port.js",
         "app/workbench/comment-rail-container.tsx",
         "app/workbench/comment-rail-contract.ts",
@@ -43,27 +40,13 @@
         "tests/comment-session.test.mjs",
         "tests/comment-canvas-port.test.mjs",
         "tests/comment-text-locator.test.mjs",
-        "tests/runtime-comment-hint.test.mjs",
         "tests/canvas-target-rebind.test.mjs",
         "tests/workbench-render-snapshot.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
-        "docs/INTERACTION_FLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/ARCHITECTURE_MAP.md",
-          "headings": [
-            "## Comment render boundary"
-          ]
-        },
-        {
-          "path": "docs/INTERACTION_FLOW.md",
-          "headings": [
-            "## 6. 评论"
-          ]
-        }
+        "docs/ARCHITECTURE_CONTRACT.md",
+        "docs/GUARD_LEDGER.md"
       ]
     },
     {
@@ -99,16 +82,7 @@
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
-        "docs/ARCHITECTURE_CONTRACT.md",
-        "docs/INTERACTION_FLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/INTERACTION_FLOW.md",
-          "headings": [
-            "## 5. 直接编辑与自动写回"
-          ]
-        }
+        "docs/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -158,47 +132,30 @@
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
-        "docs/INTERACTION_FLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/INTERACTION_FLOW.md",
-          "headings": [
-            "## 3. 项目级状态机",
-            "## 4. 打开已有 HTML",
-            "## 12. 项目切换"
-          ]
-        }
+        "docs/INTERACTION_FLOW.md",
+        "docs/GUARD_LEDGER.md"
       ]
     },
     {
       "id": "semantic-source-editing",
       "patterns": [
         "^app/lib/semantic-operation-kernel",
-        "^app/lib/source-structure-edit",
         "^app/lib/source-(?:patch-engine|index|text-map)",
-        "^app/components/html-canvas-structure-commands",
         "^schemas/semantic-operation",
-        "^tests/semantic-operation-kernel",
-        "^tests/source-structure-edit"
+        "^tests/semantic-operation-kernel"
       ],
       "entryInterfaces": [
-        "schemas/semantic-operation.v1.schema.json",
-        "app/lib/source-structure-edit.d.ts",
-        "app/components/html-canvas-structure-commands.ts"
+        "schemas/semantic-operation.v1.schema.json"
       ],
       "owners": [
         "SemanticOperationKernel"
       ],
       "implementationFiles": [
         "app/lib/semantic-operation-kernel.js",
-        "app/lib/source-structure-edit.js",
-        "app/lib/source-patch-engine.js",
-        "app/components/html-canvas-structure-commands.ts"
+        "app/lib/source-patch-engine.js"
       ],
       "focusedTests": [
         "tests/semantic-operation-kernel.test.mjs",
-        "tests/source-structure-edit.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/pageroot-element-identity.test.mjs"
@@ -206,17 +163,9 @@
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
         "docs/ARCHITECTURE_CONTRACT.md",
-        "docs/decisions/0062-semantic-source-operation-kernel.md",
-        "docs/decisions/0064-stable-id-source-structure-editing.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/ARCHITECTURE_MAP.md",
-          "headings": [
-            "## Current edit contract",
-            "## Capability domains"
-          ]
-        }
+        "docs/STATE_OWNERSHIP.md",
+        "docs/SECURITY_MODEL.md",
+        "docs/decisions/0062-semantic-source-operation-kernel.md"
       ]
     },
     {
@@ -248,73 +197,7 @@
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
-        "docs/ENGINEERING_STANDARDS.md",
-        "docs/INTERACTION_FLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/INTERACTION_FLOW.md",
-          "headings": [
-            "#### 5.1.1 编辑画布体验与持久化合同"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "canvas-runtime",
-      "patterns": [
-        "^app/domain/edit-runtime-contract",
-        "^app/application/edit-author-runtime-session",
-        "^app/components/desktop-edit-runtime-api",
-        "^desktop/edit-runtime-",
-        "^tests/edit-runtime-",
-        "^tests/edit-author-runtime-session"
-      ],
-      "entryInterfaces": [
-        "app/domain/edit-runtime-contract.d.ts",
-        "app/application/edit-author-runtime-session.d.ts",
-        "app/components/desktop-edit-runtime-api.ts"
-      ],
-      "owners": [
-        "EditAuthorRuntimeSession",
-        "HtmlCanvasEditor"
-      ],
-      "implementationFiles": [
-        "app/domain/edit-runtime-contract.js",
-        "app/application/edit-author-runtime-session.js",
-        "app/components/desktop-edit-runtime-api.ts",
-        "desktop/edit-runtime-protocol.mjs",
-        "desktop/edit-runtime-bootstrap.mjs",
-        "desktop/edit-runtime-preparation-fence.mjs",
-        "desktop/edit-runtime-library-store.mjs",
-        "app/components/HtmlCanvasEditor.tsx"
-      ],
-      "focusedTests": [
-        "tests/edit-runtime-contract.test.mjs",
-        "tests/edit-runtime-protocol.test.mjs",
-        "tests/edit-runtime-bootstrap.test.mjs",
-        "tests/edit-runtime-preparation-fence.test.mjs",
-        "tests/edit-author-runtime-session.test.mjs"
-      ],
-      "requiredDocs": [
-        "docs/ARCHITECTURE_MAP.md",
-        "docs/decisions/0065-disposable-edit-runtime.md",
-        "docs/INTERACTION_FLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/ARCHITECTURE_MAP.md",
-          "headings": [
-            "## Current edit contract",
-            "## Capability domains"
-          ]
-        },
-        {
-          "path": "docs/INTERACTION_FLOW.md",
-          "headings": [
-            "#### 5.1.1 编辑画布体验与持久化合同"
-          ]
-        }
+        "docs/ENGINEERING_STANDARDS.md"
       ]
     },
     {
@@ -367,18 +250,7 @@
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
-        "docs/CHANGE_REQUEST_PROTOCOL.md",
-        "docs/INTERACTION_FLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/INTERACTION_FLOW.md",
-          "headings": [
-            "## 7. 发给 AI 与交接",
-            "## 8. 内部 AI 处理与完成",
-            "## 9. 新 Version 提交与打开"
-          ]
-        }
+        "docs/CHANGE_REQUEST_PROTOCOL.md"
       ]
     },
     {
@@ -415,97 +287,6 @@
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
         "docs/INTERACTION_FLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/INTERACTION_FLOW.md",
-          "headings": [
-            "## 2. 顶层导航"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "agent-runtime",
-      "patterns": [
-        "^bridge/agent/",
-        "^desktop/ipc/agent-ipc",
-        "^tests/agent-"
-      ],
-      "entryInterfaces": [
-        "bridge/agent/runtimes/agent-runtime-contract.mjs",
-        "bridge/agent/providers/agent-provider-contract.mjs"
-      ],
-      "owners": [
-        "AgentRuntimeCoordinator",
-        "ACP runtime"
-      ],
-      "implementationFiles": [
-        "bridge/agent/agent-runtime-coordinator.mjs",
-        "bridge/agent/runtimes/acp-runtime.mjs",
-        "bridge/agent/hosts/execution-host.mjs",
-        "desktop/ipc/agent-ipc.mjs"
-      ],
-      "focusedTests": [
-        "tests/agent-runtime-coordinator.test.mjs",
-        "tests/agent-provider-contract.test.mjs",
-        "tests/agent-bridge-service.test.mjs",
-        "tests/agent-bridge-workspace.test.mjs"
-      ],
-      "requiredDocs": [
-        "docs/ARCHITECTURE_MAP.md",
-        "docs/decisions/0032-qoder-acp-agent-bridge.md",
-        "docs/decisions/0039-provider-neutral-agent-runtime.md",
-        "docs/decisions/0069-pageroot-native-openai-compatible-agent.md"
-      ]
-    },
-    {
-      "id": "desktop-host",
-      "patterns": [
-        "^desktop/main\\.mjs$",
-        "^desktop/app-lifecycle",
-        "^desktop/close-recovery",
-        "^desktop/preload",
-        "^desktop/ipc/window-ipc",
-        "^desktop/ipc/project-ipc",
-        "^tests/desktop-host",
-        "^tests/desktop-close-recovery",
-        "^tests/desktop-preload-ipc"
-      ],
-      "entryInterfaces": [
-        "desktop/app-lifecycle.mjs",
-        "desktop/close-recovery.mjs",
-        "desktop/preload.mjs"
-      ],
-      "owners": [
-        "Electron main",
-        "DrainCoordinator"
-      ],
-      "implementationFiles": [
-        "desktop/main.mjs",
-        "desktop/app-lifecycle.mjs",
-        "desktop/close-recovery.mjs",
-        "desktop/preload.mjs",
-        "desktop/ipc/window-ipc.mjs",
-        "desktop/ipc/project-ipc.mjs"
-      ],
-      "focusedTests": [
-        "tests/desktop-host.test.mjs",
-        "tests/desktop-close-recovery.test.mjs",
-        "tests/desktop-preload-ipc.test.mjs"
-      ],
-      "requiredDocs": [
-        "docs/ARCHITECTURE_MAP.md",
-        "docs/INTERACTION_FLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/INTERACTION_FLOW.md",
-          "headings": [
-            "### 3.4 编辑模式中的安全内容切换",
-            "### 12.2 关闭与重启"
-          ]
-        }
       ]
     },
     {
@@ -534,40 +315,23 @@
         "tests/review-analysis-session.test.mjs"
       ],
       "requiredDocs": [
-        "docs/ARCHITECTURE_MAP.md",
         "docs/CODEX_WORKFLOW.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/CODEX_WORKFLOW.md",
-          "headings": [
-            "## Standard commands"
-          ]
-        }
       ]
     },
     {
       "id": "architecture-policy",
       "patterns": [
-        "^AGENTS\\.md$",
-        "^\\.qoder/skills/",
         "^docs/ARCHITECTURE",
         "^docs/GUARD_LEDGER",
         "^docs/ENGINEERING_STANDARDS",
-        "^docs/CODEX_WORKFLOW",
-        "^docs/ADR_CURATION",
-        "^docs/SIMPLIFICATION_AUDIT",
         "^scripts/check-architecture",
         "^scripts/architecture-",
         "^scripts/capability-context",
-        "^tests/architecture-boundaries",
-        "^tests/test-gate-selection",
-        "^tests/capability-context-locate"
+        "^tests/architecture-boundaries"
       ],
       "entryInterfaces": [
         "docs/ARCHITECTURE_MAP.md",
-        "scripts/check-architecture.mjs",
-        "scripts/capability-context.json"
+        "scripts/check-architecture.mjs"
       ],
       "owners": [
         "architecture-gate"
@@ -575,26 +339,17 @@
       "implementationFiles": [
         "scripts/check-architecture.mjs",
         "scripts/capability-context.mjs",
-        "scripts/capability-context.json",
-        "scripts/capability-context-locate.mjs"
+        "scripts/capability-context.json"
       ],
       "focusedTests": [
         "tests/architecture-boundaries.test.mjs",
-        "tests/test-gate-selection.test.mjs",
-        "tests/capability-context-locate.test.mjs"
+        "tests/test-gate-selection.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
-        "AGENTS.md"
-      ],
-      "requiredDocSections": [
-        {
-          "path": "docs/ARCHITECTURE_MAP.md",
-          "headings": [
-            "## Current edit contract",
-            "## Capability-context for `gate:plan`"
-          ]
-        }
+        "docs/ARCHITECTURE_CONTRACT.md",
+        "docs/GUARD_LEDGER.md",
+        "docs/ENGINEERING_STANDARDS.md"
       ]
     }
   ]

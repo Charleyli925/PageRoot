@@ -200,3 +200,9 @@ first. Expand `implementationFiles`, `focusedTests` and `requiredDocs`
 `implementation` set remains the union of those lists. Unknown paths and
 unknown domain ids appear as `unmatchedFiles` / `unmatchedDomains`; missing
 map references fail map load instead of silently shrinking the estimate.
+
+Repeatable locate comparison for five representative tasks lives in
+`scripts/capability-context-locate.mjs`. It compares the frozen pre-change map
+in `tests/fixtures/capability-context/main-before-cold-start.json` with the
+current cold-start query, including contract-first bytes and whether the task
+gate would select a complete matrix.

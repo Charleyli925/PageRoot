@@ -165,6 +165,7 @@ Qoder process, so it must not be repurposed for real user Requests. See
 | `npm run gate:edit` | Fast, impact-selected feedback for uncommitted work |
 | `npm run gate:plan -- --base origin/main` | Compact JSON of the task-lane selection: owners, Node tests, capability canaries, estimated fan-out and capability reading sets |
 | `npm run gate:plan -- --context-domain <id>` | Same reading map before any files have changed; does not select tests or change `task:finish` |
+| `node scripts/capability-context-locate.mjs` | Compare five representative locate tasks against the frozen pre-change map |
 | `npm run gate:task` | Static checks plus impacted Node tests and capability-level Browser/Electron/AI canaries |
 | `npm run gate:task -- --resume <run-id>` | Replay a failed task gate on the identical source hash; reuse passed suites only when fingerprints match |
 | `npm run gate:main:auto` | Optional local/diagnostic Node/browser smoke; it is not part of the automatic post-merge path |
