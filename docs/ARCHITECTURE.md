@@ -142,7 +142,10 @@ the historical synthetic-spike decision.
   interaction mode.
 - Formal AI review owns one disposable reducer with independent page, change
   filter, context visibility, navigation, active focus-group, canonical presentation path, scroll
-  and zoom fields. A cancellable, byte-bounded `ReviewAnalysisSession` yields
+  and zoom fields. Warning-only impact counts come from the bounded Candidate
+  assessment; historical Version full-array impact is projected at
+  `candidateAssessmentFromRecord` and is not reinterpreted in the Review
+  display. A cancellable, byte-bounded `ReviewAnalysisSession` yields
   between parse/control/pair/annotation/serialization phases and after bounded
   semantic row/list-item batches, then caches multiple
   exact identities. Its document analyzer first builds a hierarchy of semantic

@@ -267,6 +267,23 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 - Support window and deletion evidence: Developer Preview history may be
   reset.
 
+## Version-record full-array Candidate impact
+
+- Historical producer and version: earlier Candidate assessments persisted
+  `changedStableElementIds`, `requestedTargetElementIds` and
+  `outsideRequestedTargetElementIds` on Version records. Current producers
+  write only bounded counts and samples.
+- Current consumer: `assertCandidateAssessment` still reads both shapes from
+  Version records and rejects a mixed form. `candidate-assessment.json`
+  continues to refuse full-array facts.
+- Decoder and canonical output: `candidateAssessmentFromRecord` projects a
+  valid historical full-array impact into bounded counts, samples and
+  `truncated`. Review display reads only that bounded result. The Version
+  file is not rewritten.
+- Support window and deletion evidence: keep the Version-record reader until
+  a census shows the full-array shape is outside the supported upgrade
+  window.
+
 ## Legacy release update manifest
 
 - Historical producer and version: `scripts/create-release-assets.mjs` still
