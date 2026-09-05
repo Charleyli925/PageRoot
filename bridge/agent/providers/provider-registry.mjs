@@ -20,14 +20,6 @@ import {
   sameAgentConfiguration,
 } from "../agent-configuration-snapshot.mjs";
 
-function unsupportedDriver() {
-  throw agentProviderError(
-    "AGENT_DRIVER_UNSUPPORTED",
-    "当前只支持已登记的 ACP 驱动。",
-    { status: 400 },
-  );
-}
-
 function selectionForProvider(provider) {
   return Object.freeze({
     providerId: provider.providerId,
@@ -147,7 +139,6 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     throw new TypeError("Provider registry requires a runtime registry.");
   }
   const byProviderId = new Map();
-  const byLegacyDriver = new Map();
   for (const provider of providers) {
     if (!provider?.providerId || !provider?.runtimeId) {
       throw new TypeError("Provider registry entries must satisfy the Agent provider contract.");
@@ -159,12 +150,6 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     // will fail only after a one-use preflight ticket has been consumed.
     runtimeRegistry.resolve(provider.runtimeId);
     byProviderId.set(provider.providerId, provider);
-    for (const driver of provider.legacyDrivers) {
-      if (byLegacyDriver.has(driver)) {
-        throw new TypeError(`Duplicate legacy Agent driver mapping ${driver}.`);
-      }
-      byLegacyDriver.set(driver, provider.providerId);
-    }
   }
 
   const resolveProvider = (providerId) => {
@@ -197,24 +182,12 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     return bindingForProvider(provider);
   };
 
-  const resolveDriver = (driver) => {
-    const providerId = byLegacyDriver.get(String(driver || ""));
-    if (!providerId) unsupportedDriver();
-    return bindingForProvider(resolveProvider(providerId));
-  };
-
-  const selectionFromDriver = (driver) => selectionForProvider(resolveDriver(driver).provider);
-
   const resolveTicket = (ticketInput, purpose = ticketInput?.purpose) => {
     const ticket = assertProviderTicket(ticketInput);
     const binding = bindingForProvider(resolveProvider(ticket.providerId));
-    const legacyDriverMatches = ticket.driver === undefined
-      || ticket.driver === null
-      || binding.provider.legacyDrivers.includes(ticket.driver);
     if (
       binding.provider.runtimeId !== ticket.runtimeId
       || binding.provider.securityProfile !== ticket.securityProfile
-      || !legacyDriverMatches
     ) {
       throw agentProviderError(
         "AGENT_PROVIDER_TICKET_INVALID",
@@ -316,8 +289,6 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
         capabilities: provider.capabilities,
       })));
     },
-    resolveDriver,
-    selectionFromDriver,
     resolveSelection,
     assertCapabilityForSelection(selection, purpose) {
       const { provider } = resolveSelection(selection);
@@ -412,12 +383,6 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     preflightForSelection(selection, purpose, { environment } = {}) {
       return prepareForSelection(selection, purpose, environment);
     },
-    async availability({ driver, environment }) {
-      return this.availabilityForSelection(selectionFromDriver(driver), { environment });
-    },
-    preflight({ driver, environment, purpose = "execution" }) {
-      return prepareForSelection(selectionFromDriver(driver), purpose, environment);
-    },
     async verifyTicket(ticket, { purpose = ticket?.purpose, environment } = {}) {
       const { provider } = resolveTicket(ticket, purpose);
       await provider.assertInstallationUnchanged(ticket.installation, { environment });
@@ -472,14 +437,6 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     },
     preflightFailureMessageForSelection(selection, code) {
       const { provider } = resolveSelection(selection);
-      return provider.preflightFailureMessage(code);
-    },
-    failureMessageForDriver(driver, code) {
-      const { provider } = resolveDriver(driver);
-      return provider.failureMessage(code);
-    },
-    preflightFailureMessageForDriver(driver, code) {
-      const { provider } = resolveDriver(driver);
       return provider.preflightFailureMessage(code);
     },
   });

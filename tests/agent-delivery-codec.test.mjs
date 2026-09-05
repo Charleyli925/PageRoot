@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   agentRecoveryKindForError,
   defaultManagedAgentDelivery,
-  legacyDriverForAgentDelivery,
   normalizeAgentDelivery,
   normalizeNewAgentDelivery,
   publicCompatibilityDriver,
@@ -93,7 +92,7 @@ test("malformed policy, reasoning and cross-provider model ids fail closed", () 
   }
 });
 
-test("unknown provider history is readable but cannot resolve to an installed start driver", () => {
+test("unknown provider history is readable but cannot become a new start binding", () => {
   const delivery = normalizeAgentDelivery({
     mode: "managed-agent",
     selection: {
@@ -106,9 +105,7 @@ test("unknown provider history is readable but cannot resolve to an installed st
     trustPolicyVersion: "trusted-local-agent-v1",
   });
   assert.equal(delivery.selection.providerId, "future-agent");
-  assert.throws(() => legacyDriverForAgentDelivery(delivery), {
-    code: "AGENT_PROVIDER_UNSUPPORTED",
-  });
+  assert.equal(shippedLegacyDriver(delivery.selection), null);
   assert.throws(() => normalizeNewAgentDelivery(delivery), {
     code: "AGENT_PROVIDER_UNSUPPORTED",
   });
@@ -180,7 +177,7 @@ test("shipped Codex ACP and 源页 HTTP deliveries can be newly frozen", () => {
       },
     };
     assert.deepEqual(normalizeNewAgentDelivery(delivery).selection.providerId, selection.providerId);
-    assert.equal(legacyDriverForAgentDelivery(delivery), null);
+    assert.equal(shippedLegacyDriver(selection), null);
   }
 });
 

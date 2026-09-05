@@ -189,7 +189,6 @@ async function run() {
     });
     assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
     const preflight = await postJson("/agent/preflight", {
-      driver: "qoder-acp",
       trustPolicyAccepted: trustPolicyVersion,
     });
     assert.equal(preflight.response.status, 200, JSON.stringify(preflight.body));
@@ -222,7 +221,6 @@ async function run() {
       sourcePath: ensured.body.sourcePath,
       requestId: request.body.requestId,
       attemptId: request.body.attemptId,
-      driver: "qoder-acp",
       trustPolicyAccepted: trustPolicyVersion,
       preflightId: preflight.body.preflightId,
       configurationDigest: preflight.body.configuration.configurationDigest,

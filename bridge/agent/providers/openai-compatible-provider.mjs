@@ -213,7 +213,6 @@ export function createOpenAiCompatibleProvider({
     runtimeId: PAGEROOT_RUNTIME_ID,
     displayName: "源页 Agent",
     securityProfile: "client-mediated",
-    legacyDrivers: [],
     capabilityRevision: SUPPORTED_AGENT_MODELS_REVISION,
     capabilities: {
       availability: true,

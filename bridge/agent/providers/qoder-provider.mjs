@@ -27,7 +27,6 @@ import {
 
 export const QODER_PROVIDER_ID = "qoder";
 export const QODER_RUNTIME_ID = "acp";
-export const QODER_LEGACY_DRIVER = "qoder-acp";
 export const MIN_QODER_VERSION = "1.1.27";
 
 const MAX_PUBLIC_MODELS = 40;
@@ -605,7 +604,6 @@ export function createQoderProvider({
     displayName: "Qoder",
     runtimeId: QODER_RUNTIME_ID,
     securityProfile: "client-mediated",
-    legacyDrivers: [QODER_LEGACY_DRIVER],
     capabilities: {
       availability: true,
       preflight: true,
