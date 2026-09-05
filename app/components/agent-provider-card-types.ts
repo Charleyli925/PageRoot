@@ -9,6 +9,10 @@ export type AgentProviderCardData = Readonly<{
   presentation: AgentProviderCardPresentation;
   availability: AgentProviderAvailabilitySnapshot;
   installState?: "idle" | "installing" | "failed" | "cancelling";
+  activeOperation?: Readonly<{
+    kind: string;
+    state: string;
+  }> | null;
   models?: readonly Readonly<{
     id: string;
     displayName: string;

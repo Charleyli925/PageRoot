@@ -308,6 +308,9 @@ export type DesktopIntegrationsApi = {
   handoffToQoderWork: (payload: {
     message: string;
   }) => Promise<QoderHandoffResult>;
+  openAgentLogin?: (payload: {
+    providerId: string;
+  }) => Promise<{ opened?: boolean }>;
   openVendorApiKeyPage?: (vendorId: string) => Promise<{ opened?: boolean }>;
   persistSessionCredential?: (payload: {
     apiKey: string;

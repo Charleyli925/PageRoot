@@ -200,6 +200,7 @@
       "desktop/edit-runtime-library-store.mjs",
       "desktop/edit-runtime-protocol.mjs",
       "desktop/edit-runtime-preparation-fence.mjs",
+      "desktop/agent-login-url.mjs",
       "shared/agent-vendor-key-url.mjs",
       "app/domain/edit-runtime-contract.js",
       "public/brand-logo.png",
@@ -288,6 +289,14 @@
       {
         "from": "bridge/agent/catalog/agent-installer.mjs",
         "to": "bridge/agent/catalog/agent-installer.mjs"
+      },
+      {
+        "from": "bridge/agent/catalog/agent-access-auth.mjs",
+        "to": "bridge/agent/catalog/agent-access-auth.mjs"
+      },
+      {
+        "from": "bridge/agent/catalog/agent-login-command.mjs",
+        "to": "bridge/agent/catalog/agent-login-command.mjs"
       },
       {
         "from": "bridge/agent/catalog/qoder-managed-release.mjs",
@@ -496,6 +505,14 @@
       {
         "from": "shared/agent-access-operation.mjs",
         "to": "shared/agent-access-operation.mjs"
+      },
+      {
+        "from": "shared/agent-login-url.mjs",
+        "to": "shared/agent-login-url.mjs"
+      },
+      {
+        "from": "shared/agent-auth-source.mjs",
+        "to": "shared/agent-auth-source.mjs"
       },
       {
         "from": "shared/openai-compatible-vendors.mjs",

@@ -58,7 +58,7 @@ const QODER_PRESENTATION = Object.freeze({
   readyDetail: "已接通，可直接交给 Qoder 修改",
   notInstalledDetail: "安装后即可从侧栏直接发送。",
   authRequiredDetail: "登录后即可从侧栏直接发送。",
-  loginLabel: "复制登录指令",
+  loginLabel: "登录 Qoder",
   invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Qoder CLI。",
   restartRequiredDetail: "Qoder CLI 已发生变化，重新打开 PageRoot 后即可继续。",
   checkingDetail: "正在自动检查 Qoder CLI…",
@@ -178,7 +178,7 @@ const CODEX_PRESENTATION = Object.freeze({
   authRequiredDetail: "登录 ChatGPT 后即可从侧栏直接发送。",
   capacityStatusLabel: "额度已用完",
   capacityDetail: "换源页 Agent 或 Qoder，或复制任务给别的 AI。",
-  loginLabel: "复制登录指令",
+  loginLabel: "登录 Codex",
   invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Codex ACP。",
   restartRequiredDetail: "Codex ACP 已发生变化，重新打开 PageRoot 后即可继续。",
   checkingDetail: "正在检查 Codex…",
@@ -389,8 +389,8 @@ export function agentProviderCardPresentation(provider) {
         copiedLabel: "重新安装",
       }),
       login: Object.freeze({
-        label: presentation.loginLabel || "复制登录指令",
-        copiedLabel: "重新复制",
+        label: presentation.loginLabel || "登录",
+        copiedLabel: "重新登录",
       }),
       recheck: Object.freeze({
         label: "重试",
@@ -457,6 +457,7 @@ export function agentProviderCardsFromCatalog(snapshot) {
       models: Array.isArray(provider.models) ? provider.models : Object.freeze([]),
       credentialConfigured: provider.credentialConfigured === true,
       connection: provider.connection || null,
+      loginUrlPresent: provider.loginUrlPresent === true,
       enabled: provider.enabled !== false,
       activeOperation: provider.activeOperation || null,
       installState: provider.installState || "idle",
@@ -475,7 +476,8 @@ function frozenProviderEntry(descriptor, previous = null) {
     installationDigest: previous?.installationDigest || null,
     models: previous?.models || Object.freeze([]),
     credentialConfigured: previous?.credentialConfigured === true,
-    connection: previous?.connection || null,
+    connection: previous?.connection || descriptor.connection || null,
+    loginUrlPresent: previous?.loginUrlPresent === true || descriptor.loginUrlPresent === true,
     enabled: previous?.enabled !== false,
     activeOperation: previous?.activeOperation || null,
     diagnostic: previous?.diagnostic || descriptor.diagnostic || null,
@@ -1167,6 +1169,26 @@ export class AgentCatalogState {
     if (operation.kind === "install") {
       return this.cancelInstall(frozen);
     }
+    if (operation.kind === "login" && typeof this.#bridgeClient.cancelAgentLogin === "function") {
+      const cancelling = requestCancelAccessOperation(operation);
+      this.#patchProvider(frozen.providerId, { activeOperation: cancelling });
+      try {
+        await this.#bridgeClient.cancelAgentLogin({ providerId: frozen.providerId });
+        this.#patchProvider(frozen.providerId, {
+          activeOperation: finishAccessOperation(cancelling, { state: "cancelled" }),
+          loginUrlPresent: false,
+        });
+      } catch (cause) {
+        this.#patchProvider(frozen.providerId, {
+          activeOperation: finishAccessOperation(cancelling, {
+            state: "failed",
+            errorCode: cause?.code || "AGENT_LOGIN_CANCEL_FAILED",
+          }),
+        });
+        throw cause;
+      }
+      return this.provider(frozen)?.activeOperation || null;
+    }
     if (operation.kind === "config-validate") {
       const cancelling = requestCancelAccessOperation(operation);
       this.#patchProvider(frozen.providerId, { activeOperation: cancelling });
@@ -1198,6 +1220,101 @@ export class AgentCatalogState {
     return this.provider(frozen)?.activeOperation || null;
   }
 
+  async startLogin(selection = this.freezeSelected()) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    if (typeof this.#bridgeClient.loginAgent !== "function") {
+      throw Object.assign(new Error("This Agent cannot start an official login."), {
+        code: "AGENT_LOGIN_UNSUPPORTED",
+      });
+    }
+    this.#invalidateProvider(frozen.providerId);
+    const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
+    this.#generationByProvider.set(frozen.providerId, generation);
+    this.#patchProvider(frozen.providerId, {
+      activeOperation: createAccessOperation({
+        providerId: frozen.providerId,
+        kind: "login",
+        generation,
+        startedAt: validDate(this.#clock),
+      }),
+      loginUrlPresent: false,
+    });
+    this.#setAvailability(frozen.providerId, checkingAgentProviderAvailability(provider.availability));
+    void this.#openOfficialLogin(frozen.providerId, generation);
+    try {
+      await this.#bridgeClient.loginAgent({ providerId: frozen.providerId });
+      return await this.#waitForLogin(frozen, generation);
+    } catch (cause) {
+      const cancelled = cause?.code === "AGENT_LOGIN_CANCELLED";
+      const current = this.provider(frozen)?.activeOperation;
+      if (current?.generation === generation) {
+        this.#patchProvider(frozen.providerId, {
+          activeOperation: finishAccessOperation(current, {
+            state: cancelled ? "cancelled" : "failed",
+            errorCode: cause?.code || "AGENT_LOGIN_FAILED",
+          }),
+          loginUrlPresent: false,
+        });
+      }
+      await this.diagnose(
+        this.freezeProviderSelection(frozen.providerId) || frozen,
+      ).catch(() => null);
+      throw cause;
+    }
+  }
+
+  async #openOfficialLogin(providerId, generation) {
+    if (typeof this.#handoffPort?.openLogin !== "function") return;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const current = this.#providers.get(providerId);
+      if (current?.activeOperation?.generation !== generation) return;
+      if (current.loginUrlPresent === true) {
+        await this.#handoffPort.openLogin({ providerId }).catch(() => null);
+        return;
+      }
+      if (typeof this.#bridgeClient.agentProviders === "function") {
+        const listed = await this.#bridgeClient.agentProviders().catch(() => null);
+        const item = Array.isArray(listed?.providers)
+          ? listed.providers.find((entry) => entry?.providerId === providerId)
+          : null;
+        if (item?.loginUrlPresent === true) {
+          this.#patchProvider(providerId, { loginUrlPresent: true });
+          await this.#handoffPort.openLogin({ providerId }).catch(() => null);
+          return;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  async #waitForLogin(selection, generation) {
+    for (let attempt = 0; attempt < 900; attempt += 1) {
+      const current = this.provider(selection);
+      if (current?.activeOperation?.generation !== generation) {
+        throw Object.assign(new Error("A newer login replaced this attempt."), {
+          code: "AGENT_LOGIN_STALE",
+        });
+      }
+      if (current?.activeOperation?.state === "cancelled") {
+        throw Object.assign(new Error("登录已取消。"), { code: "AGENT_LOGIN_CANCELLED" });
+      }
+      if (current?.activeOperation?.state === "failed") {
+        throw Object.assign(new Error("官方登录没有完成。"), {
+          code: current.activeOperation.errorCode || "AGENT_LOGIN_FAILED",
+        });
+      }
+      await this.#applyPublicCatalog();
+      const diagnosed = await this.diagnose(
+        this.freezeProviderSelection(selection.providerId) || selection,
+      ).catch(() => null);
+      if (this.availability(selection)?.status === "ready") return diagnosed;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    throw Object.assign(new Error("登录等待已超时。"), { code: "AGENT_LOGIN_EXPIRED" });
+  }
+
   async copyGuidance(kind, selection = this.freezeSelected()) {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
@@ -1222,18 +1339,6 @@ export class AgentCatalogState {
       kind,
       validDate(this.#clock),
     ));
-    if (kind === "login") {
-      const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
-      this.#generationByProvider.set(frozen.providerId, generation);
-      this.#patchProvider(frozen.providerId, {
-        activeOperation: createAccessOperation({
-          providerId: frozen.providerId,
-          kind: "login",
-          generation,
-          startedAt: validDate(this.#clock),
-        }),
-      });
-    }
     return Object.freeze({ kind, copied: true });
   }
 
@@ -1559,7 +1664,14 @@ export class AgentCatalogState {
         installState: ["idle", "installing", "failed", "cancelling"].includes(item.installState)
           ? item.installState
           : current.installState || "idle",
-        connection: current.connection,
+        connection: item.connection?.authSource
+          ? Object.freeze({
+            ...(current.connection || {}),
+            authSource: item.connection.authSource,
+            authScope: item.connection.authScope || null,
+          })
+          : current.connection,
+        loginUrlPresent: item.loginUrlPresent === true,
         activeOperation: publicAccessOperation(item.activeOperation)
           || (current.activeOperation?.kind === "install" ? null : current.activeOperation),
       }));

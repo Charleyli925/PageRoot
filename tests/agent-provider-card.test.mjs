@@ -20,7 +20,7 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
     'cardClassName: "qoder-availability-card"',
     'primaryActionDataAttribute: "data-qoder-primary"',
     '安装 Qoder CLI',
-    '复制登录指令',
+    '登录 Qoder',
   ]) assert.match(wrapper, new RegExp(literal, "u"));
 
   for (const contract of [
@@ -30,11 +30,12 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
     'aria-atomic="true"',
     "ref={index === 0 ? actionButtonRef : undefined}",
     "{...(index === 0 ? primaryActionData : {})}",
-    '正在复制…',
+    '正在登录…',
     '正在安装…',
     'cancel-install',
     'onCancelInstall',
-    'installState === "cancelling" || cancelPending',
+    'onStartLogin',
+    '请在浏览器完成登录',
   ]) assert.ok(card.includes(contract), contract);
   assert.doesNotMatch(card, /installState === "cancelling" \|\| cancelPending \|\| cancelRequested/u);
   assert.match(card, /setCancelRequested\(false\)/u);

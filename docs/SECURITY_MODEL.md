@@ -48,7 +48,15 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   and `--list-models`, verifies executable realpath/mode/content identity and
   obtains an opaque short-lived ticket; a changed executable invalidates that
   ticket. Arbitrary command overrides are enabled only when both dedicated E2E
-  environment fences are present. The 源页 HTTP Agent may redirect preflight and
+  environment fences are present. Official Qoder/Codex login is started by the
+  already-verified installation's `login` command; Main opens only an https URL
+  whose host is on that provider's allowlist. Main restates that allowlist in
+  `desktop/agent-login-url.mjs` because `shared/agent-login-url.mjs` ships as a
+  Bridge extraResource and cannot be imported from asar. The renderer may request
+  `html-agent-access:open-login` with `providerId` only and never supplies a URL,
+  command or path. Public catalog snapshots expose `loginUrlPresent` without the
+  OAuth URL. Environment PAT/API keys are reported as `environment` auth scope
+  and are not claimed to be revoked by in-app logout. The 源页 HTTP Agent may redirect preflight and
   chat to a loopback `127.0.0.1` base URL only when both `PAGEROOT_E2E=1` and
   `PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL=1` are set; production never honors
   `PAGEROOT_HTTP_AGENT_BASE_URL`.

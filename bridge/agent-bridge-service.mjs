@@ -63,6 +63,56 @@ export class AgentBridgeService {
     return catalog.cancelInstall(providerId);
   }
 
+  login(providerId) {
+    const listed = this.#coordinator.providerCatalog().find((item) => item.providerId === providerId);
+    if (!listed || listed.capabilities?.login !== true) {
+      throw new AgentBridgeError(
+        "AGENT_LOGIN_UNSUPPORTED",
+        "This Agent cannot start an official login.",
+        { status: 409 },
+      );
+    }
+    const catalog = this.#coordinator.agentCatalog;
+    if (!catalog || typeof catalog.login !== "function") {
+      throw new AgentBridgeError(
+        "AGENT_LOGIN_UNSUPPORTED",
+        "This Agent cannot start an official login.",
+        { status: 409 },
+      );
+    }
+    return catalog.login(providerId);
+  }
+
+  waitLogin(providerId) {
+    const catalog = this.#coordinator.agentCatalog;
+    if (!catalog || typeof catalog.waitLogin !== "function") {
+      throw new AgentBridgeError(
+        "AGENT_LOGIN_UNSUPPORTED",
+        "This Agent cannot start an official login.",
+        { status: 409 },
+      );
+    }
+    return catalog.waitLogin(providerId);
+  }
+
+  cancelLogin(providerId) {
+    const catalog = this.#coordinator.agentCatalog;
+    if (!catalog || typeof catalog.cancelLogin !== "function") {
+      throw new AgentBridgeError(
+        "AGENT_LOGIN_UNSUPPORTED",
+        "This Agent cannot start an official login.",
+        { status: 409 },
+      );
+    }
+    return catalog.cancelLogin(providerId);
+  }
+
+  loginUrl(providerId) {
+    const catalog = this.#coordinator.agentCatalog;
+    if (!catalog || typeof catalog.loginUrl !== "function") return null;
+    return catalog.loginUrl(providerId);
+  }
+
   assertSelection(selection, purpose) {
     return this.#coordinator.assertSelection(selection, purpose);
   }

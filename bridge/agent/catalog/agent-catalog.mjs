@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { agentProviderError } from "../providers/agent-provider-contract.mjs";
 import { createAgentInstaller } from "./agent-installer.mjs";
+import { createAgentAccessAuth } from "./agent-access-auth.mjs";
 import {
   accessOperationFromInstallSnapshot,
 } from "../../../shared/agent-access-operation.mjs";
@@ -35,6 +36,7 @@ export function createAgentCatalog({
   entries = SHIPPED_ACP_CATALOG,
   installer,
   installerOptions = {},
+  authenticator,
 } = {}) {
   if (typeof agentsRoot !== "string" || !path.isAbsolute(agentsRoot)) {
     throw new TypeError("Agent catalog requires an absolute agentsRoot.");
@@ -44,6 +46,8 @@ export function createAgentCatalog({
     agentsRoot,
     ...installerOptions,
   });
+  const agentAuth = authenticator || createAgentAccessAuth();
+  let loginExecutor = null;
 
   function entryFor(providerId) {
     return catalogEntryByProviderId(providerId, catalogEntries);
@@ -51,6 +55,9 @@ export function createAgentCatalog({
 
   return {
     agentsRoot,
+    bindLoginExecutor(executor) {
+      loginExecutor = executor;
+    },
     entries() {
       return catalogEntries;
     },
@@ -60,11 +67,18 @@ export function createAgentCatalog({
     installerSnapshot(providerId) {
       return agentInstaller.snapshot(providerId);
     },
+    loginSnapshot(providerId) {
+      return agentAuth.snapshot(providerId);
+    },
+    loginUrl(providerId) {
+      return agentAuth.loginUrl(providerId);
+    },
     publicProvider(provider, {
       installSource = "none",
     } = {}) {
       const entry = entryFor(provider.providerId);
       const snapshot = agentInstaller.snapshot(provider.providerId);
+      const login = agentAuth.snapshot(provider.providerId);
       return Object.freeze({
         providerId: provider.providerId,
         displayName: provider.displayName,
@@ -73,8 +87,16 @@ export function createAgentCatalog({
         installable: entry?.installable === true,
         installSource: INSTALL_SOURCES.includes(installSource) ? installSource : "none",
         installState: publicInstallState(snapshot),
-        connection: null,
-        activeOperation: accessOperationFromInstallSnapshot(snapshot),
+        connection: login.authSource
+          ? Object.freeze({
+            authSource: login.authSource,
+            authScope: login.authScope,
+            accountSummary: null,
+          })
+          : null,
+        loginUrlPresent: login.loginUrlPresent === true,
+        activeOperation: agentAuth.accessOperation(provider.providerId)
+          || accessOperationFromInstallSnapshot(snapshot),
       });
     },
     async managedCommandCandidates(providerId) {
@@ -106,6 +128,22 @@ export function createAgentCatalog({
         );
       }
       return agentInstaller.cancel(providerId);
+    },
+    login(providerId) {
+      if (typeof loginExecutor !== "function") {
+        throw agentProviderError(
+          "AGENT_LOGIN_UNSUPPORTED",
+          "This Agent cannot start an official login.",
+          { status: 409 },
+        );
+      }
+      return agentAuth.login(providerId, (context) => loginExecutor(providerId, context));
+    },
+    waitLogin(providerId) {
+      return agentAuth.wait(providerId);
+    },
+    cancelLogin(providerId) {
+      return agentAuth.cancel(providerId);
     },
     drain(options) {
       return agentInstaller.drain(options);

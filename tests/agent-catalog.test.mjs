@@ -54,6 +54,7 @@ test("public catalog projection never includes command, path or stderr", async (
   assert.equal(projected.installState, "idle");
   assert.equal(projected.activeOperation, null);
   assert.equal(projected.connection, null);
+  assert.equal(projected.loginUrlPresent, false);
   assert.equal(serialized.includes(root), false);
   assert.equal(Object.hasOwn(projected, "command"), false);
   assert.equal(serialized.includes("stderr"), false);

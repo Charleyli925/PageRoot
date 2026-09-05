@@ -305,6 +305,7 @@ export type WorkspaceControllerConstruction = Readonly<{
         run: import("../domain/run-lifecycle.js").ActiveRun | null;
         purpose?: string;
       }): Promise<{ status: string; copied: boolean }>;
+      openLogin?(input: { providerId: string }): Promise<{ opened?: boolean } | null>;
     }>;
     scheduler?: Readonly<{
       setTimeout(callback: () => void, delayMs: number): unknown;
@@ -595,6 +596,9 @@ export class WorkspaceController {
   copyQoderGuidance(input: {
     kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
+  startAgentLogin(
+    selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
+  ): Promise<RunWorkflowOutcome>;
   installQoder(): Promise<RunWorkflowOutcome>;
   installAgent(
     selection?: import("../domain/agent-provider-state.js").AgentSelection | null,

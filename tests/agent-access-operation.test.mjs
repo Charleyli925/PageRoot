@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   accessOperationFromInstallSnapshot,
+  accessOperationFromLoginSnapshot,
   createAccessOperation,
   finishAccessOperation,
   isStaleAccessOperation,
@@ -62,6 +63,22 @@ test("install snapshots project in-flight access operations and ignore stale gen
   }), null);
   assert.equal(isStaleAccessOperation(installing, 5), true);
   assert.equal(isStaleAccessOperation(installing, 4), false);
+});
+
+test("login snapshots project waiting access operations", () => {
+  const waiting = accessOperationFromLoginSnapshot({
+    providerId: "codex",
+    loginState: "waiting",
+    generation: 2,
+    startedAt: "2026-09-06T00:00:00.000Z",
+  });
+  assert.equal(waiting.kind, "login");
+  assert.equal(waiting.state, "waiting");
+  assert.equal(accessOperationFromLoginSnapshot({
+    providerId: "codex",
+    loginState: "idle",
+    generation: 2,
+  }), null);
 });
 
 test("credential errors map to the field that the user can correct", () => {

@@ -248,6 +248,8 @@ test("Bridge client exposes the Agent catalog, install and execution routes", as
   await client.agentProviders();
   await client.installAgent({ providerId: "qoder" });
   await client.cancelAgentInstall({ providerId: "qoder" });
+  await client.loginAgent({ providerId: "qoder" });
+  await client.cancelAgentLogin({ providerId: "qoder" });
   await client.updateAgentConfiguration({
     providerId: "pageroot",
     apiKey: "sk-test",
@@ -271,6 +273,8 @@ test("Bridge client exposes the Agent catalog, install and execution routes", as
     ["GET", "/agent/providers"],
     ["POST", "/agent/install"],
     ["POST", "/agent/install/cancel"],
+    ["POST", "/agent/login"],
+    ["POST", "/agent/login/cancel"],
     ["POST", "/agent/configuration"],
     ["POST", "/agent/configuration/cancel"],
     ["POST", "/agent/preflight"],
