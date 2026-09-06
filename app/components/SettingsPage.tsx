@@ -444,6 +444,7 @@ function AgentSettings({
                     onClick={() => {
                       if (primaryLabel === "设为默认") {
                         onSelect(card.selection);
+                        setExpandedId(id);
                         return;
                       }
                       if (primaryLabel === "重新连接") {

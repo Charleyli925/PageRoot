@@ -231,7 +231,7 @@ test("Electron settings routes categories and persists restore preference withou
       } catch {
         return null;
       }
-    }).toMatchObject({ workspace: { defaultAgentProviderId: "codex" } });
+    }).toMatchObject({ workspace: { defaultAgentProviderId: "qoder" } });
     await first.page.getByRole("button", { name: "软件更新", exact: true }).click();
     await expect(settings.getByRole("heading", { name: "软件更新" })).toBeFocused();
     await captureSettings("settings-updates-1440x1024", 1440, 1024);
