@@ -2006,7 +2006,7 @@
     {
       "id": "agent-renderer-projection",
       "patterns": [
-        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard|AgentSetupPanel)\\.tsx$",
+        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard|AgentSetupPanel|SettingsPage)\\.tsx$",
         "^shared/(?:agent-delivery|agent-feature-gates|openai-compatible-vendors)\\.mjs$"
       ],
       "suites": [

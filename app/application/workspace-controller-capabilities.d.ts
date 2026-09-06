@@ -280,6 +280,18 @@ export interface AgentSelectionControllerCapability {
   applyDisabledAgentProviders(ids?: readonly string[]): void;
   connectAgentApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>): Promise<RunWorkflowOutcome>;
   disconnectAgentApiKey(selection: AgentSelection): Promise<RunWorkflowOutcome>;
+  stopRunsForProvider(providerId: string): Promise<readonly RunWorkflowOutcome[]>;
+  manageAgentAccess(
+    kind: "disconnect" | "remove-key" | "reconnect",
+    selection: AgentSelection,
+    options?: Readonly<{
+      stopRelatedRuns?: boolean;
+      credentials?: Readonly<{
+        clear?(): Promise<{ ok?: boolean }>;
+        restore?(): Promise<unknown>;
+      }>;
+    }>,
+  ): Promise<RunWorkflowOutcome>;
   checkAgentUsability(selection?: AgentSelection): Promise<RunWorkflowOutcome>;
   cancelAgentInstall(selection?: AgentSelection | null): Promise<RunWorkflowOutcome>;
 }

@@ -2272,6 +2272,78 @@ export class RunWorkflow {
       ));
   }
 
+  async stopRunsForProvider(providerId) {
+    const id = String(providerId || "");
+    const outcomes = [];
+    for (const run of this.#runSession.runs) {
+      const delivery = deliveryForRun(run);
+      if (delivery?.selection?.providerId !== id) continue;
+      const handoff = this.#runSession.handoffForSource(run.sourcePath);
+      const running = run.status === "processing"
+        || ["starting", "running", "cancelling"].includes(String(handoff?.status || ""));
+      if (!running) continue;
+      outcomes.push(await this.cancel({ run, agentMayBeRunning: true }));
+    }
+    return Object.freeze(outcomes);
+  }
+
+  async manageAgentAccess(kind, selection, {
+    credentials = null,
+    stopRelatedRuns = true,
+  } = {}) {
+    const frozen = selection;
+    if (kind !== "reconnect" && stopRelatedRuns) {
+      const stopped = await this.stopRunsForProvider(frozen.providerId);
+      const stopFailed = stopped.find((outcome) => (
+        outcome?.status === "rejected" || outcome?.status === "blocked"
+      ));
+      if (stopFailed) {
+        return rejected(
+          stopFailed.code || "RUN_CANCEL_FAILED",
+          stopFailed.reason || "相关任务没有全部停止。",
+          { stage: "stop-runs" },
+        );
+      }
+    }
+    if (kind === "reconnect") {
+      if (typeof credentials?.restore === "function" && frozen.providerId === "pageroot") {
+        await credentials.restore().catch(() => null);
+      }
+      return this.checkAgentUsability(frozen);
+    }
+    let disconnect = succeeded({ kind });
+    if (frozen.providerId === "pageroot" && (kind === "disconnect" || kind === "remove-key")) {
+      disconnect = await this.disconnectAgentApiKey(frozen);
+      if (!["succeeded", "stale"].includes(disconnect.status)) return disconnect;
+    }
+    if (kind === "remove-key") {
+      if (typeof credentials?.clear !== "function") {
+        return rejected(
+          "AGENT_CREDENTIAL_CLEAR_FAILED",
+          "当前连接已处理，但未能移除已记住的 API Key。",
+          { stage: "clear-credential" },
+        );
+      }
+      try {
+        const cleared = await credentials.clear();
+        if (cleared?.ok === false) {
+          return rejected(
+            "AGENT_CREDENTIAL_CLEAR_FAILED",
+            "当前连接已处理，但未能移除已记住的 API Key。",
+            { stage: "clear-credential" },
+          );
+        }
+      } catch {
+        return rejected(
+          "AGENT_CREDENTIAL_CLEAR_FAILED",
+          "当前连接已处理，但未能移除已记住的 API Key。",
+          { stage: "clear-credential" },
+        );
+      }
+    }
+    return succeeded({ kind });
+  }
+
   #publishSnapshot() {
     const snapshot = this.getSnapshot();
     for (const listener of this.#listeners) {

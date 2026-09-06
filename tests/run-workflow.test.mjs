@@ -301,6 +301,9 @@ function createHarness({
       calls.cancel.push(request);
       return {};
     },
+    async updateAgentConfiguration(request) {
+      return { ok: true, configured: request?.disconnect !== true };
+    },
     async resolveConflict(request) {
       calls.resolve.push(request);
       return { activeRun: runRecord({ ...request, status: "committing" }) };
@@ -2012,6 +2015,62 @@ test("managed cancellation publishes cancelling before waiting for Bridge cleanu
   const outcome = await cancelling;
   assert.equal(outcome.status, "succeeded");
   assert.equal(harness.runSession.activeRun, null);
+});
+
+test("disconnecting an Agent stops every related run, not only the visible document", async () => {
+  const harness = createHarness();
+  const qoderSelection = harness.workflow.getSnapshot().agentCatalog.providers.qoder.selection;
+  const delivery = {
+    mode: "managed-agent",
+    selection: qoderSelection,
+    trustPolicyVersion: "trusted-local-agent-v1",
+  };
+  const visible = runRecord({ agentDelivery: delivery });
+  const background = runRecord({
+    sourcePath: SOURCE_B,
+    requestId: "request_b",
+    documentId: "document_b",
+    agentDelivery: delivery,
+  });
+  harness.runSession.trackRun(visible, { activate: "always" });
+  harness.runSession.publishHandoff({
+    sourcePath: visible.sourcePath,
+    requestId: visible.requestId,
+    attemptId: visible.attemptId,
+    mode: "managed-agent",
+    status: "running",
+    phase: "generating",
+  });
+  harness.runSession.trackRun(background, { activate: "never" });
+  harness.runSession.publishHandoff({
+    sourcePath: background.sourcePath,
+    requestId: background.requestId,
+    attemptId: background.attemptId,
+    mode: "managed-agent",
+    status: "running",
+    phase: "generating",
+  });
+
+  const outcome = await harness.workflow.manageAgentAccess("disconnect", qoderSelection);
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+  assert.equal(harness.calls.cancel.length, 2);
+  assert.equal(harness.runSession.runForSource(SOURCE_A), null);
+  assert.equal(harness.runSession.runForSource(SOURCE_B), null);
+});
+
+test("removing a remembered Key reports failure instead of succeeding after a clear error", async () => {
+  const harness = createHarness();
+  const selection = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  const outcome = await harness.workflow.manageAgentAccess("remove-key", selection, {
+    stopRelatedRuns: false,
+    credentials: {
+      async clear() {
+        return { ok: false };
+      },
+    },
+  });
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "AGENT_CREDENTIAL_CLEAR_FAILED");
 });
 
 test("a late keep-external result cannot reload a reopened project generation", async () => {

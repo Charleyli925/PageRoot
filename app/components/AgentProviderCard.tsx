@@ -9,7 +9,12 @@ import type {
   AgentProviderGuidanceKind,
 } from "../domain/agent-provider-state.js";
 
-type AgentActionOutcome = Readonly<{ status: string; reason?: string; code?: string }> | null | undefined;
+type AgentActionOutcome = Readonly<{
+  status: string;
+  reason?: string;
+  code?: string;
+  persistFailed?: boolean;
+}> | null | undefined;
 type CardActionKind = AgentProviderGuidanceKind | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning" | "reopen-login";
 type ApiKeyExtras = Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>;
 type ApiKeyField = "apiKey" | "baseUrl" | "modelId" | "form";
@@ -345,6 +350,11 @@ export default function AgentProviderCard({
         const message = outcome?.reason || "API Key 无效或已失效。";
         setFieldError(fieldForConnectError(outcome?.code));
         setActionError(message);
+        return;
+      }
+      if (outcome?.persistFailed || outcome?.reason) {
+        setFieldError("form");
+        setActionError(outcome.reason || "已连接，但记住 API Key 失败。本次仍可使用，可稍后重试记住。");
         return;
       }
       setApiKey("");

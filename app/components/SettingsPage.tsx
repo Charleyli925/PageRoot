@@ -344,6 +344,8 @@ function AgentSettings({
     card: AgentProviderCardData;
     stopRun: boolean;
   }>>(null);
+  const [confirmPending, setConfirmPending] = useState(false);
+  const [confirmError, setConfirmError] = useState("");
   if (followedChoiceId !== selectedChoiceId) {
     setFollowedChoiceId(selectedChoiceId);
     setExpandedId(selectedChoiceId);
@@ -407,7 +409,7 @@ function AgentSettings({
                 : "管理";
             const canRemoveKey = card.selection.providerId === "pageroot"
               && Boolean(onRemoveRememberedKey)
-              && (rememberedKey || Boolean(card.connection));
+              && rememberedKey;
             const canDisconnect = Boolean(onDisconnectProvider)
               && !disconnected
               && (card.availability.status === "ready" || Boolean(card.connection) || card.availability.status === "auth-required");
@@ -564,28 +566,49 @@ function AgentSettings({
                     </strong>
                     <p>
                       {confirmAction.stopRun
-                        ? "当前任务会先停止，确认后才更改连接。"
+                        ? "该服务相关任务会先停止，确认后才更改连接。"
                         : confirmAction.kind === "remove-key"
-                          ? "移除后需要重新填写 API Key。"
+                          ? "移除后需要重新填写 API Key。断开后仍可移除已记住的 Key。"
                           : card.selection.providerId === "pageroot"
                             ? "断开会停用本应用接入，已记住的 Key 仍保留。"
                             : "断开会停用本应用接入，本机登录仍保留。"}
                     </p>
+                    {confirmError ? <p role="alert">{confirmError}</p> : null}
                     <div className="settings-agent-confirm-actions">
-                      <button type="button" onClick={() => setConfirmAction(null)}>
+                      <button
+                        type="button"
+                        disabled={confirmPending}
+                        onClick={() => {
+                          if (confirmPending) return;
+                          setConfirmError("");
+                          setConfirmAction(null);
+                        }}
+                      >
                         {confirmAction.stopRun ? "继续任务" : "取消"}
                       </button>
                       <button
                         type="button"
                         className="settings-agent-confirm-danger"
+                        disabled={confirmPending}
                         onClick={() => {
                           const action = confirmAction;
-                          setConfirmAction(null);
-                          if (action.kind === "remove-key") {
-                            void onRemoveRememberedKey?.(action.card.selection, { stopRun: action.stopRun });
-                            return;
-                          }
-                          void onDisconnectProvider?.(action.card.selection, { stopRun: action.stopRun });
+                          setConfirmPending(true);
+                          setConfirmError("");
+                          const request = action.kind === "remove-key"
+                            ? onRemoveRememberedKey?.(action.card.selection, { stopRun: action.stopRun })
+                            : onDisconnectProvider?.(action.card.selection, { stopRun: action.stopRun });
+                          void Promise.resolve(request).then((outcome) => {
+                            if (!outcome || !["succeeded", "stale"].includes(outcome.status)) {
+                              setConfirmError(outcome?.reason || "操作没有完成。");
+                              setConfirmPending(false);
+                              return;
+                            }
+                            setConfirmPending(false);
+                            setConfirmAction(null);
+                          }, () => {
+                            setConfirmError("操作没有完成。");
+                            setConfirmPending(false);
+                          });
                         }}
                       >
                         {confirmAction.stopRun

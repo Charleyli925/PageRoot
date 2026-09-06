@@ -51,6 +51,8 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
   assert.match(card, /在此 Mac 上记住 API Key/u);
   assert.match(card, /未勾选记住时仅本次使用/u);
   assert.match(card, /验证成功后才会替换当前连接/u);
+  assert.match(card, /persistFailed \|\| outcome\?\.reason/u);
+  assert.match(card, /可稍后重试记住/u);
   assert.doesNotMatch(card, /placeholder="API Token"/u);
   assert.doesNotMatch(card, /选择其他模型/u);
   assert.match(card, /高级设置/u);
@@ -81,6 +83,10 @@ test("About is product information while Settings owns Agent checks and update c
   assert.match(settings, /onRequestRestart/u);
   assert.match(settings, /if \(!force && \(/u);
   assert.match(settings, /checkInFlightRef\.current/u);
+  assert.match(settings, /rememberedKey;/u);
+  assert.doesNotMatch(settings, /rememberedKey \|\| Boolean\(card\.connection\)/u);
+  assert.match(settings, /setConfirmPending\(true\)/u);
+  assert.doesNotMatch(settings, /setConfirmAction\(null\);\s+if \(action\.kind === "remove-key"\)/u);
 });
 
 test("Settings reuses AgentSetupPanel and lists every service row", async () => {

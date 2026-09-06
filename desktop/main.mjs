@@ -3342,6 +3342,7 @@ async function restoreRememberedAgentCredential() {
       apiKey: credential.apiKey,
       vendorId: credential.vendorId,
       baseUrl: credential.baseUrl,
+      ...(credential.modelId ? { modelId: credential.modelId } : {}),
     });
     return Object.freeze({ ok: true, restored: true });
   } catch {
