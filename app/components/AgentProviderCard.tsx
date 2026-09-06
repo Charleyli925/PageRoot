@@ -201,6 +201,8 @@ export default function AgentProviderCard({
       ? { ...presentation, statusLabel: "正在取消…", detail: "", tone: "checking" as const }
       : presentation;
   const currentModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
+  const tokenFormOpen = provider.credentialKind === "api-token"
+    && (availability.status === "auth-required" || apiKeyOpen);
   const actions = installing || cancelling
     ? [{ kind: "cancel-install" as const, label: "取消", copiedLabel: "取消" }]
     : loggingIn
@@ -215,14 +217,17 @@ export default function AgentProviderCard({
           : []),
       ]
       : actionsForAvailability(availability, provider).filter((action) => !(
-    availability.reason === "model-unavailable"
-    && connection
-    && models.length > 1
-    && action.kind === "api-key"
-    ));
+        action.kind === "api-key"
+        && (
+          tokenFormOpen
+          || (
+            availability.reason === "model-unavailable"
+            && connection
+            && models.length > 1
+          )
+        )
+      ));
   const checking = availability.status === "checking";
-  const tokenFormOpen = provider.credentialKind === "api-token"
-    && (availability.status === "auth-required" || apiKeyOpen);
   const selectedVendor = provider.vendors?.find((vendor) => vendor.id === vendorId)
     || provider.vendors?.[0]
     || null;

@@ -55,6 +55,8 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
   assert.match(card, /可稍后重试记住/u);
   assert.match(card, /kind: "api-key", label: "连接"/u);
   assert.doesNotMatch(card, /kind: "api-key", label: "登录"/u);
+  assert.match(card, /tokenFormOpen/u);
+  assert.match(card, /action\.kind === "api-key"/u);
   assert.match(card, /更换 API Key/u);
   assert.doesNotMatch(card, /更换 Token/u);
   assert.match(card, /surface === "settings" \? null : <strong>/u);
