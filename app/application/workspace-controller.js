@@ -1694,6 +1694,34 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().selectAgent(selection);
   }
 
+  queuePendingDefaultAgent(selection) {
+    return this.#requireRunWorkflow().queuePendingDefaultAgent(selection);
+  }
+
+  pendingDefaultAgent() {
+    return this.#requireRunWorkflow().pendingDefaultAgent();
+  }
+
+  readyPendingDefaultAgent() {
+    return this.#requireRunWorkflow().readyPendingDefaultAgent();
+  }
+
+  clearPendingDefaultAgent() {
+    return this.#requireRunWorkflow().clearPendingDefaultAgent();
+  }
+
+  beginAccessRepair(run, field) {
+    return this.#requireRunWorkflow().beginAccessRepair(run, field);
+  }
+
+  clearAccessRepair() {
+    return this.#requireRunWorkflow().clearAccessRepair();
+  }
+
+  resendAfterAccessRepair(run) {
+    return this.#requireRunWorkflow().resendAfterAccessRepair(run);
+  }
+
   selectAgentModel(modelId, expectedSelection) {
     return this.#requireRunWorkflow().selectAgentModel(modelId, expectedSelection);
   }

@@ -275,6 +275,13 @@ export interface ConversationControllerCapability {
 
 export interface AgentSelectionControllerCapability {
   selectAgent(selection: AgentSelection): AgentSelection;
+  queuePendingDefaultAgent(selection: AgentSelection): AgentSelection;
+  pendingDefaultAgent(): AgentSelection | null;
+  readyPendingDefaultAgent(): AgentSelection | null;
+  clearPendingDefaultAgent(): null;
+  beginAccessRepair(run?: ActiveRun | null, field?: "apiKey" | "login" | "install"): unknown;
+  clearAccessRepair(): null;
+  resendAfterAccessRepair(run?: ActiveRun | null): Promise<RunWorkflowOutcome>;
   selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   applyDisabledAgentProviders(ids?: readonly string[]): void;

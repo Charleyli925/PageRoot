@@ -916,6 +916,51 @@ test("Token replacement publishes atomically, clears old model state, and can di
   assert.equal(requests.at(-1).disconnect, true);
 });
 
+test("a sidebar pending default is adopted only after that service is ready", async () => {
+  const pageroot = PAGEROOT_AGENT_PROVIDER.selection;
+  const qoder = QODER_AGENT_PROVIDER.selection;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async setAgentSessionCredential() {
+        return {
+          ok: true,
+          status: "ready",
+          vendorId: "deepseek",
+          vendorDisplayName: "DeepSeek",
+          baseUrl: "https://api.deepseek.com/v1",
+          installationDigest: `sha256:${"a".repeat(64)}`,
+          selection: {
+            ...pageroot,
+            resolvedModelId: "pageroot:deepseek-v4-pro",
+          },
+          models: [{
+            id: "pageroot:deepseek-v4-pro",
+            isDefault: true,
+            reasoningChoices: [{ id: "auto", label: "自动" }],
+          }],
+        };
+      },
+      async preflightAgent() {
+        return { status: "ready", preflightId: "unused" };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER, PAGEROOT_AGENT_PROVIDER],
+    selected: qoder,
+    clock: { now: () => 10 },
+  });
+
+  catalog.queuePendingDefault(pageroot);
+  assert.equal(catalog.freezeSelected().providerId, "qoder");
+  assert.equal(catalog.readyPendingDefault(), null);
+  await catalog.connectWithApiKey(pageroot, "sk-secret", { vendorId: "deepseek" });
+  assert.equal(catalog.freezeSelected().providerId, "qoder");
+  assert.equal(catalog.readyPendingDefault()?.providerId, "pageroot");
+  catalog.select(catalog.readyPendingDefault());
+  catalog.clearPendingDefault();
+  assert.equal(catalog.freezeSelected().providerId, "pageroot");
+  assert.equal(catalog.pendingDefault(), null);
+});
+
 test("updating installation digest or models does not clear connection or credential flags", async () => {
   const initial = PAGEROOT_AGENT_PROVIDER.selection;
   const catalog = new AgentCatalogState({

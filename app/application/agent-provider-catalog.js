@@ -592,6 +592,7 @@ export class AgentCatalogState {
   #diagnoseGenerationByProvider = new Map();
   #listeners = new Set();
   #disposed = false;
+  #pendingDefault = null;
 
   constructor({
     bridgeClient,
@@ -665,6 +666,7 @@ export class AgentCatalogState {
     return Object.freeze({
       providers: frozenRecord(this.#providers.entries()),
       selected: this.#selected,
+      pendingDefault: this.#pendingDefault,
       preflightBySelection: frozenRecord(this.#preflightBySelection.entries()),
     });
   }
@@ -720,6 +722,37 @@ export class AgentCatalogState {
     }
     this.#publish();
     return frozen;
+  }
+
+  queuePendingDefault(selection) {
+    const frozen = freezeAgentSelection(selection);
+    if (!this.#providers.get(frozen.providerId)) {
+      throw Object.assign(new Error("The selected Agent provider is not installed in this build."), {
+        code: "AGENT_PROVIDER_UNSUPPORTED",
+      });
+    }
+    this.#pendingDefault = frozen;
+    this.#publish();
+    return frozen;
+  }
+
+  pendingDefault() {
+    return this.#pendingDefault ? freezeAgentSelection(this.#pendingDefault) : null;
+  }
+
+  readyPendingDefault() {
+    const pending = this.#pendingDefault;
+    if (!pending) return null;
+    const provider = this.provider(pending);
+    if (provider?.availability?.status !== "ready") return null;
+    return freezeAgentSelection(pending);
+  }
+
+  clearPendingDefault() {
+    if (!this.#pendingDefault) return null;
+    this.#pendingDefault = null;
+    this.#publish();
+    return null;
   }
 
   freezeSelected() {

@@ -47,6 +47,17 @@ export type RunWorkflowSnapshot = Readonly<{
   qoderAvailability: AgentProviderAvailabilitySnapshot;
   agentCatalog: AgentCatalogSnapshot;
   agentPresentation: AgentProviderPresentation;
+  accessRepair: Readonly<{
+    projectId: string;
+    documentId: string;
+    sourcePath: string;
+    requestId: string;
+    attemptId: string;
+    providerId: string | null;
+    configurationDigest: string | null;
+    credentialGeneration: number | null;
+    field: "apiKey" | "login" | "install";
+  }> | null;
 }>;
 
 export type RunWorkflowEvent = Readonly<{
@@ -197,6 +208,26 @@ export class RunWorkflow {
   }): Promise<RunWorkflowOutcome<{ recovered: number; attempted: number }>>;
   freezeAgentSelection(): AgentSelection | null;
   selectAgent(selection: AgentSelection): AgentSelection;
+  queuePendingDefaultAgent(selection: AgentSelection): AgentSelection;
+  pendingDefaultAgent(): AgentSelection | null;
+  readyPendingDefaultAgent(): AgentSelection | null;
+  clearPendingDefaultAgent(): null;
+  beginAccessRepair(
+    run?: ActiveRun | null,
+    field?: "apiKey" | "login" | "install",
+  ): Readonly<{
+    projectId: string;
+    documentId: string;
+    sourcePath: string;
+    requestId: string;
+    attemptId: string;
+    providerId: string | null;
+    configurationDigest: string | null;
+    credentialGeneration: number | null;
+    field: "apiKey" | "login" | "install";
+  }> | null;
+  clearAccessRepair(): null;
+  resendAfterAccessRepair(run?: ActiveRun | null): Promise<RunWorkflowOutcome>;
   selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   applyDisabledAgentProviders(ids?: readonly string[]): void;

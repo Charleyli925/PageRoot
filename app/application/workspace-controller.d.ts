@@ -580,6 +580,30 @@ export class WorkspaceController {
   selectAgent(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
   ): import("../domain/agent-provider-state.js").AgentSelection;
+  queuePendingDefaultAgent(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+  ): import("../domain/agent-provider-state.js").AgentSelection;
+  pendingDefaultAgent(): import("../domain/agent-provider-state.js").AgentSelection | null;
+  readyPendingDefaultAgent(): import("../domain/agent-provider-state.js").AgentSelection | null;
+  clearPendingDefaultAgent(): null;
+  beginAccessRepair(
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null,
+    field?: "apiKey" | "login" | "install",
+  ): Readonly<{
+    projectId: string;
+    documentId: string;
+    sourcePath: string;
+    requestId: string;
+    attemptId: string;
+    providerId: string | null;
+    configurationDigest: string | null;
+    credentialGeneration: number | null;
+    field: "apiKey" | "login" | "install";
+  }> | null;
+  clearAccessRepair(): null;
+  resendAfterAccessRepair(
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null,
+  ): Promise<RunWorkflowOutcome>;
   selectAgentModel(modelId: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
   selectAgentReasoning(reasoning: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
   applyDisabledAgentProviders(ids?: readonly string[]): void;
