@@ -39,6 +39,7 @@ export type AgentProviderCardPresentation = Readonly<{
   }>;
   supportsApiKey?: boolean;
   credentialKind?: "api-token" | null;
+  supportsSelectableModels?: boolean;
   vendors?: readonly VendorOption[];
 }>;
 
@@ -563,7 +564,7 @@ export default function AgentProviderCard({
           {apiKeyOpen ? "收起配置" : (provider.actions.apiKey?.label || "更换 Token")}
         </button>
       ) : null}
-          {connection && models.length > 1 && onSelectModel ? (
+          {availability.status === "ready" && models.length > 1 && onSelectModel ? (
             <label className="qoder-card-model-choice">
               <span>当前模型</span>
           <select
