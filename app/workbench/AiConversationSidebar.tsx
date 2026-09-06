@@ -94,9 +94,14 @@ export type AiConversationSidebarProps = {
     recovery?: null | Readonly<{
       documentId: string;
       providerId: string | null;
-      field: "apiKey" | "login" | "install";
+      field: "apiKey" | "login" | "install" | "model" | "provider";
       requestId?: string;
       attemptId?: string;
+      lastOutcome?: Readonly<{
+        status: string;
+        code: string | null;
+        reason: string;
+      }> | null;
     }>;
     bindings: Omit<
       BoundAgentSetupPanelProps,
@@ -105,7 +110,7 @@ export type AiConversationSidebarProps = {
     onSelect(selection: AgentSelection): void;
     onQueueDefault?(selection: AgentSelection): void;
     onReconnect?(selection: AgentSelection): Promise<unknown>;
-    onBeginAccessRepair?(field?: "apiKey" | "login" | "install"): void;
+    onBeginAccessRepair?(field?: "apiKey" | "login" | "install" | "model" | "provider"): void;
   }>;
   /** What the selected Agent is saying while it works (ADR 0037). */
   agentText?: string;
@@ -371,10 +376,18 @@ export default function AiConversationSidebar({
   const currentProviderId = agentPresentation?.providerId
     || agentAccess?.cards.find((card) => card.availability.status === "ready")?.selection.providerId
     || "";
+  const currentCard = agentAccess?.cards.find((card) => card.selection.providerId === currentProviderId)
+    || setupCard;
+  const canChooseModel = currentCard?.presentation?.supportsSelectableModels === true
+    || currentCard?.presentation?.credentialKind === "api-token";
   const serviceTriggerLabel = (() => {
     const name = agentServiceLabel(currentProviderId, schemeName);
+    const currentCardForLabel = currentCard;
     if (currentProviderId === "pageroot" && catalogStatus === "ready") {
-      return `DeepSeek · ${selectedModel?.displayName || "当前模型"}`;
+      const vendor = currentCardForLabel?.connection?.vendorDisplayName
+        || currentCardForLabel?.connection?.vendorId
+        || "兼容接口";
+      return `${vendor} · ${selectedModel?.displayName || "当前模型"}`;
     }
     if (catalogStatus === "ready") {
       return `${name} · ${selectedModel?.displayName || "默认模型"}`;
@@ -864,6 +877,18 @@ export default function AiConversationSidebar({
                   {agentAccess.cards.map((card) => {
                     const snapshot = card.presentation.availability(card.availability);
                     const disconnected = card.availability.reason === "disabled";
+                    const chooseService = () => {
+                      if (card.availability.status === "ready") {
+                        agentAccess.onSelect(card.selection);
+                        setOpenChoice(null);
+                        setSetupProviderId(null);
+                        return;
+                      }
+                      agentAccess.onQueueDefault?.(card.selection);
+                      if (disconnected) void agentAccess.onReconnect?.(card.selection);
+                      setSetupProviderId(card.selection.providerId);
+                      setOpenChoice(null);
+                    };
                     return (
                       <button
                         key={card.selection.providerId}
@@ -873,19 +898,9 @@ export default function AiConversationSidebar({
                         data-testid={`ai-conversation-service-${card.selection.providerId}`}
                         onPointerDown={(event) => {
                           event.preventDefault();
+                          chooseService();
                         }}
-                        onClick={() => {
-                          if (card.availability.status === "ready") {
-                            agentAccess.onSelect(card.selection);
-                            setOpenChoice(null);
-                            setSetupProviderId(null);
-                            return;
-                          }
-                          agentAccess.onQueueDefault?.(card.selection);
-                          if (disconnected) void agentAccess.onReconnect?.(card.selection);
-                          setSetupProviderId(card.selection.providerId);
-                          setOpenChoice(null);
-                        }}
+                        onClick={chooseService}
                       >
                         <strong>{agentServiceLabel(card.selection.providerId, card.presentation.displayName)}</strong>
                         <span>{disconnected ? "已断开" : snapshot.statusLabel}</span>
@@ -919,7 +934,7 @@ export default function AiConversationSidebar({
                   </span>
                 ) : null}
 
-                {openChoice === "model" && models.length > 1 ? (
+                {openChoice === "model" && canChooseModel && models.length > 1 ? (
                   <div
                     id="ai-conversation-model-choices"
                     className={styles.agentChoices}
@@ -1057,6 +1072,9 @@ export default function AiConversationSidebar({
         {recoveredOnOrigin || recoveredElsewhere ? (
           <p className={styles.recoveredBar} data-testid="ai-conversation-access-recovered">
             连接已恢复
+            {recovery?.lastOutcome?.reason ? (
+              <span>{recovery.lastOutcome.reason}</span>
+            ) : null}
             {recoveredOnOrigin ? (
               <button
                 type="button"

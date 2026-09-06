@@ -52,7 +52,8 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
   assert.match(card, /未勾选记住时仅本次使用/u);
   assert.match(card, /验证成功后才会替换当前连接/u);
   assert.match(card, /persistFailed \|\| outcome\?\.reason/u);
-  assert.match(card, /可稍后重试记住/u);
+  assert.match(card, /已连接，但新的 API Key 未保存/u);
+  assert.match(card, /重试保存/u);
   assert.match(card, /kind: "api-key", label: "连接"/u);
   assert.doesNotMatch(card, /kind: "api-key", label: "登录"/u);
   assert.match(card, /tokenFormOpen/u);
@@ -96,6 +97,9 @@ test("About is product information while Settings owns Agent checks and update c
   assert.match(settings, /正在处理…/u);
   assert.doesNotMatch(settings, /expandedId \|\| selectedChoiceId/u);
   assert.match(settings, /setExpandedId\(expanded \? null : id\)/u);
+  assert.doesNotMatch(settings, /settings-agent-scheme/u);
+  assert.match(settings, /停止并退出/u);
+  assert.match(settings, /providerAccessImpact/u);
   assert.doesNotMatch(settings, /setConfirmAction\(null\);\s+if \(action\.kind === "remove-key"\)/u);
 });
 
@@ -122,4 +126,14 @@ test("Settings reuses AgentSetupPanel and lists every service row", async () => 
   assert.match(panel, /credentialKind === "api-token"/u);
   assert.doesNotMatch(panel, /if \(card\.connection\)/u);
   assert.match(panel, /supportsSelectableModels === true/u);
+  assert.match(panel, /key=\{`\$\{card\.selection\.providerId\}:\$\{card\.selection\.runtimeId\}`\}/u);
+  assert.doesNotMatch(panel, /resolvedModelId \|\| "none"/u);
+});
+
+test("the conversation sidebar names pageroot from the connection summary", async () => {
+  const sidebar = await source("../app/workbench/AiConversationSidebar.tsx");
+  assert.match(sidebar, /vendorDisplayName/u);
+  assert.doesNotMatch(sidebar, /DeepSeek ·/u);
+  assert.match(sidebar, /recovery\.lastOutcome/u);
+  assert.match(sidebar, /supportsSelectableModels === true/u);
 });

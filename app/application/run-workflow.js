@@ -369,6 +369,8 @@ export class RunWorkflow {
   #uncertainSubmissions = new Map();
   #agentStartsPending = new Set();
   #accessRepair = null;
+  #repairIntentSeq = 0;
+  #defaultCommitSeq = 0;
   #disposed = false;
 
   constructor({
@@ -504,6 +506,7 @@ export class RunWorkflow {
       agentPresentation: this.#agentCatalog.presentation(),
       qoderAvailability: this.#agentCatalog.displayAvailability(),
       accessRepair: this.#accessRepair,
+      providerAccessImpact: this.#providerAccessImpact(),
     });
   }
 
@@ -726,6 +729,12 @@ export class RunWorkflow {
       if (cancelled) {
         return succeeded({ cancelled: true, availability: this.#agentCatalog.availability(frozen) });
       }
+      if (cause?.code === "AGENT_LOGIN_CANCEL_FAILED") {
+        return rejected(
+          "AGENT_LOGIN_CANCEL_FAILED",
+          this.#codecs.errorMessage(cause, "无法确认登录进程已退出。"),
+        );
+      }
       return rejected(
         errorCode(cause, "AGENT_LOGIN_FAILED"),
         this.#codecs.errorMessage(cause, `暂时无法完成 ${displayName} 登录。`),
@@ -820,7 +829,12 @@ export class RunWorkflow {
     } catch (cause) {
       return rejected(
         errorCode(cause, "AGENT_INSTALL_CANCEL_FAILED"),
-        this.#codecs.errorMessage(cause, `暂时无法取消 ${displayName} 安装。`),
+        this.#codecs.errorMessage(
+          cause,
+          cause?.code === "AGENT_LOGIN_CANCEL_FAILED"
+            ? "无法确认操作已停止。"
+            : `暂时无法取消 ${displayName} 安装。`,
+        ),
       );
     }
   }
@@ -2229,10 +2243,12 @@ export class RunWorkflow {
   }
 
   selectAgent(selection) {
+    this.#defaultCommitSeq += 1;
     return this.#agentCatalog.select(selection);
   }
 
   queuePendingDefaultAgent(selection) {
+    this.#defaultCommitSeq += 1;
     return this.#agentCatalog.queuePendingDefault(selection);
   }
 
@@ -2244,66 +2260,161 @@ export class RunWorkflow {
     return this.#agentCatalog.readyPendingDefault();
   }
 
-  clearPendingDefaultAgent() {
-    return this.#agentCatalog.clearPendingDefault();
+  clearPendingDefaultAgent(expectedIntentId) {
+    this.#defaultCommitSeq += 1;
+    return this.#agentCatalog.clearPendingDefault(expectedIntentId);
   }
 
-  beginAccessRepair(run = this.#runSession.activeRun, field = "apiKey") {
-    if (!run?.requestId || run.requestId === "pending") return null;
-    const delivery = deliveryForRun(run);
+  async commitPendingDefaultAgent(selection, { saveDefault } = {}) {
+    const pending = this.#agentCatalog.peekPendingDefaultIntent();
+    if (!pending) return succeeded({ committed: false });
+    const queued = pending.validatedSelection || pending.queuedSelection;
+    if (selection && queued.providerId !== selection.providerId) {
+      return succeeded({ committed: false });
+    }
+    const ready = this.#agentCatalog.readyPendingDefault();
+    if (!ready) return succeeded({ committed: false });
+    const intentId = pending.intentId;
+    const generation = this.#defaultCommitSeq;
+    if (typeof saveDefault === "function") {
+      await saveDefault(ready.providerId);
+    }
+    if (generation !== this.#defaultCommitSeq
+      || this.#agentCatalog.peekPendingDefaultIntent()?.intentId !== intentId) {
+      const current = this.#agentCatalog.freezeSelected();
+      if (
+        current
+        && current.providerId !== ready.providerId
+        && typeof saveDefault === "function"
+      ) {
+        await saveDefault(current.providerId);
+      }
+      return succeeded({ committed: false, superseded: true });
+    }
+    const committed = this.#agentCatalog.commitPendingDefault(intentId);
+    return succeeded({
+      committed: Boolean(committed),
+      selection: committed,
+    });
+  }
+
+  beginAccessRepair(run, field = "apiKey") {
+    const target = run;
+    if (!target?.requestId || target.requestId === "pending") return null;
+    const context = this.#projectSession.context;
+    const delivery = deliveryForRun(target);
+    const allowed = ["apiKey", "login", "install", "model", "provider"];
+    this.#repairIntentSeq += 1;
     this.#accessRepair = Object.freeze({
-      projectId: run.projectId,
-      documentId: run.documentId,
-      sourcePath: run.sourcePath,
-      requestId: run.requestId,
-      attemptId: run.attemptId,
+      repairIntentId: `repair-${this.#repairIntentSeq}`,
+      projectId: target.projectId,
+      documentId: target.documentId,
+      sourcePath: target.sourcePath,
+      requestId: target.requestId,
+      attemptId: target.attemptId,
+      sessionEpoch: Number.isSafeInteger(Number(context?.epoch)) ? Number(context.epoch) : null,
       providerId: delivery?.selection?.providerId || null,
       configurationDigest: delivery?.configuration?.configurationDigest || null,
       credentialGeneration: delivery?.configuration?.credentialGeneration ?? null,
-      field: field === "login" || field === "install" ? field : "apiKey",
+      field: allowed.includes(field) ? field : "apiKey",
+      lastOutcome: null,
     });
     this.#publishSnapshot();
     return this.#accessRepair;
   }
 
-  clearAccessRepair() {
+  clearAccessRepair(expectedIntentId) {
     if (!this.#accessRepair) return null;
+    if (expectedIntentId && this.#accessRepair.repairIntentId !== expectedIntentId) {
+      return this.#accessRepair;
+    }
     this.#accessRepair = null;
     this.#publishSnapshot();
     return null;
   }
 
-  async resendAfterAccessRepair(run = this.#runSession.activeRun) {
+  async resendAfterAccessRepair() {
     const repair = this.#accessRepair;
-    const context = this.#projectSession.context;
-    if (repair) {
-      if (
-        !context
-        || repair.documentId !== context.documentId
-        || !this.#codecs.sameSourcePath(repair.sourcePath, context.sourcePath)
-      ) {
-        return rejected(
+    if (!repair) {
+      return this.startAgent({ run: this.#runSession.activeRun });
+    }
+    const intentId = repair.repairIntentId;
+    const noteOutcome = (outcome) => {
+      if (this.#accessRepair?.repairIntentId !== intentId) return outcome;
+      this.#accessRepair = Object.freeze({
+        ...this.#accessRepair,
+        lastOutcome: Object.freeze({
+          status: outcome.status,
+          code: outcome.code || null,
+          reason: outcome.reason || "",
+        }),
+      });
+      this.#publishSnapshot();
+      return outcome;
+    };
+    const matchesRepairContext = () => {
+      const context = this.#projectSession.context;
+      return Boolean(
+        context
+        && repair.projectId === context.projectId
+        && repair.documentId === context.documentId
+        && this.#codecs.sameSourcePath(repair.sourcePath, context.sourcePath)
+        && (repair.sessionEpoch == null || repair.sessionEpoch === context.epoch)
+      );
+    };
+    if (!matchesRepairContext()) {
+      return noteOutcome(rejected(
+        "AGENT_REPAIR_DOCUMENT_CHANGED",
+        "当前文件已变化，不会重新发送。",
+      ));
+    }
+    const tracked = this.#runSession.runForSource(repair.sourcePath);
+    if (
+      tracked
+      && (tracked.requestId !== repair.requestId || tracked.attemptId !== repair.attemptId)
+    ) {
+      this.#accessRepair = null;
+      this.#publishSnapshot();
+      return rejected(
+        "AGENT_REPAIR_ATTEMPT_CHANGED",
+        "原任务已结束，当前文件已开始新的一轮。",
+      );
+    }
+    if (tracked && this.#runSession.hasRun(tracked)) {
+      const cancelled = await this.cancel({ run: tracked, agentMayBeRunning: true });
+      if (this.#accessRepair?.repairIntentId !== intentId) {
+        return rejected("AGENT_REPAIR_STALE", "修复意图已被更新。");
+      }
+      if (!matchesRepairContext()) {
+        return noteOutcome(rejected(
           "AGENT_REPAIR_DOCUMENT_CHANGED",
           "当前文件已变化，不会重新发送。",
-        );
+        ));
+      }
+      if (cancelled.status !== "succeeded" && cancelled.status !== "stale") {
+        return noteOutcome(cancelled);
       }
     }
-    const target = run
-      || (repair ? this.#runSession.runForSource(repair.sourcePath) : null)
-      || this.#runSession.activeRun;
-    const delivery = deliveryForRun(target);
-    if (!repair) {
-      return this.startAgent({ run: target });
+    if (this.#accessRepair?.repairIntentId !== intentId) {
+      return rejected("AGENT_REPAIR_STALE", "修复意图已被更新。");
     }
-    if (target && this.#runSession.hasRun(target)) {
-      const cancelled = await this.cancel({ run: target, agentMayBeRunning: true });
-      if (cancelled.status === "rejected") return cancelled;
+    if (!matchesRepairContext()) {
+      return noteOutcome(rejected(
+        "AGENT_REPAIR_DOCUMENT_CHANGED",
+        "当前文件已变化，不会重新发送。",
+      ));
     }
-    this.#accessRepair = null;
-    this.#publishSnapshot();
-    return this.submit({
+    const delivery = deliveryForRun(tracked);
+    const outcome = await this.submit({
       deliveryMode: delivery?.mode || MANAGED_AGENT_MODE,
     });
+    if (this.#accessRepair?.repairIntentId !== intentId) return outcome;
+    if (outcome.status === "succeeded") {
+      this.#accessRepair = null;
+      this.#publishSnapshot();
+      return outcome;
+    }
+    return noteOutcome(outcome);
   }
 
   selectAgentModel(modelId, expectedSelection) {
@@ -2325,6 +2436,7 @@ export class RunWorkflow {
         models: this.#agentCatalog.provider(selection)?.models || [],
         connection: this.#agentCatalog.provider(selection)?.connection || null,
         selection: connection?.selection || null,
+        credentialPersist: this.#agentCatalog.credentialPersist(selection.providerId),
       }))
       .catch((cause) => {
         const code = errorCode(cause, "AGENT_SESSION_CREDENTIAL_INVALID");
@@ -2345,6 +2457,32 @@ export class RunWorkflow {
       .catch((cause) => rejected(
         errorCode(cause, "AGENT_SESSION_CREDENTIAL_CLEAR_FAILED"),
         this.#codecs.errorMessage(cause, "断开连接没有完成。"),
+      ));
+  }
+
+  holdAgentCredential(selection, payload) {
+    return this.#agentCatalog.holdRememberedCredential(selection?.providerId, payload);
+  }
+
+  noteAgentCredentialPersist(selection, result) {
+    return this.#agentCatalog.noteCredentialPersist(selection?.providerId, result);
+  }
+
+  retryAgentCredentialPersist(selection, persist) {
+    return this.#agentCatalog.retryRememberedCredential(selection?.providerId, persist)
+      .then((credentialPersist) => (
+        credentialPersist?.status === "failed"
+          ? Object.freeze({
+            status: "succeeded",
+            persistFailed: true,
+            reason: credentialPersist.reason || "已连接，但新的 API Key 未保存。",
+            value: { credentialPersist },
+          })
+          : succeeded({ credentialPersist })
+      ))
+      .catch((cause) => rejected(
+        errorCode(cause, "AGENT_CREDENTIAL_RETRY_UNAVAILABLE"),
+        this.#codecs.errorMessage(cause, "没有可重试保存的 API Key。"),
       ));
   }
 
@@ -2387,6 +2525,9 @@ export class RunWorkflow {
       }
       return this.checkAgentUsability(frozen);
     }
+    if (kind === "logout") {
+      return this.startAgentLogout(frozen);
+    }
     let disconnect = succeeded({ kind });
     if (frozen.providerId === "pageroot" && (kind === "disconnect" || kind === "remove-key")) {
       disconnect = await this.disconnectAgentApiKey(frozen);
@@ -2418,6 +2559,30 @@ export class RunWorkflow {
       }
     }
     return succeeded({ kind });
+  }
+
+  #providerAccessImpact() {
+    const impact = new Map();
+    for (const run of this.#runSession.runs) {
+      const delivery = deliveryForRun(run);
+      const providerId = delivery?.selection?.providerId;
+      if (!providerId) continue;
+      const handoff = this.#runSession.handoffForSource(run.sourcePath);
+      const running = run.status === "processing"
+        || ["starting", "running", "cancelling"].includes(String(handoff?.status || ""));
+      if (!running) continue;
+      const current = impact.get(providerId) || { runningCount: 0, documentIds: new Set() };
+      current.runningCount += 1;
+      current.documentIds.add(run.documentId);
+      impact.set(providerId, current);
+    }
+    return Object.freeze(Object.fromEntries([...impact].map(([providerId, value]) => [
+      providerId,
+      Object.freeze({
+        runningCount: value.runningCount,
+        documentCount: value.documentIds.size,
+      }),
+    ])));
   }
 
   #publishSnapshot() {

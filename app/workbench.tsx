@@ -678,8 +678,11 @@ export default function Workbench() {
   const runSnapshot = workspaceControllerSnapshot?.runSession
     ?? INITIAL_RUN_SNAPSHOT;
   const agentCatalogSnapshot = workspaceControllerSnapshot?.run?.agentCatalog ?? null;
-  const frozenAgentSelection = runSnapshot.activeRun?.agentDelivery?.selection
+  const catalogDisplaySelection = agentCatalogSnapshot?.displaySelection
     ?? agentCatalogSnapshot?.selected
+    ?? null;
+  const frozenAgentSelection = runSnapshot.activeRun?.agentDelivery?.selection
+    ?? catalogDisplaySelection
     ?? null;
   const frozenProvider = frozenAgentSelection
     ? agentCatalogSnapshot?.providers?.[frozenAgentSelection.providerId]
@@ -4862,13 +4865,13 @@ export default function Workbench() {
     workspaceController,
   ]);
   const commitPendingDefaultIfReady = useCallback(async (selection: AgentSelection) => {
-    const ready = workspaceController?.readyPendingDefaultAgent?.();
-    if (!ready || ready.providerId !== selection.providerId) return;
-    await workspacePreferencesController.update({
-      defaultAgentProviderId: ready.providerId as WorkspacePreferences["defaultAgentProviderId"],
+    await workspaceController?.commitPendingDefaultAgent?.(selection, {
+      saveDefault: async (providerId) => {
+        await workspacePreferencesController.update({
+          defaultAgentProviderId: providerId as WorkspacePreferences["defaultAgentProviderId"],
+        });
+      },
     });
-    workspaceController?.selectAgent(ready);
-    workspaceController?.clearPendingDefaultAgent();
   }, [workspaceController, workspacePreferencesController]);
   const checkAgentUsability = useCallback(async (selection?: AgentSelection) => (
     workspaceController?.checkAgentUsability(selection) ?? null
@@ -4885,9 +4888,6 @@ export default function Workbench() {
   }, [commitPendingDefaultIfReady, workspaceController]);
   const reopenAgentLogin = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.reopenAgentLogin(selection) ?? null
-  ), [workspaceController]);
-  const startAgentLogout = useCallback(async (selection?: AgentSelection | null) => (
-    workspaceController?.startAgentLogout(selection) ?? null
   ), [workspaceController]);
   const installAgent = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.installAgent(selection) ?? null
@@ -4910,6 +4910,12 @@ export default function Workbench() {
     const integrations = window.htmlAIIntegrations;
     try {
       if (extras?.remember === true && apiKey) {
+        workspaceController?.holdAgentCredential?.(selection, {
+          apiKey,
+          vendorId: extras.vendorId,
+          baseUrl: extras.baseUrl,
+          modelId: extras.modelId,
+        });
         const persisted = await integrations?.persistSessionCredential?.({
           apiKey,
           vendorId: extras.vendorId,
@@ -4917,22 +4923,33 @@ export default function Workbench() {
           modelId: extras.modelId,
         });
         if (persisted && persisted.ok === false) {
+          const reason = persisted.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
+            ? "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。"
+            : "已连接，但新的 API Key 未保存。";
+          workspaceController?.noteAgentCredentialPersist?.(selection, {
+            status: "failed",
+            reason,
+          });
           await commitPendingDefaultIfReady(selection);
           return Object.freeze({
             ...outcome,
             persistFailed: true,
-            reason: persisted.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
-              ? "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。"
-              : "已连接，但记住 API Key 失败。本次仍可使用，可稍后重试记住。",
+            reason,
           });
         }
+        workspaceController?.noteAgentCredentialPersist?.(selection, { status: "saved" });
       }
     } catch {
+      const reason = "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。";
+      workspaceController?.noteAgentCredentialPersist?.(selection, {
+        status: "failed",
+        reason,
+      });
       await commitPendingDefaultIfReady(selection);
       return Object.freeze({
         ...outcome,
         persistFailed: true,
-        reason: "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。",
+        reason,
       });
     }
     await commitPendingDefaultIfReady(selection);
@@ -5264,7 +5281,7 @@ export default function Workbench() {
   }, [activeRun, runCapability]);
 
   const manageAgentAccess = useCallback(async (
-    kind: "disconnect" | "remove-key" | "reconnect",
+    kind: "disconnect" | "remove-key" | "reconnect" | "logout",
     selection: AgentSelection,
   ) => {
     const disabledIds = workspacePreferences.disabledAgentProviderIds;
@@ -5713,9 +5730,7 @@ export default function Workbench() {
   // decision no longer requires a panel over the page.
   const handleAiDecision = useCallback((actionId: string) => {
     if (actionId === "resend-agent" || actionId === "retry-later") {
-      if (activeRun) {
-        void workspaceControllerRef.current?.resendAfterAccessRepair(activeRun);
-      }
+      void workspaceControllerRef.current?.resendAfterAccessRepair();
       return;
     }
     if ([
@@ -5727,11 +5742,16 @@ export default function Workbench() {
       "switch-agent",
     ].includes(actionId)) {
       void (async () => {
-        if (activeRun && !(await cancelActiveRun())) return;
-        workspaceControllerRef.current?.beginAccessRepair(
-          activeRun,
-          actionId === "repair-agent-installation" ? "install" : "login",
-        );
+        const run = activeRun;
+        const field = actionId === "repair-agent-installation"
+          ? "install"
+          : actionId === "change-agent-model"
+            ? "model"
+            : actionId === "change-agent-provider" || actionId === "switch-agent"
+              ? "provider"
+              : "login";
+        workspaceControllerRef.current?.beginAccessRepair(run, field);
+        if (run) await cancelActiveRun();
         workspaceControllerRef.current?.runs.commands.dismiss();
         setHandoffPreviewOpen(false);
         setCanvasMode("edit");
@@ -5835,6 +5855,7 @@ export default function Workbench() {
   // both preview sessions (and retitle the header) mid-accept for nothing.
   const selectDefaultAgent = (selection: AgentSelection) => {
     try {
+      workspaceController?.clearPendingDefaultAgent?.();
       const selected = workspaceController?.selectAgent(selection);
       if (selected) {
         void workspacePreferencesController.update({
@@ -5859,11 +5880,25 @@ export default function Workbench() {
       onCopyGuidance: copyAgentGuidance,
       onStartLogin: startAgentLogin,
       onReopenLogin: reopenAgentLogin,
-      onLogoutAgent: startAgentLogout,
+      onLogoutAgent: (selection: AgentSelection) => manageAgentAccess("logout", selection),
       onInstall: installAgent,
       onCancelInstall: cancelAgentInstall,
       onCheckSelection: checkAgentUsability,
       onConnectApiKey: connectAgentApiKey,
+      onRetryPersistCredential: (selection: AgentSelection) => (
+        workspaceController?.retryAgentCredentialPersist?.(selection, (held) => (
+          window.htmlAIIntegrations?.persistSessionCredential?.({
+            apiKey: held.apiKey,
+            vendorId: held.vendorId ?? undefined,
+            baseUrl: held.baseUrl ?? undefined,
+            modelId: held.modelId ?? undefined,
+          })
+          ?? Promise.resolve({ ok: false })
+        )) ?? Promise.resolve({
+          status: "rejected",
+          reason: "没有可重试保存的 API Key。",
+        })
+      ),
       onDisconnectApiKey: disconnectAgentApiKey,
       onOpenVendorApiKeyPage: openVendorApiKeyPage,
       onSelectAgentModel: selectSettingsAgentModel,
@@ -5880,7 +5915,7 @@ export default function Workbench() {
       }
       return outcome;
     },
-    onBeginAccessRepair: (field: "apiKey" | "login" | "install" = "apiKey") => {
+    onBeginAccessRepair: (field: "apiKey" | "login" | "install" | "model" | "provider" = "apiKey") => {
       if (activeRun) workspaceController?.beginAccessRepair(activeRun, field);
     },
   };
@@ -6424,16 +6459,30 @@ export default function Workbench() {
           onCopyGuidance={copyAgentGuidance}
           onStartLogin={startAgentLogin}
           onReopenLogin={reopenAgentLogin}
-          onLogoutAgent={startAgentLogout}
+          onLogoutAgent={(selection) => manageAgentAccess("logout", selection)}
           onInstall={installAgent}
           onCancelInstall={cancelAgentInstall}
           onConnectApiKey={connectAgentApiKey}
+          onRetryPersistCredential={(selection) => (
+            workspaceController?.retryAgentCredentialPersist?.(selection, (held) => (
+              window.htmlAIIntegrations?.persistSessionCredential?.({
+                apiKey: held.apiKey,
+                vendorId: held.vendorId ?? undefined,
+                baseUrl: held.baseUrl ?? undefined,
+                modelId: held.modelId ?? undefined,
+              })
+              ?? Promise.resolve({ ok: false })
+            )) ?? Promise.resolve({
+              status: "rejected",
+              reason: "没有可重试保存的 API Key。",
+            })
+          )}
           onDisconnectApiKey={disconnectAgentApiKey}
           onDisconnectProvider={(selection) => manageAgentAccess("disconnect", selection)}
           onRemoveRememberedKey={(selection) => manageAgentAccess("remove-key", selection)}
           onReconnectProvider={(selection) => manageAgentAccess("reconnect", selection)}
           onOpenVendorApiKeyPage={openVendorApiKeyPage}
-          busyProviderId={runInProgress ? frozenAgentSelection?.providerId || null : null}
+          providerAccessImpact={workspaceControllerSnapshot?.run?.providerAccessImpact ?? {}}
           onSelectAgentModel={selectSettingsAgentModel}
           onSelectAgentReasoning={selectSettingsAgentReasoning}
         />

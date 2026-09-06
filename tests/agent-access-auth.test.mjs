@@ -138,3 +138,27 @@ test("login jobs keep a terminal snapshot until the next login and drain waiting
   assert.equal(cancelled, true);
   assert.equal(auth.snapshot("qoder").loginState, "cancelled");
 });
+
+test("cleanup failure stays stop-unconfirmed and does not drain as cancelled", async () => {
+  const auth = createAgentAccessAuth({ timeoutMs: 40 });
+  await auth.login("qoder", async ({ signal }) => {
+    await new Promise((resolve, reject) => {
+      const failCleanup = () => {
+        reject(Object.assign(new Error("cleanup failed"), {
+          code: "AGENT_LOGIN_CANCEL_FAILED",
+        }));
+      };
+      if (signal.aborted) {
+        failCleanup();
+        return;
+      }
+      signal.addEventListener("abort", failCleanup);
+    });
+  });
+  assert.equal(auth.snapshot("qoder").loginState, "waiting");
+  await auth.cancel("qoder");
+  assert.equal(auth.snapshot("qoder").loginState, "stop-unconfirmed");
+  assert.equal(auth.snapshot("qoder").errorCode, "AGENT_LOGIN_CANCEL_FAILED");
+  assert.equal(await auth.drain({ timeoutMs: 50 }), false);
+  assert.equal(auth.snapshot("qoder").loginState, "stop-unconfirmed");
+});

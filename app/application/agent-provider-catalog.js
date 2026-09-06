@@ -18,6 +18,10 @@ import {
   accessOperationId,
   createAccessOperation,
   finishAccessOperation,
+  isBlockingAccessOperation,
+  isInFlightAccessOperation,
+  pickActiveAccessOperation,
+  projectAccessOperations,
   publicAccessOperation,
   requestCancelAccessOperation,
 } from "../../shared/agent-access-operation.mjs";
@@ -436,6 +440,59 @@ function agentProviderDisplayAvailability(provider) {
     : diagnosticAvailability;
 }
 
+function providerReadyForPending(provider) {
+  return provider?.availability?.status === "ready"
+    || provider?.diagnostic?.readiness === "ready";
+}
+
+function projectListedConnection(currentConnection, listedConnection) {
+  const current = currentConnection || null;
+  if (listedConnection?.authSource) {
+    return Object.freeze({
+      ...(current || {}),
+      authSource: listedConnection.authSource,
+      authScope: listedConnection.authScope || null,
+    });
+  }
+  if (!current) return null;
+  if (listedConnection !== null) return current;
+  if (current.vendorId || current.vendorDisplayName || current.baseUrl) {
+    if (!current.authSource && !current.authScope) return current;
+    return Object.freeze({
+      vendorId: current.vendorId || "",
+      vendorDisplayName: current.vendorDisplayName || "",
+      baseUrl: current.baseUrl || "",
+    });
+  }
+  return null;
+}
+
+function currentAccessOperation(provider) {
+  return publicAccessOperation(provider?.activeOperation)
+    || publicAccessOperation(provider?.lastOperation);
+}
+
+function finishProviderOperation(provider, operation, { state, errorCode = null } = {}) {
+  const current = publicAccessOperation(operation);
+  if (!current) {
+    return Object.freeze({
+      activeOperation: provider?.activeOperation || null,
+      lastOperation: provider?.lastOperation || null,
+    });
+  }
+  const finished = finishAccessOperation(current, { state, errorCode });
+  if (isBlockingAccessOperation(finished)) {
+    return Object.freeze({
+      activeOperation: finished,
+      lastOperation: provider?.lastOperation || null,
+    });
+  }
+  return Object.freeze({
+    activeOperation: null,
+    lastOperation: finished,
+  });
+}
+
 export function agentProviderCardsFromCatalog(snapshot) {
   const selected = snapshot?.selected || null;
   return Object.freeze(Object.values(snapshot?.providers ?? {})
@@ -462,6 +519,8 @@ export function agentProviderCardsFromCatalog(snapshot) {
       models: Array.isArray(provider.models) ? provider.models : Object.freeze([]),
       credentialConfigured: provider.credentialConfigured === true,
       connection: provider.connection || null,
+      credentialPersist: provider.credentialPersist || null,
+      lastOperation: provider.lastOperation || null,
       loginUrlPresent: provider.loginUrlPresent === true,
       loginOpenError: provider.loginOpenError || null,
       enabled: provider.enabled !== false,
@@ -482,7 +541,9 @@ function frozenProviderEntry(descriptor, previous = null) {
     installationDigest: previous?.installationDigest || null,
     models: previous?.models || Object.freeze([]),
     credentialConfigured: previous?.credentialConfigured === true,
-    connection: previous?.connection || descriptor.connection || null,
+      connection: previous?.connection || descriptor.connection || null,
+      credentialPersist: previous?.credentialPersist || null,
+      lastOperation: previous?.lastOperation || null,
       loginUrlPresent: previous?.loginUrlPresent === true || descriptor.loginUrlPresent === true,
     loginOpenError: previous?.loginOpenError || null,
     enabled: previous?.enabled !== false,
@@ -595,6 +656,8 @@ export class AgentCatalogState {
   #listeners = new Set();
   #disposed = false;
   #pendingDefault = null;
+  #pendingDefaultSeq = 0;
+  #heldCredentials = new Map();
 
   constructor({
     bridgeClient,
@@ -668,7 +731,8 @@ export class AgentCatalogState {
     return Object.freeze({
       providers: frozenRecord(this.#providers.entries()),
       selected: this.#selected,
-      pendingDefault: this.#pendingDefault,
+      pendingDefault: this.pendingDefault(),
+      displaySelection: this.displaySelection(),
       preflightBySelection: frozenRecord(this.#preflightBySelection.entries()),
     });
   }
@@ -733,33 +797,140 @@ export class AgentCatalogState {
         code: "AGENT_PROVIDER_UNSUPPORTED",
       });
     }
-    this.#pendingDefault = frozen;
+    this.#pendingDefaultSeq += 1;
+    this.#pendingDefault = Object.freeze({
+      intentId: `pending-default-${this.#pendingDefaultSeq}`,
+      queuedSelection: frozen,
+      validatedSelection: null,
+    });
     this.#publish();
-    return frozen;
+    return this.pendingDefault();
   }
 
   pendingDefault() {
-    return this.#pendingDefault ? freezeAgentSelection(this.#pendingDefault) : null;
+    const pending = this.#pendingDefault;
+    if (!pending) return null;
+    return freezeAgentSelection(pending.validatedSelection || pending.queuedSelection);
+  }
+
+  peekPendingDefaultIntent() {
+    return this.#pendingDefault;
+  }
+
+  bindPendingDefaultSelection(selection) {
+    const pending = this.#pendingDefault;
+    const frozen = freezeAgentSelection(selection);
+    if (!pending || pending.queuedSelection.providerId !== frozen.providerId) return null;
+    this.#pendingDefault = Object.freeze({
+      ...pending,
+      validatedSelection: frozen,
+    });
+    this.#publish();
+    return this.pendingDefault();
   }
 
   readyPendingDefault() {
     const pending = this.#pendingDefault;
     if (!pending) return null;
-    const provider = this.provider(pending);
-    if (provider?.availability?.status !== "ready") return null;
-    return freezeAgentSelection(pending);
+    const selection = pending.validatedSelection || pending.queuedSelection;
+    const provider = this.provider(selection);
+    if (!providerReadyForPending(provider)) return null;
+    return freezeAgentSelection(selection);
   }
 
-  clearPendingDefault() {
+  clearPendingDefault(expectedIntentId) {
     if (!this.#pendingDefault) return null;
+    if (expectedIntentId && this.#pendingDefault.intentId !== expectedIntentId) {
+      return this.pendingDefault();
+    }
     this.#pendingDefault = null;
     this.#publish();
     return null;
   }
 
+  commitPendingDefault(expectedIntentId) {
+    const pending = this.#pendingDefault;
+    if (!pending || pending.intentId !== expectedIntentId) return null;
+    const ready = this.readyPendingDefault();
+    if (!ready) return null;
+    this.select(ready);
+    if (this.#pendingDefault?.intentId !== expectedIntentId) return ready;
+    this.#pendingDefault = null;
+    this.#publish();
+    return ready;
+  }
+
+  holdRememberedCredential(providerId, payload) {
+    const id = String(providerId || "");
+    const apiKey = String(payload?.apiKey || "");
+    if (!id || !apiKey) return this.credentialPersist(id);
+    this.#heldCredentials.set(id, Object.freeze({
+      apiKey,
+      vendorId: payload?.vendorId || null,
+      baseUrl: payload?.baseUrl || null,
+      modelId: payload?.modelId || null,
+    }));
+    this.#patchProvider(id, {
+      credentialPersist: Object.freeze({
+        status: "pending",
+        reason: null,
+      }),
+    });
+    return this.credentialPersist(id);
+  }
+
+  noteCredentialPersist(providerId, { status, reason = null } = {}) {
+    const id = String(providerId || "");
+    if (status !== "failed") this.#heldCredentials.delete(id);
+    this.#patchProvider(id, {
+      credentialPersist: Object.freeze({
+        status: status === "failed" ? "failed" : status === "saved" ? "saved" : "skipped",
+        reason: status === "failed" ? String(reason || "已连接，但新的 API Key 未保存。") : null,
+      }),
+    });
+    return this.credentialPersist(id);
+  }
+
+  credentialPersist(providerId) {
+    return this.#providers.get(String(providerId || ""))?.credentialPersist || null;
+  }
+
+  async retryRememberedCredential(providerId, persist) {
+    const id = String(providerId || "");
+    const held = this.#heldCredentials.get(id);
+    if (!held || typeof persist !== "function") {
+      throw Object.assign(new Error("没有可重试保存的 API Key。"), {
+        code: "AGENT_CREDENTIAL_RETRY_UNAVAILABLE",
+      });
+    }
+    const persisted = await persist(held);
+    if (persisted && persisted.ok === false) {
+      this.noteCredentialPersist(id, {
+        status: "failed",
+        reason: persisted.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
+          ? "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。"
+          : "已连接，但新的 API Key 未保存。",
+      });
+      return this.credentialPersist(id);
+    }
+    this.noteCredentialPersist(id, { status: "saved" });
+    return this.credentialPersist(id);
+  }
+
   freezeSelected() {
     if (!this.#selected) return null;
     return freezeAgentSelection(this.#selected);
+  }
+
+  displaySelection() {
+    const pending = this.pendingDefault();
+    if (pending) {
+      const availability = this.displayAvailability(pending);
+      if (availability.status !== "ready") {
+        return freezeAgentSelection(pending);
+      }
+    }
+    return this.freezeSelected();
   }
 
   freezeProviderSelection(providerId) {
@@ -780,11 +951,11 @@ export class AgentCatalogState {
     return this.provider(selection)?.availability || INITIAL_AGENT_PROVIDER_AVAILABILITY;
   }
 
-  displayAvailability(selection = this.#selected) {
+  displayAvailability(selection = this.displaySelection()) {
     return agentProviderDisplayAvailability(this.provider(selection));
   }
 
-  presentation(selection = this.#selected) {
+  presentation(selection = this.displaySelection()) {
     const provider = this.provider(selection);
     if (provider) return provider.presentation;
     const providerId = String(selection?.providerId || "Agent");
@@ -1153,6 +1324,9 @@ export class AgentCatalogState {
     this.#generationByProvider.set(frozen.providerId, generation);
     this.#patchProvider(frozen.providerId, {
       installState: "installing",
+      lastOperation: isInFlightAccessOperation(provider.activeOperation)
+        ? provider.lastOperation || null
+        : publicAccessOperation(provider.activeOperation) || provider.lastOperation || null,
       activeOperation: createAccessOperation({
         providerId: frozen.providerId,
         kind: "install",
@@ -1166,13 +1340,28 @@ export class AgentCatalogState {
       this.#patchProvider(frozen.providerId, {
         installState: "idle",
         installSource: "managed",
+        ...finishProviderOperation(
+          this.provider(frozen),
+          this.provider(frozen)?.activeOperation,
+          { state: "succeeded" },
+        ),
       });
       return this.diagnose(
         this.freezeProviderSelection(frozen.providerId) || frozen,
       );
     } catch (cause) {
       const cancelled = cause?.code === "AGENT_INSTALL_CANCELLED";
-      this.#patchProvider(frozen.providerId, { installState: cancelled ? "idle" : "failed" });
+      this.#patchProvider(frozen.providerId, {
+        installState: cancelled ? "idle" : "failed",
+        ...finishProviderOperation(
+          this.provider(frozen),
+          this.provider(frozen)?.activeOperation,
+          {
+            state: cancelled ? "cancelled" : "failed",
+            errorCode: cancelled ? "AGENT_INSTALL_CANCELLED" : cause?.code || "AGENT_INSTALL_FAILED",
+          },
+        ),
+      });
       await this.diagnose(
         this.freezeProviderSelection(frozen.providerId) || frozen,
       ).catch(() => null);
@@ -1203,7 +1392,8 @@ export class AgentCatalogState {
         installState: ["idle", "failed"].includes(result?.installState)
           ? result.installState
           : "idle",
-        activeOperation: finishAccessOperation(
+        ...finishProviderOperation(
+          this.provider(frozen),
           provider.activeOperation || createAccessOperation({
             providerId: frozen.providerId,
             kind: "install",
@@ -1223,34 +1413,60 @@ export class AgentCatalogState {
   async cancelAccessOperation(selection = this.freezeSelected()) {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
-    const operation = publicAccessOperation(provider?.activeOperation);
-    const installing = ["installing", "cancelling"].includes(provider?.installState);
-    if (installing && (!operation || operation.kind === "install")) {
+    if (this.#pendingDefault?.queuedSelection.providerId === frozen.providerId) {
+      this.clearPendingDefault(this.#pendingDefault.intentId);
+    }
+    const operation = pickActiveAccessOperation(
+      provider?.activeOperation,
+      ["installing", "cancelling"].includes(provider?.installState)
+        ? createAccessOperation({
+          providerId: frozen.providerId,
+          kind: "install",
+          generation: this.#generationByProvider.get(frozen.providerId) || 1,
+        })
+        : null,
+    );
+    const installing = ["installing", "cancelling"].includes(provider?.installState)
+      || operation?.kind === "install";
+    if (installing) {
       return this.cancelInstall(frozen);
     }
-    if (!operation) return null;
-    if (operation.kind === "install") {
-      return this.cancelInstall(frozen);
-    }
+    if (!operation) return provider?.lastOperation || null;
     if (operation.kind === "login" && typeof this.#bridgeClient.cancelAgentLogin === "function") {
       const cancelling = requestCancelAccessOperation(operation);
       this.#patchProvider(frozen.providerId, { activeOperation: cancelling });
       try {
-        await this.#bridgeClient.cancelAgentLogin({ providerId: frozen.providerId });
+        const result = await this.#bridgeClient.cancelAgentLogin({ providerId: frozen.providerId });
+        const stopUnconfirmed = result?.loginState === "stop-unconfirmed"
+          || result?.errorCode === "AGENT_LOGIN_CANCEL_FAILED";
+        if (stopUnconfirmed) {
+          throw Object.assign(new Error("无法确认登录进程已退出。"), {
+            code: "AGENT_LOGIN_CANCEL_FAILED",
+          });
+        }
+        const current = this.provider(frozen);
         this.#patchProvider(frozen.providerId, {
-          activeOperation: finishAccessOperation(cancelling, { state: "cancelled" }),
+          ...finishProviderOperation(
+            current,
+            current?.activeOperation || cancelling,
+            { state: "cancelled" },
+          ),
           loginUrlPresent: false,
         });
       } catch (cause) {
-        this.#patchProvider(frozen.providerId, {
-          activeOperation: finishAccessOperation(cancelling, {
-            state: "failed",
+        const stopUnconfirmed = String(cause?.code || "") === "AGENT_LOGIN_CANCEL_FAILED";
+        const current = this.provider(frozen);
+        this.#patchProvider(frozen.providerId, finishProviderOperation(
+          current,
+          current?.activeOperation || cancelling,
+          {
+            state: stopUnconfirmed ? "stop-unconfirmed" : "failed",
             errorCode: cause?.code || "AGENT_LOGIN_CANCEL_FAILED",
-          }),
-        });
+          },
+        ));
         throw cause;
       }
-      return this.provider(frozen)?.activeOperation || null;
+      return currentAccessOperation(this.provider(frozen));
     }
     if (operation.kind === "config-validate") {
       const cancelling = requestCancelAccessOperation(operation);
@@ -1264,23 +1480,27 @@ export class AgentCatalogState {
           generation: operation.generation,
         });
         if (result?.cancelled === false && result?.configured === true) {
-          return this.provider(frozen)?.activeOperation || null;
+          return currentAccessOperation(this.provider(frozen));
         }
       }
       this.#invalidateProvider(frozen.providerId);
-      this.#patchProvider(frozen.providerId, {
-        activeOperation: finishAccessOperation(cancelling, { state: "cancelled" }),
-      });
-      return this.provider(frozen)?.activeOperation || null;
+      this.#patchProvider(frozen.providerId, finishProviderOperation(
+        this.provider(frozen),
+        cancelling,
+        { state: "cancelled" },
+      ));
+      return currentAccessOperation(this.provider(frozen));
     }
     const cancelling = requestCancelAccessOperation(operation);
     this.#patchProvider(frozen.providerId, { activeOperation: cancelling });
     if (cancelling.state === "cancelling") {
-      this.#patchProvider(frozen.providerId, {
-        activeOperation: finishAccessOperation(cancelling, { state: "cancelled" }),
-      });
+      this.#patchProvider(frozen.providerId, finishProviderOperation(
+        this.provider(frozen),
+        cancelling,
+        { state: "cancelled" },
+      ));
     }
-    return this.provider(frozen)?.activeOperation || null;
+    return currentAccessOperation(this.provider(frozen));
   }
 
   async startLogin(selection = this.freezeSelected()) {
@@ -1319,11 +1539,12 @@ export class AgentCatalogState {
       return await this.#waitForLogin(frozen, operation.operationId);
     } catch (cause) {
       const cancelled = cause?.code === "AGENT_LOGIN_CANCELLED";
+      const stopUnconfirmed = cause?.code === "AGENT_LOGIN_CANCEL_FAILED";
       const current = this.provider(frozen)?.activeOperation;
       if (operation && current?.operationId === operation.operationId) {
         this.#patchProvider(frozen.providerId, {
-          activeOperation: finishAccessOperation(current, {
-            state: cancelled ? "cancelled" : "failed",
+          ...finishProviderOperation(this.provider(frozen), current, {
+            state: stopUnconfirmed ? "stop-unconfirmed" : cancelled ? "cancelled" : "failed",
             errorCode: cause?.code || "AGENT_LOGIN_FAILED",
           }),
           loginUrlPresent: false,
@@ -1392,7 +1613,7 @@ export class AgentCatalogState {
         generation,
       })) {
         this.#patchProvider(frozen.providerId, {
-          activeOperation: finishAccessOperation(current, { state: "succeeded" }),
+          ...finishProviderOperation(this.provider(frozen), current, { state: "succeeded" }),
           connection: null,
         });
       }
@@ -1400,12 +1621,14 @@ export class AgentCatalogState {
     } catch (cause) {
       const current = publicAccessOperation(this.provider(frozen)?.activeOperation);
       if (current?.generation === generation && current.kind === "logout") {
-        this.#patchProvider(frozen.providerId, {
-          activeOperation: finishAccessOperation(current, {
+        this.#patchProvider(frozen.providerId, finishProviderOperation(
+          this.provider(frozen),
+          current,
+          {
             state: "failed",
             errorCode: cause?.code || "AGENT_LOGOUT_FAILED",
-          }),
-        });
+          },
+        ));
       }
       await this.diagnose(
         this.freezeProviderSelection(frozen.providerId) || frozen,
@@ -1480,7 +1703,7 @@ export class AgentCatalogState {
     for (let attempt = 0; attempt < 900; attempt += 1) {
       await this.#applyPublicCatalog();
       const current = this.provider(selection);
-      const operation = publicAccessOperation(current?.activeOperation);
+      const operation = currentAccessOperation(current);
       if (!operation || operation.operationId !== operationId) {
         throw Object.assign(new Error("A newer login replaced this attempt."), {
           code: "AGENT_LOGIN_STALE",
@@ -1488,6 +1711,11 @@ export class AgentCatalogState {
       }
       if (operation.state === "cancelled") {
         throw Object.assign(new Error("登录已取消。"), { code: "AGENT_LOGIN_CANCELLED" });
+      }
+      if (operation.state === "stop-unconfirmed") {
+        throw Object.assign(new Error("无法确认登录进程已退出。"), {
+          code: "AGENT_LOGIN_CANCEL_FAILED",
+        });
       }
       if (operation.state === "failed") {
         throw Object.assign(new Error("官方登录没有完成。"), {
@@ -1502,7 +1730,7 @@ export class AgentCatalogState {
     const current = publicAccessOperation(this.provider(selection)?.activeOperation);
     if (current?.operationId === operationId) {
       this.#patchProvider(selection.providerId, {
-        activeOperation: finishAccessOperation(current, {
+        ...finishProviderOperation(this.provider(selection), current, {
           state: "failed",
           errorCode: "AGENT_LOGIN_EXPIRED",
         }),
@@ -1517,7 +1745,7 @@ export class AgentCatalogState {
       this.freezeProviderSelection(selection.providerId) || selection,
     ).catch(() => null);
     const current = this.provider(selection);
-    const active = publicAccessOperation(current?.activeOperation);
+    const active = currentAccessOperation(current);
     if (!active || active.operationId !== operation.operationId) {
       throw Object.assign(new Error("A newer login replaced this attempt."), {
         code: "AGENT_LOGIN_STALE",
@@ -1536,7 +1764,7 @@ export class AgentCatalogState {
       );
     this.#setAvailability(selection.providerId, availability);
     this.#patchProvider(selection.providerId, {
-      activeOperation: finishAccessOperation(active, { state: "succeeded" }),
+      ...finishProviderOperation(this.provider(selection), active, { state: "succeeded" }),
       loginUrlPresent: false,
       loginOpenError: null,
     });
@@ -1681,14 +1909,16 @@ export class AgentCatalogState {
       const operation = publicAccessOperation(current?.activeOperation);
       if (operation?.generation === generation
         && !["cancelled", "cancelling"].includes(operation.state)) {
-        this.#patchProvider(frozen.providerId, {
-          activeOperation: finishAccessOperation(operation, {
+        this.#patchProvider(frozen.providerId, finishProviderOperation(
+          this.provider(frozen),
+          operation,
+          {
             state: String(cause?.code || "") === "AGENT_SESSION_CREDENTIAL_STALE"
               ? "cancelled"
               : "failed",
             errorCode: cause?.code || "AGENT_SESSION_CREDENTIAL_INVALID",
-          }),
-        });
+          },
+        ));
       }
       throw cause;
     }
@@ -1702,12 +1932,14 @@ export class AgentCatalogState {
     }
     if (result?.status !== "ready" || !result?.selection) {
       if (operation) {
-        this.#patchProvider(frozen.providerId, {
-          activeOperation: finishAccessOperation(operation, {
+        this.#patchProvider(frozen.providerId, finishProviderOperation(
+          this.provider(frozen),
+          operation,
+          {
             state: "failed",
             errorCode: "AGENT_SESSION_CREDENTIAL_INVALID",
-          }),
-        });
+          },
+        ));
       }
       throw Object.assign(new Error("API Token 没有返回可执行配置。"), {
         code: "AGENT_SESSION_CREDENTIAL_INVALID",
@@ -1742,10 +1974,9 @@ export class AgentCatalogState {
       availability: readyAgentProviderAvailability(checkedAt),
       diagnostic,
       installationDigest: String(result.installationDigest || "") || null,
-      activeOperation: operation
-        ? finishAccessOperation(operation, { state: "succeeded" })
-        : null,
+      ...(operation ? finishProviderOperation(next, operation, { state: "succeeded" }) : {}),
     }));
+    this.bindPendingDefaultSelection(returnedSelection);
     this.#publish();
     return result;
   }
@@ -1896,16 +2127,14 @@ export class AgentCatalogState {
         installState: ["idle", "installing", "failed", "cancelling"].includes(item.installState)
           ? item.installState
           : current.installState || "idle",
-        connection: item.connection?.authSource
-          ? Object.freeze({
-            ...(current.connection || {}),
-            authSource: item.connection.authSource,
-            authScope: item.connection.authScope || null,
-          })
-          : current.connection,
+        connection: projectListedConnection(current.connection, item.connection),
         loginUrlPresent: item.loginUrlPresent === true,
-        activeOperation: publicAccessOperation(item.activeOperation)
-          || (current.activeOperation?.kind === "install" ? null : current.activeOperation),
+        ...projectAccessOperations({
+          listedActive: item.activeOperation,
+          listedLast: item.lastOperation,
+          currentActive: current.activeOperation,
+          currentLast: current.lastOperation,
+        }),
       }));
     }
     this.#publish();

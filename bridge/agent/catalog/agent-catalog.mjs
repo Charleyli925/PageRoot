@@ -6,7 +6,10 @@ import { agentProviderError } from "../providers/agent-provider-contract.mjs";
 import { createAgentInstaller } from "./agent-installer.mjs";
 import { createAgentAccessAuth } from "./agent-access-auth.mjs";
 import {
+  ACCESS_OPERATION_TERMINAL_STATES,
   accessOperationFromInstallSnapshot,
+  pickActiveAccessOperation,
+  publicAccessOperation,
 } from "../../../shared/agent-access-operation.mjs";
 import {
   SHIPPED_ACP_CATALOG,
@@ -86,6 +89,13 @@ export function createAgentCatalog({
       const entry = entryFor(provider.providerId);
       const snapshot = agentInstaller.snapshot(provider.providerId);
       const login = agentAuth.snapshot(provider.providerId);
+      const loginOperation = agentAuth.accessOperation(provider.providerId);
+      const installOperation = accessOperationFromInstallSnapshot(snapshot);
+      const activeOperation = pickActiveAccessOperation(installOperation, loginOperation);
+      const lastOperation = [loginOperation, installOperation]
+        .map((operation) => publicAccessOperation(operation))
+        .filter(Boolean)
+        .find((operation) => ACCESS_OPERATION_TERMINAL_STATES.includes(operation.state));
       return Object.freeze({
         providerId: provider.providerId,
         displayName: provider.displayName,
@@ -94,7 +104,7 @@ export function createAgentCatalog({
         installable: entry?.installable === true,
         installSource: INSTALL_SOURCES.includes(installSource) ? installSource : "none",
         installState: publicInstallState(snapshot),
-        connection: login.authSource
+        connection: login.loginState === "succeeded" && login.authSource
           ? Object.freeze({
             authSource: login.authSource,
             authScope: login.authScope,
@@ -102,8 +112,8 @@ export function createAgentCatalog({
           })
           : null,
         loginUrlPresent: login.loginUrlPresent === true,
-        activeOperation: agentAuth.accessOperation(provider.providerId)
-          || accessOperationFromInstallSnapshot(snapshot),
+        activeOperation,
+        lastOperation: activeOperation ? null : lastOperation || null,
       });
     },
     async managedCommandCandidates(providerId) {
@@ -161,7 +171,9 @@ export function createAgentCatalog({
         );
       }
       await agentAuth.cancel(providerId);
-      return logoutExecutor(providerId);
+      const result = await logoutExecutor(providerId);
+      agentAuth.clearAuth(providerId);
+      return result;
     },
     drain(options) {
       return Promise.all([

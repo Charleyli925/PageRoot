@@ -31,6 +31,7 @@ export type BoundAgentSetupPanelProps = Readonly<{
     apiKey: string,
     extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>,
   ): Promise<AgentActionOutcome>;
+  onRetryPersistCredential?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onDisconnectApiKey?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onOpenVendorApiKeyPage?(vendorId: string): Promise<AgentActionOutcome>;
   onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
@@ -50,6 +51,7 @@ export function BoundAgentSetupPanel({
   onCancelInstall,
   onCheckSelection,
   onConnectApiKey,
+  onRetryPersistCredential,
   onDisconnectApiKey,
   onOpenVendorApiKeyPage,
   onSelectAgentModel,
@@ -65,7 +67,7 @@ export function BoundAgentSetupPanel({
   const canSelectModel = usesApiKeyModels || card.presentation.supportsSelectableModels === true;
   return (
     <AgentProviderCard
-      key={`${card.selection.providerId}:${card.selection.runtimeId}:${card.connection?.vendorId || "none"}:${card.connection?.baseUrl || ""}:${card.selection.resolvedModelId || "none"}`}
+      key={`${card.selection.providerId}:${card.selection.runtimeId}`}
       availability={card.availability}
       connection={card.connection}
       models={card.models}
@@ -87,6 +89,10 @@ export function BoundAgentSetupPanel({
       onCancelInstall={() => onCancelInstall(card.selection)}
       onRecheck={() => onCheckSelection(card.selection)}
       onConnectApiKey={(apiKey, extras) => onConnectApiKey(card.selection, apiKey, extras)}
+      onRetryPersistCredential={onRetryPersistCredential
+        ? () => onRetryPersistCredential(card.selection)
+        : undefined}
+      credentialPersist={card.credentialPersist || null}
       onDisconnectApiKey={onDisconnectApiKey
         ? () => onDisconnectApiKey(card.selection)
         : undefined}

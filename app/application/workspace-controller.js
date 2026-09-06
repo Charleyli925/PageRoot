@@ -1706,8 +1706,12 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().readyPendingDefaultAgent();
   }
 
-  clearPendingDefaultAgent() {
-    return this.#requireRunWorkflow().clearPendingDefaultAgent();
+  clearPendingDefaultAgent(expectedIntentId) {
+    return this.#requireRunWorkflow().clearPendingDefaultAgent(expectedIntentId);
+  }
+
+  commitPendingDefaultAgent(selection, options) {
+    return this.#requireRunWorkflow().commitPendingDefaultAgent(selection, options);
   }
 
   beginAccessRepair(run, field) {
@@ -1718,8 +1722,8 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().clearAccessRepair();
   }
 
-  resendAfterAccessRepair(run) {
-    return this.#requireRunWorkflow().resendAfterAccessRepair(run);
+  resendAfterAccessRepair() {
+    return this.#requireRunWorkflow().resendAfterAccessRepair();
   }
 
   selectAgentModel(modelId, expectedSelection) {
@@ -1740,6 +1744,18 @@ export class WorkspaceController {
 
   disconnectAgentApiKey(selection) {
     return this.#requireRunWorkflow().disconnectAgentApiKey(selection);
+  }
+
+  holdAgentCredential(selection, payload) {
+    return this.#requireRunWorkflow().holdAgentCredential(selection, payload);
+  }
+
+  noteAgentCredentialPersist(selection, result) {
+    return this.#requireRunWorkflow().noteAgentCredentialPersist(selection, result);
+  }
+
+  retryAgentCredentialPersist(selection, persist) {
+    return this.#requireRunWorkflow().retryAgentCredentialPersist(selection, persist);
   }
 
   stopRunsForProvider(providerId) {

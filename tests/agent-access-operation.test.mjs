@@ -4,9 +4,12 @@ import test from "node:test";
 import {
   accessOperationFromInstallSnapshot,
   accessOperationFromLoginSnapshot,
+  adoptAccessOperation,
   createAccessOperation,
   finishAccessOperation,
   isStaleAccessOperation,
+  pickActiveAccessOperation,
+  projectAccessOperations,
   publicAccessOperation,
   requestCancelAccessOperation,
   credentialErrorField,
@@ -108,4 +111,47 @@ test("credential field mapping stays on structured error codes", async () => {
   assert.equal(credentialErrorField("AGENT_SELECTION_UNSUPPORTED"), "modelId");
   assert.equal(credentialErrorField("AGENT_ENDPOINT_REGION_MISMATCH"), "baseUrl");
   assert.equal(credentialErrorField("AGENT_PROVIDER_UNAVAILABLE"), null);
+});
+
+test("projectAccessOperations parks a finished login and keeps an in-flight install", () => {
+  const waiting = accessOperationFromLoginSnapshot({
+    providerId: "qoder",
+    loginState: "waiting",
+    generation: 2,
+  });
+  const succeeded = accessOperationFromLoginSnapshot({
+    providerId: "qoder",
+    loginState: "succeeded",
+    generation: 2,
+  });
+  const parked = projectAccessOperations({
+    listedLast: succeeded,
+    currentActive: waiting,
+  });
+  assert.equal(parked.activeOperation, null);
+  assert.equal(parked.lastOperation?.state, "succeeded");
+  const install = accessOperationFromInstallSnapshot({
+    providerId: "qoder",
+    installState: "installing",
+    generation: 4,
+    startedAt: "2026-09-06T00:00:00.000Z",
+  });
+  const overlapping = projectAccessOperations({
+    listedActive: install,
+    currentLast: succeeded,
+  });
+  assert.equal(overlapping.activeOperation?.kind, "install");
+  assert.equal(overlapping.lastOperation?.kind, "login");
+  const stop = finishAccessOperation(waiting, {
+    state: "stop-unconfirmed",
+    errorCode: "AGENT_LOGIN_CANCEL_FAILED",
+  });
+  const blocking = projectAccessOperations({
+    currentActive: stop,
+    currentLast: succeeded,
+  });
+  assert.equal(blocking.activeOperation?.state, "stop-unconfirmed");
+  assert.equal(blocking.lastOperation?.state, "succeeded");
+  assert.equal(pickActiveAccessOperation(succeeded, install)?.kind, "install");
+  assert.equal(adoptAccessOperation(succeeded, waiting)?.state, "succeeded");
 });

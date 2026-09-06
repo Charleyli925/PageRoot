@@ -585,25 +585,17 @@ export class WorkspaceController {
   ): import("../domain/agent-provider-state.js").AgentSelection;
   pendingDefaultAgent(): import("../domain/agent-provider-state.js").AgentSelection | null;
   readyPendingDefaultAgent(): import("../domain/agent-provider-state.js").AgentSelection | null;
-  clearPendingDefaultAgent(): null;
+  clearPendingDefaultAgent(expectedIntentId?: string): import("../domain/agent-provider-state.js").AgentSelection | null;
+  commitPendingDefaultAgent(
+    selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
+    options?: Readonly<{ saveDefault?(providerId: string): Promise<unknown> }>,
+  ): Promise<RunWorkflowOutcome>;
   beginAccessRepair(
     run?: import("../domain/run-lifecycle.js").ActiveRun | null,
-    field?: "apiKey" | "login" | "install",
-  ): Readonly<{
-    projectId: string;
-    documentId: string;
-    sourcePath: string;
-    requestId: string;
-    attemptId: string;
-    providerId: string | null;
-    configurationDigest: string | null;
-    credentialGeneration: number | null;
-    field: "apiKey" | "login" | "install";
-  }> | null;
-  clearAccessRepair(): null;
-  resendAfterAccessRepair(
-    run?: import("../domain/run-lifecycle.js").ActiveRun | null,
-  ): Promise<RunWorkflowOutcome>;
+    field?: "apiKey" | "login" | "install" | "model" | "provider",
+  ): import("./run-workflow.js").RunWorkflowSnapshot["accessRepair"];
+  clearAccessRepair(expectedIntentId?: string): import("./run-workflow.js").RunWorkflowSnapshot["accessRepair"];
+  resendAfterAccessRepair(): Promise<RunWorkflowOutcome>;
   selectAgentModel(modelId: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
   selectAgentReasoning(reasoning: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
   applyDisabledAgentProviders(ids?: readonly string[]): void;
@@ -615,9 +607,31 @@ export class WorkspaceController {
   disconnectAgentApiKey(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
   ): Promise<RunWorkflowOutcome>;
+  holdAgentCredential(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+    payload: Readonly<{
+      apiKey: string;
+      vendorId?: string | null;
+      baseUrl?: string | null;
+      modelId?: string | null;
+    }>,
+  ): unknown;
+  noteAgentCredentialPersist(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+    result: Readonly<{ status: string; reason?: string | null }>,
+  ): unknown;
+  retryAgentCredentialPersist(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+    persist: (held: Readonly<{
+      apiKey: string;
+      vendorId: string | null;
+      baseUrl: string | null;
+      modelId: string | null;
+    }>) => Promise<{ ok?: boolean; code?: string }>,
+  ): Promise<RunWorkflowOutcome>;
   stopRunsForProvider(providerId: string): Promise<readonly RunWorkflowOutcome[]>;
   manageAgentAccess(
-    kind: "disconnect" | "remove-key" | "reconnect",
+    kind: "disconnect" | "remove-key" | "reconnect" | "logout",
     selection: import("../domain/agent-provider-state.js").AgentSelection,
     options?: Readonly<{
       stopRelatedRuns?: boolean;

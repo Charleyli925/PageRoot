@@ -48,16 +48,27 @@ export type RunWorkflowSnapshot = Readonly<{
   agentCatalog: AgentCatalogSnapshot;
   agentPresentation: AgentProviderPresentation;
   accessRepair: Readonly<{
+    repairIntentId: string;
     projectId: string;
     documentId: string;
     sourcePath: string;
     requestId: string;
     attemptId: string;
+    sessionEpoch: number | null;
     providerId: string | null;
     configurationDigest: string | null;
     credentialGeneration: number | null;
-    field: "apiKey" | "login" | "install";
+    field: "apiKey" | "login" | "install" | "model" | "provider";
+    lastOutcome: Readonly<{
+      status: string;
+      code: string | null;
+      reason: string;
+    }> | null;
   }> | null;
+  providerAccessImpact: Readonly<Record<string, Readonly<{
+    runningCount: number;
+    documentCount: number;
+  }>>>;
 }>;
 
 export type RunWorkflowEvent = Readonly<{
@@ -211,23 +222,17 @@ export class RunWorkflow {
   queuePendingDefaultAgent(selection: AgentSelection): AgentSelection;
   pendingDefaultAgent(): AgentSelection | null;
   readyPendingDefaultAgent(): AgentSelection | null;
-  clearPendingDefaultAgent(): null;
+  clearPendingDefaultAgent(expectedIntentId?: string): AgentSelection | null;
+  commitPendingDefaultAgent(
+    selection: AgentSelection | null | undefined,
+    options?: Readonly<{ saveDefault?(providerId: string): Promise<unknown> }>,
+  ): Promise<RunWorkflowOutcome>;
   beginAccessRepair(
     run?: ActiveRun | null,
-    field?: "apiKey" | "login" | "install",
-  ): Readonly<{
-    projectId: string;
-    documentId: string;
-    sourcePath: string;
-    requestId: string;
-    attemptId: string;
-    providerId: string | null;
-    configurationDigest: string | null;
-    credentialGeneration: number | null;
-    field: "apiKey" | "login" | "install";
-  }> | null;
-  clearAccessRepair(): null;
-  resendAfterAccessRepair(run?: ActiveRun | null): Promise<RunWorkflowOutcome>;
+    field?: "apiKey" | "login" | "install" | "model" | "provider",
+  ): RunWorkflowSnapshot["accessRepair"];
+  clearAccessRepair(expectedIntentId?: string): RunWorkflowSnapshot["accessRepair"];
+  resendAfterAccessRepair(): Promise<RunWorkflowOutcome>;
   selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   applyDisabledAgentProviders(ids?: readonly string[]): void;
@@ -239,7 +244,7 @@ export class RunWorkflow {
   disconnectAgentApiKey(selection: AgentSelection): Promise<RunWorkflowOutcome>;
   stopRunsForProvider(providerId: string): Promise<readonly RunWorkflowOutcome[]>;
   manageAgentAccess(
-    kind: "disconnect" | "remove-key" | "reconnect",
+    kind: "disconnect" | "remove-key" | "reconnect" | "logout",
     selection: AgentSelection,
     options?: Readonly<{
       stopRelatedRuns?: boolean;

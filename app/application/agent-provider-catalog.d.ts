@@ -60,6 +60,11 @@ export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
     errorCode: string | null;
     cancellable: boolean;
   }> | null;
+  lastOperation?: AgentProviderEntry["activeOperation"];
+  credentialPersist?: Readonly<{
+    status: "pending" | "saved" | "failed" | "skipped";
+    reason: string | null;
+  }> | null;
   connection?: Readonly<{
     vendorId?: string;
     vendorDisplayName?: string;
@@ -81,6 +86,7 @@ export type AgentCatalogSnapshot = Readonly<{
   providers: Readonly<Record<string, AgentProviderEntry>>;
   selected: AgentSelection | null;
   pendingDefault: AgentSelection | null;
+  displaySelection: AgentSelection | null;
   preflightBySelection: Readonly<Record<string, AgentPreflight>>;
 }>;
 
@@ -147,8 +153,38 @@ export class AgentCatalogState {
   select(selection: AgentSelection): AgentSelection;
   queuePendingDefault(selection: AgentSelection): AgentSelection;
   pendingDefault(): AgentSelection | null;
+  peekPendingDefaultIntent(): Readonly<{
+    intentId: string;
+    queuedSelection: AgentSelection;
+    validatedSelection: AgentSelection | null;
+  }> | null;
+  bindPendingDefaultSelection(selection: AgentSelection): AgentSelection | null;
   readyPendingDefault(): AgentSelection | null;
-  clearPendingDefault(): null;
+  clearPendingDefault(expectedIntentId?: string): AgentSelection | null;
+  commitPendingDefault(expectedIntentId: string): AgentSelection | null;
+  holdRememberedCredential(providerId: string, payload: Readonly<{
+    apiKey: string;
+    vendorId?: string | null;
+    baseUrl?: string | null;
+    modelId?: string | null;
+  }>): Readonly<{ status: string; reason: string | null }> | null;
+  noteCredentialPersist(providerId: string, result: Readonly<{
+    status: string;
+    reason?: string | null;
+  }>): Readonly<{ status: string; reason: string | null }> | null;
+  credentialPersist(providerId: string): Readonly<{
+    status: string;
+    reason: string | null;
+  }> | null;
+  retryRememberedCredential(
+    providerId: string,
+    persist: (held: Readonly<{
+      apiKey: string;
+      vendorId: string | null;
+      baseUrl: string | null;
+      modelId: string | null;
+    }>) => Promise<{ ok?: boolean; code?: string }>,
+  ): Promise<Readonly<{ status: string; reason: string | null }> | null>;
   applyDisabledProviderIds(ids?: readonly string[]): void;
   selectModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   selectReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
@@ -160,6 +196,7 @@ export class AgentCatalogState {
   ): Promise<unknown>;
   disconnectApiKey(selection?: AgentSelection | null): Promise<unknown>;
   freezeSelected(): AgentSelection | null;
+  displaySelection(): AgentSelection | null;
   freezeProviderSelection(providerId: string): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;
   availability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;

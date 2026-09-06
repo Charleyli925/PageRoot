@@ -17,7 +17,6 @@ import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
-import { UserCircleIcon } from "@phosphor-icons/react/dist/csr/UserCircle";
 
 import type {
   AgentProviderGuidanceKind,
@@ -87,6 +86,7 @@ export type SettingsPageProps = {
     apiKey: string,
     extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>,
   ) => Promise<AgentActionOutcome>;
+  onRetryPersistCredential?: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onDisconnectApiKey: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onDisconnectProvider?: (
     selection: AgentSelection,
@@ -99,7 +99,10 @@ export type SettingsPageProps = {
   onReconnectProvider?: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onOpenVendorApiKeyPage?: (vendorId: string) => Promise<AgentActionOutcome>;
   rememberedKey?: boolean;
-  busyProviderId?: string | null;
+  providerAccessImpact?: Readonly<Record<string, Readonly<{
+    runningCount: number;
+    documentCount: number;
+  }>>>;
   onClose: () => void;
 };
 
@@ -286,7 +289,6 @@ function cardChoiceId(card: AgentProviderCardData) {
 
 function AgentSettings({
   currentAgentName,
-  choices,
   selectedChoiceId,
   cards,
   checking,
@@ -301,6 +303,7 @@ function AgentSettings({
   onInstall,
   onCancelInstall,
   onConnectApiKey,
+  onRetryPersistCredential,
   onDisconnectApiKey,
   onDisconnectProvider,
   onRemoveRememberedKey,
@@ -309,10 +312,9 @@ function AgentSettings({
   onSelectAgentModel,
   onSelectAgentReasoning,
   rememberedKey = false,
-  busyProviderId = null,
+  providerAccessImpact = {},
 }: {
   currentAgentName: string;
-  choices: readonly SettingsAgentChoice[];
   selectedChoiceId: string | null;
   cards: readonly AgentProviderCardData[];
   checking: boolean;
@@ -327,6 +329,7 @@ function AgentSettings({
   onInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCancelInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>): Promise<AgentActionOutcome>;
+  onRetryPersistCredential?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onDisconnectApiKey(selection: AgentSelection): Promise<AgentActionOutcome>;
   onDisconnectProvider?(selection: AgentSelection, options?: Readonly<{ stopRun?: boolean }>): Promise<AgentActionOutcome>;
   onRemoveRememberedKey?(selection: AgentSelection, options?: Readonly<{ stopRun?: boolean }>): Promise<AgentActionOutcome>;
@@ -335,14 +338,19 @@ function AgentSettings({
   onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
   onSelectAgentReasoning(reasoning: string, expectedSelection: AgentSelection): AgentSelection | null;
   rememberedKey?: boolean;
-  busyProviderId?: string | null;
+  providerAccessImpact?: Readonly<Record<string, Readonly<{
+    runningCount: number;
+    documentCount: number;
+  }>>>;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(selectedChoiceId);
   const [followedChoiceId, setFollowedChoiceId] = useState(selectedChoiceId);
   const [confirmAction, setConfirmAction] = useState<null | Readonly<{
-    kind: "disconnect" | "remove-key";
+    kind: "disconnect" | "remove-key" | "logout";
     card: AgentProviderCardData;
     stopRun: boolean;
+    runningCount: number;
+    documentCount: number;
   }>>(null);
   const [confirmPending, setConfirmPending] = useState(false);
   const [confirmError, setConfirmError] = useState("");
@@ -355,27 +363,10 @@ function AgentSettings({
     : null;
   return (
     <div className="settings-page-sections">
-      <SettingsSection title="默认服务">
-        <SettingRow
-          icon={<UserCircleIcon size={20} weight="regular" />}
-          title="默认服务"
-          description={`下一轮任务将使用 ${currentAgentName || "尚未选择"}`}
-        >
-          <SettingsSelect
-            value={selectedChoiceId || choices[0]?.id || ""}
-            disabled={!choices.length}
-            label="默认 Agent"
-            testId="settings-agent-scheme"
-            options={choices.map((choice) => ({ value: choice.id, label: choice.label }))}
-            onChange={(id) => {
-              const choice = choices.find((item) => item.id === id);
-              if (choice) onSelect(choice.selection);
-            }}
-          />
-        </SettingRow>
-      </SettingsSection>
-
       <SettingsSection title="连接状态">
+        <p className="settings-agent-default-summary">
+          {`下一轮任务使用 ${currentAgentName || "尚未选择"}。已连接的服务可用“设为默认”更换，浏览或展开不会改变默认。`}
+        </p>
         <div className="settings-agent-toolbar">
           <button
             className="settings-secondary-action"
@@ -453,6 +444,7 @@ function AgentSettings({
                     onClick={() => {
                       if (primaryLabel === "设为默认") {
                         onSelect(card.selection);
+                        setExpandedId(id);
                         return;
                       }
                       if (primaryLabel === "重新连接") {
@@ -490,12 +482,30 @@ function AgentSettings({
                               role="menuitem"
                               data-kind="disconnect"
                               onClick={() => {
-                                const stopRun = busyProviderId === card.selection.providerId;
+                                const impact = providerAccessImpact[card.selection.providerId];
+                                const stopRun = Boolean(impact?.runningCount);
                                 if (stopRun) {
-                                  setConfirmAction({ kind: "disconnect", card, stopRun });
+                                  setConfirmAction({
+                                    kind: "disconnect",
+                                    card,
+                                    stopRun,
+                                    runningCount: impact?.runningCount || 0,
+                                    documentCount: impact?.documentCount || 0,
+                                  });
                                   return;
                                 }
-                                void onDisconnectProvider?.(card.selection);
+                                void Promise.resolve(onDisconnectProvider?.(card.selection)).then((outcome) => {
+                                  if (!outcome || !["succeeded", "stale"].includes(outcome.status)) {
+                                    setConfirmAction({
+                                      kind: "disconnect",
+                                      card,
+                                      stopRun: false,
+                                      runningCount: 0,
+                                      documentCount: 0,
+                                    });
+                                    setConfirmError(outcome?.reason || "断开没有完成。");
+                                  }
+                                });
                               }}
                             >
                               断开连接
@@ -514,7 +524,16 @@ function AgentSettings({
                               role="menuitem"
                               data-kind="logout"
                               onClick={() => {
-                                void onLogoutAgent?.(card.selection);
+                                const impact = providerAccessImpact[card.selection.providerId];
+                                const stopRun = Boolean(impact?.runningCount)
+                                  || card.connection?.authScope === "shared-machine";
+                                setConfirmAction({
+                                  kind: "logout",
+                                  card,
+                                  stopRun,
+                                  runningCount: impact?.runningCount || 0,
+                                  documentCount: impact?.documentCount || 0,
+                                });
                               }}
                             >
                               退出账号
@@ -541,10 +560,13 @@ function AgentSettings({
                               role="menuitem"
                               data-kind="remove-key"
                               onClick={() => {
+                                const impact = providerAccessImpact[card.selection.providerId];
                                 setConfirmAction({
                                   kind: "remove-key",
                                   card,
-                                  stopRun: busyProviderId === card.selection.providerId,
+                                  stopRun: Boolean(impact?.runningCount),
+                                  runningCount: impact?.runningCount || 0,
+                                  documentCount: impact?.documentCount || 0,
                                 });
                               }}
                             >
@@ -558,15 +580,37 @@ function AgentSettings({
                   ) : null}
                 </div>
                 {confirmAction?.card.selection.providerId === card.selection.providerId ? (
-                  <div className="settings-agent-confirm" role="alertdialog" aria-label={confirmAction.kind === "remove-key" ? "移除 API Key？" : "断开连接？"}>
+                  <div
+                    className="settings-agent-confirm"
+                    role="alertdialog"
+                    aria-label={
+                      confirmAction.kind === "remove-key"
+                        ? "移除 API Key？"
+                        : confirmAction.kind === "logout"
+                          ? "退出账号？"
+                          : "断开连接？"
+                    }
+                  >
                     <strong>
                       {confirmAction.kind === "remove-key"
                         ? "移除 API Key？"
-                        : `断开 ${settingsServiceName(card.selection.providerId, card.presentation.displayName)}？`}
+                        : confirmAction.kind === "logout"
+                          ? `退出 ${settingsServiceName(card.selection.providerId, card.presentation.displayName)}？`
+                          : `断开 ${settingsServiceName(card.selection.providerId, card.presentation.displayName)}？`}
                     </strong>
                     <p>
                       {confirmAction.stopRun
-                        ? "该服务相关任务会先停止，确认后才更改连接。"
+                        ? `将停止 ${confirmAction.documentCount || 1} 个文档上的 ${confirmAction.runningCount || 1} 个任务后再继续。${
+                          confirmAction.kind === "logout"
+                            ? card.connection?.authScope === "shared-machine"
+                              ? "这也会退出本机共享登录。"
+                              : "退出后需要重新登录。"
+                            : ""
+                        }`
+                        : confirmAction.kind === "logout"
+                          ? card.connection?.authScope === "shared-machine"
+                            ? "将退出本机共享登录，之后需要重新登录。"
+                            : "退出后需要重新登录。"
                         : confirmAction.kind === "remove-key"
                           ? "移除后需要重新填写 API Key。断开后仍可移除已记住的 Key。"
                           : card.selection.providerId === "pageroot"
@@ -596,7 +640,9 @@ function AgentSettings({
                           setConfirmError("");
                           const request = action.kind === "remove-key"
                             ? onRemoveRememberedKey?.(action.card.selection, { stopRun: action.stopRun })
-                            : onDisconnectProvider?.(action.card.selection, { stopRun: action.stopRun });
+                            : action.kind === "logout"
+                              ? onLogoutAgent?.(action.card.selection)
+                              : onDisconnectProvider?.(action.card.selection, { stopRun: action.stopRun });
                           void Promise.resolve(request).then((outcome) => {
                             if (!outcome || !["succeeded", "stale"].includes(outcome.status)) {
                               setConfirmError(outcome?.reason || "操作没有完成。");
@@ -613,9 +659,11 @@ function AgentSettings({
                       >
                         {confirmPending
                           ? "正在处理…"
-                          : confirmAction.stopRun
-                            ? confirmAction.kind === "remove-key" ? "停止并移除" : "停止并断开"
-                            : confirmAction.kind === "remove-key" ? "移除 API Key" : "断开连接"}
+                          : confirmAction.kind === "logout"
+                            ? confirmAction.stopRun ? "停止并退出" : "退出账号"
+                            : confirmAction.stopRun
+                              ? confirmAction.kind === "remove-key" ? "停止并移除" : "停止并断开"
+                              : confirmAction.kind === "remove-key" ? "移除 API Key" : "断开连接"}
                       </button>
                     </div>
                   </div>
@@ -634,6 +682,7 @@ function AgentSettings({
                       onCancelInstall={onCancelInstall}
                       onCheckSelection={onCheckSelection}
                       onConnectApiKey={onConnectApiKey}
+                      onRetryPersistCredential={onRetryPersistCredential}
                       onDisconnectApiKey={onDisconnectApiKey}
                       onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
                       onSelectAgentModel={onSelectAgentModel}
@@ -661,7 +710,7 @@ function UpdatesSettings({
   onDownloadUpdate,
   onRequestRestart,
   onOpenReleaseNotes,
-}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onStartLogin" | "onInstall" | "onCancelInstall" | "onConnectApiKey" | "onDisconnectApiKey" | "onDisconnectProvider" | "onRemoveRememberedKey" | "onReconnectProvider" | "onOpenVendorApiKeyPage" | "rememberedKey" | "busyProviderId">) {
+}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onStartLogin" | "onInstall" | "onCancelInstall" | "onConnectApiKey" | "onDisconnectApiKey" | "onDisconnectProvider" | "onRemoveRememberedKey" | "onReconnectProvider" | "onOpenVendorApiKeyPage" | "rememberedKey" | "providerAccessImpact">) {
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -775,7 +824,6 @@ export default function SettingsPage({
   workspacePreferences,
   workspacePreferencesSaving,
   workspacePreferencesError,
-  agentChoices,
   selectedAgentChoiceId,
   agentCards,
   onUpdateWorkspacePreference,
@@ -795,13 +843,14 @@ export default function SettingsPage({
   onInstall,
   onCancelInstall,
   onConnectApiKey,
+  onRetryPersistCredential,
   onDisconnectApiKey,
   onDisconnectProvider,
   onRemoveRememberedKey,
   onReconnectProvider,
   onOpenVendorApiKeyPage,
   rememberedKey,
-  busyProviderId,
+  providerAccessImpact,
   onClose,
 }: SettingsPageProps) {
   const pageRef = useRef<HTMLElement>(null);
@@ -913,7 +962,7 @@ export default function SettingsPage({
   const pageDescription = category === "general"
     ? "调整工作台布局与启动习惯。"
     : category === "agent"
-      ? "选择默认服务，并接通内置 AI、Qoder 或 Codex。"
+      ? "接通内置 AI、Qoder 或 Codex，并在已连接的服务上设为默认。"
       : "检查、下载并安装源页的正式版本。";
 
   return (
@@ -947,7 +996,6 @@ export default function SettingsPage({
         ) : category === "agent" ? (
           <AgentSettings
             currentAgentName={currentAgentName}
-            choices={agentChoices}
             selectedChoiceId={selectedAgentChoiceId}
             cards={agentCards}
             checking={agentCheckPending}
@@ -962,6 +1010,7 @@ export default function SettingsPage({
             onInstall={onInstall}
             onCancelInstall={onCancelInstall}
             onConnectApiKey={onConnectApiKey}
+            onRetryPersistCredential={onRetryPersistCredential}
             onDisconnectApiKey={onDisconnectApiKey}
             onDisconnectProvider={onDisconnectProvider}
             onRemoveRememberedKey={onRemoveRememberedKey}
@@ -970,7 +1019,7 @@ export default function SettingsPage({
             onSelectAgentModel={onSelectAgentModel}
             onSelectAgentReasoning={onSelectAgentReasoning}
             rememberedKey={rememberedKeyState}
-            busyProviderId={busyProviderId}
+            providerAccessImpact={providerAccessImpact}
           />
         ) : (
           <UpdatesSettings
