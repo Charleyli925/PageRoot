@@ -894,8 +894,8 @@ test("Token replacement publishes atomically, clears old model state, and can di
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
   assert.equal(catalog.provider().diagnostic.readiness, "ready");
   assert.equal(catalog.provider().diagnostic.facts.service.source, "preflight");
-  assert.equal(catalog.provider().activeOperation?.kind, "config-validate");
-  assert.equal(catalog.provider().activeOperation?.state, "succeeded");
+  assert.equal(catalog.provider().lastOperation?.kind, "config-validate");
+  assert.equal(catalog.provider().lastOperation?.state, "succeeded");
   failNext = true;
   await assert.rejects(
     catalog.connectWithApiKey(catalog.freezeSelected(), "sk-bad", { vendorId: "openai" }),
@@ -955,6 +955,10 @@ test("a sidebar pending default is adopted only after that service is ready", as
   await catalog.connectWithApiKey(pageroot, "sk-secret", { vendorId: "deepseek" });
   assert.equal(catalog.freezeSelected().providerId, "qoder");
   assert.equal(catalog.readyPendingDefault()?.providerId, "pageroot");
+  assert.equal(
+    catalog.peekPendingDefaultIntent()?.validatedSelection?.resolvedModelId,
+    "pageroot:deepseek-v4-pro",
+  );
   catalog.select(catalog.readyPendingDefault());
   catalog.clearPendingDefault();
   assert.equal(catalog.freezeSelected().providerId, "pageroot");
@@ -1223,8 +1227,8 @@ test("startLogin waits on the backend operation identity after a local diagnose 
   });
   await catalog.diagnose(selected);
   const result = await catalog.startLogin(selected);
-  assert.equal(catalog.provider(selected).activeOperation?.operationId, "access_qoder_login_7");
-  assert.equal(catalog.provider(selected).activeOperation?.state, "succeeded");
+  assert.equal(catalog.provider(selected).lastOperation?.operationId, "access_qoder_login_7");
+  assert.equal(catalog.provider(selected).lastOperation?.state, "succeeded");
   assert.equal(catalog.availability(selected).status, "ready");
   assert.equal(result?.diagnostic?.readiness, "ready");
 });
@@ -1312,7 +1316,118 @@ test("startLogout refuses environment-token credentials and completes official l
     clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
   });
   await catalog.startLogout(selected);
-  assert.equal(catalog.provider(selected).activeOperation?.kind, "logout");
-  assert.equal(catalog.provider(selected).activeOperation?.state, "succeeded");
+  assert.equal(catalog.provider(selected).lastOperation?.kind, "logout");
+  assert.equal(catalog.provider(selected).lastOperation?.state, "succeeded");
+});
+
+test("cancelAccessOperation withdraws the matching pending default", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+  });
+  catalog.queuePendingDefault(selected);
+  assert.equal(catalog.pendingDefault()?.providerId, "qoder");
+  await catalog.cancelAccessOperation(selected);
+  assert.equal(catalog.pendingDefault(), null);
+});
+
+test("credential persist failure survives a catalog refresh", async () => {
+  const pageroot = PAGEROOT_AGENT_PROVIDER.selection;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async agentDiagnose() {
+        return { status: "ready", diagnostic: { readiness: "ready" } };
+      },
+      async agentProviders() {
+        return {
+          providers: [{
+            providerId: "pageroot",
+            installable: false,
+            installState: "idle",
+            connection: null,
+            activeOperation: null,
+            lastOperation: null,
+          }],
+        };
+      },
+    },
+    providers: [PAGEROOT_AGENT_PROVIDER],
+    selected: pageroot,
+  });
+  catalog.holdRememberedCredential("pageroot", { apiKey: "sk-secret" });
+  catalog.noteCredentialPersist("pageroot", {
+    status: "failed",
+    reason: "已连接，但新的 API Key 未保存。",
+  });
+  await catalog.diagnose(pageroot);
+  assert.equal(catalog.credentialPersist("pageroot")?.status, "failed");
+  assert.match(catalog.credentialPersist("pageroot")?.reason || "", /未保存/u);
+});
+
+test("an in-flight install does not hide the previous login result", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let listed = {
+    providers: [{
+      providerId: "qoder",
+      installable: true,
+      installState: "idle",
+      connection: { authSource: "cli-login", authScope: "app-managed" },
+      activeOperation: null,
+      lastOperation: {
+        operationId: "access_qoder_login_3",
+        providerId: "qoder",
+        kind: "login",
+        state: "succeeded",
+        generation: 3,
+        startedAt: "2026-09-06T00:00:00.000Z",
+        errorCode: null,
+        cancellable: false,
+      },
+    }],
+  };
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async agentDiagnose() {
+        return { status: "ready", diagnostic: { readiness: "ready" } };
+      },
+      async agentProviders() {
+        return listed;
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
+  });
+  await catalog.diagnose(selected);
+  assert.equal(catalog.provider(selected).lastOperation?.kind, "login");
+  listed = {
+    providers: [{
+      providerId: "qoder",
+      installable: true,
+      installState: "installing",
+      connection: { authSource: "cli-login", authScope: "app-managed" },
+      activeOperation: {
+        operationId: "access_qoder_install_4",
+        providerId: "qoder",
+        kind: "install",
+        state: "running",
+        generation: 4,
+        startedAt: "2026-09-06T00:00:01.000Z",
+        errorCode: null,
+        cancellable: true,
+      },
+      lastOperation: null,
+    }],
+  };
+  await catalog.diagnose(selected);
+  assert.equal(catalog.provider(selected).activeOperation?.kind, "install");
+  assert.equal(catalog.provider(selected).lastOperation?.kind, "login");
+  assert.equal(catalog.provider(selected).lastOperation?.state, "succeeded");
 });
 

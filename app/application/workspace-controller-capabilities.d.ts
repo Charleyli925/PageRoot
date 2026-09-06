@@ -278,10 +278,14 @@ export interface AgentSelectionControllerCapability {
   queuePendingDefaultAgent(selection: AgentSelection): AgentSelection;
   pendingDefaultAgent(): AgentSelection | null;
   readyPendingDefaultAgent(): AgentSelection | null;
-  clearPendingDefaultAgent(): null;
-  beginAccessRepair(run?: ActiveRun | null, field?: "apiKey" | "login" | "install"): unknown;
-  clearAccessRepair(): null;
-  resendAfterAccessRepair(run?: ActiveRun | null): Promise<RunWorkflowOutcome>;
+  clearPendingDefaultAgent(expectedIntentId?: string): AgentSelection | null;
+  commitPendingDefaultAgent(
+    selection: AgentSelection | null | undefined,
+    options?: Readonly<{ saveDefault?(providerId: string): Promise<unknown> }>,
+  ): Promise<RunWorkflowOutcome>;
+  beginAccessRepair(run?: ActiveRun | null, field?: "apiKey" | "login" | "install" | "model" | "provider"): unknown;
+  clearAccessRepair(expectedIntentId?: string): unknown;
+  resendAfterAccessRepair(): Promise<RunWorkflowOutcome>;
   selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   applyDisabledAgentProviders(ids?: readonly string[]): void;
@@ -289,7 +293,7 @@ export interface AgentSelectionControllerCapability {
   disconnectAgentApiKey(selection: AgentSelection): Promise<RunWorkflowOutcome>;
   stopRunsForProvider(providerId: string): Promise<readonly RunWorkflowOutcome[]>;
   manageAgentAccess(
-    kind: "disconnect" | "remove-key" | "reconnect",
+    kind: "disconnect" | "remove-key" | "reconnect" | "logout",
     selection: AgentSelection,
     options?: Readonly<{
       stopRelatedRuns?: boolean;

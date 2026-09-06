@@ -2177,6 +2177,217 @@ test("resend after access repair freezes a new execution identity", async () => 
   assert.equal(harness.workflow.getSnapshot().accessRepair, null);
 });
 
+test("resend after access repair does not follow a later document switch", async () => {
+  const gate = deferred();
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async cancelActiveRun(request) {
+        harness.calls.cancel.push(request);
+        await gate.promise;
+        return {};
+      },
+      async createRequest(request) {
+        harness.calls.createRequest.push(request);
+        return { activeRun: runRecord({ sourcePath: SOURCE_B, documentId: "document_b" }) };
+      },
+    },
+  });
+  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  harness.workflow.selectAgent(pageroot);
+  const run = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: pageroot,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.workflow.beginAccessRepair(run, "apiKey");
+  const pending = harness.workflow.resendAfterAccessRepair();
+  await new Promise((resolve) => setImmediate(resolve));
+  harness.projectSession.openLocator(SOURCE_B);
+  harness.projectSession.register({
+    epoch: harness.projectSession.epoch,
+    sourcePath: SOURCE_B,
+    projectId: "project_b",
+    documentId: "document_b",
+  });
+  gate.resolve();
+  const outcome = await pending;
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "AGENT_REPAIR_DOCUMENT_CHANGED");
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.workflow.getSnapshot().accessRepair.requestId, run.requestId);
+});
+
+test("resend after access repair does not cancel a newer round on the same document", async () => {
+  const harness = createHarness();
+  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  harness.workflow.selectAgent(pageroot);
+  const first = runRecord({
+    requestId: "request_one",
+    attemptId: "attempt_001",
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: pageroot,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(first, { activate: "always" });
+  harness.workflow.beginAccessRepair(first, "login");
+  const second = runRecord({
+    requestId: "request_two",
+    attemptId: "attempt_001",
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: pageroot,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(second, { activate: "always" });
+  const outcome = await harness.workflow.resendAfterAccessRepair();
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "AGENT_REPAIR_ATTEMPT_CHANGED");
+  assert.equal(harness.calls.cancel.length, 0);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.workflow.getSnapshot().accessRepair, null);
+});
+
+test("a blocked cancel keeps the access-repair intent", async () => {
+  const harness = createHarness();
+  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  harness.workflow.selectAgent(pageroot);
+  const run = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: pageroot,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.workflow.beginAccessRepair(run, "apiKey");
+  assert.equal(harness.runSession.beginOperation("cancel", operationKey(run)), true);
+  const outcome = await harness.workflow.resendAfterAccessRepair();
+  assert.equal(outcome.status, "blocked");
+  assert.equal(outcome.code, "RUN_CANCEL_BUSY");
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.workflow.getSnapshot().accessRepair.requestId, run.requestId);
+});
+
+test("resend after a dismissed run still uses the stored repair intent", async () => {
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async createRequest(request) {
+        harness.calls.createRequest.push(request);
+        return {
+          activeRun: runRecord({
+            requestId: "request_repaired",
+            agentDelivery: request.agentDelivery,
+          }),
+        };
+      },
+    },
+  });
+  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  harness.workflow.selectAgent(pageroot);
+  const run = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: pageroot,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.workflow.beginAccessRepair(run, "login");
+  harness.runSession.removeRun(run);
+  harness.runSession.clearActiveRun();
+  const outcome = await harness.workflow.resendAfterAccessRepair();
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.equal(harness.workflow.getSnapshot().accessRepair, null);
+});
+
+test("a failed new request keeps the access-repair intent", async () => {
+  const harness = createHarness({
+    bridge: {
+      async createRequest() {
+        throw Object.assign(new Error("persist failed"), { code: "REQUEST_PERSIST_FAILED" });
+      },
+    },
+  });
+  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  harness.workflow.selectAgent(pageroot);
+  const run = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: pageroot,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.workflow.beginAccessRepair(run, "apiKey");
+  harness.runSession.removeRun(run);
+  const outcome = await harness.workflow.resendAfterAccessRepair();
+  assert.notEqual(outcome.status, "succeeded");
+  assert.equal(harness.workflow.getSnapshot().accessRepair.requestId, run.requestId);
+});
+
+test("commitPendingDefaultAgent ignores a superseded selection after save", async () => {
+  const saves = [];
+  const harness = createHarness();
+  const catalog = harness.workflow.getSnapshot().agentCatalog;
+  const pageroot = catalog.providers.pageroot.selection;
+  const qoder = catalog.providers.qoder.selection;
+  harness.workflow.selectAgent(qoder);
+  await harness.workflow.checkAgentUsability(pageroot);
+  harness.workflow.queuePendingDefaultAgent(pageroot);
+  let resume;
+  const pendingSave = new Promise((resolve) => {
+    resume = resolve;
+  });
+  const committing = harness.workflow.commitPendingDefaultAgent(pageroot, {
+    async saveDefault(providerId) {
+      saves.push(providerId);
+      if (saves.length === 1) await pendingSave;
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  harness.workflow.queuePendingDefaultAgent(qoder);
+  resume();
+  const outcome = await committing;
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value?.superseded, true);
+  assert.equal(harness.workflow.pendingDefaultAgent()?.providerId, "qoder");
+  assert.equal(harness.workflow.getSnapshot().agentCatalog.selected.providerId, "qoder");
+});
+
+test("provider access impact counts running tasks on other documents", async () => {
+  const harness = createHarness();
+  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  const runA = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: pageroot,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  const runB = runRecord({
+    sourcePath: SOURCE_B,
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: pageroot,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(runA, { activate: "always" });
+  harness.runSession.trackRun(runB, { activate: "never" });
+  const impact = harness.workflow.getSnapshot().providerAccessImpact.pageroot;
+  assert.equal(impact.runningCount, 2);
+  assert.equal(impact.documentCount, 2);
+});
+
 test("a late keep-external result cannot reload a reopened project generation", async () => {
   const resolution = deferred();
   const harness = createHarness({

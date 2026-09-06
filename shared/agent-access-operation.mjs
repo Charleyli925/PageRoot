@@ -14,15 +14,27 @@ export const ACCESS_OPERATION_STATES = Object.freeze([
   "running",
   "waiting",
   "cancelling",
+  "stop-unconfirmed",
   "succeeded",
   "failed",
   "cancelled",
+]);
+
+export const ACCESS_OPERATION_IN_FLIGHT_STATES = Object.freeze([
+  "running",
+  "waiting",
+  "cancelling",
 ]);
 
 export const ACCESS_OPERATION_TERMINAL_STATES = Object.freeze([
   "succeeded",
   "failed",
   "cancelled",
+]);
+
+export const ACCESS_OPERATION_FINISH_STATES = Object.freeze([
+  ...ACCESS_OPERATION_TERMINAL_STATES,
+  "stop-unconfirmed",
 ]);
 
 export function accessOperationId({ providerId, kind, generation }) {
@@ -71,10 +83,73 @@ export function publicAccessOperation(value) {
   }
 }
 
+export function isInFlightAccessOperation(operation) {
+  const current = publicAccessOperation(operation);
+  return Boolean(current && ACCESS_OPERATION_IN_FLIGHT_STATES.includes(current.state));
+}
+
+export function isBlockingAccessOperation(operation) {
+  const current = publicAccessOperation(operation);
+  return Boolean(
+    current
+    && (ACCESS_OPERATION_IN_FLIGHT_STATES.includes(current.state)
+      || current.state === "stop-unconfirmed"),
+  );
+}
+
+export function pickActiveAccessOperation(...operations) {
+  const current = operations.map((operation) => publicAccessOperation(operation)).filter(Boolean);
+  return current.find((operation) => isInFlightAccessOperation(operation))
+    || current.find((operation) => operation.state === "stop-unconfirmed")
+    || null;
+}
+
+export function adoptAccessOperation(listed, current) {
+  const listedOp = publicAccessOperation(listed);
+  const currentOp = publicAccessOperation(current);
+  if (listedOp && currentOp && listedOp.operationId === currentOp.operationId) {
+    return listedOp;
+  }
+  return pickActiveAccessOperation(listedOp, currentOp);
+}
+
+export function projectAccessOperations({
+  listedActive = null,
+  listedLast = null,
+  currentActive = null,
+  currentLast = null,
+} = {}) {
+  const listedA = publicAccessOperation(listedActive);
+  const listedL = publicAccessOperation(listedLast);
+  const currentA = publicAccessOperation(currentActive);
+  const currentL = publicAccessOperation(currentLast);
+  const sameFinished = listedL && currentA && listedL.operationId === currentA.operationId
+    ? listedL
+    : null;
+  const adopted = adoptAccessOperation(listedA, currentA);
+  const candidate = sameFinished || adopted;
+  const active = isBlockingAccessOperation(candidate)
+    ? candidate
+    : pickActiveAccessOperation(listedA);
+  const last = listedL
+    || (candidate && ACCESS_OPERATION_TERMINAL_STATES.includes(candidate.state) ? candidate : null)
+    || (currentA
+      && ACCESS_OPERATION_TERMINAL_STATES.includes(currentA.state)
+      && (!active || active.operationId !== currentA.operationId)
+      ? currentA
+      : null)
+    || currentL
+    || null;
+  return {
+    activeOperation: active,
+    lastOperation: last,
+  };
+}
+
 export function finishAccessOperation(operation, { state, errorCode = null } = {}) {
   if (!operation) throw new TypeError("Access operation is missing.");
-  if (!ACCESS_OPERATION_TERMINAL_STATES.includes(state)) {
-    throw new TypeError("Access operation must finish in a terminal state.");
+  if (!ACCESS_OPERATION_FINISH_STATES.includes(state)) {
+    throw new TypeError("Access operation must finish in a terminal or stop-unconfirmed state.");
   }
   return createAccessOperation({
     ...operation,
@@ -136,6 +211,7 @@ export function accessOperationFromInstallSnapshot(snapshot) {
 const LOGIN_STATE_TO_ACCESS = Object.freeze({
   waiting: "waiting",
   cancelling: "cancelling",
+  "stop-unconfirmed": "stop-unconfirmed",
   succeeded: "succeeded",
   failed: "failed",
   cancelled: "cancelled",

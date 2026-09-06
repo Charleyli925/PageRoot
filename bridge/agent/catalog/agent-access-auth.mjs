@@ -9,11 +9,13 @@ export const LOGIN_STATES = Object.freeze([
   "idle",
   "waiting",
   "cancelling",
+  "stop-unconfirmed",
   "succeeded",
   "failed",
   "cancelled",
 ]);
 const LOGIN_TERMINAL_STATES = Object.freeze(["succeeded", "failed", "cancelled"]);
+const LOGIN_CLEAN_STATES = Object.freeze(["idle", ...LOGIN_TERMINAL_STATES]);
 const DEFAULT_LOGIN_TIMEOUT_MS = 15 * 60 * 1000;
 
 function fail(code, message, options) {
@@ -71,26 +73,43 @@ export function createAgentAccessAuth({
   }
 
   function terminalStateForCode(code) {
+    if (code === "AGENT_LOGIN_CANCEL_FAILED") return "stop-unconfirmed";
     if (code === "AGENT_LOGIN_EXPIRED") return "failed";
     if (code === "AGENT_LOGIN_CANCELLED" || code === "AGENT_LOGIN_STALE") return "cancelled";
     return "failed";
   }
 
+  function applyJobFailure(job, cause, fallbackCode) {
+    const code = String(cause?.code || fallbackCode || "AGENT_LOGIN_FAILED");
+    job.loginUrl = null;
+    job.startedAt = null;
+    job.errorCode = code;
+    job.loginState = terminalStateForCode(code);
+  }
+
   async function abortJob(job, code = "AGENT_LOGIN_CANCELLED") {
-    if (!job || job.loginState === "idle" || LOGIN_TERMINAL_STATES.includes(job.loginState)) {
-      return;
+    if (
+      !job
+      || job.loginState === "idle"
+      || job.loginState === "stop-unconfirmed"
+      || LOGIN_TERMINAL_STATES.includes(job.loginState)
+    ) {
+      return job;
     }
     job.loginState = "cancelling";
     job.controller.abort();
     try {
       await job.promise;
-    } catch {
-      // Cancellation is the requested outcome.
+    } catch (cause) {
+      applyJobFailure(job, cause, code);
+      return job;
     }
+    if (job.loginState === "stop-unconfirmed") return job;
     if (job.errorCode !== "AGENT_LOGIN_STALE") job.errorCode = code;
     job.loginState = terminalStateForCode(job.errorCode || code);
     job.loginUrl = null;
     job.startedAt = null;
+    return job;
   }
 
   return {
@@ -165,16 +184,15 @@ export function createAgentAccessAuth({
           if (jobs.get(providerId)?.generation !== generation) {
             fail("AGENT_LOGIN_STALE", "A newer login replaced this attempt.", { status: 409 });
           }
-          const cancelled = cause?.code === "AGENT_LOGIN_CANCELLED" || controller.signal.aborted;
-          const expired = cause?.code === "AGENT_LOGIN_EXPIRED";
-          job.loginUrl = null;
-          job.startedAt = null;
-          job.errorCode = expired
-            ? "AGENT_LOGIN_EXPIRED"
-            : cancelled
-              ? "AGENT_LOGIN_CANCELLED"
-              : String(cause?.code || "AGENT_LOGIN_FAILED");
-          job.loginState = expired ? "failed" : cancelled ? "cancelled" : "failed";
+          applyJobFailure(
+            job,
+            cause,
+            cause?.code === "AGENT_LOGIN_CANCEL_FAILED"
+              ? "AGENT_LOGIN_CANCEL_FAILED"
+              : controller.signal.aborted
+                ? "AGENT_LOGIN_CANCELLED"
+                : "AGENT_LOGIN_FAILED",
+          );
           throw cause;
         } finally {
           clearTimeout(timeout);
@@ -196,14 +214,29 @@ export function createAgentAccessAuth({
       await abortJob(job);
       return jobSnapshot(providerId);
     },
+    clearAuth(providerId) {
+      const job = currentJob(providerId);
+      if (job) {
+        job.authSource = null;
+        job.authScope = null;
+        if (LOGIN_TERMINAL_STATES.includes(job.loginState) || job.loginState === "stop-unconfirmed") {
+          job.loginState = "idle";
+          job.errorCode = null;
+          job.loginUrl = null;
+          job.startedAt = null;
+        }
+      }
+      return jobSnapshot(providerId);
+    },
     async drain({ timeoutMs = 12_000 } = {}) {
       const pending = [...jobs.values()]
-        .filter((job) => job.loginState === "waiting" || job.loginState === "cancelling")
+        .filter((job) => (
+          job.loginState === "waiting"
+          || job.loginState === "cancelling"
+        ))
         .map((job) => abortJob(job, "AGENT_LOGIN_CANCELLED"));
       if (pending.length === 0) {
-        return [...jobs.values()].every((job) => (
-          job.loginState !== "waiting" && job.loginState !== "cancelling"
-        ));
+        return [...jobs.values()].every((job) => LOGIN_CLEAN_STATES.includes(job.loginState));
       }
       const timeout = new Promise((_, reject) => {
         const timer = setTimeout(() => {
@@ -216,9 +249,7 @@ export function createAgentAccessAuth({
         timer.unref?.();
       });
       await Promise.race([Promise.allSettled(pending), timeout]);
-      return [...jobs.values()].every((job) => (
-        job.loginState !== "waiting" && job.loginState !== "cancelling"
-      ));
+      return [...jobs.values()].every((job) => LOGIN_CLEAN_STATES.includes(job.loginState));
     },
   };
 }

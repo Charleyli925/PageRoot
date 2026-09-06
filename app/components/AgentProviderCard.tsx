@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Ref } from "react";
+import { useEffect, useState, type Ref } from "react";
 import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
 import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
 
@@ -82,12 +82,17 @@ export type AgentProviderCardProps = {
   onCancelInstall?: () => Promise<AgentActionOutcome>;
   onRecheck?: () => Promise<AgentActionOutcome>;
   onConnectApiKey?: (apiKey: string, extras?: ApiKeyExtras) => Promise<AgentActionOutcome>;
+  onRetryPersistCredential?: () => Promise<AgentActionOutcome>;
   onDisconnectApiKey?: () => Promise<AgentActionOutcome>;
   onOpenVendorApiKeyPage?: (vendorId: string) => Promise<AgentActionOutcome>;
   onSelectModel?: (modelId: string) => Promise<AgentActionOutcome>;
   onSelectReasoning?: (reasoning: string) => Promise<AgentActionOutcome>;
   hideDisconnectAction?: boolean;
   initialApiKeyOpen?: boolean;
+  credentialPersist?: Readonly<{
+    status?: string;
+    reason?: string | null;
+  }> | null;
 };
 
 type CardAction = Readonly<{
@@ -166,6 +171,8 @@ export default function AgentProviderCard({
   onSelectReasoning,
   hideDisconnectAction = false,
   initialApiKeyOpen = false,
+  credentialPersist = null,
+  onRetryPersistCredential,
 }: AgentProviderCardProps) {
   const [pendingAction, setPendingAction] = useState<CardActionKind | null>(null);
   const [installPending, setInstallPending] = useState(false);
@@ -183,14 +190,29 @@ export default function AgentProviderCard({
       ? String(selectedModelId || models[0]?.id || "").replace(/^pageroot:/u, "")
       : "",
   );
+  const persistFailed = credentialPersist?.status === "failed";
+  useEffect(() => {
+    if (!persistFailed) return;
+    setApiKeyOpen(true);
+    setActionError(credentialPersist?.reason || "已连接，但新的 API Key 未保存。");
+    setFieldError("form");
+  }, [persistFailed, credentialPersist?.reason]);
   const presentation = provider.availability(availability);
   const installing = installState === "installing" || installPending;
+  const stopUnconfirmed = activeOperation?.state === "stop-unconfirmed";
   const loggingIn = activeOperation?.kind === "login"
     && (activeOperation.state === "waiting" || activeOperation.state === "cancelling" || pendingAction === "login");
   const cancelling = installState === "cancelling"
     || (activeOperation?.kind === "login" && activeOperation.state === "cancelling")
     || cancelPending;
-  const statusPresentation = (installing || loggingIn) && !cancelling
+  const statusPresentation = stopUnconfirmed
+    ? {
+      ...presentation,
+      statusLabel: "尚未确认操作已停止",
+      detail: "只有确认停止后才能开始下一次登录或退出。",
+      tone: "attention" as const,
+    }
+    : (installing || loggingIn) && !cancelling
     ? {
       ...presentation,
       statusLabel: loggingIn ? "请在浏览器完成登录" : "正在安装…",
@@ -202,8 +224,10 @@ export default function AgentProviderCard({
       : presentation;
   const currentModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
   const tokenFormOpen = provider.credentialKind === "api-token"
-    && (availability.status === "auth-required" || apiKeyOpen);
-  const actions = installing || cancelling
+    && (availability.status === "auth-required" || apiKeyOpen || persistFailed);
+  const actions = stopUnconfirmed
+    ? [{ kind: "cancel-install" as const, label: "重试停止", copiedLabel: "重试停止" }]
+    : installing || cancelling
     ? [{ kind: "cancel-install" as const, label: "取消", copiedLabel: "取消" }]
     : loggingIn
       ? [
@@ -359,7 +383,7 @@ export default function AgentProviderCard({
       }
       if (outcome?.persistFailed || outcome?.reason) {
         setFieldError("form");
-        setActionError(outcome.reason || "已连接，但记住 API Key 失败。本次仍可使用，可稍后重试记住。");
+        setActionError(outcome.reason || "已连接，但新的 API Key 未保存。");
         return;
       }
       setApiKey("");
@@ -755,6 +779,29 @@ export default function AgentProviderCard({
           ) : null}
           {actionError && (fieldError === "form" || !fieldError) ? (
             <span className="qoder-card-error" role="alert">{actionError}</span>
+          ) : null}
+          {persistFailed && onRetryPersistCredential ? (
+            <button
+              type="button"
+              data-kind="retry-persist"
+              disabled={Boolean(pendingAction) || disabled}
+              onClick={() => {
+                void (async () => {
+                  setPendingAction("api-key");
+                  try {
+                    const outcome = await onRetryPersistCredential();
+                    if (!outcome || !["succeeded", "stale"].includes(outcome.status) || outcome.persistFailed) {
+                      setFieldError("form");
+                      setActionError(outcome?.reason || "已连接，但新的 API Key 未保存。");
+                    }
+                  } finally {
+                    setPendingAction(null);
+                  }
+                })();
+              }}
+            >
+              {pendingAction === "api-key" ? "正在保存…" : "重试保存"}
+            </button>
           ) : null}
           {connection ? (
             <span className="qoder-card-apikey-note">新配置验证成功后才会替换当前连接。</span>
