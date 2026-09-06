@@ -4861,15 +4861,28 @@ export default function Workbench() {
     viewMode,
     workspaceController,
   ]);
+  const commitPendingDefaultIfReady = useCallback(async (selection: AgentSelection) => {
+    const ready = workspaceController?.readyPendingDefaultAgent?.();
+    if (!ready || ready.providerId !== selection.providerId) return;
+    await workspacePreferencesController.update({
+      defaultAgentProviderId: ready.providerId as WorkspacePreferences["defaultAgentProviderId"],
+    });
+    workspaceController?.selectAgent(ready);
+    workspaceController?.clearPendingDefaultAgent();
+  }, [workspaceController, workspacePreferencesController]);
   const checkAgentUsability = useCallback(async (selection?: AgentSelection) => (
     workspaceController?.checkAgentUsability(selection) ?? null
   ), [workspaceController]);
   const copyAgentGuidance = useCallback(async (kind: "install" | "login", selection?: AgentSelection) => (
     workspaceController?.copyAgentGuidance({ kind, selection }) ?? null
   ), [workspaceController]);
-  const startAgentLogin = useCallback(async (selection?: AgentSelection | null) => (
-    workspaceController?.startAgentLogin(selection) ?? null
-  ), [workspaceController]);
+  const startAgentLogin = useCallback(async (selection?: AgentSelection | null) => {
+    const outcome = await workspaceController?.startAgentLogin(selection) ?? null;
+    if (outcome && ["succeeded", "stale"].includes(outcome.status) && selection) {
+      await commitPendingDefaultIfReady(selection);
+    }
+    return outcome;
+  }, [commitPendingDefaultIfReady, workspaceController]);
   const reopenAgentLogin = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.reopenAgentLogin(selection) ?? null
   ), [workspaceController]);
@@ -4904,6 +4917,7 @@ export default function Workbench() {
           modelId: extras.modelId,
         });
         if (persisted && persisted.ok === false) {
+          await commitPendingDefaultIfReady(selection);
           return Object.freeze({
             ...outcome,
             persistFailed: true,
@@ -4914,14 +4928,16 @@ export default function Workbench() {
         }
       }
     } catch {
+      await commitPendingDefaultIfReady(selection);
       return Object.freeze({
         ...outcome,
         persistFailed: true,
         reason: "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。",
       });
     }
+    await commitPendingDefaultIfReady(selection);
     return outcome;
-  }, [workspaceController]);
+  }, [commitPendingDefaultIfReady, workspaceController]);
   const openVendorApiKeyPage = useCallback(async (vendorId: string) => {
     try {
       const result = await window.htmlAIIntegrations?.openVendorApiKeyPage?.(vendorId);
@@ -5697,7 +5713,9 @@ export default function Workbench() {
   // decision no longer requires a panel over the page.
   const handleAiDecision = useCallback((actionId: string) => {
     if (actionId === "resend-agent" || actionId === "retry-later") {
-      if (activeRun) void workspaceControllerRef.current?.runs.commands.startAgent({ run: activeRun });
+      if (activeRun) {
+        void workspaceControllerRef.current?.resendAfterAccessRepair(activeRun);
+      }
       return;
     }
     if ([
@@ -5710,6 +5728,10 @@ export default function Workbench() {
     ].includes(actionId)) {
       void (async () => {
         if (activeRun && !(await cancelActiveRun())) return;
+        workspaceControllerRef.current?.beginAccessRepair(
+          activeRun,
+          actionId === "repair-agent-installation" ? "install" : "login",
+        );
         workspaceControllerRef.current?.runs.commands.dismiss();
         setHandoffPreviewOpen(false);
         setCanvasMode("edit");
@@ -5832,6 +5854,7 @@ export default function Workbench() {
   const agentAccess = {
     cards: agentCards,
     documentId: documentId ?? "",
+    recovery: workspaceControllerSnapshot?.run?.accessRepair ?? null,
     bindings: {
       onCopyGuidance: copyAgentGuidance,
       onStartLogin: startAgentLogin,
@@ -5847,7 +5870,19 @@ export default function Workbench() {
       onSelectAgentReasoning: selectSettingsAgentReasoning,
     },
     onSelect: selectDefaultAgent,
-    onReconnect: (selection: AgentSelection) => manageAgentAccess("reconnect", selection),
+    onQueueDefault: (selection: AgentSelection) => {
+      workspaceController?.queuePendingDefaultAgent(selection);
+    },
+    onReconnect: async (selection: AgentSelection) => {
+      const outcome = await manageAgentAccess("reconnect", selection);
+      if (outcome && ["succeeded", "stale"].includes(outcome.status)) {
+        await commitPendingDefaultIfReady(selection);
+      }
+      return outcome;
+    },
+    onBeginAccessRepair: (field: "apiKey" | "login" | "install" = "apiKey") => {
+      if (activeRun) workspaceController?.beginAccessRepair(activeRun, field);
+    },
   };
   const readyReviewOverlay = readyReviewSession ? (
     <WorkbenchReviewOverlay
