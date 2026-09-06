@@ -75,6 +75,7 @@ const QODER_PRESENTATION = Object.freeze({
   stopLabel: "停止 Qoder 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给 Qoder CLI 的只读内容",
   installLabel: "安装 Qoder CLI",
+  supportsSelectableModels: true,
 });
 
 const AGENT_SECURITY_PROFILES = new Set(["client-mediated", "agent-native"]);
@@ -404,6 +405,7 @@ export function agentProviderCardPresentation(provider) {
     }),
     supportsApiKey: presentation.supportsApiKey === true,
     credentialKind: presentation.credentialKind || null,
+    supportsSelectableModels: presentation.supportsSelectableModels === true,
     vendors: Array.isArray(presentation.vendors) ? presentation.vendors : Object.freeze([]),
   });
 }

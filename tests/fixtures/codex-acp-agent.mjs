@@ -13,6 +13,7 @@ const hang = process.argv.includes("--hang");
 const authRequired = process.argv.includes("--auth-required");
 const objectModels = process.argv.includes("--object-models");
 const unknownModels = process.argv.includes("--unknown-models");
+const nameOnlyModels = process.argv.includes("--name-only-models");
 if (process.argv.includes("login") && process.argv.includes("status")) {
   if (authRequired) {
     process.stderr.write("Not logged in. Login required.\n");
@@ -72,19 +73,43 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
     if (unknownModels) {
       return { sessionId, models: { currentModelId: "gpt-synthetic" } };
     }
+    if (nameOnlyModels) {
+      return {
+        sessionId,
+        models: {
+          currentModelId: "GPT With Spaces",
+          availableModels: [
+            { name: "GPT With Spaces", description: "Display name is not a machine id" },
+          ],
+        },
+      };
+    }
     if (objectModels) {
       return {
         sessionId,
         models: {
           currentModelId: "gpt-object",
           availableModels: [
-            { id: "gpt-object", displayName: "GPT Object", reasoningEfforts: ["low", "high"] },
-            { id: "gpt-other", displayName: "GPT Other" },
+            {
+              modelId: "gpt-object",
+              name: "GPT Object",
+              description: "Locked Codex ACP catalog item",
+              reasoningEfforts: ["low", "high"],
+            },
+            { modelId: "gpt-other", name: "GPT Other", description: "Second locked catalog item" },
           ],
         },
       };
     }
-    return { sessionId, models: [{ id: "gpt-synthetic", displayName: "GPT Synthetic", isDefault: true }] };
+    return {
+      sessionId,
+      models: {
+        currentModelId: "gpt-synthetic",
+        availableModels: [
+          { modelId: "gpt-synthetic", name: "GPT Synthetic", description: "PageRoot synthetic Codex model" },
+        ],
+      },
+    };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     if (hang) return new Promise(() => {});

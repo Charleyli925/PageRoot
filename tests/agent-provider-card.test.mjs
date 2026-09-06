@@ -103,5 +103,7 @@ test("Settings reuses AgentSetupPanel and lists every service row", async () => 
     "a model selection must validate before it becomes current",
   );
   assert.match(panel, /checked\.status !== "succeeded"/u);
-  assert.match(panel, /onSelectAgentReasoning\(reasoning, card\.selection\)/u);
+  assert.match(panel, /credentialKind === "api-token"/u);
+  assert.doesNotMatch(panel, /if \(card\.connection\)/u);
+  assert.match(panel, /supportsSelectableModels === true/u);
 });

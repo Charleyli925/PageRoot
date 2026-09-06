@@ -442,35 +442,52 @@ function sessionModelCatalog(initializeResult, sessionResult) {
   return Object.freeze({ ok: true, list: [], currentModelId: null });
 }
 
-function namespacedModels(rawModels, currentModelId = null) {
+function lockedCodexModelItem(raw) {
+  if (typeof raw === "string") {
+    const modelId = cleanProviderText(raw, 80);
+    return Object.freeze({ modelId, displayName: modelId, reasoningEfforts: Object.freeze([]) });
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return Object.freeze({ modelId: "", displayName: "", reasoningEfforts: Object.freeze([]) });
+  }
+  // Locked Codex ACP / ACP session model items use modelId as the machine
+  // identity. name and description are display-only and may contain spaces.
+  const modelId = cleanProviderText(raw.modelId, 80);
+  return Object.freeze({
+    modelId,
+    displayName: cleanProviderText(raw.name || raw.displayName || modelId, 80),
+    reasoningEfforts: Object.freeze(
+      Array.isArray(raw.reasoningEfforts)
+        ? raw.reasoningEfforts.filter((value) => SAFE_REASONING.test(String(value || "")))
+        : [],
+    ),
+    defaultReasoningEffort: SAFE_REASONING.test(String(raw.defaultReasoningEffort || ""))
+      ? String(raw.defaultReasoningEffort)
+      : null,
+    isDefault: raw.isDefault === true,
+  });
+}
+
+export function publicCodexAcpModels(rawModels, currentModelId = null) {
   const seen = new Set();
   const models = [];
   const current = cleanProviderText(currentModelId, 80);
-  for (const raw of rawModels) {
-    const providerModelId = cleanProviderText(
-      typeof raw === "string" ? raw : raw?.id || raw?.name || "",
-      80,
-    );
-    if (!providerModelId || !SAFE_MODEL_ID.test(providerModelId) || seen.has(providerModelId)) continue;
-    seen.add(providerModelId);
-    const id = providerModelId.startsWith("codex:") ? providerModelId : `codex:${providerModelId}`;
+  for (const raw of Array.isArray(rawModels) ? rawModels : []) {
+    const item = lockedCodexModelItem(raw);
+    if (!item.modelId || !SAFE_MODEL_ID.test(item.modelId) || seen.has(item.modelId)) continue;
+    seen.add(item.modelId);
+    const id = item.modelId.startsWith("codex:") ? item.modelId : `codex:${item.modelId}`;
     const matchesCurrent = Boolean(
       current
-      && (providerModelId === current || id === current || id === `codex:${current}`),
+      && (item.modelId === current || id === current || id === `codex:${current}`),
     );
     models.push(Object.freeze({
       id,
       providerModelId: id.slice("codex:".length),
-      displayName: cleanProviderText(raw?.displayName || providerModelId, 80) || id,
-      reasoningEfforts: Object.freeze(
-        Array.isArray(raw?.reasoningEfforts)
-          ? raw.reasoningEfforts.filter((value) => SAFE_REASONING.test(String(value || "")))
-          : [],
-      ),
-      defaultReasoningEffort: SAFE_REASONING.test(String(raw?.defaultReasoningEffort || ""))
-        ? String(raw.defaultReasoningEffort)
-        : null,
-      isDefault: current ? matchesCurrent : raw?.isDefault === true,
+      displayName: item.displayName || id,
+      reasoningEfforts: item.reasoningEfforts,
+      defaultReasoningEffort: item.defaultReasoningEffort || null,
+      isDefault: current ? matchesCurrent : item.isDefault === true,
     }));
     if (models.length >= MAX_PUBLIC_MODELS) break;
   }
@@ -726,21 +743,20 @@ export async function probeCodexAcp(command, environment = process.env) {
     if (!catalog.ok) {
       fail(catalog.code, codexAcpPreflightFailure(catalog.code), { status: 503 });
     }
-    const models = namespacedModels(catalog.list, catalog.currentModelId);
-    const publicModels = models.length > 0 ? models : Object.freeze([Object.freeze({
-      id: "codex:default",
-      providerModelId: "default",
-      displayName: "Codex",
-      reasoningEfforts: Object.freeze([]),
-      defaultReasoningEffort: null,
-      isDefault: true,
-    })]);
+    const models = publicCodexAcpModels(catalog.list, catalog.currentModelId);
+    if (catalog.list.length > 0 && models.length === 0) {
+      fail(
+        "CODEX_PROTOCOL_UNSUPPORTED",
+        "Codex 返回了无法识别的模型目录。",
+        { status: 503 },
+      );
+    }
     return Object.freeze({
       version: command.version || cleanProviderText(agentInfo.version, 80) || null,
       protocol: "acp",
       authMode: "ready",
-      modelCount: publicModels.length,
-      models: publicModels,
+      modelCount: models.length,
+      models,
     });
   } catch (cause) {
     const code = cause?.code === "ACP_PROCESS_CLEANUP_UNCONFIRMED"
