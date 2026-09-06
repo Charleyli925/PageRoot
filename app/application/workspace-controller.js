@@ -1714,6 +1714,14 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().disconnectAgentApiKey(selection);
   }
 
+  stopRunsForProvider(providerId) {
+    return this.#requireRunWorkflow().stopRunsForProvider(providerId);
+  }
+
+  manageAgentAccess(kind, selection, options) {
+    return this.#requireRunWorkflow().manageAgentAccess(kind, selection, options);
+  }
+
   refreshQoderAvailability() {
     return this.#requireRunWorkflow().refreshQoderAvailability();
   }

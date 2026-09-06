@@ -1663,10 +1663,20 @@ async function setAgentSessionCredential(body) {
   if (body?.apiKey == null || body?.apiKey === "") {
     return agentBridgeService.clearSessionCredential(providerId);
   }
+  const modelId = String(body?.modelId || "").trim();
+  const selection = body.selection || (modelId
+    ? {
+      providerId,
+      runtimeId: "http",
+      requestedModelId: modelId.startsWith(`${providerId}:`) ? modelId : `${providerId}:${modelId}`,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    }
+    : undefined);
   return agentBridgeService.setSessionCredential(providerId, body.apiKey, {
     vendorId: body.vendorId,
     baseUrl: body.baseUrl,
-    selection: body.selection,
+    selection,
   });
 }
 

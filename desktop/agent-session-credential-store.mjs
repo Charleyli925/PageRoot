@@ -7,6 +7,7 @@ const SCHEMA_VERSION = 1;
 const MAX_BYTES = 16_384;
 const PROVIDER_ID = "pageroot";
 const SAFE_VENDOR = /^(?:deepseek|zhipu|dashscope|openai|custom)$/u;
+const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,79}$/u;
 const HTTPS_ORIGIN = /^https:\/\//u;
 
 function isRecord(value) {
@@ -96,6 +97,7 @@ export function createAgentSessionCredentialStore({
       providerId: PROVIDER_ID,
       vendorId: parsed.vendorId,
       baseUrl: normalizeBaseUrl(parsed.baseUrl),
+      modelId: SAFE_MODEL_ID.test(String(parsed.modelId || "")) ? String(parsed.modelId) : "",
       ciphertext: parsed.ciphertext,
       rememberedAt: typeof parsed.rememberedAt === "string" ? parsed.rememberedAt : null,
     });
@@ -119,7 +121,7 @@ export function createAgentSessionCredentialStore({
       if (availability) return availability;
       return publicStatus(await readRecord());
     },
-    async persist({ apiKey, vendorId, baseUrl } = {}) {
+    async persist({ apiKey, vendorId, baseUrl, modelId } = {}) {
       if (!available() || !encrypt) {
         return Object.freeze({
           ok: false,
@@ -157,6 +159,9 @@ export function createAgentSessionCredentialStore({
         providerId: PROVIDER_ID,
         vendorId: vendor,
         baseUrl: vendor === "custom" ? normalizeBaseUrl(baseUrl) : "",
+        modelId: vendor === "custom" && SAFE_MODEL_ID.test(String(modelId || ""))
+          ? String(modelId)
+          : "",
         ciphertext,
         rememberedAt: new Date().toISOString(),
       });
@@ -177,6 +182,7 @@ export function createAgentSessionCredentialStore({
         providerId: PROVIDER_ID,
         vendorId: record.vendorId,
         baseUrl: record.baseUrl,
+        modelId: record.modelId || "",
         apiKey,
       });
     },
