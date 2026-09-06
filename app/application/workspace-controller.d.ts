@@ -599,6 +599,12 @@ export class WorkspaceController {
   startAgentLogin(
     selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
   ): Promise<RunWorkflowOutcome>;
+  reopenAgentLogin(
+    selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
+  ): Promise<RunWorkflowOutcome>;
+  startAgentLogout(
+    selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
+  ): Promise<RunWorkflowOutcome>;
   installQoder(): Promise<RunWorkflowOutcome>;
   installAgent(
     selection?: import("../domain/agent-provider-state.js").AgentSelection | null,

@@ -126,7 +126,9 @@ The renderer's main workspace facts are partitioned as follows:
 - Bridge Agent catalog/installer: `AgentCatalog` owns the product ACP
   allowlist, public provider projection and managed-command candidates.
   `AgentInstaller` owns in-flight install jobs, atomic verified layout under
-  `userData/agents` and shutdown drain. Coordinator does not own install. This
+  `userData/agents` and shutdown drain. `AgentAccessAuth` owns in-flight login
+  jobs, Bridge-minted login `operationId` values, terminal login snapshots and
+  login drain. Coordinator does not own install or login. This
   is a product allowlist, not a live public registry; Qoder and Codex ACP are
   the installable shipped ACP entries. `pageroot`/`http` is a non-installable
   shipped HTTP Agent (ADR 0069). The packaged application contains no

@@ -22,6 +22,7 @@ export type BoundAgentSetupPanelProps = Readonly<{
   initialApiKeyOpen?: boolean;
   onCopyGuidance(kind: AgentProviderGuidanceKind, selection: AgentSelection): Promise<AgentActionOutcome>;
   onStartLogin(selection: AgentSelection): Promise<AgentActionOutcome>;
+  onReopenLogin?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCancelInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCheckSelection(selection: AgentSelection): Promise<AgentActionOutcome>;
@@ -44,6 +45,7 @@ export function BoundAgentSetupPanel({
   initialApiKeyOpen,
   onCopyGuidance,
   onStartLogin,
+  onReopenLogin,
   onInstall,
   onCancelInstall,
   onCheckSelection,
@@ -74,9 +76,12 @@ export function BoundAgentSetupPanel({
       initialApiKeyOpen={initialApiKeyOpen}
       onCopyGuidance={(kind) => onCopyGuidance(kind, card.selection)}
       onStartLogin={() => onStartLogin(card.selection)}
+      onReopenLogin={onReopenLogin ? () => onReopenLogin(card.selection) : undefined}
       onInstall={() => onInstall(card.selection)}
       installState={card.installState}
       activeOperation={card.activeOperation}
+      loginUrlPresent={card.loginUrlPresent === true}
+      loginOpenError={card.loginOpenError || null}
       onCancelInstall={() => onCancelInstall(card.selection)}
       onRecheck={() => onCheckSelection(card.selection)}
       onConnectApiKey={(apiKey, extras) => onConnectApiKey(card.selection, apiKey, extras)}

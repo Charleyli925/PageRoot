@@ -10,7 +10,7 @@ import type {
 } from "../domain/agent-provider-state.js";
 
 type AgentActionOutcome = Readonly<{ status: string; reason?: string; code?: string }> | null | undefined;
-type CardActionKind = AgentProviderGuidanceKind | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning";
+type CardActionKind = AgentProviderGuidanceKind | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning" | "reopen-login";
 type ApiKeyExtras = Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>;
 type ApiKeyField = "apiKey" | "baseUrl" | "modelId" | "form";
 type VendorOption = Readonly<{
@@ -49,10 +49,14 @@ export type AgentProviderCardProps = {
     kind: string;
     state: string;
   }> | null;
+  loginUrlPresent?: boolean;
+  loginOpenError?: string | null;
   connection?: Readonly<{
-    vendorId: string;
-    vendorDisplayName: string;
-    baseUrl: string;
+    vendorId?: string;
+    vendorDisplayName?: string;
+    baseUrl?: string;
+    authSource?: string | null;
+    authScope?: string | null;
   }> | null;
   models?: readonly Readonly<{
     id: string;
@@ -67,6 +71,7 @@ export type AgentProviderCardProps = {
   actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: AgentProviderGuidanceKind) => Promise<AgentActionOutcome>;
   onStartLogin?: () => Promise<AgentActionOutcome>;
+  onReopenLogin?: () => Promise<AgentActionOutcome>;
   onInstall?: () => Promise<AgentActionOutcome>;
   onCancelInstall?: () => Promise<AgentActionOutcome>;
   onRecheck?: () => Promise<AgentActionOutcome>;
@@ -132,6 +137,8 @@ export default function AgentProviderCard({
   availability,
   installState = "idle",
   activeOperation = null,
+  loginUrlPresent = false,
+  loginOpenError = null,
   connection = null,
   models = [],
   selectedModelId = null,
@@ -142,6 +149,7 @@ export default function AgentProviderCard({
   actionButtonRef,
   onCopyGuidance,
   onStartLogin,
+  onReopenLogin,
   onInstall,
   onCancelInstall,
   onRecheck,
@@ -163,7 +171,7 @@ export default function AgentProviderCard({
   const [apiKey, setApiKey] = useState("");
   const [rememberKey, setRememberKey] = useState(false);
   const [vendorId, setVendorId] = useState(connection?.vendorId || provider.vendors?.[0]?.id || "deepseek");
-  const [baseUrl, setBaseUrl] = useState(connection?.vendorId === "custom" ? connection.baseUrl : "");
+  const [baseUrl, setBaseUrl] = useState(connection?.vendorId === "custom" ? connection.baseUrl || "" : "");
   const [modelId, setModelId] = useState(
     connection?.vendorId === "custom"
       ? String(selectedModelId || models[0]?.id || "").replace(/^pageroot:/u, "")
@@ -187,9 +195,20 @@ export default function AgentProviderCard({
       ? { ...presentation, statusLabel: "正在取消…", detail: "", tone: "checking" as const }
       : presentation;
   const currentModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
-  const actions = installing || cancelling || loggingIn
+  const actions = installing || cancelling
     ? [{ kind: "cancel-install" as const, label: "取消", copiedLabel: "取消" }]
-    : actionsForAvailability(availability, provider).filter((action) => !(
+    : loggingIn
+      ? [
+        { kind: "cancel-install" as const, label: "取消", copiedLabel: "取消" },
+        ...(onReopenLogin
+          ? [{
+            kind: "reopen-login" as const,
+            label: loginUrlPresent ? "重新打开登录页" : "打开登录页",
+            copiedLabel: "重新打开登录页",
+          }]
+          : []),
+      ]
+      : actionsForAvailability(availability, provider).filter((action) => !(
     availability.reason === "model-unavailable"
     && connection
     && models.length > 1
@@ -224,6 +243,22 @@ export default function AgentProviderCard({
       } finally {
         setCancelPending(false);
         setCancelRequested(false);
+      }
+      return;
+    }
+    if (kind === "reopen-login") {
+      if (pendingAction === "reopen-login" || typeof onReopenLogin !== "function") return;
+      setPendingAction("reopen-login");
+      setActionError("");
+      try {
+        const outcome = await onReopenLogin();
+        if (!outcome || outcome.status !== "succeeded") {
+          setActionError(outcome?.reason || "官方登录页没有打开。");
+        }
+      } catch {
+        setActionError("官方登录页暂时无法打开。");
+      } finally {
+        setPendingAction(null);
       }
       return;
     }
@@ -454,7 +489,9 @@ export default function AgentProviderCard({
             const actionDisabled = disabled
               || (action.kind === "cancel-install"
                 ? cancelling
-                : Boolean(pendingAction) || installPending || cancelPending);
+                : action.kind === "reopen-login"
+                  ? pendingAction === "reopen-login" || cancelling
+                  : Boolean(pendingAction) || installPending || cancelPending);
             return (
               <button
                 key={action.kind}
@@ -475,6 +512,8 @@ export default function AgentProviderCard({
                     ? "正在取消…"
                     : action.kind === "install"
                     ? "正在安装…"
+                    : action.kind === "reopen-login"
+                      ? "正在打开…"
                     : action.kind === "login"
                       ? "正在登录…"
                     : action.kind === "recheck"
@@ -496,6 +535,8 @@ export default function AgentProviderCard({
           ) : null}
           {actionError && !tokenFormOpen ? (
             <span className="qoder-card-error" role="alert">{actionError}</span>
+          ) : loginOpenError && loggingIn ? (
+            <span className="qoder-card-error" role="alert">{loginOpenError}</span>
           ) : null}
         </span>
       </div>

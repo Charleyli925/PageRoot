@@ -65,7 +65,7 @@ test("install snapshots project in-flight access operations and ignore stale gen
   assert.equal(isStaleAccessOperation(installing, 4), false);
 });
 
-test("login snapshots project waiting access operations", () => {
+test("login snapshots project waiting, succeeded and cancelled access operations", () => {
   const waiting = accessOperationFromLoginSnapshot({
     providerId: "codex",
     loginState: "waiting",
@@ -79,6 +79,20 @@ test("login snapshots project waiting access operations", () => {
     loginState: "idle",
     generation: 2,
   }), null);
+  const succeeded = accessOperationFromLoginSnapshot({
+    providerId: "codex",
+    loginState: "succeeded",
+    generation: 2,
+  });
+  assert.equal(succeeded.state, "succeeded");
+  const cancelled = accessOperationFromLoginSnapshot({
+    providerId: "qoder",
+    loginState: "cancelled",
+    generation: 3,
+    errorCode: "AGENT_LOGIN_CANCELLED",
+  });
+  assert.equal(cancelled.state, "cancelled");
+  assert.equal(cancelled.errorCode, "AGENT_LOGIN_CANCELLED");
 });
 
 test("credential errors map to the field that the user can correct", () => {

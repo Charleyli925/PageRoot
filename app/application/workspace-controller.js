@@ -1730,6 +1730,14 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().startAgentLogin(selection);
   }
 
+  reopenAgentLogin(selection) {
+    return this.#requireRunWorkflow().reopenAgentLogin(selection);
+  }
+
+  startAgentLogout(selection) {
+    return this.#requireRunWorkflow().startAgentLogout(selection);
+  }
+
   installQoder() {
     return this.#requireRunWorkflow().installQoder();
   }

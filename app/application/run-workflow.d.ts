@@ -151,6 +151,12 @@ export class RunWorkflow {
     availability: AgentProviderAvailabilitySnapshot;
     cancelled?: boolean;
   }>>;
+  reopenAgentLogin(selection?: AgentSelection | null): Promise<RunWorkflowOutcome<{
+    opened: boolean;
+  }>>;
+  startAgentLogout(selection?: AgentSelection | null): Promise<RunWorkflowOutcome<{
+    availability: AgentProviderAvailabilitySnapshot;
+  }>>;
   installAgent(selection?: AgentSelection | null): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;

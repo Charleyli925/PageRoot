@@ -5,7 +5,15 @@ import {
 import { publicAgentAuthSource } from "../../../shared/agent-auth-source.mjs";
 import { publicAgentLoginUrl } from "../../../shared/agent-login-url.mjs";
 
-export const LOGIN_STATES = Object.freeze(["idle", "waiting", "cancelling", "failed"]);
+export const LOGIN_STATES = Object.freeze([
+  "idle",
+  "waiting",
+  "cancelling",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+const LOGIN_TERMINAL_STATES = Object.freeze(["succeeded", "failed", "cancelled"]);
 const DEFAULT_LOGIN_TIMEOUT_MS = 15 * 60 * 1000;
 
 function fail(code, message, options) {
@@ -62,8 +70,16 @@ export function createAgentAccessAuth({
     return jobs.get(providerId) || null;
   }
 
+  function terminalStateForCode(code) {
+    if (code === "AGENT_LOGIN_EXPIRED") return "failed";
+    if (code === "AGENT_LOGIN_CANCELLED" || code === "AGENT_LOGIN_STALE") return "cancelled";
+    return "failed";
+  }
+
   async function abortJob(job, code = "AGENT_LOGIN_CANCELLED") {
-    if (!job || job.loginState === "idle") return;
+    if (!job || job.loginState === "idle" || LOGIN_TERMINAL_STATES.includes(job.loginState)) {
+      return;
+    }
     job.loginState = "cancelling";
     job.controller.abort();
     try {
@@ -72,7 +88,7 @@ export function createAgentAccessAuth({
       // Cancellation is the requested outcome.
     }
     if (job.errorCode !== "AGENT_LOGIN_STALE") job.errorCode = code;
-    job.loginState = "idle";
+    job.loginState = terminalStateForCode(job.errorCode || code);
     job.loginUrl = null;
     job.startedAt = null;
   }
@@ -138,7 +154,7 @@ export function createAgentAccessAuth({
               { status: timeoutMs && (now() - job.startedAt) >= timeoutMs ? 408 : 409 },
             );
           }
-          job.loginState = "idle";
+          job.loginState = "succeeded";
           job.loginUrl = null;
           job.startedAt = null;
           job.errorCode = null;
@@ -158,7 +174,7 @@ export function createAgentAccessAuth({
             : cancelled
               ? "AGENT_LOGIN_CANCELLED"
               : String(cause?.code || "AGENT_LOGIN_FAILED");
-          job.loginState = cancelled || expired ? "idle" : "failed";
+          job.loginState = expired ? "failed" : cancelled ? "cancelled" : "failed";
           throw cause;
         } finally {
           clearTimeout(timeout);
@@ -174,9 +190,35 @@ export function createAgentAccessAuth({
     },
     async cancel(providerId) {
       const job = currentJob(providerId);
-      if (!job || job.loginState === "idle") return jobSnapshot(providerId);
+      if (!job || job.loginState === "idle" || LOGIN_TERMINAL_STATES.includes(job.loginState)) {
+        return jobSnapshot(providerId);
+      }
       await abortJob(job);
       return jobSnapshot(providerId);
+    },
+    async drain({ timeoutMs = 12_000 } = {}) {
+      const pending = [...jobs.values()]
+        .filter((job) => job.loginState === "waiting" || job.loginState === "cancelling")
+        .map((job) => abortJob(job, "AGENT_LOGIN_CANCELLED"));
+      if (pending.length === 0) {
+        return [...jobs.values()].every((job) => (
+          job.loginState !== "waiting" && job.loginState !== "cancelling"
+        ));
+      }
+      const timeout = new Promise((_, reject) => {
+        const timer = setTimeout(() => {
+          reject(agentProviderError(
+            "AGENT_LOGIN_DRAIN_UNCONFIRMED",
+            "无法确认官方登录已停止。",
+            { status: 503 },
+          ));
+        }, timeoutMs);
+        timer.unref?.();
+      });
+      await Promise.race([Promise.allSettled(pending), timeout]);
+      return [...jobs.values()].every((job) => (
+        job.loginState !== "waiting" && job.loginState !== "cancelling"
+      ));
     },
   };
 }

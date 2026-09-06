@@ -55,7 +55,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   Bridge extraResource and cannot be imported from asar. The renderer may request
   `html-agent-access:open-login` with `providerId` only and never supplies a URL,
   command or path. Public catalog snapshots expose `loginUrlPresent` without the
-  OAuth URL. Environment PAT/API keys are reported as `environment` auth scope
+  OAuth URL. Opening the login page records success or an in-place failure so the
+  user can retry without guessing. Official logout runs the verified installation's
+  `logout` command for `cli-login` / ChatGPT accounts. Environment PAT/API keys are reported as `environment` auth scope
   and are not claimed to be revoked by in-app logout. The 源页 HTTP Agent may redirect preflight and
   chat to a loopback `127.0.0.1` base URL only when both `PAGEROOT_E2E=1` and
   `PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL=1` are set; production never honors

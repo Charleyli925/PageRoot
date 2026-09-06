@@ -49,6 +49,7 @@ export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
   credentialConfigured?: boolean;
   enabled?: boolean;
   loginUrlPresent?: boolean;
+  loginOpenError?: string | null;
   activeOperation?: Readonly<{
     operationId: string;
     providerId: string;
@@ -60,9 +61,11 @@ export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
     cancellable: boolean;
   }> | null;
   connection?: Readonly<{
-    vendorId: string;
-    vendorDisplayName: string;
-    baseUrl: string;
+    vendorId?: string;
+    vendorDisplayName?: string;
+    baseUrl?: string;
+    authSource?: string | null;
+    authScope?: string | null;
   }> | null;
 }>;
 export type AgentPreflight = Readonly<Record<string, unknown> & {
@@ -123,6 +126,7 @@ export function agentProviderCardsFromCatalog(snapshot: AgentCatalogSnapshot | n
   credentialConfigured: boolean;
   connection: AgentProviderEntry["connection"];
   loginUrlPresent?: boolean;
+  loginOpenError?: string | null;
   activeOperation?: AgentProviderEntry["activeOperation"];
 }>[];
 export class AgentCatalogState {
@@ -174,7 +178,8 @@ export class AgentCatalogState {
   install(selection?: AgentSelection | null): Promise<unknown>;
   cancelInstall(selection?: AgentSelection | null): Promise<unknown>;
   startLogin(selection?: AgentSelection | null): Promise<unknown>;
-  cancelAccessOperation(selection?: AgentSelection | null): Promise<unknown>;
+  reopenOfficialLogin(selection?: AgentSelection | null): Promise<unknown>;
+  startLogout(selection?: AgentSelection | null): Promise<unknown>;
   cancelAccessOperation(selection?: AgentSelection | null): Promise<unknown>;
   copyGuidance(kind: "install" | "login", selection?: AgentSelection | null): Promise<unknown>;
 }

@@ -85,7 +85,7 @@ test("login jobs cancel, expire, and reject stale generations", async () => {
   assert.equal(auth.snapshot("qoder").loginState, "waiting");
   await auth.cancel("qoder");
   assert.equal(cancelled, true);
-  assert.equal(auth.snapshot("qoder").loginState, "idle");
+  assert.equal(auth.snapshot("qoder").loginState, "cancelled");
 
   auth.login("codex", async ({ onLoginUrl, signal }) => {
     onLoginUrl("https://chatgpt.com/auth/login");
@@ -107,7 +107,34 @@ test("login jobs cancel, expire, and reject stale generations", async () => {
   }));
   assert.equal(replacement.providerId, "codex");
   await auth.wait("codex");
-  assert.equal(auth.snapshot("codex").loginState, "idle");
+  assert.equal(auth.snapshot("codex").loginState, "succeeded");
   assert.equal(auth.snapshot("codex").authSource, "chatgpt");
   assert.equal(auth.loginUrl("codex"), null);
+});
+
+test("login jobs keep a terminal snapshot until the next login and drain waiting jobs", async () => {
+  const auth = createAgentAccessAuth({ timeoutMs: 40 });
+  const started = await auth.login("qoder", async () => ({
+    authSource: "cli-login",
+    authScope: "app-managed",
+  }));
+  assert.equal(started.generation, 1);
+  await auth.wait("qoder");
+  const succeeded = auth.accessOperation("qoder");
+  assert.equal(succeeded?.state, "succeeded");
+  assert.equal(succeeded?.generation, 1);
+
+  let cancelled = false;
+  const waiting = await auth.login("qoder", async ({ signal }) => {
+    await new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        cancelled = true;
+        reject(Object.assign(new Error("canceled"), { code: "AGENT_LOGIN_CANCELLED" }));
+      });
+    });
+  });
+  assert.equal(waiting.generation, 2);
+  assert.equal(await auth.drain({ timeoutMs: 200 }), true);
+  assert.equal(cancelled, true);
+  assert.equal(auth.snapshot("qoder").loginState, "cancelled");
 });

@@ -136,7 +136,9 @@ export function accessOperationFromInstallSnapshot(snapshot) {
 const LOGIN_STATE_TO_ACCESS = Object.freeze({
   waiting: "waiting",
   cancelling: "cancelling",
+  succeeded: "succeeded",
   failed: "failed",
+  cancelled: "cancelled",
 });
 
 export function accessOperationFromLoginSnapshot(snapshot) {

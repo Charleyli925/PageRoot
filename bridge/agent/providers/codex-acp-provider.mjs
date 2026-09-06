@@ -27,6 +27,7 @@ import {
 import { cleanProviderText } from "./qoder-provider.mjs";
 import {
   runOfficialAgentLogin,
+  runOfficialAgentLogout,
   waitForAgentAuthentication,
 } from "../catalog/agent-login-command.mjs";
 import { describeCodexAuthSource } from "../../../shared/agent-auth-source.mjs";
@@ -970,6 +971,32 @@ export async function startCodexLogin(command, {
   return auth;
 }
 
+export async function startCodexLogout(command, {
+  environment = process.env,
+  signal,
+  timeoutMs,
+  logoutRunner = runOfficialAgentLogout,
+} = {}) {
+  const auth = describeCodexAuthSource(command, environment);
+  if (auth.authSource === "environment-token") {
+    throw agentProviderError(
+      "AGENT_LOGOUT_UNSUPPORTED",
+      "当前使用环境变量凭据，无法在应用内退出账号。",
+      { status: 409 },
+    );
+  }
+  const executable = command.nativeCommand || command.command;
+  await logoutRunner({
+    executable,
+    args: ["logout"],
+    env: acpProcessEnvironment(launchEnvironment(command), environment),
+    providerId: CODEX_ACP_PROVIDER_ID,
+    signal,
+    timeoutMs,
+  });
+  return Object.freeze({ authSource: null, authScope: null });
+}
+
 export function createCodexAcpProvider({
   commandResolver = resolveCodexAcpCommand,
   diagnoseRunner = diagnoseCodexAcp,
@@ -1001,6 +1028,7 @@ export function createCodexAcpProvider({
       modelCatalog: true,
       install: true,
       login: true,
+      logout: true,
     },
     resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
     diagnose: (installation, { environment }) => diagnoseRunner(installation, environment),
@@ -1009,6 +1037,7 @@ export function createCodexAcpProvider({
       ...options,
       inspectRunner: diagnoseRunner,
     }),
+    startLogout: (installation, options) => startCodexLogout(installation, options),
     assertInstallationUnchanged: assertCodexAcpInstallationUnchanged,
     installationDigest,
     availabilityFailure(cause) {

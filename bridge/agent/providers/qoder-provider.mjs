@@ -26,6 +26,7 @@ import {
 } from "./agent-provider-contract.mjs";
 import {
   runOfficialAgentLogin,
+  runOfficialAgentLogout,
   waitForAgentAuthentication,
 } from "../catalog/agent-login-command.mjs";
 import { describeQoderAuthSource } from "../../../shared/agent-auth-source.mjs";
@@ -615,6 +616,31 @@ export async function startQoderLogin(command, {
   return auth;
 }
 
+export async function startQoderLogout(command, {
+  environment = process.env,
+  signal,
+  timeoutMs,
+  logoutRunner = runOfficialAgentLogout,
+} = {}) {
+  const auth = describeQoderAuthSource(command, environment);
+  if (auth.authSource === "environment-token") {
+    throw agentProviderError(
+      "AGENT_LOGOUT_UNSUPPORTED",
+      "当前使用环境变量凭据，无法在应用内退出账号。",
+      { status: 409 },
+    );
+  }
+  await logoutRunner({
+    executable: command.command,
+    args: ["logout"],
+    env: qoderAcpEnvironment({}, environment),
+    providerId: QODER_PROVIDER_ID,
+    signal,
+    timeoutMs,
+  });
+  return Object.freeze({ authSource: null, authScope: null });
+}
+
 export function createQoderProvider({
   commandResolver = resolveQoderAcpCommand,
   diagnoseRunner = diagnoseQoder,
@@ -646,6 +672,7 @@ export function createQoderProvider({
       modelCatalog: true,
       install: true,
       login: true,
+      logout: true,
     },
     resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
     diagnose: (installation, { environment }) => diagnoseRunner(installation, environment),
@@ -654,6 +681,7 @@ export function createQoderProvider({
       ...options,
       inspectRunner: diagnoseRunner,
     }),
+    startLogout: (installation, options) => startQoderLogout(installation, options),
     assertInstallationUnchanged: assertQoderInstallationUnchanged,
     installationDigest,
     availabilityFailure(cause) {

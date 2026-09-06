@@ -9,6 +9,8 @@ export type AgentProviderCardData = Readonly<{
   presentation: AgentProviderCardPresentation;
   availability: AgentProviderAvailabilitySnapshot;
   installState?: "idle" | "installing" | "failed" | "cancelling";
+  loginUrlPresent?: boolean;
+  loginOpenError?: string | null;
   activeOperation?: Readonly<{
     kind: string;
     state: string;
@@ -19,8 +21,10 @@ export type AgentProviderCardData = Readonly<{
     reasoningChoices?: readonly Readonly<{ id: string; label: string }>[];
   }>[];
   connection?: Readonly<{
-    vendorId: string;
-    vendorDisplayName: string;
-    baseUrl: string;
+    vendorId?: string;
+    vendorDisplayName?: string;
+    baseUrl?: string;
+    authSource?: string | null;
+    authScope?: string | null;
   }> | null;
 }>;

@@ -731,6 +731,43 @@ export class RunWorkflow {
     }
   }
 
+  async reopenAgentLogin(selection = this.#agentCatalog.freezeSelected()) {
+    const frozen = selection || this.#agentCatalog.freezeSelected();
+    const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
+    if (!frozen) return rejected("AGENT_PROVIDER_UNSUPPORTED", `${displayName} 不可用。`);
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 登录已经停止。`);
+    }
+    try {
+      const result = await this.#agentCatalog.reopenOfficialLogin(frozen);
+      return succeeded(result);
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_LOGIN_URL_UNAVAILABLE"),
+        this.#codecs.errorMessage(cause, "官方登录页暂时无法打开。"),
+      );
+    }
+  }
+
+  async startAgentLogout(selection = this.#agentCatalog.freezeSelected()) {
+    const frozen = selection || this.#agentCatalog.freezeSelected();
+    const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
+    if (!frozen) return rejected("AGENT_PROVIDER_UNSUPPORTED", `${displayName} 不可用。`);
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 退出已经停止。`);
+    }
+    try {
+      await this.#agentCatalog.startLogout(frozen);
+      if (this.#disposed) return stale({ kind: "agent-logout" });
+      return succeeded({ availability: this.#agentCatalog.availability(frozen) });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_LOGOUT_FAILED"),
+        this.#codecs.errorMessage(cause, `暂时无法退出 ${displayName}。`),
+      );
+    }
+  }
+
   async installAgent(selection = this.#agentCatalog.freezeSelected()) {
     const frozen = selection || this.#agentCatalog.freezeSelected();
     const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
