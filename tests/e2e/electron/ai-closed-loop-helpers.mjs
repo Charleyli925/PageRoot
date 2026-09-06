@@ -397,6 +397,21 @@ export async function openQoderAvailability(page) {
   return card;
 }
 
+export async function expandSettingsAgent(settings, providerId) {
+  const row = settings.getByTestId(`settings-agent-row-${providerId}`);
+  await expect(row).toBeVisible();
+  if (await row.getAttribute("data-expanded") !== "true") {
+    await row.locator(".settings-agent-service-main").click();
+  }
+  return row;
+}
+
+export async function setDefaultSettingsAgent(settings, providerId) {
+  const action = settings.getByTestId(`settings-agent-row-action-${providerId}`);
+  await expect(action).toHaveText("设为默认", { timeout: 60_000 });
+  await action.click();
+}
+
 export async function closeQoderAvailability(page) {
   await page.getByRole("button", { name: "返回工作台" }).click();
 }

@@ -877,6 +877,18 @@ export default function AiConversationSidebar({
                   {agentAccess.cards.map((card) => {
                     const snapshot = card.presentation.availability(card.availability);
                     const disconnected = card.availability.reason === "disabled";
+                    const chooseService = () => {
+                      if (card.availability.status === "ready") {
+                        agentAccess.onSelect(card.selection);
+                        setOpenChoice(null);
+                        setSetupProviderId(null);
+                        return;
+                      }
+                      agentAccess.onQueueDefault?.(card.selection);
+                      if (disconnected) void agentAccess.onReconnect?.(card.selection);
+                      setSetupProviderId(card.selection.providerId);
+                      setOpenChoice(null);
+                    };
                     return (
                       <button
                         key={card.selection.providerId}
@@ -886,19 +898,9 @@ export default function AiConversationSidebar({
                         data-testid={`ai-conversation-service-${card.selection.providerId}`}
                         onPointerDown={(event) => {
                           event.preventDefault();
+                          chooseService();
                         }}
-                        onClick={() => {
-                          if (card.availability.status === "ready") {
-                            agentAccess.onSelect(card.selection);
-                            setOpenChoice(null);
-                            setSetupProviderId(null);
-                            return;
-                          }
-                          agentAccess.onQueueDefault?.(card.selection);
-                          if (disconnected) void agentAccess.onReconnect?.(card.selection);
-                          setSetupProviderId(card.selection.providerId);
-                          setOpenChoice(null);
-                        }}
+                        onClick={chooseService}
                       >
                         <strong>{agentServiceLabel(card.selection.providerId, card.presentation.displayName)}</strong>
                         <span>{disconnected ? "已断开" : snapshot.statusLabel}</span>

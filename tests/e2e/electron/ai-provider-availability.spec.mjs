@@ -9,6 +9,7 @@ import {
   createQoderAcpE2ECommand,
   createSourceFixture,
   existsSync,
+  expandSettingsAgent,
   launchPageRoot,
   managedProjectRoots,
   mkdirSync,
@@ -21,6 +22,7 @@ import {
   realpathSync,
   readdirSync,
   removeSourceFixture,
+  setDefaultSettingsAgent,
   startPagerootHttpAgent,
   stopPageRoot,
 } from "./ai-closed-loop-helpers.mjs";
@@ -220,10 +222,11 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
       .toContainText("Qoder", { timeout: 60_000 });
     await openQoderAvailability(launched.page);
     const settingsPage = launched.page.locator(".workbench-settings-page");
-    await settingsPage.getByTestId("settings-agent-row-action-codex").click();
+    await expandSettingsAgent(settingsPage, "codex");
     await expect(settingsPage.locator(".codex-availability-card")
       .getByText("Codex · 已连接", { exact: true }))
       .toBeVisible({ timeout: 60_000 });
+    await setDefaultSettingsAgent(settingsPage, "codex");
     await expect(settingsPage.locator(".qoder-availability-card")).toHaveCount(0);
     await launched.page.screenshot({
       path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "agent-selector-open.png"),
@@ -376,6 +379,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
       .toBeVisible({ timeout: 30_000 });
     await expect(pagerootCard.getByTestId("settings-agent-current-connection"))
       .toContainText("DeepSeek");
+    await setDefaultSettingsAgent(settingsPage, "pageroot");
     await pagerootCard.getByRole("button", { name: "更换 API Key" }).click();
     await expect(pagerootCard.getByText("未勾选记住时仅本次使用。")).toBeVisible();
     await pagerootCard.getByText("其他服务商").click();
@@ -508,6 +512,7 @@ test("源页运行时余额失败 offers only provider recovery without a false 
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText("源页 Agent · 已连接", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
+    await setDefaultSettingsAgent(settingsPage, "pageroot");
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
     await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
@@ -566,6 +571,13 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
     await expect(pagerootCard.getByText("源页 Agent · 未连接", { exact: true })).toBeVisible();
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    const choices = sidebar.getByTestId("ai-conversation-service-choices");
+    await expect(choices).toBeVisible();
+    await choices.getByTestId("ai-conversation-service-pageroot").evaluate((node) => {
+      node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+      if (typeof node.click === "function") node.click();
+    });
     await expect(sidebar.getByRole("button", { name: "连接 源页 Agent" }))
       .toBeVisible();
     await expect(sidebar.getByRole("button", { name: /交给 源页 修改/u })).toHaveCount(0);

@@ -951,6 +951,9 @@ test("a sidebar pending default is adopted only after that service is ready", as
 
   catalog.queuePendingDefault(pageroot);
   assert.equal(catalog.freezeSelected().providerId, "qoder");
+  assert.equal(catalog.displaySelection()?.providerId, "pageroot");
+  assert.notEqual(catalog.displayAvailability().status, "ready");
+  assert.equal(catalog.presentation().displayName, PAGEROOT_AGENT_PROVIDER.presentation.displayName);
   assert.equal(catalog.readyPendingDefault(), null);
   await catalog.connectWithApiKey(pageroot, "sk-secret", { vendorId: "deepseek" });
   assert.equal(catalog.freezeSelected().providerId, "qoder");
@@ -1367,6 +1370,57 @@ test("credential persist failure survives a catalog refresh", async () => {
   await catalog.diagnose(pageroot);
   assert.equal(catalog.credentialPersist("pageroot")?.status, "failed");
   assert.match(catalog.credentialPersist("pageroot")?.reason || "", /未保存/u);
+});
+
+test("a catalog refresh keeps API-token vendor facts when Bridge has no login connection", async () => {
+  const pageroot = PAGEROOT_AGENT_PROVIDER.selection;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async setAgentSessionCredential(request) {
+        if (request.disconnect === true) return { ok: true, configured: false };
+        return {
+          ok: true,
+          status: "ready",
+          vendorId: "deepseek",
+          vendorDisplayName: "DeepSeek",
+          baseUrl: "https://api.deepseek.com/v1",
+          installationDigest: `sha256:${"a".repeat(64)}`,
+          selection: {
+            ...pageroot,
+            resolvedModelId: "pageroot:deepseek-v4-pro",
+          },
+          models: [{
+            id: "pageroot:deepseek-v4-pro",
+            isDefault: true,
+            reasoningChoices: [{ id: "auto", label: "自动" }],
+          }],
+        };
+      },
+      async preflightAgent() { return { status: "ready" }; },
+      async agentDiagnose() {
+        return { status: "ready", diagnostic: { readiness: "ready" } };
+      },
+      async agentProviders() {
+        return {
+          providers: [{
+            providerId: "pageroot",
+            installable: false,
+            installState: "idle",
+            connection: null,
+            activeOperation: null,
+            lastOperation: null,
+          }],
+        };
+      },
+    },
+    providers: [PAGEROOT_AGENT_PROVIDER],
+    selected: pageroot,
+    clock: { now: () => 10 },
+  });
+  await catalog.connectWithApiKey(pageroot, "sk-secret", { vendorId: "deepseek" });
+  await catalog.diagnose(pageroot);
+  assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
+  assert.equal(catalog.availability().status, "ready");
 });
 
 test("an in-flight install does not hide the previous login result", async () => {

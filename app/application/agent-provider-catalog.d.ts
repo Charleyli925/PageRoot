@@ -86,6 +86,7 @@ export type AgentCatalogSnapshot = Readonly<{
   providers: Readonly<Record<string, AgentProviderEntry>>;
   selected: AgentSelection | null;
   pendingDefault: AgentSelection | null;
+  displaySelection: AgentSelection | null;
   preflightBySelection: Readonly<Record<string, AgentPreflight>>;
 }>;
 
@@ -195,6 +196,7 @@ export class AgentCatalogState {
   ): Promise<unknown>;
   disconnectApiKey(selection?: AgentSelection | null): Promise<unknown>;
   freezeSelected(): AgentSelection | null;
+  displaySelection(): AgentSelection | null;
   freezeProviderSelection(providerId: string): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;
   availability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;

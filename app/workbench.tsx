@@ -678,8 +678,11 @@ export default function Workbench() {
   const runSnapshot = workspaceControllerSnapshot?.runSession
     ?? INITIAL_RUN_SNAPSHOT;
   const agentCatalogSnapshot = workspaceControllerSnapshot?.run?.agentCatalog ?? null;
-  const frozenAgentSelection = runSnapshot.activeRun?.agentDelivery?.selection
+  const catalogDisplaySelection = agentCatalogSnapshot?.displaySelection
     ?? agentCatalogSnapshot?.selected
+    ?? null;
+  const frozenAgentSelection = runSnapshot.activeRun?.agentDelivery?.selection
+    ?? catalogDisplaySelection
     ?? null;
   const frozenProvider = frozenAgentSelection
     ? agentCatalogSnapshot?.providers?.[frozenAgentSelection.providerId]

@@ -445,6 +445,28 @@ function providerReadyForPending(provider) {
     || provider?.diagnostic?.readiness === "ready";
 }
 
+function projectListedConnection(currentConnection, listedConnection) {
+  const current = currentConnection || null;
+  if (listedConnection?.authSource) {
+    return Object.freeze({
+      ...(current || {}),
+      authSource: listedConnection.authSource,
+      authScope: listedConnection.authScope || null,
+    });
+  }
+  if (!current) return null;
+  if (listedConnection !== null) return current;
+  if (current.vendorId || current.vendorDisplayName || current.baseUrl) {
+    if (!current.authSource && !current.authScope) return current;
+    return Object.freeze({
+      vendorId: current.vendorId || "",
+      vendorDisplayName: current.vendorDisplayName || "",
+      baseUrl: current.baseUrl || "",
+    });
+  }
+  return null;
+}
+
 function currentAccessOperation(provider) {
   return publicAccessOperation(provider?.activeOperation)
     || publicAccessOperation(provider?.lastOperation);
@@ -710,6 +732,7 @@ export class AgentCatalogState {
       providers: frozenRecord(this.#providers.entries()),
       selected: this.#selected,
       pendingDefault: this.pendingDefault(),
+      displaySelection: this.displaySelection(),
       preflightBySelection: frozenRecord(this.#preflightBySelection.entries()),
     });
   }
@@ -899,6 +922,17 @@ export class AgentCatalogState {
     return freezeAgentSelection(this.#selected);
   }
 
+  displaySelection() {
+    const pending = this.pendingDefault();
+    if (pending) {
+      const availability = this.displayAvailability(pending);
+      if (availability.status !== "ready") {
+        return freezeAgentSelection(pending);
+      }
+    }
+    return this.freezeSelected();
+  }
+
   freezeProviderSelection(providerId) {
     const provider = this.#providers.get(String(providerId || ""));
     if (!provider) return null;
@@ -917,11 +951,11 @@ export class AgentCatalogState {
     return this.provider(selection)?.availability || INITIAL_AGENT_PROVIDER_AVAILABILITY;
   }
 
-  displayAvailability(selection = this.#selected) {
+  displayAvailability(selection = this.displaySelection()) {
     return agentProviderDisplayAvailability(this.provider(selection));
   }
 
-  presentation(selection = this.#selected) {
+  presentation(selection = this.displaySelection()) {
     const provider = this.provider(selection);
     if (provider) return provider.presentation;
     const providerId = String(selection?.providerId || "Agent");
@@ -2093,15 +2127,7 @@ export class AgentCatalogState {
         installState: ["idle", "installing", "failed", "cancelling"].includes(item.installState)
           ? item.installState
           : current.installState || "idle",
-        connection: item.connection?.authSource
-          ? Object.freeze({
-            ...(current.connection || {}),
-            authSource: item.connection.authSource,
-            authScope: item.connection.authScope || null,
-          })
-          : item.connection === null
-            ? null
-            : current.connection,
+        connection: projectListedConnection(current.connection, item.connection),
         loginUrlPresent: item.loginUrlPresent === true,
         ...projectAccessOperations({
           listedActive: item.activeOperation,
