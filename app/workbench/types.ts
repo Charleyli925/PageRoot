@@ -316,6 +316,7 @@ export type DesktopIntegrationsApi = {
     apiKey: string;
     vendorId?: string;
     baseUrl?: string;
+    modelId?: string;
   }) => Promise<{ ok?: boolean; code?: string; remembered?: boolean }>;
   clearSessionCredential?: () => Promise<{ ok?: boolean; remembered?: boolean }>;
   sessionCredentialStatus?: () => Promise<{

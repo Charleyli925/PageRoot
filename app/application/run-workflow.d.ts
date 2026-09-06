@@ -206,4 +206,16 @@ export class RunWorkflow {
     extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>,
   ): Promise<RunWorkflowOutcome>;
   disconnectAgentApiKey(selection: AgentSelection): Promise<RunWorkflowOutcome>;
+  stopRunsForProvider(providerId: string): Promise<readonly RunWorkflowOutcome[]>;
+  manageAgentAccess(
+    kind: "disconnect" | "remove-key" | "reconnect",
+    selection: AgentSelection,
+    options?: Readonly<{
+      stopRelatedRuns?: boolean;
+      credentials?: Readonly<{
+        clear?(): Promise<{ ok?: boolean }>;
+        restore?(): Promise<unknown>;
+      }>;
+    }>,
+  ): Promise<RunWorkflowOutcome>;
 }

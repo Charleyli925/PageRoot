@@ -45,6 +45,33 @@ test("remembered Key is stored as ciphertext and never written in plaintext", as
   assert.equal("apiKey" in status, false);
 });
 
+test("remembered custom vendor also stores the non-secret Model ID", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
+  const crypto = memorySafeStorage();
+  const store = createAgentSessionCredentialStore({
+    userDataPath,
+    encryptString: (value) => crypto.encryptString(value),
+    decryptString: (buffer) => crypto.decryptString(buffer),
+    isEncryptionAvailable: () => crypto.available,
+  });
+
+  const persisted = await store.persist({
+    apiKey: "sk-secret",
+    vendorId: "custom",
+    baseUrl: "https://api.example.com/v1",
+    modelId: "private-model",
+  });
+  assert.equal(persisted.ok, true);
+  const raw = await readFile(path.join(userDataPath, "agent-session-credential.v1.json"), "utf8");
+  assert.doesNotMatch(raw, /sk-secret/u);
+  assert.match(raw, /private-model/u);
+  const loaded = await store.load();
+  assert.equal(loaded.apiKey, "sk-secret");
+  assert.equal(loaded.vendorId, "custom");
+  assert.equal(loaded.baseUrl, "https://api.example.com/v1");
+  assert.equal(loaded.modelId, "private-model");
+});
+
 test("unavailable encryption refuses to persist and does not fall back to plaintext", async () => {
   const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
   const store = createAgentSessionCredentialStore({

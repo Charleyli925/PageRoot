@@ -591,6 +591,18 @@ export class WorkspaceController {
   disconnectAgentApiKey(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
   ): Promise<RunWorkflowOutcome>;
+  stopRunsForProvider(providerId: string): Promise<readonly RunWorkflowOutcome[]>;
+  manageAgentAccess(
+    kind: "disconnect" | "remove-key" | "reconnect",
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+    options?: Readonly<{
+      stopRelatedRuns?: boolean;
+      credentials?: Readonly<{
+        clear?(): Promise<{ ok?: boolean }>;
+        restore?(): Promise<unknown>;
+      }>;
+    }>,
+  ): Promise<RunWorkflowOutcome>;
   refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
   checkQoderUsability(): Promise<RunWorkflowOutcome>;
   copyQoderGuidance(input: {

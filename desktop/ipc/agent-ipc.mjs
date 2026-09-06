@@ -90,6 +90,7 @@ export function registerAgentIpc({
         apiKey: payload?.apiKey,
         vendorId: payload?.vendorId,
         baseUrl: payload?.baseUrl,
+        modelId: payload?.modelId,
       });
     }, "agent_persist_credential"),
   );

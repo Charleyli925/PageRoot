@@ -4901,20 +4901,23 @@ export default function Workbench() {
           apiKey,
           vendorId: extras.vendorId,
           baseUrl: extras.baseUrl,
+          modelId: extras.modelId,
         });
         if (persisted && persisted.ok === false) {
           return Object.freeze({
             ...outcome,
+            persistFailed: true,
             reason: persisted.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
-              ? "已连接，但无法安全保存 API Key。本次仍可使用。"
-              : "已连接，但记住 API Key 失败。",
+              ? "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。"
+              : "已连接，但记住 API Key 失败。本次仍可使用，可稍后重试记住。",
           });
         }
       }
     } catch {
       return Object.freeze({
         ...outcome,
-        reason: "已连接，但无法安全保存 API Key。本次仍可使用。",
+        persistFailed: true,
+        reason: "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。",
       });
     }
     return outcome;
@@ -5247,45 +5250,40 @@ export default function Workbench() {
   const manageAgentAccess = useCallback(async (
     kind: "disconnect" | "remove-key" | "reconnect",
     selection: AgentSelection,
-    options: { stopRun?: boolean } = {},
   ) => {
-    if (options.stopRun) {
-      const stopped = await cancelActiveRun({ agentMayBeRunning: true });
-      if (!stopped) return { status: "rejected" as const, reason: "当前任务尚未停止。" };
-    }
     const disabledIds = workspacePreferences.disabledAgentProviderIds;
     if (kind === "reconnect") {
       await workspacePreferencesController.update({
         disabledAgentProviderIds: disabledIds.filter((id) => id !== selection.providerId),
       });
-      if (selection.providerId === "pageroot") {
-        await window.htmlAIIntegrations?.restoreSessionCredential?.();
-      }
-      return checkAgentUsability(selection);
     }
-    if (kind === "disconnect") {
-      const nextDisabled = Array.from(new Set([...disabledIds, selection.providerId])) as WorkspacePreferences["disabledAgentProviderIds"];
+    const outcome = await workspaceController?.manageAgentAccess(kind, selection, {
+      stopRelatedRuns: kind !== "reconnect",
+      credentials: {
+        clear: async () => {
+          if (typeof window.htmlAIIntegrations?.clearSessionCredential !== "function") {
+            return { ok: false };
+          }
+          return window.htmlAIIntegrations.clearSessionCredential();
+        },
+        restore: () => window.htmlAIIntegrations?.restoreSessionCredential?.()
+          ?? Promise.resolve({ ok: true }),
+      },
+    }) ?? { status: "rejected" as const, reason: "工作台尚未就绪。" };
+    if (
+      kind === "disconnect"
+      && outcome
+      && ["succeeded", "stale"].includes(outcome.status)
+    ) {
+      const nextDisabled = Array.from(new Set([
+        ...disabledIds,
+        selection.providerId,
+      ])) as WorkspacePreferences["disabledAgentProviderIds"];
       await workspacePreferencesController.update({ disabledAgentProviderIds: nextDisabled });
-      if (selection.providerId === "pageroot") {
-        return await disconnectAgentApiKey(selection) ?? { status: "succeeded" as const };
-      }
-      return { status: "succeeded" as const };
     }
-    const outcome = selection.providerId === "pageroot"
-      ? await disconnectAgentApiKey(selection)
-      : { status: "succeeded" as const };
-    try {
-      await window.htmlAIIntegrations?.clearSessionCredential?.();
-    } catch {
-      return { status: "rejected" as const, reason: "未能移除已记住的 API Key。" };
-    }
-    return outcome && ["succeeded", "stale"].includes(outcome.status)
-      ? outcome
-      : { status: "succeeded" as const };
+    return outcome;
   }, [
-    cancelActiveRun,
-    checkAgentUsability,
-    disconnectAgentApiKey,
+    workspaceController,
     workspacePreferences.disabledAgentProviderIds,
     workspacePreferencesController,
   ]);
@@ -6396,8 +6394,8 @@ export default function Workbench() {
           onCancelInstall={cancelAgentInstall}
           onConnectApiKey={connectAgentApiKey}
           onDisconnectApiKey={disconnectAgentApiKey}
-          onDisconnectProvider={(selection, options) => manageAgentAccess("disconnect", selection, options)}
-          onRemoveRememberedKey={(selection, options) => manageAgentAccess("remove-key", selection, options)}
+          onDisconnectProvider={(selection) => manageAgentAccess("disconnect", selection)}
+          onRemoveRememberedKey={(selection) => manageAgentAccess("remove-key", selection)}
           onReconnectProvider={(selection) => manageAgentAccess("reconnect", selection)}
           onOpenVendorApiKeyPage={openVendorApiKeyPage}
           busyProviderId={runInProgress ? frozenAgentSelection?.providerId || null : null}

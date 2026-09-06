@@ -358,8 +358,10 @@ provider's preflight and HTTP launch. Empty `apiKey` clears it. The secret is
 never written to `ui-preferences.json`, logs, GET responses or renderer
 snapshots. If the user explicitly checks “在此 Mac 上记住 API Key”, Main encrypts
 it with Electron `safeStorage` into `agent-session-credential.v1.json` and never
-returns the plaintext. Encryption unavailable refuses to persist and does not
-fall back to plaintext. Shutdown discards the session copy; a remembered
+returns the plaintext. Custom vendors may also persist the non-secret Model ID
+in that same file. Encryption unavailable refuses to persist and does not
+fall back to plaintext. Persist failure cannot be rewritten as a complete
+connection success. Shutdown discards the session copy; a remembered
 ciphertext may be restored into Coordinator memory after Bridge is ready.
 Anthropic is not registered. Codex and Qoder do not accept a session Token.
 
