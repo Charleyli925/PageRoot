@@ -4867,8 +4867,8 @@ export default function Workbench() {
     await workspacePreferencesController.update({
       defaultAgentProviderId: ready.providerId as WorkspacePreferences["defaultAgentProviderId"],
     });
-    workspaceController.selectAgent(ready);
-    workspaceController.clearPendingDefaultAgent();
+    workspaceController?.selectAgent(ready);
+    workspaceController?.clearPendingDefaultAgent();
   }, [workspaceController, workspacePreferencesController]);
   const checkAgentUsability = useCallback(async (selection?: AgentSelection) => (
     workspaceController?.checkAgentUsability(selection) ?? null
