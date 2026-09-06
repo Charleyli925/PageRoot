@@ -1,0 +1,17 @@
+{
+  "name": "PageRoot",
+  "install": "npm ci && npx playwright install chromium",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev",
+      "description": "Web dev server (vinext/Vite on http://localhost:3000) plus the workspace bridge on 127.0.0.1:4317. The first page/module request may return 500 or fail a dynamic import while Vite optimizes dependencies on cold start; reload once it settles. This serves the web renderer shell, which is what Linux/cloud and CI exercise. The full editing canvas requires the Electron desktop host (window.htmlAIRuntime/htmlAIProjects/...), which per docs/DEVELOPMENT.md targets macOS via `npm run desktop:dev`; in a plain browser the canvas shows the expected \u201c\u684c\u9762\u8fd0\u884c\u73af\u5883\u672a\u521d\u59cb\u5316\u201d notice."
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 3000
+    }
+  ]
+}
