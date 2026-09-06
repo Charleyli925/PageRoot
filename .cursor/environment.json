@@ -1,0 +1,17 @@
+{
+  "name": "PageRoot",
+  "install": "npm ci && npx playwright install chromium",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev",
+      "description": "Web development server (vinext/Vite on http://localhost:3000) plus the workspace bridge on 127.0.0.1:4317. The first request may return 500 while Vite finishes optimizing dependencies; retry once it settles."
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 3000
+    }
+  ]
+}
