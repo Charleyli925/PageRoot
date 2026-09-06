@@ -350,9 +350,9 @@ function AgentSettings({
     setFollowedChoiceId(selectedChoiceId);
     setExpandedId(selectedChoiceId);
   }
-  const selectedCard = cards.find((card) => cardChoiceId(card) === (expandedId || selectedChoiceId))
-    || cards[0]
-    || null;
+  const selectedCard = expandedId
+    ? cards.find((card) => cardChoiceId(card) === expandedId) || null
+    : null;
   return (
     <div className="settings-page-sections">
       <SettingsSection title="默认服务">
@@ -393,7 +393,7 @@ function AgentSettings({
           ) : cards.map((card) => {
             const id = cardChoiceId(card);
             const isDefault = id === selectedChoiceId;
-            const expanded = Boolean(selectedCard) && cardChoiceId(selectedCard) === id;
+            const expanded = selectedCard != null && cardChoiceId(selectedCard) === id;
             const snapshot = card.presentation.availability(card.availability);
             const disconnected = card.availability.reason === "disabled"
               || card.availability.status === "unavailable" && card.availability.reason === "disabled";
@@ -611,9 +611,11 @@ function AgentSettings({
                           });
                         }}
                       >
-                        {confirmAction.stopRun
-                          ? confirmAction.kind === "remove-key" ? "停止并移除" : "停止并断开"
-                          : confirmAction.kind === "remove-key" ? "移除 API Key" : "断开连接"}
+                        {confirmPending
+                          ? "正在处理…"
+                          : confirmAction.stopRun
+                            ? confirmAction.kind === "remove-key" ? "停止并移除" : "停止并断开"
+                            : confirmAction.kind === "remove-key" ? "移除 API Key" : "断开连接"}
                       </button>
                     </div>
                   </div>

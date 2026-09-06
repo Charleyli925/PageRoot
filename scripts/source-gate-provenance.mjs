@@ -6,6 +6,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  agentProtocolReleaseSnapshot,
+  logAgentProtocolReleaseNotice,
+} from "../shared/agent-protocol-acceptance.mjs";
+import {
   evaluateProductFlakyEvidence,
   evaluateShaFailureHistory,
   loadFlakyEvidence,
@@ -294,6 +298,11 @@ async function createAttestation(options) {
     );
   }
   const artifactName = sourceGateArtifactName(identity.treeSha, identity.packageVersion);
+  const agentProtocol = agentProtocolReleaseSnapshot({
+    commitSha: identity.commitSha,
+    packageVersion: identity.packageVersion,
+    platform: "source-gate",
+  });
   const attestation = Object.freeze({
     schemaVersion: 1,
     repository: options.repository,
@@ -314,6 +323,7 @@ async function createAttestation(options) {
       reason: shaDecision.reason,
       untriagedFailuresForSameSha: shaDecision.untriagedFailuresForSameSha,
     }),
+    agentProtocol,
   });
   const destination = path.resolve(productRoot, options.output);
   await mkdir(path.dirname(destination), { recursive: true });
@@ -328,6 +338,7 @@ async function createAttestation(options) {
   });
   console.log(`Source gate attestation: ${destination}`);
   console.log(`Source gate artifact: ${artifactName}`);
+  logAgentProtocolReleaseNotice(agentProtocol);
   return attestation;
 }
 

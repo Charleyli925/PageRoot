@@ -275,7 +275,7 @@ const PAGEROOT_PRESENTATION = Object.freeze({
   supportsReasoning: true,
   vendors: publicOpenAiCompatibleVendors(),
   apiKeyLabel: "连接",
-  replaceTokenLabel: "更换 Token",
+  replaceTokenLabel: "更换 API Key",
   stopLabel: "停止源页 Agent 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给源页 Agent 的只读任务资料",
 });
@@ -343,7 +343,9 @@ export function agentAvailabilityCardPresentation(presentation, availability) {
   }
   if (status === "auth-required") {
     return Object.freeze({
-      statusLabel: `${displayName} · 未登录`,
+      statusLabel: presentation.credentialKind === "api-token"
+        ? `${displayName} · 未连接`
+        : `${displayName} · 未登录`,
       detail: "",
       tone: "attention",
     });
@@ -399,7 +401,7 @@ export function agentProviderCardPresentation(provider) {
         copiedLabel: "重试",
       }),
       apiKey: Object.freeze({
-        label: presentation.replaceTokenLabel || "更换 Token",
+        label: presentation.replaceTokenLabel || "更换 API Key",
         copiedLabel: presentation.apiKeyLabel || "连接",
       }),
     }),

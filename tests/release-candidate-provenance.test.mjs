@@ -12,6 +12,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { agentProtocolReleaseSnapshot } from "../shared/agent-protocol-acceptance.mjs";
 import {
   evaluateReleaseCandidateEvidence,
   releaseCandidateArtifactName,
@@ -212,6 +213,11 @@ test("downloaded candidate verification rejects changed release bytes and malfor
     artifactName,
     createdAt: now.toISOString(),
     assets,
+    agentProtocol: agentProtocolReleaseSnapshot({
+      commitSha,
+      packageVersion,
+      platform: "macos-arm64",
+    }),
   };
   const attestationPath = path.join(directory, "release-candidate.json");
   await writeFile(
@@ -255,6 +261,18 @@ test("downloaded candidate verification rejects changed release bytes and malfor
         );
       },
       expected: /source-gate identity does not match/u,
+    },
+    {
+      name: "missing Agent protocol ledger",
+      mutate: () => {
+        const withoutProtocol = { ...attestation };
+        delete withoutProtocol.agentProtocol;
+        return writeFile(
+          attestationPath,
+          JSON.stringify(withoutProtocol, null, 2) + "\n",
+        );
+      },
+      expected: /must list Agent protocol acceptance/u,
     },
     {
       name: "incomplete asset manifest",
