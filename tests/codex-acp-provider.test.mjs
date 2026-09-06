@@ -12,6 +12,7 @@ import {
   assertCodexAcpInstallationUnchanged,
   diagnoseCodexAcp,
   probeCodexAcp,
+  publicCodexAcpModels,
   resolveCodexAcpCommand,
 } from "../bridge/agent/providers/codex-acp-provider.mjs";
 
@@ -247,9 +248,31 @@ test("ACP probe reads session.new models object with currentModelId and availabl
   );
   assert.equal(evidence.modelCount, 2);
   assert.deepEqual(evidence.models.map((model) => model.id), ["codex:gpt-object", "codex:gpt-other"]);
+  assert.equal(evidence.models[0].displayName, "GPT Object");
   assert.equal(evidence.models[0].isDefault, true);
   assert.equal(evidence.models[1].isDefault, false);
   assert.deepEqual(evidence.models[0].reasoningEfforts, ["low", "high"]);
+});
+
+test("locked Codex ACP catalog items use modelId, not display names", () => {
+  const models = publicCodexAcpModels([
+    { modelId: "gpt-5.4", name: "GPT 5.4 Codex", description: "Flagship Codex model" },
+    { modelId: "gpt-5.4-mini", name: "GPT 5.4 Mini", description: "Faster Codex model" },
+  ], "gpt-5.4");
+  assert.deepEqual(models.map((model) => model.id), ["codex:gpt-5.4", "codex:gpt-5.4-mini"]);
+  assert.equal(models[0].displayName, "GPT 5.4 Codex");
+  assert.equal(models[0].isDefault, true);
+  assert.deepEqual(
+    publicCodexAcpModels([{ id: "gpt-object", name: "GPT Object", description: "invented identity" }]),
+    [],
+  );
+});
+
+test("ACP probe does not invent a default catalog when modelId is missing", async (t) => {
+  await assert.rejects(
+    probeCodexAcp(await probeCommand(await isolatedHome(t), "--name-only-models"), process.env),
+    (error) => error?.code === "CODEX_PROTOCOL_UNSUPPORTED",
+  );
 });
 
 test("ACP probe reports adapter error for unknown session.new models object", async (t) => {

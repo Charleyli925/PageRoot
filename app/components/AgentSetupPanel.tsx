@@ -61,6 +61,8 @@ export function BoundAgentSetupPanel({
     // Availability snapshots change during diagnose and must not retrigger it.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- provider/runtime identity only
   }, [card.selection.providerId, card.selection.runtimeId, onCheckSelection]);
+  const usesApiKeyModels = card.presentation.credentialKind === "api-token";
+  const canSelectModel = usesApiKeyModels || card.presentation.supportsSelectableModels === true;
   return (
     <AgentProviderCard
       key={`${card.selection.providerId}:${card.selection.runtimeId}:${card.connection?.vendorId || "none"}:${card.connection?.baseUrl || ""}:${card.selection.resolvedModelId || "none"}`}
@@ -89,11 +91,11 @@ export function BoundAgentSetupPanel({
         ? () => onDisconnectApiKey(card.selection)
         : undefined}
       onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
-      onSelectModel={async (modelId) => {
-        if (card.connection) {
+      onSelectModel={canSelectModel ? async (modelId) => {
+        if (usesApiKeyModels) {
           return onConnectApiKey(card.selection, "", {
-            vendorId: card.connection.vendorId,
-            baseUrl: card.connection.baseUrl,
+            vendorId: card.connection?.vendorId,
+            baseUrl: card.connection?.baseUrl,
             modelId: modelId.replace(/^pageroot:/u, ""),
           });
         }
@@ -113,7 +115,7 @@ export function BoundAgentSetupPanel({
         return committed
           ? { status: "succeeded" }
           : { status: "rejected", reason: "模型选择已经变化，请重新选择。" };
-      }}
+      } : undefined}
       onSelectReasoning={async (reasoning) => {
         const automatic = reasoning === "auto";
         const candidateSelection = {
