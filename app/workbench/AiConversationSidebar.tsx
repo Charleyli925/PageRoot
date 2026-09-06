@@ -91,12 +91,21 @@ export type AiConversationSidebarProps = {
   agentAccess?: Readonly<{
     cards: readonly AgentProviderCardData[];
     documentId: string;
+    recovery?: null | Readonly<{
+      documentId: string;
+      providerId: string | null;
+      field: "apiKey" | "login" | "install";
+      requestId?: string;
+      attemptId?: string;
+    }>;
     bindings: Omit<
       BoundAgentSetupPanelProps,
       "card" | "surface" | "hideDisconnectAction" | "initialApiKeyOpen" | "actionButtonRef"
     >;
     onSelect(selection: AgentSelection): void;
+    onQueueDefault?(selection: AgentSelection): void;
     onReconnect?(selection: AgentSelection): Promise<unknown>;
+    onBeginAccessRepair?(field?: "apiKey" | "login" | "install"): void;
   }>;
   /** What the selected Agent is saying while it works (ADR 0037). */
   agentText?: string;
@@ -240,11 +249,6 @@ export default function AiConversationSidebar({
 }: AiConversationSidebarProps) {
   const [openChoice, setOpenChoice] = useState<null | "model" | "reasoning" | "service">(null);
   const [setupProviderId, setSetupProviderId] = useState<string | null>(null);
-  const [recovery, setRecovery] = useState<null | Readonly<{
-    documentId: string;
-    providerId: string;
-    field: "apiKey" | "login" | "install";
-  }>>(null);
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
   const [clockNow, setClockNow] = useState(0);
@@ -362,6 +366,7 @@ export default function AiConversationSidebar({
   const showComposerIdentity = state === "preview-ready" || state === "no-change";
   const schemeName = (typeof agentDisplayName === "string" && agentDisplayName.trim())
     || resolvedAgentActionName;
+  const recovery = agentAccess?.recovery || null;
   const setupCard = agentAccess?.cards.find((card) => card.selection.providerId === setupProviderId) || null;
   const currentProviderId = agentPresentation?.providerId
     || agentAccess?.cards.find((card) => card.availability.status === "ready")?.selection.providerId
@@ -779,11 +784,7 @@ export default function AiConversationSidebar({
                         const providerId = agentPresentation?.providerId
                           || agentAccess.cards[0]?.selection.providerId
                           || "";
-                        setRecovery({
-                          documentId: agentAccess.documentId,
-                          providerId,
-                          field: "apiKey",
-                        });
+                        agentAccess.onBeginAccessRepair?.("apiKey");
                         setSetupProviderId(providerId);
                         setOpenChoice(null);
                         return;
@@ -880,6 +881,7 @@ export default function AiConversationSidebar({
                             setSetupProviderId(null);
                             return;
                           }
+                          agentAccess.onQueueDefault?.(card.selection);
                           if (disconnected) void agentAccess.onReconnect?.(card.selection);
                           setSetupProviderId(card.selection.providerId);
                           setOpenChoice(null);
@@ -1059,7 +1061,6 @@ export default function AiConversationSidebar({
               <button
                 type="button"
                 onClick={() => {
-                  setRecovery(null);
                   onAction?.("resend-agent");
                 }}
               >

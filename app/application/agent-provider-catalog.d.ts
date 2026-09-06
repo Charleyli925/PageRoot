@@ -80,6 +80,7 @@ export type AgentPreflight = Readonly<Record<string, unknown> & {
 export type AgentCatalogSnapshot = Readonly<{
   providers: Readonly<Record<string, AgentProviderEntry>>;
   selected: AgentSelection | null;
+  pendingDefault: AgentSelection | null;
   preflightBySelection: Readonly<Record<string, AgentPreflight>>;
 }>;
 
@@ -144,6 +145,10 @@ export class AgentCatalogState {
   subscribe(listener: (snapshot: AgentCatalogSnapshot) => void): () => void;
   dispose(): void;
   select(selection: AgentSelection): AgentSelection;
+  queuePendingDefault(selection: AgentSelection): AgentSelection;
+  pendingDefault(): AgentSelection | null;
+  readyPendingDefault(): AgentSelection | null;
+  clearPendingDefault(): null;
   applyDisabledProviderIds(ids?: readonly string[]): void;
   selectModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   selectReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;

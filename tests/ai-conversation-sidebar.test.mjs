@@ -1062,4 +1062,7 @@ test("the conversation sidebar reuses AgentSetupPanel and can replace an API Key
   assert.match(source, /ai-conversation-service-choices/u);
   assert.match(source, /replace-api-key/u);
   assert.match(source, /不会对当前文件发送/u);
+  assert.match(source, /onQueueDefault/u);
+  assert.match(source, /onBeginAccessRepair/u);
+  assert.doesNotMatch(source, /useState<null \| Readonly<\{\s*documentId: string;/u);
 });

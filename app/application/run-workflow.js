@@ -368,6 +368,7 @@ export class RunWorkflow {
   #visibilityListener = null;
   #uncertainSubmissions = new Map();
   #agentStartsPending = new Set();
+  #accessRepair = null;
   #disposed = false;
 
   constructor({
@@ -502,6 +503,7 @@ export class RunWorkflow {
       agentCatalog: this.#agentCatalog.getSnapshot(),
       agentPresentation: this.#agentCatalog.presentation(),
       qoderAvailability: this.#agentCatalog.displayAvailability(),
+      accessRepair: this.#accessRepair,
     });
   }
 
@@ -2228,6 +2230,80 @@ export class RunWorkflow {
 
   selectAgent(selection) {
     return this.#agentCatalog.select(selection);
+  }
+
+  queuePendingDefaultAgent(selection) {
+    return this.#agentCatalog.queuePendingDefault(selection);
+  }
+
+  pendingDefaultAgent() {
+    return this.#agentCatalog.pendingDefault();
+  }
+
+  readyPendingDefaultAgent() {
+    return this.#agentCatalog.readyPendingDefault();
+  }
+
+  clearPendingDefaultAgent() {
+    return this.#agentCatalog.clearPendingDefault();
+  }
+
+  beginAccessRepair(run = this.#runSession.activeRun, field = "apiKey") {
+    if (!run?.requestId || run.requestId === "pending") return null;
+    const delivery = deliveryForRun(run);
+    this.#accessRepair = Object.freeze({
+      projectId: run.projectId,
+      documentId: run.documentId,
+      sourcePath: run.sourcePath,
+      requestId: run.requestId,
+      attemptId: run.attemptId,
+      providerId: delivery?.selection?.providerId || null,
+      configurationDigest: delivery?.configuration?.configurationDigest || null,
+      credentialGeneration: delivery?.configuration?.credentialGeneration ?? null,
+      field: field === "login" || field === "install" ? field : "apiKey",
+    });
+    this.#publishSnapshot();
+    return this.#accessRepair;
+  }
+
+  clearAccessRepair() {
+    if (!this.#accessRepair) return null;
+    this.#accessRepair = null;
+    this.#publishSnapshot();
+    return null;
+  }
+
+  async resendAfterAccessRepair(run = this.#runSession.activeRun) {
+    const repair = this.#accessRepair;
+    const context = this.#projectSession.context;
+    if (repair) {
+      if (
+        !context
+        || repair.documentId !== context.documentId
+        || !this.#codecs.sameSourcePath(repair.sourcePath, context.sourcePath)
+      ) {
+        return rejected(
+          "AGENT_REPAIR_DOCUMENT_CHANGED",
+          "当前文件已变化，不会重新发送。",
+        );
+      }
+    }
+    const target = run
+      || (repair ? this.#runSession.runForSource(repair.sourcePath) : null)
+      || this.#runSession.activeRun;
+    const delivery = deliveryForRun(target);
+    if (!repair) {
+      return this.startAgent({ run: target });
+    }
+    if (target && this.#runSession.hasRun(target)) {
+      const cancelled = await this.cancel({ run: target, agentMayBeRunning: true });
+      if (cancelled.status === "rejected") return cancelled;
+    }
+    this.#accessRepair = null;
+    this.#publishSnapshot();
+    return this.submit({
+      deliveryMode: delivery?.mode || MANAGED_AGENT_MODE,
+    });
   }
 
   selectAgentModel(modelId, expectedSelection) {

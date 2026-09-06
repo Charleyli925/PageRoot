@@ -2073,6 +2073,110 @@ test("removing a remembered Key reports failure instead of succeeding after a cl
   assert.equal(outcome.code, "AGENT_CREDENTIAL_CLEAR_FAILED");
 });
 
+test("resend without access repair reuses the frozen Request identity", async () => {
+  const harness = createHarness();
+  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  harness.workflow.selectAgent(pageroot);
+  const selection = {
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: "pageroot:deepseek-v4-pro",
+    resolvedModelId: "pageroot:deepseek-v4-pro",
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  };
+  const run = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection,
+      trustPolicyVersion: "trusted-local-agent-v1",
+      configuration: {
+        schemaVersion: "1.0.0",
+        providerId: "pageroot",
+        runtimeId: "http",
+        vendorId: "deepseek",
+        baseUrlOrigin: "https://api.deepseek.com",
+        modelId: "pageroot:deepseek-v4-pro",
+        reasoning: "auto",
+        capabilityRevision: "2026-09-03.1",
+        credentialGeneration: 1,
+        configurationDigest: `sha256:${"a".repeat(64)}`,
+      },
+    },
+  });
+  harness.runSession.trackRun(run, { activate: "always" });
+  const outcome = await harness.workflow.resendAfterAccessRepair(run);
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.startAgent.length, 1);
+  assert.equal(harness.calls.startAgent[0].requestId, run.requestId);
+  assert.equal(harness.calls.startAgent[0].configurationDigest, `sha256:${"a".repeat(64)}`);
+});
+
+test("resend after access repair freezes a new execution identity", async () => {
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async createRequest(request) {
+        harness.calls.createRequest.push(request);
+        return {
+          activeRun: runRecord({
+            requestId: "request_resend",
+            agentDelivery: request.agentDelivery,
+          }),
+        };
+      },
+    },
+  });
+  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  harness.workflow.selectAgent(pageroot);
+  const oldDigest = `sha256:${"c".repeat(64)}`;
+  const selection = {
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: "pageroot:deepseek-v4-pro",
+    resolvedModelId: "pageroot:deepseek-v4-pro",
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  };
+  const run = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection,
+      trustPolicyVersion: "trusted-local-agent-v1",
+      configuration: {
+        schemaVersion: "1.0.0",
+        providerId: "pageroot",
+        runtimeId: "http",
+        vendorId: "deepseek",
+        baseUrlOrigin: "https://api.deepseek.com",
+        modelId: "pageroot:deepseek-v4-pro",
+        reasoning: "auto",
+        capabilityRevision: "2026-09-03.1",
+        credentialGeneration: 1,
+        configurationDigest: oldDigest,
+      },
+    },
+  });
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.runSession.publishHandoff({
+    sourcePath: run.sourcePath,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+    mode: "managed-agent",
+    status: "running",
+    phase: "generating",
+  });
+  const repair = harness.workflow.beginAccessRepair(run, "apiKey");
+  assert.equal(repair.requestId, run.requestId);
+  const outcome = await harness.workflow.resendAfterAccessRepair(run);
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+  assert.equal(harness.calls.cancel.length, 1);
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.ok(harness.calls.startAgent.length >= 1);
+  assert.notEqual(harness.calls.startAgent.at(-1).configurationDigest, oldDigest);
+  assert.notEqual(harness.calls.startAgent.at(-1).requestId, run.requestId);
+  assert.equal(harness.workflow.getSnapshot().accessRepair, null);
+});
+
 test("a late keep-external result cannot reload a reopened project generation", async () => {
   const resolution = deferred();
   const harness = createHarness({
