@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type Ref } from "react";
+import { useState, type Ref } from "react";
 import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
 import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
 
@@ -191,12 +191,11 @@ export default function AgentProviderCard({
       : "",
   );
   const persistFailed = credentialPersist?.status === "failed";
-  useEffect(() => {
-    if (!persistFailed) return;
-    setApiKeyOpen(true);
-    setActionError(credentialPersist?.reason || "已连接，但新的 API Key 未保存。");
-    setFieldError("form");
-  }, [persistFailed, credentialPersist?.reason]);
+  const persistReason = persistFailed
+    ? (credentialPersist?.reason || "已连接，但新的 API Key 未保存。")
+    : "";
+  const formError = persistReason || actionError;
+  const formFieldError = persistFailed ? "form" : fieldError;
   const presentation = provider.availability(availability);
   const installing = installState === "installing" || installPending;
   const stopUnconfirmed = activeOperation?.state === "stop-unconfirmed";
@@ -777,8 +776,8 @@ export default function AgentProviderCard({
               {cancelPending ? "正在取消…" : "取消"}
             </button>
           ) : null}
-          {actionError && (fieldError === "form" || !fieldError) ? (
-            <span className="qoder-card-error" role="alert">{actionError}</span>
+          {formError && (formFieldError === "form" || !formFieldError) ? (
+            <span className="qoder-card-error" role="alert">{formError}</span>
           ) : null}
           {persistFailed && onRetryPersistCredential ? (
             <button

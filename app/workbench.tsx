@@ -4886,9 +4886,6 @@ export default function Workbench() {
   const reopenAgentLogin = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.reopenAgentLogin(selection) ?? null
   ), [workspaceController]);
-  const startAgentLogout = useCallback(async (selection?: AgentSelection | null) => (
-    workspaceController?.startAgentLogout(selection) ?? null
-  ), [workspaceController]);
   const installAgent = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.installAgent(selection) ?? null
   ), [workspaceController]);

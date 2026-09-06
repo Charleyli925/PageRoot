@@ -289,7 +289,6 @@ function cardChoiceId(card: AgentProviderCardData) {
 
 function AgentSettings({
   currentAgentName,
-  choices,
   selectedChoiceId,
   cards,
   checking,
@@ -316,7 +315,6 @@ function AgentSettings({
   providerAccessImpact = {},
 }: {
   currentAgentName: string;
-  choices: readonly SettingsAgentChoice[];
   selectedChoiceId: string | null;
   cards: readonly AgentProviderCardData[];
   checking: boolean;
@@ -825,7 +823,6 @@ export default function SettingsPage({
   workspacePreferences,
   workspacePreferencesSaving,
   workspacePreferencesError,
-  agentChoices,
   selectedAgentChoiceId,
   agentCards,
   onUpdateWorkspacePreference,
@@ -998,7 +995,6 @@ export default function SettingsPage({
         ) : category === "agent" ? (
           <AgentSettings
             currentAgentName={currentAgentName}
-            choices={agentChoices}
             selectedChoiceId={selectedAgentChoiceId}
             cards={agentCards}
             checking={agentCheckPending}
