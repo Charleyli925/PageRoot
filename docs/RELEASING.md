@@ -156,8 +156,11 @@ cannot silently switch signing teams.
 
 Agent protocol acceptance is independent of source-gate green and of product
 visibility. `shared/agent-protocol-acceptance.mjs` currently marks DeepSeek,
-Qoder, Codex and every beta HTTP vendor `unverified`. A Candidate or Release
-must list those rows as 未验收. CI mock suites do not promote a vendor.
+Qoder, Codex and every beta HTTP vendor `unverified`. Source-gate and Candidate
+attestations must embed `agentProtocol` for the exact commit, package version
+and platform, listing those rows as 未验收. A Candidate or Release without that
+record, or with `accepted` backed only by `ci-synthetic`, is refused. CI mock
+suites do not promote a vendor.
 
 In GitHub Actions:
 

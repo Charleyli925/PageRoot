@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { readFile } from "node:fs/promises";
+
 import {
   AGENT_PROTOCOL_ACCEPTANCE,
+  agentProtocolReleaseSnapshot,
+  assertAgentProtocolReleaseSnapshot,
   formatUnverifiedAgentProtocolNotice,
+  inspectAgentProtocolAcceptance,
   unverifiedAgentProtocolTargets,
 } from "../shared/agent-protocol-acceptance.mjs";
 import { publicOpenAiCompatibleVendors } from "../shared/openai-compatible-vendors.mjs";
@@ -31,4 +36,54 @@ test("product-visible DeepSeek is still marked 未验收 and mock catalogs canno
   assert.match(notice.lines.join("\n"), /qoder：未验收/u);
   assert.match(notice.lines.join("\n"), /codex：未验收/u);
   assert.match(notice.lines.join("\n"), /smoke:agent-vendors:real/u);
+});
+
+test("accepted rows cannot use synthetic CI evidence and must bind real proof", () => {
+  assert.equal(inspectAgentProtocolAcceptance().ok, true);
+  const forged = inspectAgentProtocolAcceptance([
+    {
+      id: "pageroot:deepseek-v4-pro",
+      protocolAcceptance: "accepted",
+      evidence: "ci-synthetic",
+    },
+  ]);
+  assert.equal(forged.ok, false);
+  assert.match(forged.problems.join("\n"), /ci-synthetic/u);
+  assert.match(forged.problems.join("\n"), /proof/u);
+});
+
+test("release snapshots bind the checkout and stay unverified until real proof", () => {
+  const snapshot = agentProtocolReleaseSnapshot({
+    commitSha: "a".repeat(40),
+    packageVersion: "0.9.8",
+    platform: "macos-arm64",
+  });
+  assert.equal(snapshot.revision, "2026-09-06.2");
+  assert.ok(snapshot.unverifiedCount > 0);
+  assert.equal(snapshot.unverified.some((row) => row.evidence === "ci-synthetic"), true);
+  assert.doesNotThrow(() => {
+    assertAgentProtocolReleaseSnapshot(snapshot, {
+      commitSha: "a".repeat(40),
+      packageVersion: "0.9.8",
+      platform: "macos-arm64",
+    });
+  });
+  assert.throws(
+    () => assertAgentProtocolReleaseSnapshot(null, {
+      commitSha: "a".repeat(40),
+      packageVersion: "0.9.8",
+    }),
+    /synthetic CI green is not vendor proof/u,
+  );
+});
+
+test("source-gate and Candidate provenance read the Agent protocol ledger", async () => {
+  const [sourceGate, candidate] = await Promise.all([
+    readFile(new URL("../scripts/source-gate-provenance.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/release-candidate-provenance.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(sourceGate, /agent-protocol-acceptance\.mjs/u);
+  assert.match(sourceGate, /agentProtocol/u);
+  assert.match(candidate, /assertAgentProtocolReleaseSnapshot/u);
+  assert.match(candidate, /"agentProtocol"/u);
 });

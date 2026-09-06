@@ -14,6 +14,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  agentProtocolReleaseSnapshot,
+  assertAgentProtocolReleaseSnapshot,
+  logAgentProtocolReleaseNotice,
+} from "../shared/agent-protocol-acceptance.mjs";
+import {
   assertBuildInfo,
   readRepositoryIdentity,
 } from "./release-provenance.mjs";
@@ -234,6 +239,11 @@ async function createCandidate(options) {
     architecture,
     workflowRunAttempt,
   );
+  const agentProtocol = agentProtocolReleaseSnapshot({
+    commitSha: identity.commitSha,
+    packageVersion: identity.packageVersion,
+    platform: `macos-${architecture}`,
+  });
   const attestation = Object.freeze({
     schemaVersion: 1,
     repository: options.repository,
@@ -253,6 +263,7 @@ async function createCandidate(options) {
     artifactName,
     createdAt: new Date().toISOString(),
     assets: validated.entries,
+    agentProtocol,
   });
   const attestationPath = path.join(outputDirectory, "release-candidate.json");
   await writeFile(attestationPath, `${JSON.stringify(attestation, null, 2)}\n`, "utf8");
@@ -264,6 +275,7 @@ async function createCandidate(options) {
   });
   console.log(`Release candidate bundle: ${outputDirectory}`);
   console.log(`Release candidate artifact: ${artifactName}`);
+  logAgentProtocolReleaseNotice(agentProtocol);
   return attestation;
 }
 
@@ -461,6 +473,7 @@ function assertAttestationShape(attestation) {
     "artifactName",
     "createdAt",
     "assets",
+    "agentProtocol",
   ]);
   if (Object.keys(attestation).some((key) => !allowedKeys.has(key))) {
     throw new Error("release-candidate.json contains unsupported fields.");
@@ -521,6 +534,11 @@ export async function verifyReleaseCandidateBundle({
     throw new Error("Release candidate source-gate identity does not match the checkout.");
   }
   assertPositiveInteger(attestation.sourceGate.workflowRunId, "source-gate run id");
+  assertAgentProtocolReleaseSnapshot(attestation.agentProtocol, {
+    commitSha: identity.commitSha,
+    packageVersion: identity.packageVersion,
+    platform: `macos-${normalizedArchitecture}`,
+  });
   if (!Number.isFinite(Date.parse(attestation.createdAt || ""))) {
     throw new Error("Release candidate createdAt is invalid.");
   }

@@ -283,7 +283,7 @@ The native HTTP Agent has a credential-backed protocol smoke that is intentional
 outside the synthetic test suite. Product visibility (`releaseChannel`) is not
 acceptance. CI Electron AI, fake ACP servers and local HTTP fixtures stay
 `ci-synthetic` in `shared/agent-protocol-acceptance.mjs` and must be listed as
-未验收 on a Candidate. Before claiming real-protocol acceptance, run
+未验收 on the source-gate and Candidate `agentProtocol` record. Before claiming real-protocol acceptance, run
 `npm run smoke:agent-vendors:real` with the four
 `PAGEROOT_SMOKE_<VENDOR>_API_KEY` secrets (and optional matching `_MODEL`
 overrides). It calls each real `/models` and `/chat/completions` endpoint, never

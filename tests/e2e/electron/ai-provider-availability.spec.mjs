@@ -317,7 +317,7 @@ test("源页 Agent settings stays a Token card and does not block switching back
     const settingsPage = launched.page.locator(".workbench-settings-page");
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
-    await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true }))
+    await expect(pagerootCard.getByText("源页 Agent · 未连接", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
     await expect(pagerootCard.getByRole("textbox", { name: "API Key" })).toBeVisible();
     await expect(pagerootCard.getByText("其他服务商")).toBeVisible();
@@ -368,7 +368,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     const settingsPage = await openAgentSettingsPage(launched.page);
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
-    await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true }))
+    await expect(pagerootCard.getByText("源页 Agent · 未连接", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
     await pagerootCard.getByRole("textbox", { name: "API Key" }).fill("sk-e2e-pageroot");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
@@ -376,7 +376,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
       .toBeVisible({ timeout: 30_000 });
     await expect(pagerootCard.getByTestId("settings-agent-current-connection"))
       .toContainText("DeepSeek");
-    await pagerootCard.getByRole("button", { name: "更换 Token" }).click();
+    await pagerootCard.getByRole("button", { name: "更换 API Key" }).click();
     await expect(pagerootCard.getByText("未勾选记住时仅本次使用。")).toBeVisible();
     await pagerootCard.getByText("其他服务商").click();
     await expect(pagerootCard.getByTestId("settings-agent-vendor")).toBeVisible();
@@ -563,7 +563,7 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText(/Token 无效|API Key 无效|Token 没有接通/u))
       .toBeVisible({ timeout: 20_000 });
-    await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true })).toBeVisible();
+    await expect(pagerootCard.getByText("源页 Agent · 未连接", { exact: true })).toBeVisible();
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(sidebar.getByRole("button", { name: "连接 源页 Agent" }))

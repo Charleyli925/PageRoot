@@ -120,7 +120,7 @@ function actionsForAvailability(
   }
   if (availability.status === "auth-required") {
     if (presentation.credentialKind === "api-token") {
-      return [{ kind: "api-key", label: "登录", copiedLabel: "登录" }];
+      return [{ kind: "api-key", label: "连接", copiedLabel: "连接" }];
     }
     return [{ kind: "login", ...presentation.actions.login }];
   }
@@ -201,6 +201,8 @@ export default function AgentProviderCard({
       ? { ...presentation, statusLabel: "正在取消…", detail: "", tone: "checking" as const }
       : presentation;
   const currentModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
+  const tokenFormOpen = provider.credentialKind === "api-token"
+    && (availability.status === "auth-required" || apiKeyOpen);
   const actions = installing || cancelling
     ? [{ kind: "cancel-install" as const, label: "取消", copiedLabel: "取消" }]
     : loggingIn
@@ -215,14 +217,17 @@ export default function AgentProviderCard({
           : []),
       ]
       : actionsForAvailability(availability, provider).filter((action) => !(
-    availability.reason === "model-unavailable"
-    && connection
-    && models.length > 1
-    && action.kind === "api-key"
-    ));
+        action.kind === "api-key"
+        && (
+          tokenFormOpen
+          || (
+            availability.reason === "model-unavailable"
+            && connection
+            && models.length > 1
+          )
+        )
+      ));
   const checking = availability.status === "checking";
-  const tokenFormOpen = provider.credentialKind === "api-token"
-    && (availability.status === "auth-required" || apiKeyOpen);
   const selectedVendor = provider.vendors?.find((vendor) => vendor.id === vendorId)
     || provider.vendors?.[0]
     || null;
@@ -461,22 +466,24 @@ export default function AgentProviderCard({
       aria-busy={checking || installing || cancelling || Boolean(pendingAction)}
     >
       <div className="qoder-card-summary">
-        <span
-          className="qoder-card-brand"
-          data-fallback={!provider.logoSrc && provider.brandIcon !== "openai" ? "true" : undefined}
-          aria-hidden="true"
-        >
-          {provider.logoSrc ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={provider.logoSrc} alt="" />
-          ) : provider.brandIcon === "openai" ? (
-            <OpenAiLogoIcon size={22} weight="regular" />
-          ) : (
-            <CodeIcon size={22} weight="bold" />
-          )}
-        </span>
+        {surface === "settings" ? null : (
+          <span
+            className="qoder-card-brand"
+            data-fallback={!provider.logoSrc && provider.brandIcon !== "openai" ? "true" : undefined}
+            aria-hidden="true"
+          >
+            {provider.logoSrc ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={provider.logoSrc} alt="" />
+            ) : provider.brandIcon === "openai" ? (
+              <OpenAiLogoIcon size={22} weight="regular" />
+            ) : (
+              <CodeIcon size={22} weight="bold" />
+            )}
+          </span>
+        )}
         <span className="qoder-card-copy">
-          <strong>{provider.displayName}</strong>
+          {surface === "settings" ? null : <strong>{provider.displayName}</strong>}
           {presentation.detail ? <small>{presentation.detail}</small> : null}
         </span>
         <span className="qoder-card-control">
@@ -571,7 +578,7 @@ export default function AgentProviderCard({
             setActionError("");
           }}
         >
-          {apiKeyOpen ? "收起配置" : (provider.actions.apiKey?.label || "更换 Token")}
+          {apiKeyOpen ? "收起配置" : (provider.actions.apiKey?.label || "更换 API Key")}
         </button>
       ) : null}
           {availability.status === "ready" && models.length > 1 && onSelectModel ? (

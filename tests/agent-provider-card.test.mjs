@@ -53,6 +53,13 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
   assert.match(card, /验证成功后才会替换当前连接/u);
   assert.match(card, /persistFailed \|\| outcome\?\.reason/u);
   assert.match(card, /可稍后重试记住/u);
+  assert.match(card, /kind: "api-key", label: "连接"/u);
+  assert.doesNotMatch(card, /kind: "api-key", label: "登录"/u);
+  assert.match(card, /tokenFormOpen/u);
+  assert.match(card, /action\.kind === "api-key"/u);
+  assert.match(card, /更换 API Key/u);
+  assert.doesNotMatch(card, /更换 Token/u);
+  assert.match(card, /surface === "settings" \? null : <strong>/u);
   assert.doesNotMatch(card, /placeholder="API Token"/u);
   assert.doesNotMatch(card, /选择其他模型/u);
   assert.match(card, /高级设置/u);
@@ -86,6 +93,9 @@ test("About is product information while Settings owns Agent checks and update c
   assert.match(settings, /rememberedKey;/u);
   assert.doesNotMatch(settings, /rememberedKey \|\| Boolean\(card\.connection\)/u);
   assert.match(settings, /setConfirmPending\(true\)/u);
+  assert.match(settings, /正在处理…/u);
+  assert.doesNotMatch(settings, /expandedId \|\| selectedChoiceId/u);
+  assert.match(settings, /setExpandedId\(expanded \? null : id\)/u);
   assert.doesNotMatch(settings, /setConfirmAction\(null\);\s+if \(action\.kind === "remove-key"\)/u);
 });
 
