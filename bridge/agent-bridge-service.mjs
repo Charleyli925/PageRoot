@@ -113,6 +113,24 @@ export class AgentBridgeService {
     return catalog.loginUrl(providerId);
   }
 
+  accessOperation(providerId) {
+    const catalog = this.#coordinator.agentCatalog;
+    if (!catalog || typeof catalog.accessOperation !== "function") return null;
+    return catalog.accessOperation(providerId);
+  }
+
+  logout(providerId) {
+    const catalog = this.#coordinator.agentCatalog;
+    if (!catalog || typeof catalog.logout !== "function") {
+      throw new AgentBridgeError(
+        "AGENT_LOGOUT_UNSUPPORTED",
+        "This Agent cannot sign out from the official account.",
+        { status: 409 },
+      );
+    }
+    return catalog.logout(providerId);
+  }
+
   assertSelection(selection, purpose) {
     return this.#coordinator.assertSelection(selection, purpose);
   }

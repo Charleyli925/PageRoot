@@ -15,6 +15,7 @@ import {
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../shared/agent-delivery.mjs";
 import {
+  accessOperationId,
   createAccessOperation,
   finishAccessOperation,
   publicAccessOperation,
@@ -458,6 +459,7 @@ export function agentProviderCardsFromCatalog(snapshot) {
       credentialConfigured: provider.credentialConfigured === true,
       connection: provider.connection || null,
       loginUrlPresent: provider.loginUrlPresent === true,
+      loginOpenError: provider.loginOpenError || null,
       enabled: provider.enabled !== false,
       activeOperation: provider.activeOperation || null,
       installState: provider.installState || "idle",
@@ -477,7 +479,8 @@ function frozenProviderEntry(descriptor, previous = null) {
     models: previous?.models || Object.freeze([]),
     credentialConfigured: previous?.credentialConfigured === true,
     connection: previous?.connection || descriptor.connection || null,
-    loginUrlPresent: previous?.loginUrlPresent === true || descriptor.loginUrlPresent === true,
+      loginUrlPresent: previous?.loginUrlPresent === true || descriptor.loginUrlPresent === true,
+    loginOpenError: previous?.loginOpenError || null,
     enabled: previous?.enabled !== false,
     activeOperation: previous?.activeOperation || null,
     diagnostic: previous?.diagnostic || descriptor.diagnostic || null,
@@ -495,6 +498,30 @@ function validDate(clock) {
 function preflightExpired(preflight, clock) {
   const expiresAt = Date.parse(String(preflight?.expiresAt || ""));
   return !Number.isFinite(expiresAt) || expiresAt <= clock.now();
+}
+
+function loginOperationFromBridgeResult(result, providerId, startedAt) {
+  const adopted = publicAccessOperation(result?.activeOperation);
+  if (adopted?.kind === "login" && adopted.providerId === providerId) return adopted;
+  const generation = Number(result?.generation);
+  if (!Number.isSafeInteger(generation) || generation < 1) return null;
+  const state = result?.loginState === "cancelling"
+    ? "cancelling"
+    : result?.loginState === "succeeded"
+      ? "succeeded"
+      : result?.loginState === "cancelled"
+        ? "cancelled"
+        : result?.loginState === "failed"
+          ? "failed"
+          : "waiting";
+  return publicAccessOperation({
+    providerId,
+    kind: "login",
+    generation,
+    state,
+    startedAt: result?.startedAt || startedAt,
+    errorCode: result?.errorCode || null,
+  });
 }
 
 function publicModels(value) {
@@ -560,6 +587,7 @@ export class AgentCatalogState {
   #diagnoseInflightBySelection = new Map();
   #spentPreflightIds = new Set();
   #generationByProvider = new Map();
+  #diagnoseGenerationByProvider = new Map();
   #listeners = new Set();
   #disposed = false;
 
@@ -598,6 +626,7 @@ export class AgentCatalogState {
         selection: descriptorSelection,
       })));
       this.#generationByProvider.set(descriptor.providerId, 0);
+      this.#diagnoseGenerationByProvider.set(descriptor.providerId, 0);
     }
     const defaultSelection = defaultManagedAgentDelivery().selection;
     const initial = selected
@@ -788,8 +817,8 @@ export class AgentCatalogState {
     });
     const inflight = this.#diagnoseInflightBySelection.get(key);
     if (inflight) return inflight.promise;
-    const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
-    this.#generationByProvider.set(frozen.providerId, generation);
+    const generation = (this.#diagnoseGenerationByProvider.get(frozen.providerId) || 0) + 1;
+    this.#diagnoseGenerationByProvider.set(frozen.providerId, generation);
     const checking = (async () => {
       const previousDiagnostic = this.#providers.get(frozen.providerId)?.diagnostic || null;
       try {
@@ -812,7 +841,7 @@ export class AgentCatalogState {
         const result = await diagnoseMethod({ selection: frozen });
         if (
           this.#disposed
-          || this.#generationByProvider.get(frozen.providerId) !== generation
+          || this.#diagnoseGenerationByProvider.get(frozen.providerId) !== generation
         ) return null;
         const diagnostic = agentDiagnosticSnapshot(
           result?.diagnostic || result,
@@ -821,12 +850,9 @@ export class AgentCatalogState {
         );
         const current = this.#providers.get(frozen.providerId);
         if (current) {
-          const loginComplete = current.activeOperation?.kind === "login"
-            && diagnostic.readiness === "ready";
           this.#providers.set(frozen.providerId, Object.freeze({
             ...current,
             diagnostic,
-            ...(loginComplete ? { activeOperation: null } : {}),
             ...(current.enabled === false
               ? {
                 availability: agentProviderAvailabilityFromFailureReason(
@@ -853,7 +879,7 @@ export class AgentCatalogState {
       } catch (cause) {
         if (
           !this.#disposed
-          && this.#generationByProvider.get(frozen.providerId) === generation
+          && this.#diagnoseGenerationByProvider.get(frozen.providerId) === generation
         ) {
           const current = this.#providers.get(frozen.providerId);
           const diagnostic = agentDiagnosticSnapshot({
@@ -1230,26 +1256,34 @@ export class AgentCatalogState {
       });
     }
     this.#invalidateProvider(frozen.providerId);
-    const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
-    this.#generationByProvider.set(frozen.providerId, generation);
     this.#patchProvider(frozen.providerId, {
-      activeOperation: createAccessOperation({
-        providerId: frozen.providerId,
-        kind: "login",
-        generation,
-        startedAt: validDate(this.#clock),
-      }),
       loginUrlPresent: false,
+      loginOpenError: null,
     });
     this.#setAvailability(frozen.providerId, checkingAgentProviderAvailability(provider.availability));
-    void this.#openOfficialLogin(frozen.providerId, generation);
+    let operation = null;
     try {
-      await this.#bridgeClient.loginAgent({ providerId: frozen.providerId });
-      return await this.#waitForLogin(frozen, generation);
+      const started = await this.#bridgeClient.loginAgent({ providerId: frozen.providerId });
+      operation = loginOperationFromBridgeResult(
+        started,
+        frozen.providerId,
+        validDate(this.#clock),
+      );
+      if (!operation) {
+        throw Object.assign(new Error("官方登录没有返回操作身份。"), {
+          code: "AGENT_LOGIN_FAILED",
+        });
+      }
+      this.#patchProvider(frozen.providerId, {
+        activeOperation: operation,
+        loginUrlPresent: started?.loginUrlPresent === true,
+      });
+      void this.#openOfficialLogin(frozen.providerId, operation.operationId);
+      return await this.#waitForLogin(frozen, operation.operationId);
     } catch (cause) {
       const cancelled = cause?.code === "AGENT_LOGIN_CANCELLED";
       const current = this.provider(frozen)?.activeOperation;
-      if (current?.generation === generation) {
+      if (operation && current?.operationId === operation.operationId) {
         this.#patchProvider(frozen.providerId, {
           activeOperation: finishAccessOperation(current, {
             state: cancelled ? "cancelled" : "failed",
@@ -1265,13 +1299,119 @@ export class AgentCatalogState {
     }
   }
 
-  async #openOfficialLogin(providerId, generation) {
-    if (typeof this.#handoffPort?.openLogin !== "function") return;
+  async reopenOfficialLogin(selection = this.freezeSelected()) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    const operation = publicAccessOperation(provider.activeOperation);
+    if (operation?.kind !== "login" || !["waiting", "cancelling"].includes(operation.state)) {
+      throw Object.assign(new Error("当前没有等待中的官方登录。"), {
+        code: "AGENT_LOGIN_URL_UNAVAILABLE",
+      });
+    }
+    const opened = await this.#requestOpenLogin(frozen.providerId);
+    this.#patchProvider(frozen.providerId, {
+      loginOpenError: opened.opened ? null : opened.reason,
+    });
+    if (!opened.opened) {
+      throw Object.assign(new Error(opened.reason), {
+        code: "AGENT_LOGIN_URL_UNAVAILABLE",
+      });
+    }
+    return Object.freeze({ opened: true });
+  }
+
+  async startLogout(selection = this.freezeSelected()) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    if (typeof this.#bridgeClient.logoutAgent !== "function") {
+      throw Object.assign(new Error("This Agent cannot sign out from the official account."), {
+        code: "AGENT_LOGOUT_UNSUPPORTED",
+      });
+    }
+    const connection = provider.connection;
+    if (connection?.authSource === "environment-token") {
+      throw Object.assign(new Error("当前使用环境变量凭据，无法在应用内退出账号。"), {
+        code: "AGENT_LOGOUT_UNSUPPORTED",
+      });
+    }
+    this.#invalidateProvider(frozen.providerId);
+    const generation = this.#generationByProvider.get(frozen.providerId) || 1;
+    this.#patchProvider(frozen.providerId, {
+      activeOperation: createAccessOperation({
+        providerId: frozen.providerId,
+        kind: "logout",
+        generation,
+        startedAt: validDate(this.#clock),
+      }),
+    });
+    try {
+      await this.#bridgeClient.logoutAgent({ providerId: frozen.providerId });
+      const current = publicAccessOperation(this.provider(frozen)?.activeOperation);
+      if (current?.operationId === accessOperationId({
+        providerId: frozen.providerId,
+        kind: "logout",
+        generation,
+      })) {
+        this.#patchProvider(frozen.providerId, {
+          activeOperation: finishAccessOperation(current, { state: "succeeded" }),
+          connection: null,
+        });
+      }
+      return this.diagnose(this.freezeProviderSelection(frozen.providerId) || frozen);
+    } catch (cause) {
+      const current = publicAccessOperation(this.provider(frozen)?.activeOperation);
+      if (current?.generation === generation && current.kind === "logout") {
+        this.#patchProvider(frozen.providerId, {
+          activeOperation: finishAccessOperation(current, {
+            state: "failed",
+            errorCode: cause?.code || "AGENT_LOGOUT_FAILED",
+          }),
+        });
+      }
+      await this.diagnose(
+        this.freezeProviderSelection(frozen.providerId) || frozen,
+      ).catch(() => null);
+      throw cause;
+    }
+  }
+
+  async #requestOpenLogin(providerId) {
+    if (typeof this.#handoffPort?.openLogin !== "function") {
+      return Object.freeze({
+        opened: false,
+        reason: "当前环境无法打开官方登录页。",
+      });
+    }
+    try {
+      const result = await this.#handoffPort.openLogin({ providerId });
+      if (result && result.opened === false) {
+        return Object.freeze({
+          opened: false,
+          reason: String(result.reason || "官方登录页没有打开。"),
+        });
+      }
+      return Object.freeze({ opened: true, reason: null });
+    } catch (cause) {
+      return Object.freeze({
+        opened: false,
+        reason: String(cause?.message || "官方登录页暂时无法打开。"),
+      });
+    }
+  }
+
+  async #openOfficialLogin(providerId, operationId) {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const current = this.#providers.get(providerId);
-      if (current?.activeOperation?.generation !== generation) return;
+      const operation = publicAccessOperation(current?.activeOperation);
+      if (operation?.operationId !== operationId) return;
+      if (!["waiting", "cancelling"].includes(operation.state)) return;
       if (current.loginUrlPresent === true) {
-        await this.#handoffPort.openLogin({ providerId }).catch(() => null);
+        const opened = await this.#requestOpenLogin(providerId);
+        this.#patchProvider(providerId, {
+          loginOpenError: opened.opened ? null : opened.reason,
+        });
         return;
       }
       if (typeof this.#bridgeClient.agentProviders === "function") {
@@ -1281,38 +1421,89 @@ export class AgentCatalogState {
           : null;
         if (item?.loginUrlPresent === true) {
           this.#patchProvider(providerId, { loginUrlPresent: true });
-          await this.#handoffPort.openLogin({ providerId }).catch(() => null);
+          const opened = await this.#requestOpenLogin(providerId);
+          this.#patchProvider(providerId, {
+            loginOpenError: opened.opened ? null : opened.reason,
+          });
           return;
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
+    const current = this.#providers.get(providerId);
+    const operation = publicAccessOperation(current?.activeOperation);
+    if (operation?.operationId === operationId && operation.state === "waiting") {
+      this.#patchProvider(providerId, {
+        loginOpenError: "还没有拿到登录页，可稍后重新打开。",
+      });
+    }
   }
 
-  async #waitForLogin(selection, generation) {
+  async #waitForLogin(selection, operationId) {
     for (let attempt = 0; attempt < 900; attempt += 1) {
+      await this.#applyPublicCatalog();
       const current = this.provider(selection);
-      if (current?.activeOperation?.generation !== generation) {
+      const operation = publicAccessOperation(current?.activeOperation);
+      if (!operation || operation.operationId !== operationId) {
         throw Object.assign(new Error("A newer login replaced this attempt."), {
           code: "AGENT_LOGIN_STALE",
         });
       }
-      if (current?.activeOperation?.state === "cancelled") {
+      if (operation.state === "cancelled") {
         throw Object.assign(new Error("登录已取消。"), { code: "AGENT_LOGIN_CANCELLED" });
       }
-      if (current?.activeOperation?.state === "failed") {
+      if (operation.state === "failed") {
         throw Object.assign(new Error("官方登录没有完成。"), {
-          code: current.activeOperation.errorCode || "AGENT_LOGIN_FAILED",
+          code: operation.errorCode || "AGENT_LOGIN_FAILED",
         });
       }
-      await this.#applyPublicCatalog();
-      const diagnosed = await this.diagnose(
-        this.freezeProviderSelection(selection.providerId) || selection,
-      ).catch(() => null);
-      if (this.availability(selection)?.status === "ready") return diagnosed;
+      if (operation.state === "succeeded") {
+        return this.#completeLogin(selection, operation);
+      }
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
+    const current = publicAccessOperation(this.provider(selection)?.activeOperation);
+    if (current?.operationId === operationId) {
+      this.#patchProvider(selection.providerId, {
+        activeOperation: finishAccessOperation(current, {
+          state: "failed",
+          errorCode: "AGENT_LOGIN_EXPIRED",
+        }),
+        loginUrlPresent: false,
+      });
+    }
     throw Object.assign(new Error("登录等待已超时。"), { code: "AGENT_LOGIN_EXPIRED" });
+  }
+
+  async #completeLogin(selection, operation) {
+    const diagnosed = await this.diagnose(
+      this.freezeProviderSelection(selection.providerId) || selection,
+    ).catch(() => null);
+    const current = this.provider(selection);
+    const active = publicAccessOperation(current?.activeOperation);
+    if (!active || active.operationId !== operation.operationId) {
+      throw Object.assign(new Error("A newer login replaced this attempt."), {
+        code: "AGENT_LOGIN_STALE",
+      });
+    }
+    const availability = current.enabled === false
+      ? agentProviderAvailabilityFromFailureReason(
+        "disabled",
+        current.availability,
+        validDate(this.#clock),
+      )
+      : agentProviderAvailabilityFromDiagnostic(
+        current.diagnostic || diagnosed?.diagnostic,
+        current.availability,
+        validDate(this.#clock),
+      );
+    this.#setAvailability(selection.providerId, availability);
+    this.#patchProvider(selection.providerId, {
+      activeOperation: finishAccessOperation(active, { state: "succeeded" }),
+      loginUrlPresent: false,
+      loginOpenError: null,
+    });
+    return diagnosed;
   }
 
   async copyGuidance(kind, selection = this.freezeSelected()) {
@@ -1573,6 +1764,10 @@ export class AgentCatalogState {
     this.#generationByProvider.set(
       providerId,
       (this.#generationByProvider.get(providerId) || 0) + 1,
+    );
+    this.#diagnoseGenerationByProvider.set(
+      providerId,
+      (this.#diagnoseGenerationByProvider.get(providerId) || 0) + 1,
     );
     for (const [key, inflight] of this.#inflightBySelection) {
       if (inflight.providerId === providerId) this.#inflightBySelection.delete(key);

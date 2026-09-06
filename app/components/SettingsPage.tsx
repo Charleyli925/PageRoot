@@ -78,6 +78,8 @@ export type SettingsPageProps = {
     selection: AgentSelection,
   ) => Promise<AgentActionOutcome>;
   onStartLogin: (selection: AgentSelection) => Promise<AgentActionOutcome>;
+  onReopenLogin?: (selection: AgentSelection) => Promise<AgentActionOutcome>;
+  onLogoutAgent?: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onInstall: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onCancelInstall: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onConnectApiKey: (
@@ -294,6 +296,8 @@ function AgentSettings({
   onCheckSelection,
   onCopyGuidance,
   onStartLogin,
+  onReopenLogin,
+  onLogoutAgent,
   onInstall,
   onCancelInstall,
   onConnectApiKey,
@@ -318,6 +322,8 @@ function AgentSettings({
   onCheckSelection(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCopyGuidance(kind: AgentProviderGuidanceKind, selection: AgentSelection): Promise<AgentActionOutcome>;
   onStartLogin(selection: AgentSelection): Promise<AgentActionOutcome>;
+  onReopenLogin?(selection: AgentSelection): Promise<AgentActionOutcome>;
+  onLogoutAgent?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCancelInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>): Promise<AgentActionOutcome>;
@@ -405,7 +411,16 @@ function AgentSettings({
             const canDisconnect = Boolean(onDisconnectProvider)
               && !disconnected
               && (card.availability.status === "ready" || Boolean(card.connection) || card.availability.status === "auth-required");
-            const showMore = canDisconnect || canRemoveKey || (disconnected && Boolean(onReconnectProvider));
+            const canLogout = Boolean(onLogoutAgent)
+              && card.selection.providerId !== "pageroot"
+              && (card.connection?.authSource === "cli-login"
+                || card.connection?.authSource === "chatgpt");
+            const canRelogin = Boolean(onStartLogin)
+              && card.selection.providerId !== "pageroot"
+              && card.presentation.credentialKind !== "api-token"
+              && !disconnected;
+            const showMore = canDisconnect || canRemoveKey || canLogout || canRelogin
+              || (disconnected && Boolean(onReconnectProvider));
             return (
               <div
                 key={id}
@@ -490,6 +505,33 @@ function AgentSettings({
                             </small>
                           </>
                         ) : null}
+                        {canLogout ? (
+                          <>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-kind="logout"
+                              onClick={() => {
+                                void onLogoutAgent?.(card.selection);
+                              }}
+                            >
+                              退出账号
+                            </button>
+                            <small>退出后需要重新登录</small>
+                          </>
+                        ) : null}
+                        {canRelogin ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            data-kind="login"
+                            onClick={() => {
+                              void onStartLogin(card.selection);
+                            }}
+                          >
+                            重新登录
+                          </button>
+                        ) : null}
                         {canRemoveKey ? (
                           <>
                             <button
@@ -562,6 +604,7 @@ function AgentSettings({
                       hideDisconnectAction
                       onCopyGuidance={onCopyGuidance}
                       onStartLogin={onStartLogin}
+                      onReopenLogin={onReopenLogin}
                       onInstall={onInstall}
                       onCancelInstall={onCancelInstall}
                       onCheckSelection={onCheckSelection}
@@ -722,6 +765,8 @@ export default function SettingsPage({
   onCheckUsability,
   onCopyGuidance,
   onStartLogin,
+  onReopenLogin,
+  onLogoutAgent,
   onInstall,
   onCancelInstall,
   onConnectApiKey,
@@ -887,6 +932,8 @@ export default function SettingsPage({
             onCheckSelection={onCheckUsability}
             onCopyGuidance={onCopyGuidance}
             onStartLogin={onStartLogin}
+            onReopenLogin={onReopenLogin}
+            onLogoutAgent={onLogoutAgent}
             onInstall={onInstall}
             onCancelInstall={onCancelInstall}
             onConnectApiKey={onConnectApiKey}

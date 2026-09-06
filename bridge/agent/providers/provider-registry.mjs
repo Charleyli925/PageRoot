@@ -518,6 +518,40 @@ export function createDefaultProviderRegistry({
       onLoginUrl: context.onLoginUrl,
     });
   });
+  catalog.bindLogoutExecutor(async (providerId) => {
+    const listed = registry.catalog().find((item) => item.providerId === providerId);
+    if (!listed) {
+      throw agentProviderError(
+        "AGENT_PROVIDER_UNSUPPORTED",
+        "The selected Agent is not in PageRoot's ACP catalog.",
+        { status: 404 },
+      );
+    }
+    const { provider } = registry.resolveSelection({
+      providerId: listed.providerId,
+      runtimeId: listed.runtimeId,
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: Object.freeze({
+        requested: null,
+        applied: null,
+        resolution: "provider-default",
+      }),
+    });
+    if (provider.capabilities.logout !== true || typeof provider.startLogout !== "function") {
+      throw agentProviderError(
+        "AGENT_LOGOUT_UNSUPPORTED",
+        "This Agent cannot sign out from the official account.",
+        { status: 409 },
+      );
+    }
+    const installation = await provider.resolveInstallation({
+      environment: process.env,
+    });
+    return provider.startLogout(installation, {
+      environment: process.env,
+    });
+  });
   return Object.freeze({
     ...registry,
     agentCatalog: catalog,

@@ -52,6 +52,7 @@ export type BridgeClient = {
   cancelAgentInstall(body: BridgeJson): Promise<BridgeJson>;
   loginAgent(body: BridgeJson): Promise<BridgeJson>;
   cancelAgentLogin(body: BridgeJson): Promise<BridgeJson>;
+  logoutAgent(body: BridgeJson): Promise<BridgeJson>;
   setAgentSessionCredential(body: BridgeJson): Promise<BridgeJson>;
   updateAgentConfiguration(body: BridgeJson): Promise<BridgeJson>;
   cancelAgentConfiguration(body: BridgeJson): Promise<BridgeJson>;

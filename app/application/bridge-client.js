@@ -334,6 +334,11 @@ export function createBridgeClient({
       body,
       "官方登录停止结果暂时无法确认。",
     ),
+    logoutAgent: (body) => command(
+      "/agent/logout",
+      body,
+      "官方账号没有退出。",
+    ),
     setAgentSessionCredential: (body) => command(
       "/agent/session-credential",
       body,

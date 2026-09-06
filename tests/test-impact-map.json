@@ -1877,7 +1877,8 @@
         "tests/agent-provider-catalog.test.mjs",
         "tests/agent-provider-contract.test.mjs",
         "tests/agent-access-operation.test.mjs",
-        "tests/agent-access-auth.test.mjs"
+        "tests/agent-access-auth.test.mjs",
+        "tests/agent-login-command.test.mjs"
       ]
     },
     {
@@ -1898,6 +1899,7 @@
         "tests/agent-installer.test.mjs",
         "tests/agent-access-operation.test.mjs",
         "tests/agent-access-auth.test.mjs",
+        "tests/agent-login-command.test.mjs",
         "tests/codex-acp-provider.test.mjs",
         "tests/agent-provider-contract.test.mjs"
       ]

@@ -1703,7 +1703,11 @@ async function loginAgent(body) {
     ok: true,
     providerId: snapshot.providerId,
     loginState: snapshot.loginState,
+    generation: snapshot.generation,
+    startedAt: snapshot.startedAt,
+    errorCode: snapshot.errorCode,
     loginUrlPresent: snapshot.loginUrlPresent === true,
+    activeOperation: agentBridgeService.accessOperation(providerId),
   });
 }
 
@@ -1714,6 +1718,21 @@ async function cancelAgentLogin(body) {
     ok: true,
     providerId: snapshot.providerId,
     loginState: snapshot.loginState,
+    generation: snapshot.generation,
+    startedAt: snapshot.startedAt,
+    errorCode: snapshot.errorCode,
+    loginUrlPresent: snapshot.loginUrlPresent === true,
+    activeOperation: agentBridgeService.accessOperation(providerId),
+  });
+}
+
+async function logoutAgent(body) {
+  const providerId = String(body?.providerId || "").trim();
+  const snapshot = await agentBridgeService.logout(providerId);
+  return Object.freeze({
+    ok: true,
+    providerId,
+    ...snapshot,
   });
 }
 
@@ -2740,6 +2759,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/agent/login/cancel") {
     const body = await readBody(request);
     sendJson(response, 200, await cancelAgentLogin(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/logout") {
+    const body = await readBody(request);
+    sendJson(response, 200, await logoutAgent(body));
     return;
   }
   if (request.method === "GET" && url.pathname === "/agent/login/url") {

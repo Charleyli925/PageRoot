@@ -1013,19 +1013,42 @@ test("disabled providers stay disconnected after a ready diagnose and cannot pre
 
 test("startLogin records a waiting access operation that cancel finishes", async () => {
   const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
-  let releaseLogin;
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() { return { status: "ready" }; },
       async loginAgent() {
-        await new Promise((resolve) => {
-          releaseLogin = resolve;
-        });
-        return { ok: true, loginState: "waiting" };
+        return {
+          ok: true,
+          loginState: "waiting",
+          generation: 1,
+          activeOperation: {
+            operationId: "access_qoder_login_1",
+            providerId: "qoder",
+            kind: "login",
+            state: "waiting",
+            generation: 1,
+            startedAt: "2026-09-06T00:00:00.000Z",
+            errorCode: null,
+            cancellable: true,
+          },
+        };
       },
       async cancelAgentLogin() {
-        releaseLogin?.();
-        return { ok: true, loginState: "idle" };
+        return {
+          ok: true,
+          loginState: "cancelled",
+          generation: 1,
+          activeOperation: {
+            operationId: "access_qoder_login_1",
+            providerId: "qoder",
+            kind: "login",
+            state: "cancelled",
+            generation: 1,
+            startedAt: null,
+            errorCode: "AGENT_LOGIN_CANCELLED",
+            cancellable: false,
+          },
+        };
       },
       async agentDiagnose() {
         return { status: "auth-required", diagnostic: { readiness: "auth-required" } };
@@ -1040,6 +1063,7 @@ test("startLogin records a waiting access operation that cancel finishes", async
   const waiting = catalog.provider(selected).activeOperation;
   assert.equal(waiting.kind, "login");
   assert.equal(waiting.state, "waiting");
+  assert.equal(waiting.generation, 1);
   const cancelled = await catalog.cancelAccessOperation(selected);
   assert.equal(cancelled.state, "cancelled");
   assert.equal(cancelled.cancellable, false);
@@ -1050,19 +1074,28 @@ test("startLogin records a waiting access operation that cancel finishes", async
 
 test("public catalog idle install does not clear a waiting login operation", async () => {
   const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
-  let releaseLogin;
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() { return { status: "ready" }; },
       async loginAgent() {
-        await new Promise((resolve) => {
-          releaseLogin = resolve;
-        });
-        return { ok: true, loginState: "waiting" };
+        return {
+          ok: true,
+          loginState: "waiting",
+          generation: 3,
+          activeOperation: {
+            operationId: "access_qoder_login_3",
+            providerId: "qoder",
+            kind: "login",
+            state: "waiting",
+            generation: 3,
+            startedAt: "2026-09-06T00:00:00.000Z",
+            errorCode: null,
+            cancellable: true,
+          },
+        };
       },
       async cancelAgentLogin() {
-        releaseLogin?.();
-        return { ok: true, loginState: "idle" };
+        return { ok: true, loginState: "cancelled", generation: 3 };
       },
       async agentDiagnose() {
         return { status: "auth-required", diagnostic: { readiness: "auth-required" } };
@@ -1088,7 +1121,153 @@ test("public catalog idle install does not clear a waiting login operation", asy
   await catalog.diagnose(selected);
   assert.equal(catalog.provider(selected).activeOperation?.kind, "login");
   assert.equal(catalog.provider(selected).activeOperation?.state, "waiting");
+  assert.equal(catalog.provider(selected).activeOperation?.generation, 3);
   await catalog.cancelAccessOperation(selected);
   await pending.catch(() => null);
+});
+
+test("startLogin waits on the backend operation identity after a local diagnose generation", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async loginAgent() {
+        return {
+          ok: true,
+          loginState: "waiting",
+          generation: 7,
+          activeOperation: {
+            operationId: "access_qoder_login_7",
+            providerId: "qoder",
+            kind: "login",
+            state: "waiting",
+            generation: 7,
+            startedAt: "2026-09-06T00:00:00.000Z",
+            errorCode: null,
+            cancellable: true,
+          },
+        };
+      },
+      async agentDiagnose() {
+        return { status: "ready", diagnostic: { readiness: "ready" } };
+      },
+      async agentProviders() {
+        return {
+          providers: [{
+            providerId: "qoder",
+            installable: true,
+            installState: "idle",
+            connection: { authSource: "cli-login", authScope: "app-managed" },
+            activeOperation: {
+              operationId: "access_qoder_login_7",
+              providerId: "qoder",
+              kind: "login",
+              state: "succeeded",
+              generation: 7,
+              startedAt: "2026-09-06T00:00:00.000Z",
+              errorCode: null,
+              cancellable: false,
+            },
+          }],
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
+  });
+  await catalog.diagnose(selected);
+  const result = await catalog.startLogin(selected);
+  assert.equal(catalog.provider(selected).activeOperation?.operationId, "access_qoder_login_7");
+  assert.equal(catalog.provider(selected).activeOperation?.state, "succeeded");
+  assert.equal(catalog.availability(selected).status, "ready");
+  assert.equal(result?.diagnostic?.readiness, "ready");
+});
+
+test("diagnose ready does not finish a waiting login as stale", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async loginAgent() {
+        return {
+          ok: true,
+          loginState: "waiting",
+          generation: 2,
+          activeOperation: {
+            operationId: "access_qoder_login_2",
+            providerId: "qoder",
+            kind: "login",
+            state: "waiting",
+            generation: 2,
+            startedAt: "2026-09-06T00:00:00.000Z",
+            errorCode: null,
+            cancellable: true,
+          },
+        };
+      },
+      async cancelAgentLogin() {
+        return { ok: true, loginState: "cancelled", generation: 2 };
+      },
+      async agentDiagnose() {
+        return { status: "ready", diagnostic: { readiness: "ready" } };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
+  });
+  const pending = catalog.startLogin(selected);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await catalog.diagnose(selected);
+  assert.equal(catalog.provider(selected).activeOperation?.state, "waiting");
+  assert.notEqual(catalog.availability(selected).status, "ready");
+  await catalog.cancelAccessOperation(selected);
+  await pending.catch(() => null);
+});
+
+test("startLogout refuses environment-token credentials and completes official logout", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const environmentCatalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async logoutAgent() { return { ok: true }; },
+      async agentDiagnose() {
+        return { status: "ready", diagnostic: { readiness: "ready" } };
+      },
+      async agentProviders() {
+        return {
+          providers: [{
+            providerId: "qoder",
+            connection: { authSource: "environment-token", authScope: "environment" },
+          }],
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
+  });
+  await environmentCatalog.diagnose(selected);
+  await assert.rejects(
+    () => environmentCatalog.startLogout(selected),
+    (error) => error?.code === "AGENT_LOGOUT_UNSUPPORTED",
+  );
+
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async logoutAgent() { return { ok: true }; },
+      async agentDiagnose() {
+        return { status: "auth-required", diagnostic: { readiness: "auth-required" } };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
+  });
+  await catalog.startLogout(selected);
+  assert.equal(catalog.provider(selected).activeOperation?.kind, "logout");
+  assert.equal(catalog.provider(selected).activeOperation?.state, "succeeded");
 });
 

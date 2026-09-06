@@ -48,6 +48,7 @@ export function createAgentCatalog({
   });
   const agentAuth = authenticator || createAgentAccessAuth();
   let loginExecutor = null;
+  let logoutExecutor = null;
 
   function entryFor(providerId) {
     return catalogEntryByProviderId(providerId, catalogEntries);
@@ -57,6 +58,9 @@ export function createAgentCatalog({
     agentsRoot,
     bindLoginExecutor(executor) {
       loginExecutor = executor;
+    },
+    bindLogoutExecutor(executor) {
+      logoutExecutor = executor;
     },
     entries() {
       return catalogEntries;
@@ -72,6 +76,9 @@ export function createAgentCatalog({
     },
     loginUrl(providerId) {
       return agentAuth.loginUrl(providerId);
+    },
+    accessOperation(providerId) {
+      return agentAuth.accessOperation(providerId);
     },
     publicProvider(provider, {
       installSource = "none",
@@ -145,8 +152,22 @@ export function createAgentCatalog({
     cancelLogin(providerId) {
       return agentAuth.cancel(providerId);
     },
+    async logout(providerId) {
+      if (typeof logoutExecutor !== "function") {
+        throw agentProviderError(
+          "AGENT_LOGOUT_UNSUPPORTED",
+          "This Agent cannot sign out from the official account.",
+          { status: 409 },
+        );
+      }
+      await agentAuth.cancel(providerId);
+      return logoutExecutor(providerId);
+    },
     drain(options) {
-      return agentInstaller.drain(options);
+      return Promise.all([
+        agentInstaller.drain(options),
+        agentAuth.drain(options),
+      ]).then(([installOk, authOk]) => installOk === true && authOk === true);
     },
   };
 }

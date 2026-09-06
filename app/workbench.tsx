@@ -4870,6 +4870,12 @@ export default function Workbench() {
   const startAgentLogin = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.startAgentLogin(selection) ?? null
   ), [workspaceController]);
+  const reopenAgentLogin = useCallback(async (selection?: AgentSelection | null) => (
+    workspaceController?.reopenAgentLogin(selection) ?? null
+  ), [workspaceController]);
+  const startAgentLogout = useCallback(async (selection?: AgentSelection | null) => (
+    workspaceController?.startAgentLogout(selection) ?? null
+  ), [workspaceController]);
   const installAgent = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.installAgent(selection) ?? null
   ), [workspaceController]);
@@ -5831,6 +5837,8 @@ export default function Workbench() {
     bindings: {
       onCopyGuidance: copyAgentGuidance,
       onStartLogin: startAgentLogin,
+      onReopenLogin: reopenAgentLogin,
+      onLogoutAgent: startAgentLogout,
       onInstall: installAgent,
       onCancelInstall: cancelAgentInstall,
       onCheckSelection: checkAgentUsability,
@@ -6382,6 +6390,8 @@ export default function Workbench() {
           onCheckUsability={checkAgentUsability}
           onCopyGuidance={copyAgentGuidance}
           onStartLogin={startAgentLogin}
+          onReopenLogin={reopenAgentLogin}
+          onLogoutAgent={startAgentLogout}
           onInstall={installAgent}
           onCancelInstall={cancelAgentInstall}
           onConnectApiKey={connectAgentApiKey}

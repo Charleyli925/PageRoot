@@ -432,6 +432,9 @@ test("public Agent catalog exposes installable Qoder and Codex without paths", a
   const qoderLogin = await bridge.postJson("/agent/login", { providerId: "qoder" });
   assert.equal(qoderLogin.response.status, 202, JSON.stringify(qoderLogin.body));
   assert.equal(qoderLogin.body.ok, true);
+  assert.equal(qoderLogin.body.generation, 1);
+  assert.equal(qoderLogin.body.activeOperation?.kind, "login");
+  assert.equal(qoderLogin.body.activeOperation?.generation, 1);
   const cancelledLogin = await bridge.postJson("/agent/login/cancel", { providerId: "qoder" });
   assert.equal(cancelledLogin.response.status, 200, JSON.stringify(cancelledLogin.body));
   const loginUrl = await bridge.requestJson("/agent/login/url?providerId=qoder");

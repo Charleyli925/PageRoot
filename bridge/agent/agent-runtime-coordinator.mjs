@@ -1155,7 +1155,7 @@ export class AgentRuntimeCoordinator {
         if (drained !== true) {
           failAgentRuntime(
             "AGENT_INSTALL_DRAIN_UNCONFIRMED",
-            "无法确认 Agent 安装已停止；为避免失去控制，本次退出已取消。",
+            "无法确认 Agent 安装或登录已停止；为避免失去控制，本次退出已取消。",
             { status: 503 },
           );
         }
