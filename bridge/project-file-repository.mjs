@@ -6580,6 +6580,16 @@ export class ProjectFileRepository {
       committedWorkingCopy.fileIdentity = copyFileIdentity(visible.information);
       loaded.manifest.workingCopies.push(committedWorkingCopy);
       loaded.manifest.latestOfficialVersionId = version.versionId;
+      // Binding publication awaits filesystem work. Revalidate the published
+      // object at the manifest boundary, including when resuming a Promotion.
+      const commitInformation = await regularInformation(visiblePath, "Version Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (!commitInformation || !sameFileIdentity(
+        copyFileIdentity(prepared.information), copyFileIdentity(commitInformation),
+      )) {
+        throw new ProjectFileRepositoryError("PROMOTION_PATH_REPLACED", "The published Working Copy changed before manifest commit.");
+      }
       await atomicWriteProjectJson(
         loaded.paths.projectRootPath,
         loaded.paths.manifestPath,

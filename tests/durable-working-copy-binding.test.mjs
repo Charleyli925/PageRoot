@@ -357,7 +357,7 @@ for (const collision of ["occupied-copy", "occupied-link", "replaced-link"]) {
   });
 }
 
-for (const replacementStage of ["before-recovery", "before-binding-refresh"]) {
+for (const replacementStage of ["before-recovery", "before-binding-refresh", "after-binding-refresh"]) {
   test(`Promotion recovery rejects identical-byte replacement ${replacementStage}`, async (t) => {
     const value = await fixture(t);
     const { target } = await importSource(value);
@@ -381,9 +381,16 @@ for (const replacementStage of ["before-recovery", "before-binding-refresh"]) {
       replaced = true;
     };
     const originalOpen = filesystem.open;
+    const originalRename = filesystem.rename;
     try {
       if (replacementStage === "before-recovery") await replace();
-      else {
+      else if (replacementStage === "after-binding-refresh") {
+        filesystem.rename = async function (source, destination) {
+          await originalRename(source, destination);
+          if (!replaced && destination === sourceBindingPath(target.projectRootPath, transaction.workingCopy.workingCopyId)) await replace();
+        };
+        syncBuiltinESMExports();
+      } else {
         filesystem.open = async function (filePath, ...args) {
           const handle = await originalOpen.call(this, filePath, ...args);
           if (!replaced && filePath === path.join(target.projectRootPath, ".pageroot", transaction.preparedWorkingCopyRelativePath)) {
@@ -399,6 +406,7 @@ for (const replacementStage of ["before-recovery", "before-binding-refresh"]) {
         (error) => ["PROMOTION_PATH_REPLACED", "WORKING_COPY_CONFLICT"].includes(error.code));
     } finally {
       filesystem.open = originalOpen;
+      filesystem.rename = originalRename;
       syncBuiltinESMExports();
     }
     assert.equal(replaced, true);
