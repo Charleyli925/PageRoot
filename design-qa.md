@@ -2845,3 +2845,13 @@ final result: passed
 - 自动回归：`@smoke-version-display` 的原生界面和 AI 审阅场景分别连续运行两次通过；项目切换使用实际可交互状态作为等待条件。
 - 已记录 P2：历史页沿用的 Runtime 静态降级提示仍有“仍可编辑和保存”通用文案，与历史只读上下文不符；本批不改 Runtime，按钮的历史锁仍生效。
 - final result: passed（本批展示范围；上述既有 Runtime 文案留待后续）
+
+
+## 2026-09-08 — D：独立只读历史预览
+
+- Truth: 用户第二批 D，沿用现有标签、侧栏和 HtmlInteractionPreview。
+- Evidence: `output/playwright/native-dom-electron/results/electron-workbench-tabs-El-d7fb3-in-the-existing-project-tab/version-history-projection.png` 和同目录 `version-current-projection.png`。
+- 核对：历史标签与左侧 V1 选中一致，顶部预览选中、编辑禁用；返回后仍为 V3 工作文件。历史读取失败保持当前视图并可继续切换项目。
+- 修复及复核：初轮截图发现布局仍使用后台编辑模式，预览高度仅 150px；统一展示模式后复拍，完整预览可见，增加大于 400px 的真实窗口尺寸断言。
+- 本 PR 不改变旧继续编辑入口；新建版本事务与入口分别由 E、F 接续。
+- final result: passed（独立历史预览与既有视觉语言）。

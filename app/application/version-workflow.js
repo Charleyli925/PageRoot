@@ -568,22 +568,15 @@ export class VersionWorkflow {
     if (!operation) {
       return blocked("VERSION_NAVIGATION_BUSY", "当前 HTML 视图正在切换，请稍后重试。");
     }
-    let previous = this.#captureNavigationSnapshot(current);
     try {
-      const frozen = this.#freezeCurrentCanvas(
-        "当前编辑画布尚未完成安全收口，无法打开历史版本。",
-      );
-      if (!frozen.ok) return blocked("VERSION_HISTORY_CANVAS_FENCE", frozen.reason);
-      if (!this.#isNavigationCurrent(operation)) return stale(current);
-      if (previous.version.viewMode === "current") {
+      if (this.#versionSession.snapshot.viewMode === "current") {
+        const frozen = this.#freezeCurrentCanvas(
+          "当前编辑画布尚未完成安全收口，无法打开历史版本。",
+        );
+        if (!frozen.ok) return blocked("VERSION_HISTORY_CANVAS_FENCE", frozen.reason);
         const drained = await this.#projectWorkflow.drain("history", { deadlineAt });
-        // A drain can advance durable Document authority before a later
-        // obligation rejects. Rollback must retain that settled projection in
-        // either case rather than restoring a stale pending write.
-        previous = this.#captureNavigationSnapshot(current);
-        if (!drained.ok) {
-          throw new Error(drained.reason || "当前编辑没有完成安全收口。");
-        }
+        if (!this.#isNavigationCurrent(operation)) return stale(current);
+        if (!drained.ok) throw new Error(drained.reason || "当前编辑没有完成安全收口。");
       }
       const payload = await this.#bridgeClient.versionFile(current.sourcePath, String(version.id));
       if (!this.#isNavigationCurrent(operation)) return stale(current);
@@ -597,25 +590,20 @@ export class VersionWorkflow {
       ) {
         throw new Error("历史文件内容与声明 Hash 不一致，已拒绝打开。");
       }
-      this.#documentSession.publishAuthority({
-        html: content,
-        persistedSourceSha256: previous.document.persistedSourceSha256,
-        workingHtmlSha256: sha256,
-      });
-      this.#versionSession.enterHistory(String(version.id));
-      this.#canvasPort.invalidateRenderAcks();
-      await this.#canvasPort.verifyRendered(content, sha256, current);
       if (!this.#isNavigationCurrent(operation)) return stale(current);
+      this.#versionSession.enterHistory(String(version.id), {
+        projectId: current.projectId, documentId: current.documentId,
+        sourcePath: current.sourcePath, versionId: String(version.id), content, sha256,
+      });
       const value = { context: current, versionId: String(version.id), content, sha256 };
       this.#emitEvent({ type: "version-history-viewed", ...value });
       return succeeded(value);
     } catch (cause) {
-      const rollback = await this.#rollbackNavigation(operation, previous);
       return rejected(
         errorCode(cause, "VERSION_HISTORY_REJECTED"),
         this.#codecs.errorMessage(
           cause,
-          rollback ? "历史版本没有打开；原来的画布仍保持不变。" : "历史版本没有打开。",
+          "历史版本没有打开；当前工作内容仍保留。",
         ),
       );
     } finally {
@@ -625,7 +613,6 @@ export class VersionWorkflow {
 
   async returnToCurrent({
     context = this.#projectSession.context,
-    fromDeferred = false,
   } = {}) {
     if (this.#disposed) {
       return blocked("VERSION_WORKFLOW_DISPOSED", "版本工作流已经停止。");
@@ -634,67 +621,18 @@ export class VersionWorkflow {
     if (!current || !this.#projectSession.matches(current)) {
       return stale(current || {});
     }
-    if (this.#projectWorkflow.projectLoadError) {
-      return blocked("VERSION_CURRENT_PROJECT_UNAVAILABLE", "项目状态尚未准备完成，不能返回当前 HTML。");
-    }
-    if (!fromDeferred) {
-      const deferred = this.#deferCanvasCommand(
-        "project-switch",
-        () => this.returnToCurrent({ context: current, fromDeferred: true }),
-      );
-      if (deferred) return deferred;
-    }
-    const operation = this.#beginNavigation("current", current);
-    if (!operation) {
+    if (this.#snapshot.navigation.phase !== "idle") {
       return blocked("VERSION_NAVIGATION_BUSY", "当前 HTML 视图正在切换，请稍后重试。");
     }
-    const previous = this.#captureNavigationSnapshot(current);
-    try {
-      const frozen = this.#freezeCurrentCanvas(
-        "当前编辑画布尚未完成安全收口，无法返回当前 HTML。",
-      );
-      if (!frozen.ok) return blocked("VERSION_CURRENT_CANVAS_FENCE", frozen.reason);
-      const payload = await this.#bridgeClient.source(current.sourcePath);
-      if (!this.#isNavigationCurrent(operation)) return stale(current);
-      this.#assertSourceIdentity(payload, current);
-      const content = String(payload.content || "");
-      const sha256 = String(payload.sha256 || payload.sourceSha256 || "");
-      if (!SHA256.test(sha256) || await this.#hashPort.sha256(content) !== sha256) {
-        throw new Error("当前源 HTML 与声明 Hash 不一致。");
-      }
-      this.#documentSession.publishAuthority({ html: content, persistedSourceSha256: sha256 });
-      this.#versionSession.returnCurrent({
-        currentBasedOnVersionId:
-          payload.currentBasedOnVersionId || previous.version.currentBasedOnVersionId,
-        currentExactVersionId: payload.currentExactVersionId || null,
-        restoredFromVersionId:
-          payload.restoredFromVersionId || previous.version.restoredFromVersionId,
-      });
-      this.#canvasPort.invalidateRenderAcks();
-      await this.#canvasPort.verifyRendered(content, sha256, current);
-      if (!this.#isNavigationCurrent(operation)) return stale(current);
-      const value = {
-        context: current,
-        content,
-        sha256,
-        lastModifiedAt: String(payload.lastModifiedAt || ""),
-      };
-      this.#emitEvent({ type: "version-current-returned", ...value });
-      return succeeded(value);
-    } catch (cause) {
-      const rollback = await this.#rollbackNavigation(operation, previous);
-      return rejected(
-        errorCode(cause, "VERSION_CURRENT_REJECTED"),
-        this.#codecs.errorMessage(
-          cause,
-          rollback
-            ? "当前画布仍停留在原来的历史版本；源文件没有被改动。"
-            : "当前源 HTML 没有被改动。",
-        ),
-      );
-    } finally {
-      this.#finishNavigation(operation);
-    }
+    // Leaving a read-only projection must remain possible even when a disk
+    // check fails. Observation reports conflicts through DocumentWorkflow and
+    // never replaces the protected current source with disk bytes.
+    this.#versionSession.returnCurrent();
+    const value = { context: current, content: this.#documentSession.html,
+      sha256: this.#documentSession.snapshot.workingHtmlSha256 };
+    this.#emitEvent({ type: "version-current-returned", ...value });
+    void this.#documentWorkflow.observeExternalSourceChange({ sourcePath: current.sourcePath });
+    return succeeded(value);
   }
 
   async continueEditingHistoryVersion({
@@ -1357,38 +1295,6 @@ export class VersionWorkflow {
     this.#runSession.removeRun(run, { clearActive: false });
     this.#runSession.clearActiveHandoff();
     return Object.freeze(completed);
-  }
-
-  #captureNavigationSnapshot(context) {
-    return Object.freeze({
-      context,
-      document: Object.freeze({ ...this.#documentSession.snapshot }),
-      pendingWrite: this.#documentSession.pendingWrite,
-      version: this.#versionSession.captureSnapshot(),
-    });
-  }
-
-  async #rollbackNavigation(operation, previous) {
-    if (!this.#isNavigationCurrent(operation)) return false;
-    this.#documentSession.publishAuthority({
-      html: previous.document.html,
-      persistedSourceSha256: previous.document.persistedSourceSha256,
-      workingHtmlSha256: previous.document.workingHtmlSha256,
-      editRevision: previous.document.editRevision,
-      lastPersistedRevision: previous.document.lastPersistedRevision,
-      persistState: previous.document.persistState,
-      persistError: previous.document.persistError,
-      pendingWrite: previous.pendingWrite,
-    });
-    this.#versionSession.restoreSnapshot(previous.version);
-    this.#canvasPort.invalidateRenderAcks();
-    try {
-      const sha256 = await this.#hashPort.sha256(previous.document.html);
-      await this.#canvasPort.verifyRendered(previous.document.html, sha256, previous.context);
-      return this.#isNavigationCurrent(operation);
-    } catch {
-      return false;
-    }
   }
 
   #freezeCurrentCanvas(reason) {

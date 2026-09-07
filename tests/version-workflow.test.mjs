@@ -128,6 +128,7 @@ function createHarness({
   confirmHistory = null,
   verifyRendered = null,
   onDrain = null,
+  observeExternalSourceChange = async () => ({ status: "succeeded" }),
   onCatalogAfterSettlement = null,
 } = {}) {
   const projectSession = new ProjectSession();
@@ -370,6 +371,7 @@ function createHarness({
     },
   };
   const documentWorkflow = {
+    observeExternalSourceChange,
     clearRecovery() {
       calls.clearRecovery += 1;
     },
@@ -740,30 +742,18 @@ test("a failed workspace refresh never blocks activation and reports through eve
   assert.equal(warning.candidateLabel, "版本 2");
 });
 
-test("history failure restores the complete prior Document and Version snapshot", async () => {
-  const harness = createHarness({
-    verifyRendered: async (html) => {
-      if (html === HISTORY_HTML) throw new Error("history canvas failed");
-    },
-  });
-
-  const outcome = await harness.workflow.viewHistory({
-    version: {
-      id: "ver_0001",
-      contentSha256: sha256(HISTORY_HTML),
-    },
-    context: harness.context,
-  });
-
-  assert.equal(outcome.status, "rejected");
-  assert.equal(harness.documentSession.html, BASE_HTML);
-  assert.equal(harness.documentSession.persistedSourceSha256, sha256(BASE_HTML));
-  assert.equal(harness.versionSession.snapshot.viewMode, "current");
+test("history preview never publishes historical bytes or renders the working Canvas", async () => {
+  const harness = createHarness({ verifyRendered: async () => { throw new Error("must not render"); } });
+  const before = harness.documentSession.snapshot;
+  const outcome = await harness.workflow.viewHistory({ version: { id: "ver_0001", contentSha256: sha256(HISTORY_HTML) }, context: harness.context });
+  assert.equal(outcome.status, "succeeded");
+  assert.deepEqual(harness.documentSession.snapshot, before);
+  assert.equal(harness.versionSession.snapshot.historyPreview.content, HISTORY_HTML);
   assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0001");
-  assert.equal(harness.calls.render.at(-1)?.html, BASE_HTML);
+  assert.equal(harness.calls.render.length, 0);
 });
 
-test("history rollback retains persistence advanced by a successful drain", async () => {
+test("failed history read retains persistence advanced by a successful drain", async () => {
   const harness = createHarness({
     onDrain: async ({ documentSession }) => {
       documentSession.publishAuthority({
@@ -777,9 +767,7 @@ test("history rollback retains persistence advanced by a successful drain", asyn
       });
       return { ok: true };
     },
-    verifyRendered: async (html) => {
-      if (html === HISTORY_HTML) throw new Error("history canvas failed");
-    },
+    versionRead: async () => { throw new Error("history read failed"); },
   });
   harness.documentSession.publishAuthority({
     html: DRAINED_HTML,
@@ -808,7 +796,7 @@ test("history rollback retains persistence advanced by a successful drain", asyn
   assert.equal(harness.documentSession.lastPersistedRevision, 1);
   assert.equal(harness.documentSession.persistState, "idle");
   assert.equal(harness.documentSession.pendingWrite, null);
-  assert.equal(harness.calls.render.at(-1)?.html, DRAINED_HTML);
+  assert.equal(harness.calls.render.length, 0);
 });
 
 test("history rollback retains persistence advanced before a later drain failure", async () => {
@@ -854,42 +842,17 @@ test("history rollback retains persistence advanced before a later drain failure
   assert.equal(harness.documentSession.lastPersistedRevision, 1);
   assert.equal(harness.documentSession.persistState, "idle");
   assert.equal(harness.documentSession.pendingWrite, null);
-  assert.equal(harness.calls.render.at(-1)?.html, DRAINED_HTML);
+  assert.equal(harness.calls.render.length, 0);
 });
 
-test("history stays read-only and return-current validates canonical source identity", async () => {
-  const harness = createHarness();
-  const history = await harness.workflow.viewHistory({
-    version: {
-      id: "ver_0001",
-      contentSha256: sha256(HISTORY_HTML),
-    },
-    context: harness.context,
-  });
-  assert.equal(history.status, "succeeded");
-  assert.equal(harness.versionSession.snapshot.viewMode, "history");
-  assert.equal(harness.documentSession.html, HISTORY_HTML);
-
-  const mismatched = createHarness({
-    sourceRead: async () => ({
-      projectId: "other_project",
-      documentId: "document_a",
-      sourcePath: SOURCE_A,
-      content: BASE_HTML,
-      sha256: sha256(BASE_HTML),
-    }),
-  });
-  mismatched.versionSession.enterHistory("ver_0001");
-  mismatched.documentSession.publishAuthority({
-    html: HISTORY_HTML,
-    persistedSourceSha256: sha256(BASE_HTML),
-  });
-  const returned = await mismatched.workflow.returnToCurrent({
-    context: mismatched.context,
-  });
-  assert.equal(returned.status, "rejected");
-  assert.equal(mismatched.versionSession.snapshot.viewMode, "history");
-  assert.equal(mismatched.documentSession.html, HISTORY_HTML);
+test("failed history load leaves the current source and navigation exit available", async () => {
+  const harness = createHarness({ versionRead: async () => ({ projectId: "other", documentId: "document_a", versionId: "ver_0001", content: HISTORY_HTML, sha256: sha256(HISTORY_HTML) }) });
+  const outcome = await harness.workflow.viewHistory({ version: { id: "ver_0001" }, context: harness.context });
+  assert.equal(outcome.status, "rejected");
+  assert.equal(harness.documentSession.html, BASE_HTML);
+  assert.equal(harness.versionSession.snapshot.viewMode, "current");
+  assert.equal(harness.workflow.getSnapshot().navigation.phase, "idle");
+  assert.equal((await harness.workflow.returnToCurrent({ context: harness.context })).status, "succeeded");
 });
 
 test("history continuation synchronously publishes the V2 Working Copy authority to every Session", async () => {
@@ -963,7 +926,8 @@ test("history continuation synchronously publishes the V2 Working Copy authority
   });
   assert.equal(viewed.status, "succeeded");
   assert.equal(harness.versionSession.snapshot.viewMode, "history");
-  assert.equal(harness.documentSession.html, HISTORY_HTML);
+  assert.equal(harness.documentSession.html, BASE_HTML);
+  assert.equal(harness.versionSession.snapshot.historyPreview.content, HISTORY_HTML);
   assert.equal(harness.versionSession.snapshot.latestVersionId, "ver_0006");
 
   const continued = await harness.workflow.continueEditingHistoryVersion({
@@ -1170,36 +1134,25 @@ test("history continuation keeps the V2 Working Copy active when Canvas validati
   assert.equal(harness.documentSession.html, HISTORY_HTML);
 });
 
-test("return-current rereads canonical source and restores current Version authority", async () => {
-  const harness = createHarness({
-    sourceRead: async () => ({
-      projectId: "project_a",
-      documentId: "document_a",
-      sourcePath: SOURCE_A,
-      content: CANDIDATE_HTML,
-      sha256: sha256(CANDIDATE_HTML),
-      currentBasedOnVersionId: "ver_0002",
-      currentExactVersionId: "ver_0002",
-      restoredFromVersionId: null,
-      lastModifiedAt: "2026-08-12T00:00:02.000Z",
-    }),
-  });
-  harness.versionSession.enterHistory("ver_0001");
-  harness.documentSession.publishAuthority({
-    html: HISTORY_HTML,
-    persistedSourceSha256: sha256(BASE_HTML),
-  });
-
-  const outcome = await harness.workflow.returnToCurrent({
-    context: harness.context,
-  });
-
+test("return-current preserves working authority and checks external changes independently", async () => {
+  const observation = deferred();
+  let observedPath;
+  const harness = createHarness({ observeExternalSourceChange: ({ sourcePath }) => {
+    observedPath = sourcePath;
+    return observation.promise;
+  } });
+  const before = harness.documentSession.snapshot;
+  await harness.workflow.viewHistory({ version: { id: "ver_0001" }, context: harness.context });
+  const outcome = await harness.workflow.returnToCurrent({ context: harness.context });
   assert.equal(outcome.status, "succeeded");
-  assert.equal(harness.calls.source.length, 1);
-  assert.equal(harness.documentSession.html, CANDIDATE_HTML);
+  assert.equal(observedPath, SOURCE_A);
+  assert.deepEqual(harness.documentSession.snapshot, before);
+  assert.equal(harness.calls.source.length, 0);
+  assert.equal(harness.calls.render.length, 0);
   assert.equal(harness.versionSession.snapshot.viewMode, "current");
-  assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0002");
-  assert.equal(harness.calls.render.at(-1)?.html, CANDIDATE_HTML);
+  assert.equal(harness.versionSession.snapshot.historyPreview, null);
+  assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0001");
+  observation.resolve({ status: "rejected", reason: "file unavailable" });
 });
 
 test("malformed committed history response remains unknown and preserves Session authority", async () => {
@@ -1217,4 +1170,18 @@ test("malformed committed history response remains unknown and preserves Session
   assert.equal(harness.projectSession.context.sourcePath, project.sourcePath);
   assert.equal(harness.documentSession.html, html);
   assert.equal(harness.calls.confirmHistory.length, 0);
+});
+
+test("a late historical read cannot publish into another project", async () => {
+  const read = deferred();
+  const harness = createHarness({ versionRead: () => read.promise });
+  const pending = harness.workflow.viewHistory({ version: { id: "ver_0001" }, context: harness.context });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  harness.projectSession.openLocator(SOURCE_B);
+  harness.versionSession.reset();
+  harness.documentSession.publishAuthority({ html: B_HTML, persistedSourceSha256: sha256(B_HTML) });
+  read.resolve({ projectId: "project_a", documentId: "document_a", versionId: "ver_0001", content: HISTORY_HTML, sha256: sha256(HISTORY_HTML) });
+  assert.equal((await pending).status, "stale");
+  assert.equal(harness.documentSession.html, B_HTML);
+  assert.equal(harness.versionSession.snapshot.historyPreview, null);
 });
