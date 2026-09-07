@@ -25,6 +25,7 @@ export type HistoryCreationResult = Readonly<{
   versionId: string; versionOrdinal: number; workingCopyId: string;
   basedOnVersionId: string; previousVersionId: string; contentSha256: string;
   sourcePath: string; openedAt: string | null;
+  recoveryState: "pending" | "opened" | "superseded";
 }>;
 
 export type VersionNavigationPhase = "idle" | "activating" | "opening" | "history" | "current" | "creating";

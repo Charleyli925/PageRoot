@@ -6006,8 +6006,7 @@ export class ProjectFileRepository {
       || version.contentSha256 !== transaction.contentSha256
       || version.basedOnVersionId !== transaction.basedOnVersionId
       || version.previousVersionId !== transaction.previousVersionId
-      || workingCopy.versionId !== version.versionId
-      || workingCopy.sourceRelativePath !== transaction.finalWorkingCopyRelativePath) {
+      || workingCopy.versionId !== version.versionId) {
       throw new ProjectFileRepositoryError("HISTORY_CREATION_COMMIT_MISMATCH", "The created Version does not match its operation.");
     }
     return { status: "created", operationId: transaction.operationId,
@@ -6016,7 +6015,10 @@ export class ProjectFileRepository {
       basedOnVersionId: version.basedOnVersionId, previousVersionId: version.previousVersionId,
       contentSha256: version.contentSha256, workingCopyId: workingCopy.workingCopyId,
       sourcePath: workingCopySourcePath(loaded.paths, workingCopy),
-      openedAt: transaction.openedAt };
+      openedAt: transaction.openedAt,
+      recoveryState: loaded.manifest.latestOfficialVersionId !== version.versionId
+        || loaded.runtime.activeWorkingCopyId !== workingCopy.workingCopyId
+        ? "superseded" : transaction.openedAt ? "opened" : "pending" };
   }
 
   async #createVersionFromHistory({ target, versionId: requestedVersionId, operationId, expectedSourceSha256, expectedSnapshotSha256 }) {
@@ -6087,7 +6089,9 @@ export class ProjectFileRepository {
       if (await check(info)) { await unlink(filePath); await syncDirectory(path.dirname(filePath)); }
     };
     const binding = await readSourceBinding(loaded.paths.projectRootPath, workingCopyId(transaction.versionOrdinal));
-    if (binding && transaction.preparedFileIdentity && sameFileIdentity(copyFileIdentity(binding.information), transaction.preparedFileIdentity)) {
+    const anchor = await regularInformation(path.join(path.dirname(this.#historyCreationPath(loaded, transaction.operationId)), "working-copy.anchor"),
+      "history creation anchor", { projectRootPath: loaded.paths.projectRootPath });
+    if (binding && anchor && sameFileIdentity(copyFileIdentity(binding.information), copyFileIdentity(anchor))) {
       await unlink(binding.bindingPath);
       await syncDirectory(path.dirname(binding.bindingPath));
     }
@@ -6151,19 +6155,40 @@ export class ProjectFileRepository {
       const preparedPath = path.join(path.dirname(transactionPath), `working-copy${transaction.preferredExtension}`);
       await writeFileNoReplace(preparedPath, snapshot.buffer, snapshot.sha256, "prepared history Working Copy", { projectRootPath: loaded.paths.projectRootPath });
       const preparedSource = await readHtmlFile(preparedPath, "prepared history Working Copy", { projectRootPath: loaded.paths.projectRootPath });
+      const preparedIdentity = copyFileIdentity(preparedSource.information);
+      const anchorPath = path.join(path.dirname(transactionPath), "working-copy.anchor");
+      let anchor = await regularInformation(anchorPath, "history creation anchor", { projectRootPath: loaded.paths.projectRootPath });
+      if (!anchor && transaction.state !== "prepared") {
+        // Older journals have no private anchor. A live prepared/visible link
+        // is equivalent evidence; a remembered inode or equal bytes are not.
+        const legacyVisible = await regularInformation(path.join(loaded.paths.projectRootPath, topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath)),
+          "history Working Copy", { projectRootPath: loaded.paths.projectRootPath });
+        if (!legacyVisible || !sameFileIdentity(preparedIdentity, copyFileIdentity(legacyVisible))) {
+          throw new ProjectFileRepositoryError("HISTORY_CREATION_FILE_CHANGED", "The preparation has no surviving object evidence.");
+        }
+      }
+      if (!anchor) {
+        await link(preparedPath, anchorPath);
+        await syncDirectory(path.dirname(anchorPath));
+        anchor = await regularInformation(anchorPath, "history creation anchor", { projectRootPath: loaded.paths.projectRootPath });
+      }
+      if (!anchor || !sameFileIdentity(preparedIdentity, copyFileIdentity(anchor))) {
+        throw new ProjectFileRepositoryError("HISTORY_CREATION_FILE_CHANGED", "The prepared Working Copy no longer matches its private anchor.");
+      }
       if (transaction.state === "prepared") {
-        transaction.preparedFileIdentity = copyFileIdentity(preparedSource.information);
+        transaction.preparedFileIdentity = preparedIdentity; // diagnostic observation only
         transaction.state = "working-copy-prepared";
         await writeTransaction();
         await this.#hit("history-creation-working-copy-prepared", { operationId: transaction.operationId });
-      } else if (!sameFileIdentity(transaction.preparedFileIdentity, copyFileIdentity(preparedSource.information))) {
-        throw new ProjectFileRepositoryError("HISTORY_CREATION_FILE_CHANGED", "The prepared Working Copy was replaced.");
       }
       let visiblePath;
       for (;;) {
         visiblePath = path.join(loaded.paths.projectRootPath, topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath));
         const info = await lstat(visiblePath).catch((cause) => { if (cause.code === "ENOENT") return null; throw cause; });
-        if (info && info.isFile() && !info.isSymbolicLink() && sameFileIdentity(copyFileIdentity(info), transaction.preparedFileIdentity)) break;
+        if (info && info.isFile() && !info.isSymbolicLink() && sameFileIdentity(copyFileIdentity(info), preparedIdentity)) break;
+        if (transaction.state === "working-copy-created") {
+          throw new ProjectFileRepositoryError("HISTORY_CREATION_FILE_CHANGED", "The published Working Copy was removed or replaced.");
+        }
         if (info) {
           const allocation = await this.#allocatePromotionWorkingCopy(loaded, { preferredFileStem: transaction.preferredFileStem,
             preferredExtension: transaction.preferredExtension, versionOrdinal: transaction.versionOrdinal, startAt: transaction.pathAllocationOrdinal + 1 });
@@ -6177,7 +6202,7 @@ export class ProjectFileRepository {
         catch (cause) { if (cause.code === "EEXIST") continue; throw cause; }
       }
       const visible = await readHtmlFile(visiblePath, "new history Working Copy", { projectRootPath: loaded.paths.projectRootPath });
-      if (visible.sha256 !== snapshot.sha256 || !sameFileIdentity(copyFileIdentity(visible.information), transaction.preparedFileIdentity)) {
+      if (visible.sha256 !== snapshot.sha256 || !sameFileIdentity(copyFileIdentity(visible.information), preparedIdentity)) {
         throw new ProjectFileRepositoryError("HISTORY_CREATION_FILE_CHANGED", "The new Working Copy changed before commit.");
       }
       const nextWorkingCopy = { workingCopyId: workingCopyId(transaction.versionOrdinal), versionId: transaction.versionId,
@@ -6201,7 +6226,7 @@ export class ProjectFileRepository {
       const visibleAtCommit = await readHtmlFile(visiblePath, "new history Working Copy", { projectRootPath: loaded.paths.projectRootPath });
       if (currentAtCommit.source.sha256 !== transaction.expectedSourceSha256
         || visibleAtCommit.sha256 !== snapshot.sha256
-        || !sameFileIdentity(copyFileIdentity(visibleAtCommit.information), transaction.preparedFileIdentity)) {
+        || !sameFileIdentity(copyFileIdentity(visibleAtCommit.information), preparedIdentity)) {
         throw new ProjectFileRepositoryError("HISTORY_CREATION_FILE_CHANGED", "The Working Copy changed at commit.");
       }
       loaded.manifest.versions.push(nextVersion);
@@ -6221,7 +6246,7 @@ export class ProjectFileRepository {
     transaction.state = "completed";
     await writeTransaction();
     await this.#hit("history-creation-completed", { operationId: transaction.operationId });
-    return result;
+    return this.#historyCreationResult(loaded, transaction);
   }
 
   async #queryHistoryCreation({ target, operationId, markOpened = false }) {
@@ -6235,6 +6260,7 @@ export class ProjectFileRepository {
       transaction.openedAt = nowIso(this.#clock);
       await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, transaction, "history creation");
       result.openedAt = transaction.openedAt;
+      if (result.recoveryState === "pending") result.recoveryState = "opened";
     }
     return result;
   }
