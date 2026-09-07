@@ -518,10 +518,18 @@ test("Electron sidebar opens an imported historical version in the existing proj
       .toHaveAttribute("data-datetime", historicalVersion.modifiedAt);
     await expect(mode).toHaveAttribute("data-view-label", "历史");
     await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
+    const historicalPreview = launched.page.frameLocator('iframe[title="HTML 交互预览"]');
+    await expect(historicalPreview.locator("body")).toBeVisible();
+    await expect.poll(async () => (await launched.page.locator('iframe[title="HTML 交互预览"]').boundingBox())?.height || 0).toBeGreaterThan(400);
+    await expect(mode.getByRole("button", { name: "预览", exact: true })).toHaveAttribute("aria-pressed", "true");
+    const protectedWorkingBytes = readFileSync(target.exactSourcePath, "utf8");
+    await expect(historicalPreview.locator("title")).not.toHaveText("sidebar history V3");
     await launched.page.screenshot({ path: test.info().outputPath("version-history-projection.png") });
     await launched.page.getByRole("button", { name: "回到当前版本", exact: true }).click();
     await expect(selectedB).toContainText("sidebar-history-b-V3.html");
     await expect(selectedB).not.toContainText("历史");
+    expect(readFileSync(target.exactSourcePath, "utf8")).toBe(protectedWorkingBytes);
+    await expect(launched.page.locator('iframe[title="HTML 交互预览"]')).toHaveCount(0);
     await expect(mode).toHaveAttribute("data-view-label", "当前");
     await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeEnabled();
     await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-file')).toContainText("-V3.html");
@@ -531,6 +539,17 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-time'))
       .toHaveAttribute("data-datetime", currentVersion.modifiedAt);
     await launched.page.screenshot({ path: test.info().outputPath("version-current-projection.png") });
+
+    const rejectHistory = (route) => route.fulfill({ status: 409, contentType: "application/json",
+      body: JSON.stringify({ error: { code: "VERSION_SNAPSHOT_INVALID", message: "测试历史快照校验失败" } }) });
+    await launched.page.route("**/version-file?*", rejectHistory);
+    await importedProject.getByRole("button", { name: historicalVersion.displayFileName, exact: true }).click();
+    await expect(launched.page.getByText("测试历史快照校验失败", { exact: true })).toBeVisible();
+    await expect(mode).toHaveAttribute("data-view-label", "当前");
+    await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeEnabled();
+    expect(readFileSync(target.exactSourcePath, "utf8")).toBe(protectedWorkingBytes);
+    await launched.page.unroute("**/version-file?*", rejectHistory);
+
 
     await currentProject.locator(".sidebar-version-file").first().click();
     await expect(tabs).toHaveCount(2);

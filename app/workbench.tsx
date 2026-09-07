@@ -350,6 +350,7 @@ const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
   restoredFromVersionId: null,
   viewMode: "current",
   viewingVersionId: null,
+  historyPreview: null,
 };
 const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   html: DEFAULT_PROJECT_HTML,
@@ -2358,7 +2359,13 @@ export default function Workbench() {
         (comment) => comment.commentId === commentEditSession.commentId,
       ) ?? null
     : null;
-  const interactionPreviewHtml = externalSourcePreview?.html || html;
+  const historyPreview = viewMode === "history"
+    && versionSnapshot.historyPreview?.projectId === projectId
+    && versionSnapshot.historyPreview?.documentId === documentId
+    && versionSnapshot.historyPreview?.sourcePath === sourcePath
+    ? versionSnapshot.historyPreview : null;
+  const displayedCanvasMode = historyPreview ? "preview" : canvasMode;
+  const interactionPreviewHtml = historyPreview?.content || externalSourcePreview?.html || html;
   const pageViewDocumentKey = [
     viewMode,
     sourcePath || documentId || projectId || "memory",
@@ -5395,6 +5402,7 @@ export default function Workbench() {
       return true;
     }
     if (outcome.status === "stale") return false;
+    setFileStatusNotice(outcome.reason || "历史版本没有打开，当前工作内容仍保留。");
     reportInternalFailure({
       area: "history",
       operation: "view-version",
@@ -5413,7 +5421,7 @@ export default function Workbench() {
   ]);
 
   const returnToCurrent = useCallback(async () => {
-    if (isViewTransitioning() || projectLoadError || !workspaceController) return;
+    if (isViewTransitioning() || !workspaceController) return;
     const context = captureProjectContext();
     if (!context) return;
     const outcome = await requiredWorkspaceController(workspaceController)
@@ -5432,7 +5440,6 @@ export default function Workbench() {
   }, [
     captureProjectContext,
     isViewTransitioning,
-    projectLoadError,
     workspaceController,
   ]);
 
@@ -5655,7 +5662,7 @@ export default function Workbench() {
   const hasDocumentHistoryAction = Boolean(workspaceController?.hasDocumentHistoryAction);
   const presentation = useMemo(() => deriveWorkbenchPresentation({
     project: { projectId, documentId, sourcePath }, version: versionSnapshot,
-    activeTab: activeWorkbenchTab || null, runtimeOwnerTabId: workbenchTabsSnapshot.runtimeOwnerTabId, canvasMode,
+    activeTab: activeWorkbenchTab || null, runtimeOwnerTabId: workbenchTabsSnapshot.runtimeOwnerTabId, canvasMode: displayedCanvasMode,
     reviewActive: Boolean(readyReviewSession), activeRunStatus: activeRun?.status,
     hasReadyPayload: Boolean(activeRun?.readyPayload), hasReadyReviewSession: Boolean(readyReviewSession),
     reviewPreparing, canShowCurrentFileInFolder, canOpenCurrentHtmlInDefaultBrowser,
@@ -5663,7 +5670,7 @@ export default function Workbench() {
     projectHydrating, projectLoadError: Boolean(projectLoadError), viewTransitioning,
     runInProgress, workspaceIssue: Boolean(workspaceIssue), externalSourcePreview: Boolean(externalSourcePreview),
     hasDocumentHistoryAction, interactionLocked,
-  }), [projectId, documentId, sourcePath, versionSnapshot, activeWorkbenchTab, workbenchTabsSnapshot.runtimeOwnerTabId, canvasMode,
+  }), [projectId, documentId, sourcePath, versionSnapshot, activeWorkbenchTab, workbenchTabsSnapshot.runtimeOwnerTabId, displayedCanvasMode,
     activeRun?.status, activeRun?.readyPayload, readyReviewSession,
     reviewPreparing, canShowCurrentFileInFolder, canOpenCurrentHtmlInDefaultBrowser,
     persistState, editRevision, lastPersistedRevision, workspaceController, projectHydrating,
@@ -6120,7 +6127,7 @@ export default function Workbench() {
         data-motion={workspacePreferences.motion}
         data-left-sidebar={globalSidebarOpen ? "open" : "collapsed"}
         data-round-state={runInProgress ? "processing" : viewMode}
-        data-canvas-mode={canvasMode}
+        data-canvas-mode={displayedCanvasMode}
         data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
         data-document-persistence-banner={documentPersistenceBannerVisible ? "true" : undefined}
         data-persist-state={persistState}
@@ -6180,7 +6187,7 @@ export default function Workbench() {
               deferredEditorReplayRef.current.reloadReview?.();
               return;
             }
-            if (canvasMode === "preview") interactionPreviewRef.current?.reload();
+            if (displayedCanvasMode === "preview") interactionPreviewRef.current?.reload();
           }}
           reopenRecentRunOutcome={reopenRecentRunOutcome}
         />
@@ -6512,8 +6519,8 @@ export default function Workbench() {
             data-runtime-hot-limit={1}
             data-edit-runtime-phase={editRuntimePhase}
             data-edit-runtime-outcome={editRuntimeSnapshot?.lastOutcome || undefined}
-            hidden={canvasMode !== "edit"}
-            aria-hidden={canvasMode !== "edit" || cachedSurfaceBlocksCanvas}
+            hidden={displayedCanvasMode !== "edit"}
+            aria-hidden={displayedCanvasMode !== "edit" || cachedSurfaceBlocksCanvas}
             inert={cachedSurfaceBlocksCanvas ? true : undefined}
           >
             {!desktopHostReady ? (
@@ -6610,7 +6617,7 @@ export default function Workbench() {
                   pageViewContext={activePageViewContext}
                   pageViewDocumentKey={pageViewDocumentKey}
                   onPageViewContextChange={acceptPageViewContext}
-                  initialScrollTop={visibleCachedSurface?.scrollTop}
+                  initialScrollTop={historyPreview ? undefined : visibleCachedSurface?.scrollTop}
                   locked={
                     runInProgress
                     || projectHydrating
@@ -6634,22 +6641,22 @@ export default function Workbench() {
               </>
             )}
           </div>
-          {canvasMode === "preview" && documentRuntimeTabId ? (
+          {displayedCanvasMode === "preview" && documentRuntimeTabId ? (
             <HtmlInteractionPreview
-              key={`preview-authority-${canvasGeneration}`}
+              key={`preview-authority-${canvasGeneration}-${historyPreview?.versionId || "current"}`}
               ref={interactionPreviewRef}
               html={interactionPreviewHtml}
-              documentKey={pageViewDocumentKey}
+              documentKey={historyPreview ? `${pageViewDocumentKey}:${historyPreview.versionId}` : pageViewDocumentKey}
               sourcePath={sourcePath || undefined}
               height="100%"
-              comments={comments}
+              comments={historyPreview ? versions.find((version) => version.id === historyPreview.versionId)?.comments || [] : comments}
               transport="independent-url"
               onInteraction={() => workspaceControllerRef.current?.deferDocumentSurfacePrewarm()}
-              onReady={handlePreviewReady}
+              onReady={historyPreview ? undefined : handlePreviewReady}
               presentationCovered={cachedSurfaceBlocksCanvas}
-              initialScrollTop={visibleCachedSurface?.scrollTop}
+              initialScrollTop={historyPreview ? undefined : visibleCachedSurface?.scrollTop}
               onScrollTopChange={(scrollTop) => {
-                if (activeWorkbenchTab.kind === "document") {
+                if (!historyPreview && activeWorkbenchTab.kind === "document") {
                   updateVisibleScroll(activeWorkbenchTab.tabId, scrollTop);
                 }
               }}

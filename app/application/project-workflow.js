@@ -3908,6 +3908,7 @@ export class ProjectWorkflow {
       this.#versionSession.restoreView?.({
         viewMode: "history",
         viewingVersionId: previous.version.viewingVersionId,
+        historyPreview: previous.version.historyPreview,
       });
     }
     this.#commentSession.update(previous.comment);
