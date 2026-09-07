@@ -83,3 +83,20 @@ test("a matching unsaved document retains its source export during persistence f
   assert.equal(p.canOpenCurrentHtml, false);
   assert.equal(p.canReloadCurrentSource, false);
 });
+
+
+test("a source-less document is usable only while its tab owns the current runtime", () => {
+  const source = { ...input(), project: { projectId: null, documentId: null, sourcePath: null },
+    runtimeOwnerTabId: "tabA", version: { ...input().version, versions: [], currentBasedOnVersionId: null, latestVersionId: null } };
+  const bound = deriveWorkbenchPresentation(source);
+  assert.equal(bound.edit.enabled, true);
+  assert.equal(bound.preview.enabled, true);
+  assert.equal(bound.canExportCurrentHtml, true);
+  assert.equal(bound.canOpenCurrentHtml, false);
+  assert.equal(bound.canShowInFinder, false);
+  assert.equal(bound.reviewAvailable, false);
+  const other = deriveWorkbenchPresentation({ ...source, runtimeOwnerTabId: "tabB" });
+  assert.equal(other.edit.enabled, false);
+  assert.equal(other.preview.enabled, false);
+  assert.equal(other.canExportCurrentHtml, false);
+});

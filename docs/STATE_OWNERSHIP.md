@@ -500,3 +500,8 @@ match the Session target. An unmatched snapshot clears display identity and
 cannot offer preview, review, file opening, export or refresh for another target.
 This pure header rule does not change persistence-failure/recovery export actions;
 a matching unsaved document still exposes its current-source export.
+
+A source-less document has no registered project identity. For this existing
+in-memory case only, the navigation Session's runtimeOwnerTabId must match the
+active document tab before edit/preview/current-source export is offered. This
+never authorizes registered-document mismatches or disk/open/review actions.

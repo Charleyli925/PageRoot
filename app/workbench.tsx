@@ -5655,7 +5655,7 @@ export default function Workbench() {
   const hasDocumentHistoryAction = Boolean(workspaceController?.hasDocumentHistoryAction);
   const presentation = useMemo(() => deriveWorkbenchPresentation({
     project: { projectId, documentId, sourcePath }, version: versionSnapshot,
-    activeTab: activeWorkbenchTab || null, canvasMode,
+    activeTab: activeWorkbenchTab || null, runtimeOwnerTabId: workbenchTabsSnapshot.runtimeOwnerTabId, canvasMode,
     reviewActive: Boolean(readyReviewSession), activeRunStatus: activeRun?.status,
     hasReadyPayload: Boolean(activeRun?.readyPayload), hasReadyReviewSession: Boolean(readyReviewSession),
     reviewPreparing, canShowCurrentFileInFolder, canOpenCurrentHtmlInDefaultBrowser,
@@ -5663,7 +5663,7 @@ export default function Workbench() {
     projectHydrating, projectLoadError: Boolean(projectLoadError), viewTransitioning,
     runInProgress, workspaceIssue: Boolean(workspaceIssue), externalSourcePreview: Boolean(externalSourcePreview),
     hasDocumentHistoryAction, interactionLocked,
-  }), [projectId, documentId, sourcePath, versionSnapshot, activeWorkbenchTab, canvasMode,
+  }), [projectId, documentId, sourcePath, versionSnapshot, activeWorkbenchTab, workbenchTabsSnapshot.runtimeOwnerTabId, canvasMode,
     activeRun?.status, activeRun?.readyPayload, readyReviewSession,
     reviewPreparing, canShowCurrentFileInFolder, canOpenCurrentHtmlInDefaultBrowser,
     persistState, editRevision, lastPersistedRevision, workspaceController, projectHydrating,
