@@ -75,7 +75,7 @@ The renderer's main workspace facts are partitioned as follows:
   compensation; it publishes through `CommentSession` and `DraftSession` and
   is not a second Draft aggregate owner;
 - `ProjectRulesSession`: `PROJECT.md` working copy, generation, composition
-  fence and save projection facts;
+  fence and save projection facts and the verified immutable history preview bytes;
 - `ProjectRulesWorkflow`: `PROJECT.md` Bridge read/write, 700ms autosave,
   unknown-write authority reconciliation, close/switch drain and narrow native
   editor-restore host port. It publishes through `ProjectRulesSession` and is
