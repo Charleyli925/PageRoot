@@ -273,3 +273,49 @@ test("registered projection reads an exact inactive Working Copy without activat
   assert.equal((await value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId })).target.workingCopyId, promoted.target.workingCopyId);
   await assert.rejects(value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId, workingCopyId: "../escape" }));
 });
+
+for (const [readNumber, sameBytes] of [[1, true], [1, false], [2, true]]) {
+  test(`renamed binding rejects replacement before read ${readNumber} with ${sameBytes ? "same" : "different"} bytes`, async (t) => {
+    const value = await fixture(t); const { target } = await importSource(value);
+    const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+    const manifestBefore = await readFile(manifestPath);
+    const bindingPath = sourceBindingPath(target.projectRootPath, target.workingCopyId);
+    const bindingBefore = await lstat(bindingPath);
+    const renamed = path.join(target.projectRootPath, "renamed.html");
+    await rename(target.exactSourcePath, renamed);
+    const replacement = path.join(target.projectRootPath, "replacement.tmp");
+    const bytes = sameBytes ? await readFile(renamed) : Buffer.from(html("unregistered replacement"));
+    await writeFile(replacement, bytes);
+    const original = { open: filesystem.open, lstat: filesystem.lstat };
+    let replaced = false;
+    filesystem.lstat = async (filePath, ...options) => {
+      const information = await original.lstat(filePath, ...options);
+      const stack = new Error().stack || "";
+      if (readNumber === 1 && !replaced && String(filePath) === renamed
+        && stack.includes("findBoundSource") && stack.split("\n")[2]?.includes("regularInformation")) {
+        await rename(replacement, renamed); replaced = true;
+      }
+      return information;
+    };
+    filesystem.open = async (filePath, ...options) => {
+      const handle = await original.open(filePath, ...options);
+      if (readNumber === 2 && !replaced && String(filePath) === renamed) {
+        const close = handle.close.bind(handle);
+        handle.close = async () => {
+          await close();
+          if (!replaced) { await rename(replacement, renamed); replaced = true; }
+        };
+      }
+      return handle;
+    };
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId }),
+        { code: "WORKING_COPY_CONFLICT" });
+    } finally { Object.assign(filesystem, original); syncBuiltinESMExports(); }
+    assert.equal(replaced, true);
+    assert.deepEqual(await readFile(manifestPath), manifestBefore);
+    assert.equal((await lstat(bindingPath)).ino, bindingBefore.ino);
+    assert.deepEqual(await readFile(renamed), bytes);
+  });
+}

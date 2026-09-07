@@ -5082,11 +5082,17 @@ export class ProjectFileRepository {
       { workingCopyId: workingCopy.workingCopyId, canRestore: Boolean(binding) });
     }
     const source = await readHtmlFile(exactSourcePath, label, { projectRootPath });
+    const selectedBindingInformation = !mapped ? binding?.information : null;
+    if (selectedBindingInformation && !sameFileIdentity(
+      copyFileIdentity(selectedBindingInformation), copyFileIdentity(source.information),
+    )) {
+      throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "改名工作文件在绑定核对后被替换，未更新登记路径。");
+    }
     const sourceStatus = source.sha256 === state.currentSha256 ? "ready" : "external-change";
     // A registered path or a unique live binding selects the member. A hash
     // validates that selection; it never searches for/claims an unlisted file.
     if (sourceStatus === "ready") {
-      await refreshSourceBinding(projectRootPath, workingCopy.workingCopyId, exactSourcePath, state.currentSha256, { bindingIndex });
+      await refreshSourceBinding(projectRootPath, workingCopy.workingCopyId, exactSourcePath, state.currentSha256, { bindingIndex, expectedInformation: selectedBindingInformation });
     }
     const locatorChanged = await this.#rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, source.information, { persistLocator });
     return { exactSourcePath, sourceInformation: source.information, source, sourceStatus, locatorChanged };

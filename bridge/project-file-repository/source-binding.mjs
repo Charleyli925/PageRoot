@@ -82,10 +82,15 @@ export async function findBoundSource(projectRootPath, binding, index = null) {
   return matches[0] || null;
 }
 
-export async function refreshSourceBinding(projectRootPath, workingCopyId, sourcePath, expectedSha256, { bindingIndex = null } = {}) {
+export async function refreshSourceBinding(projectRootPath, workingCopyId, sourcePath, expectedSha256, { bindingIndex = null, expectedInformation = null } = {}) {
   const bindingPath = sourceBindingPath(projectRootPath, workingCopyId);
   await ensureProjectDirectory(projectRootPath, path.dirname(bindingPath), "source bindings");
   const source = await readHtmlFile(sourcePath, "Working Copy", { projectRootPath });
+  if (expectedInformation && !sameFileIdentity(
+    copyFileIdentity(expectedInformation), copyFileIdentity(source.information),
+  )) {
+    throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "改名工作文件在刷新绑定前被替换。");
+  }
   if (source.sha256 !== expectedSha256) {
     throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "工作文件内容已变化，未更新绑定。");
   }
