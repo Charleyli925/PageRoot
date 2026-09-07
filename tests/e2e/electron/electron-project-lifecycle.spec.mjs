@@ -408,7 +408,7 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
   }
 });
 
-test("Electron v4 registry only recovers Finder rename and protects moved copies plus Promotion collisions", async () => {
+test("Electron v4 registry recovers Finder rename and isolates duplicate project copies", async () => {
   test.setTimeout(120_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "finder-registry-state.html");
@@ -531,9 +531,13 @@ test("Electron v4 registry only recovers Finder rename and protects moved copies
       launched.page,
       `/workspace?sourcePath=${encodeURIComponent(copiedHtml)}`,
     );
-    expect(copiedPreview.status).toBe(200);
-    expect(copiedPreview.body).toMatchObject({ registered: false });
+    expect(copiedPreview.status).toBe(409);
+    expect(copiedPreview.body?.error?.code).toBe("REGISTERED_PROJECT_AMBIGUOUS");
     expect(readFileSync(copiedManifestPath)).toEqual(copiedManifestBefore);
+    const duplicateRows = await bridgeJson(launched.page, "/registered-projects");
+    expect(duplicateRows.body.projects.find((row) => row.projectId === firstTarget.projectId))
+      .toMatchObject({ sourceStatus: "duplicate" });
+    renameSync(copiedRoot, path.join(outsideRoot, "duplicate-project"));
 
     const repository = new ProjectFileRepository({ projectsRoot });
     await repository.initialize();
@@ -737,6 +741,82 @@ test("Electron rapid project switching and immediate close preserve the last nat
     removeSourceFixture(projectB.sourceDirectory);
   }
 });
+
+for (const renameKind of ["HTML", "project folder"]) {
+  test(`Electron rebases a ${renameKind} rename between active-project classification and read`, async () => {
+    const fixture = createSourceFixture("startup-read-rename.html");
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    try {
+      await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+      const sourcePath = await managedWorkingCopyPath(launched.page, fixture.sourcePath);
+      const before = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+      const root = path.dirname(sourcePath);
+      const nextRoot = renameKind === "HTML" ? root : `${root}-renamed`;
+      const nextPath = renameKind === "HTML"
+        ? path.join(root, "renamed-between-reads-V1.html")
+        : path.join(nextRoot, path.basename(sourcePath));
+      const bytes = readFileSync(sourcePath);
+      // Change the real filesystem only when Main starts the second read.
+      // Hold background reconciliation so it cannot repair a stale locator
+      // before the assertions observe this operation's own result.
+      await launched.electronApp.evaluate(({ net }) => {
+        const fetch = net.fetch.bind(net);
+        let pending = true;
+        globalThis.__PAGEROOT_READ_RENAME_WAITING__ = false;
+        const renamed = new Promise((resolve) => {
+          globalThis.__PAGEROOT_RELEASE_READ_RENAME__ = resolve;
+        });
+        let release;
+        const barrier = new Promise((resolve) => { release = resolve; });
+        globalThis.__PAGEROOT_FINISH_READ_RENAME__ = () => {
+          net.fetch = fetch;
+          release();
+          globalThis.__PAGEROOT_RELEASE_READ_RENAME__();
+        };
+        net.fetch = async (input, options) => {
+          const url = new URL(String(input));
+          if (url.pathname === "/managed-working-copy/reconcile") await barrier;
+          if (pending && url.pathname === "/registered-project/open"
+            && url.searchParams.has("workingCopyId")) {
+            pending = false;
+            globalThis.__PAGEROOT_READ_RENAME_WAITING__ = true;
+            await renamed;
+          }
+          return fetch(input, options);
+        };
+      });
+      const activeRead = launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+      await expect.poll(() => launched.electronApp.evaluate(() => globalThis.__PAGEROOT_READ_RENAME_WAITING__)).toBe(true);
+      renameSync(renameKind === "HTML" ? sourcePath : root, renameKind === "HTML" ? nextPath : nextRoot);
+      await launched.electronApp.evaluate(() => globalThis.__PAGEROOT_RELEASE_READ_RENAME__());
+      const current = await activeRead;
+      expect(current.projectId).toBe(before.projectId);
+      expect(current.documentId).toBe(before.documentId);
+      expect(sameDesktopSourcePath(current.sourcePath, nextPath)).toBe(true);
+      const state = await readDesktopProjectState(launched.isolatedUserData);
+      expect(sameDesktopSourcePath(state.activePath, nextPath)).toBe(true);
+      expect(sameDesktopSourcePath(state.recent[0].path, nextPath)).toBe(true);
+      expect(sameDesktopSourcePath(state.activeManagedLocator.sourcePath, nextPath)).toBe(true);
+      expect(sameDesktopSourcePath(state.activeManagedLocator.projectRootPath, nextRoot)).toBe(true);
+      expect(readFileSync(nextPath)).toEqual(bytes);
+      await launched.electronApp.evaluate(() => globalThis.__PAGEROOT_FINISH_READ_RENAME__());
+      await launched.page.evaluate(() => {
+        window.__PAGEROOT_READ_RENAME_EVENTS__ = [];
+        window.htmlAIProjects.onSourceFileChanged((event) => {
+          window.__PAGEROOT_READ_RENAME_EVENTS__.push(event.sourcePath);
+        });
+      });
+      writeFileSync(nextPath, bytes);
+      await expect.poll(async () => (
+        await launched.page.evaluate(() => window.__PAGEROOT_READ_RENAME_EVENTS__)
+      ).some((value) => sameDesktopSourcePath(value, nextPath))).toBe(true);
+    } finally {
+      await launched.electronApp.evaluate(() => globalThis.__PAGEROOT_FINISH_READ_RENAME__?.());
+      await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+      removeSourceFixture(fixture.sourceDirectory);
+    }
+  });
+}
 
 test("Electron follows a same-directory Finder rename and keeps the selected tab synchronized", async () => {
   const fixture = createSourceFixture("finder-rename-sync.html");

@@ -1602,6 +1602,22 @@ async function getActiveProjectOperation() {
     const classified = await classifyViaBridge(activePath);
     if (classified.kind === "managed-project" && classified.openTarget?.targetKind === "working-copy") {
       project = await readRegisteredProjectProjection(classified.openTarget.projectId, classified.openTarget);
+      if (!sameManagedPath(activePath, project.sourcePath)
+        || !sameManagedPath(classified.openTarget.projectRootPath, project.openTarget.projectRootPath)) {
+        // Finder may move this same member between classification and the
+        // serialized read. Rebase Main's locator and watcher before exposing
+        // the verified tuple; a later watcher notification is not the receipt.
+        await commitActivatedProjectPath({
+          state: await loadProjectState(),
+          previousSourcePath: await existingPathIdentity(activePath),
+          nextSourcePath: project.sourcePath,
+          project,
+          managedLocator: activeManagedLocatorForActivatedPath(
+            project.openTarget, project.sourcePath, project.sha256,
+          ),
+        });
+        activePath = project.sourcePath;
+      }
     }
     project ||= await readHtmlProject(activePath);
   } catch (error) {

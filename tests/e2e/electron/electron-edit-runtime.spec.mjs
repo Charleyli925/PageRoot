@@ -118,8 +118,8 @@ async function duplicateQueuedStaticWorkingHtml(page, sourcePath) {
   const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
   await expect(duplicateButton).toBeVisible();
   await duplicateButton.click();
-  await expect.poll(() => (
-    readFileSync(workingCopyPath, "utf8")
+  await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .split(`data-native-case="${QUEUED_STATIC_CASE}"`).length - 1
   )).toBeGreaterThanOrEqual(2);
   return { editor, workingCopyPath };
@@ -131,7 +131,7 @@ async function collectQueuedStaticFallbackProof(page, workingCopyPath) {
   const frame = await currentEditorFrame(page);
   const targets = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`);
   return {
-    diskHtml: readFileSync(workingCopyPath, "utf8"),
+    diskHtml: (await readPublishedWorkingCopy(workingCopyPath, "utf8")),
     visibleTexts: await targets.allTextContents(),
     sandbox: await active.getAttribute("sandbox"),
     expectedVisibleCount: await targets.count(),
@@ -1319,7 +1319,7 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     const undoFrame = await currentEditorFrame(page);
     await expect(undoFrame.locator("#runtime-order")).toHaveText("甲乙");
     const undoRevision = await expectCheckpointPersisted(page, moveRevision);
-    expect(readFileSync(workingCopyPath, "utf8"))
+    expect((await readPublishedWorkingCopy(workingCopyPath, "utf8")))
       .toMatch(/id="first"[\s\S]*id="second"/u);
 
     const beforeRedoDocument = await documentToken(page);
@@ -1337,10 +1337,10 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     const redoFrame = await currentEditorFrame(page);
     await expect(redoFrame.locator("#runtime-order")).toHaveText("乙甲");
     await expectCheckpointPersisted(page, undoRevision);
-    expect(readFileSync(workingCopyPath, "utf8"))
+    expect((await readPublishedWorkingCopy(workingCopyPath, "utf8")))
       .toMatch(/id="second"[\s\S]*id="first"/u);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
-    expect(readFileSync(workingCopyPath, "utf8")).not.toContain("乙甲</output>");
+    expect((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).not.toContain("乙甲</output>");
     await reviewStage.evaluate((element) => {
       element.scrollTop = 700;
     });
@@ -1739,7 +1739,7 @@ test("Runtime style edits stay in one document and coalesce at selection boundar
     )).toBeGreaterThanOrEqual(2);
 
     const latestSourceRevision = buildSourceIndex(
-      readFileSync(workingCopyPath, "utf8"),
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8")),
     ).sourceSha256;
     await frame.locator('[data-native-case="runtime-style-second"]').click();
     await expect(editor).toHaveAttribute("data-runtime-refresh-decision", "candidate-now");
@@ -1938,8 +1938,8 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
       button.click();
       button.click();
     }));
-    await expect.poll(() => (
-      readFileSync(workingCopyPath, "utf8").split('data-native-case="runtime-latest-wins"').length - 1
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8")).split('data-native-case="runtime-latest-wins"').length - 1
     )).toBeGreaterThanOrEqual(3);
     await expect.poll(() => editor.locator('iframe[data-frame-role="runtime-candidate"]').count())
       .toBe(0);
@@ -1988,7 +1988,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     });
     await expect(heading).toHaveAttribute("contenteditable", "true");
     await expect(editor.locator('iframe[data-frame-role="runtime-previous"]')).toHaveCount(0);
-    expect(readFileSync(workingCopyPath, "utf8")).not.toContain("pinyin");
+    expect((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).not.toContain("pinyin");
     await heading.evaluate((element) => {
       element.dispatchEvent(new CompositionEvent("compositionend", {
         bubbles: true,
@@ -1996,7 +1996,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
       }));
     });
     await expect(heading).not.toContainText("pinyin");
-    expect(readFileSync(workingCopyPath, "utf8")).not.toContain("pinyin");
+    expect((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).not.toContain("pinyin");
 
     frame = await currentActiveRuntimeFrame();
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
@@ -2169,7 +2169,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await expect(editor.locator('iframe:not([data-frame-role])')).toHaveCount(1);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     await expect(editor.locator('iframe[data-frame-role="runtime-previous"]')).toHaveCount(0);
-    const degradedSource = readFileSync(workingCopyPath, "utf8");
+    const degradedSource = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     expect(degradedSource).toContain("你好");
     expect(degradedSource).not.toContain("pinyin");
     const degradedHeadingSource = degradedSource.match(
@@ -2386,7 +2386,7 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
       "runtime-candidate-failure",
     );
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    const lastKnownGoodSource = readFileSync(workingCopyPath, "utf8");
+    const lastKnownGoodSource = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     await frame.locator('[data-native-case="runtime-candidate-failure"]').click();
     const toolbar = page.getByRole("toolbar", { name: /编辑/u });
     await expect(toolbar).toBeVisible();
@@ -2449,7 +2449,7 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
       "data-edit-runtime-phase",
     )).toBe("static-fallback");
 
-    const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
+    const latestWorkingSource = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     const lastKnownGoodHash = buildSourceIndex(lastKnownGoodSource).sourceSha256;
     const latestWorkingHash = buildSourceIndex(latestWorkingSource).sourceSha256;
     expect(latestWorkingHash).not.toBe(lastKnownGoodHash);
@@ -2499,7 +2499,7 @@ test("a queued static fallback follows the latest Working HTML after Native Edit
       page,
       sourcePath,
     );
-    const r1 = readFileSync(workingCopyPath, "utf8");
+    const r1 = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     expect(r1).toContain(QUEUED_STATIC_R0);
     expect(r1).not.toContain(QUEUED_STATIC_R2);
 
@@ -2655,7 +2655,7 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
   }, async ({ page, sourcePath, sourceDirectory, electronApp }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-double-failure");
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    const oldSourceHash = buildSourceIndex(readFileSync(workingCopyPath, "utf8")).sourceSha256;
+    const oldSourceHash = buildSourceIndex((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).sourceSha256;
     await frame.locator('[data-native-case="runtime-double-failure"]').click();
     const toolbar = page.getByRole("toolbar", { name: /编辑/u });
     await toolbar.getByRole("button", { name: /给.+留评论/u }).click();
@@ -2690,7 +2690,7 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
     await expect(degradationNotice.getByRole("button", { name: "关闭动态内容提示" }))
       .toHaveCount(0);
 
-    const latestSource = readFileSync(workingCopyPath, "utf8");
+    const latestSource = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     const latestSourceHash = buildSourceIndex(latestSource).sourceSha256;
     expect(latestSourceHash).not.toBe(oldSourceHash);
     expect(latestSource.indexOf('id="second"')).toBeLessThan(latestSource.indexOf('id="first"'));
@@ -2861,8 +2861,8 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
     await duplicateButton.click();
-    await expect.poll(() => (
-      readFileSync(workingCopyPath, "utf8")
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8"))
         .split('<p data-native-case="runtime-commit-hold-edit"').length - 1
     )).toBeGreaterThanOrEqual(2);
     await waitForHeldRuntimeCommit(page);
@@ -2934,7 +2934,7 @@ test("a Candidate commit verification failure restores the visible Active", {
       .toBeTruthy();
     const lastKnownGoodBefore = await editor.getAttribute("data-runtime-last-known-good-id");
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    const workingHtmlBeforeDuplicate = readFileSync(workingCopyPath, "utf8");
+    const workingHtmlBeforeDuplicate = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
 
     await armRuntimeCommitHold(page);
     const target = frame.locator('[data-native-case="runtime-commit-verify-failure"]');
@@ -2942,8 +2942,8 @@ test("a Candidate commit verification failure restores the visible Active", {
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
     await duplicateButton.click();
-    await expect.poll(() => (
-      readFileSync(workingCopyPath, "utf8")
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8"))
         .split('<p data-native-case="runtime-commit-verify-failure"').length - 1
     )).toBeGreaterThanOrEqual(2);
     await waitForHeldRuntimeCommit(page);
@@ -2961,7 +2961,7 @@ test("a Candidate commit verification failure restores the visible Active", {
       }));
     await expect(editor).toHaveAttribute("data-render-verified", "true");
     await expect(editor).toHaveAttribute("data-runtime-last-known-good-id", lastKnownGoodBefore);
-    const workingHtmlAfterFailure = readFileSync(workingCopyPath, "utf8");
+    const workingHtmlAfterFailure = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     expect(workingHtmlAfterFailure).not.toBe(workingHtmlBeforeDuplicate);
     expect(
       workingHtmlAfterFailure.split('<p data-native-case="runtime-commit-verify-failure"').length - 1,
@@ -2975,7 +2975,7 @@ test("a Candidate commit verification failure restores the visible Active", {
     }).toMatch(/^(static-visible|none)$/u);
     await expect(page.getByTestId("edit-runtime-static-fallback")).toBeVisible();
     await expect(editor).toHaveAttribute("data-render-verified", "true");
-    expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
+    expect((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).toBe(workingHtmlAfterFailure);
 
     const staticNotice = page.getByTestId("edit-runtime-static-fallback");
     await staticNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
@@ -3009,7 +3009,7 @@ test("a Candidate commit verification failure restores the visible Active", {
     await expect(
       frame.locator('[data-native-case="runtime-commit-verify-failure"]').first(),
     ).not.toHaveAttribute("contenteditable", "true");
-    expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
+    expect((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).toBe(workingHtmlAfterFailure);
     await expect(editor).toHaveAttribute("data-render-verified", "true");
   }, {
     injectedEnv: {
@@ -3161,7 +3161,7 @@ test("static fallback can reload dynamic content and dismiss itself after succes
     await expectCheckpointPersisted(page, revisionBeforeEdit);
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toContain("已保存的新文字");
-    const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
+    const latestWorkingSource = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     const latestWorkingHash = buildSourceIndex(latestWorkingSource).sourceSha256;
     await page.evaluate(() => {
       window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__ = [];
@@ -3380,7 +3380,30 @@ test("compatible ECharts activation failure recovers exactly once with exact 5.4
 </body></html>`;
   await withRuntimeProject("pageroot-echarts-exact-recovery-e2e-", {
     "runtime-report.html": html,
-  }, async ({ page, sourcePath }) => {
+  }, async ({ electronApp, page, sourcePath }) => {
+    // Hold the exact download before opening this source. Startup hydration can
+    // otherwise warm its cache before the compatible candidate executes, which
+    // exercises a cache hit rather than the activation failure under test.
+    await electronApp.evaluate(({ net }) => {
+      const fetch = net.fetch.bind(net);
+      const barrier = new Promise((resolve) => {
+        globalThis.__PAGEROOT_RELEASE_EXACT_ECHARTS__ = resolve;
+      });
+      net.fetch = async (url, options) => {
+        if (String(url).includes("echarts@5.4.3/")) await barrier;
+        return fetch(url, options);
+      };
+    });
+    await electronApp.evaluate(({ app }, filePath) => {
+      app.emit("open-file", { preventDefault() {} }, filePath);
+    }, sourcePath);
+    try {
+      await expect.poll(() => page.evaluate(() => (
+        window.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ || []
+      ))).toEqual(["5.6.0"]);
+    } finally {
+      await electronApp.evaluate(() => globalThis.__PAGEROOT_RELEASE_EXACT_ECHARTS__());
+    }
     const { frame } = await loadedDiskFrame(
       page,
       sourcePath,
@@ -3404,7 +3427,7 @@ test("compatible ECharts activation failure recovers exactly once with exact 5.4
       "static-fallback",
     );
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
-  });
+  }, { activeSourcePath: null });
 });
 
 const SINGLE_PATH_HTML = `<!doctype html>
@@ -3522,8 +3545,8 @@ test("accepted Canvas text, style and structure edits each apply once", {
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
     await duplicateButton.click();
-    await expect.poll(() => (
-      readFileSync(workingCopyPath, "utf8").split('data-native-case="pipeline-first"').length - 1
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8")).split('data-native-case="pipeline-first"').length - 1
     )).toBe(2);
     const structureCounts = await readPipelineCounters(page);
     expect(structureCounts.fullPatchApplies).toBe(1);
@@ -3537,8 +3560,8 @@ test("accepted Canvas text, style and structure edits each apply once", {
     await clickEditHistoryMenu(electronApp, page, "undo");
     // Undo/redo restore session history; they must not start a new semantic apply.
     await expectCheckpointPersisted(page, styleRevision);
-    await expect.poll(() => (
-      readFileSync(workingCopyPath, "utf8").split('data-native-case="pipeline-first"').length - 1
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8")).split('data-native-case="pipeline-first"').length - 1
     )).toBe(1);
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="pipeline-first"]')).toHaveCount(1);
@@ -3547,8 +3570,8 @@ test("accepted Canvas text, style and structure edits each apply once", {
 
     await resetPipelineCounters(page);
     await clickEditHistoryMenu(electronApp, page, "redo");
-    await expect.poll(() => (
-      readFileSync(workingCopyPath, "utf8").split('data-native-case="pipeline-first"').length - 1
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8")).split('data-native-case="pipeline-first"').length - 1
     )).toBe(2);
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="pipeline-first"]')).toHaveCount(2);

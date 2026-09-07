@@ -1655,6 +1655,69 @@ test("DocumentWorkflow waits for exact CAS retirement after source persistence s
   assert.equal(harness.workflow.recoveryCheckpoint, null);
 });
 
+test("DocumentWorkflow drains edits queued during recovery retirement without a second user action", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  let releaseRetirement;
+  let retirementStarted;
+  const retiring = new Promise((resolve) => { retirementStarted = resolve; });
+  const barrier = new Promise((resolve) => { releaseRetirement = resolve; });
+  let receipt = null;
+  let removals = 0;
+  const writes = [];
+  const harness = createHarness({
+    html: before,
+    recoveryJournal: {
+      async commit(input) {
+        receipt = {
+          ...input,
+          recoveryHtmlSha256: sha256(input.html),
+          journalSha256: sha256(`retirement-race:${input.revision}`),
+          updatedAt: "2026-09-07T00:00:00.000Z",
+        };
+        return receipt;
+      },
+      async readVerified() { return receipt; },
+      async remove() {
+        if (++removals === 1) {
+          retirementStarted();
+          await barrier;
+        }
+        receipt = null;
+        return { removed: true };
+      },
+    },
+    bridge: {
+      async autosave(body) {
+        writes.push(body);
+        return {
+          ok: true, content: body.html, sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: "2026-09-07T00:00:01.000Z",
+        };
+      },
+    },
+  });
+  harness.workflow.enqueueEdit({ html: before.replace("one", "two") });
+  await harness.workflow.protectForDetach({ context: harness.context });
+  const first = harness.workflow.flush();
+  await retiring;
+  assert.equal(harness.documentSession.lastPersistedRevision, 1);
+  harness.workflow.enqueueEdit({ html: before.replace("one", "three") });
+  // Several native checkpoints may join the same finishing flush. They must
+  // share the next write, with the latest exact expected Hash, rather than
+  // returning the old receipt or starting parallel writes.
+  const followers = [harness.workflow.flush(), harness.workflow.flush(), harness.workflow.flush()];
+  releaseRetirement();
+  const outcomes = await Promise.all([first, ...followers]);
+  assert.ok(outcomes.every((outcome) => outcome.status === "succeeded"));
+  assert.deepEqual(writes.map((write) => write.editRevision), [1, 2]);
+  assert.equal(writes[1].expectedSourceSha256, sha256(writes[0].html));
+  assert.equal(writes[1].html, before.replace("one", "three"));
+  assert.equal(harness.documentSession.lastPersistedRevision, 2);
+  assert.equal(harness.documentSession.pendingWrite, null);
+  assert.equal(harness.documentSession.persistState, "idle");
+});
+
 test("DocumentWorkflow never claims a newer journal receipt while deleting stale recovery", async () => {
   let reads = 0;
   let removals = 0;

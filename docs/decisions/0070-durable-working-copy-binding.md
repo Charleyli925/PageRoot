@@ -29,6 +29,10 @@ There is a short missing-name interval between displacement and publication;
 this is a recoverable transaction, not a single atomic rename syscall. Repository
 reads serialize with recovery, desktop source reads join that authority, and
 watcher save echoes do not relocate a session. External readers may retry ENOENT.
+If Finder moves a member between Desktop classification and the Repository read,
+Desktop commits the returned path to its active locator, recents and watcher
+before returning that projection. A background watcher is not required to finish
+the same operation's path repair.
 An ordinary check-then-rename would silently destroy a last-moment external
 replacement; a platform-specific atomic exchange helper is not introduced here.
 
@@ -47,3 +51,6 @@ fix deterministically fails the separate-process device-drift test. The AST
 architecture check rejects persistent observation comparisons used as gates.
 The packaged startup test changes persisted devices between actual application
 processes, then verifies unchanged bytes, repaired observations and an edit/save.
+Electron also forces both HTML and project-folder renames between classification
+and read, verifies persisted locators and subsequent watcher notifications, and
+fails deterministically when that Desktop rebase is removed.

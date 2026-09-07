@@ -253,6 +253,11 @@ Rules:
   immutable transaction.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
+- `DocumentWorkflow.flush()` includes recovery-journal retirement in its
+  single-flight promise. A checkpoint queued during that retirement must
+  re-enter single-flight admission after the old receipt settles; waiting for
+  the old receipt alone cannot acknowledge the newer revision. Concurrent
+  waiters join one next drain using the updated expected source Hash.
 - A current-source transition first stages one complete candidate containing
   project identity, full OpenTarget identity, source path, Version authority,
   HTML bytes and verified Hash. Only after every field is valid may the

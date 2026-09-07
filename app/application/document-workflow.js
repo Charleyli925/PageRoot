@@ -747,8 +747,15 @@ export class DocumentWorkflow {
       );
       if (
         cutoff === undefined
-        || this.#documentSession.lastPersistedRevision >= cutoff
+          ? !this.#documentSession.pendingWrite
+            && this.#documentSession.editRevision <= this.#documentSession.lastPersistedRevision
+          : this.#documentSession.lastPersistedRevision >= cutoff
       ) return outcome;
+      // A new checkpoint can arrive after the write loop has finished, while
+      // its recovery journal is retiring. Re-enter single-flight admission so
+      // every waiter joins the new drain instead of losing that queued edit.
+      this.#documentSession.clearFlushPromise(currentPromise);
+      return this.flush({ throughRevision: cutoff });
     }
 
     this.#reconstructPendingWrite();
