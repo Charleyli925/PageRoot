@@ -491,6 +491,8 @@ test("Electron sidebar opens an imported historical version in the existing proj
 
     await expect(importedProject.locator(".sidebar-version-index")).toHaveText(["V1", "V2", "V3"]);
     await expect(importedProject.locator("svg.sidebar-version-rail")).toHaveCount(0);
+    await expect(importedProject.locator(".sidebar-project-load-error")).toHaveCount(0);
+    await expect(importedProject.getByRole("button", { name: "重新检查文件" })).toHaveCount(0);
     const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(tabs).toHaveCount(1);
     await importedProject.getByRole("button", {

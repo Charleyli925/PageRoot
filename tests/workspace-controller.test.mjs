@@ -1049,3 +1049,23 @@ test("catalog retains active V3 after switching projects using the production su
   assert.equal(catalog.versionSummaries.project_b.versions.length, 1);
   h.controller.dispose();
 });
+
+
+test("a freshly decoded Working Copy timestamp replaces its old historical summary", async (t) => {
+  const projection = await loadWorkbenchModel("project-version-tree-model");
+  const h = createHarness({ controllerCodecs: { ...codecs, ...projection } });
+  t.after(() => h.controller.dispose());
+  await h.controller.ensureRegistered();
+  const projectId = h.projectSession.snapshot.projectId;
+  const versions = [{ id: "v1", ordinal: 1, modifiedAt: "2026-09-01T00:00:00Z" },
+    { id: "v2", ordinal: 2, modifiedAt: "2026-09-02T00:00:00Z" }];
+  h.versionSession.hydrate({ versions, currentBasedOnVersionId: "v2", latestVersionId: "v2" });
+  h.versionSession.hydrate({ versions: [{ ...versions[0], modifiedAt: "2026-09-07T00:00:00Z" }, versions[1]],
+    currentBasedOnVersionId: "v1", latestVersionId: "v2" });
+  const summary = () => h.controller.projectCatalog.getSnapshot().versionSummaries[projectId].versions;
+  assert.equal(summary()[0].modifiedAt, "2026-09-07T00:00:00Z");
+  h.versionSession.updateAuthority({});
+  assert.equal(summary()[0].modifiedAt, "2026-09-07T00:00:00Z");
+  assert.equal(summary()[0].isActiveWorkingCopy, true);
+  assert.equal(summary()[1].isLatestOfficial, true);
+});

@@ -316,6 +316,8 @@ export class WorkspaceController {
   #projectCatalogSnapshot = projectCatalogSnapshot();
   #projectCatalogListeners = new Set();
   #summaryGenerations = new Map();
+  #catalogRevision = 0;
+  #summarySaveReceipt = null;
   #runsCapabilitySnapshot = Object.freeze({
     session: null,
     workflow: null,
@@ -720,6 +722,7 @@ export class WorkspaceController {
         throw new TypeError("WorkspaceController ProjectWorkflow requires ProjectRulesWorkflow.");
       }
       this.#projectWorkflow = new ProjectWorkflow({
+        getCatalogRevision: () => this.#catalogRevision,
         bridgeClient,
         ensureRegistered: (input) => this.ensureRegistered(input),
         projectSession,
@@ -1678,12 +1681,17 @@ export class WorkspaceController {
     if (!projectId || !documentId || !snapshot.versions.length
       || (snapshot.latestVersionId && !snapshot.versions.some((row) => row.id === snapshot.latestVersionId))
       || (snapshot.currentBasedOnVersionId && !snapshot.versions.some((row) => row.id === snapshot.currentBasedOnVersionId))) return;
-    const prior = this.#projectCatalogSnapshot.versionSummaries[projectId];
-    const activeModifiedAt = modifiedAt || (prior?.documentId === documentId
-      ? prior.versions.find((row) => row.versionId === snapshot.currentBasedOnVersionId)?.modifiedAt : null);
+    const activeVersion = snapshot.versions.find((row) => row.id === snapshot.currentBasedOnVersionId);
+    // A save receipt belongs to this exact decoded Working Copy authority.
+    // A newly decoded workspace must never inherit a historical cache timestamp.
+    if (modifiedAt) this.#summarySaveReceipt = { projectId, documentId, activeVersion, modifiedAt };
+    const receipt = this.#summarySaveReceipt;
+    const activeModifiedAt = receipt?.projectId === projectId && receipt.documentId === documentId
+      && receipt.activeVersion === activeVersion ? receipt.modifiedAt : null;
     const versions = this.#codecs.projectVersionSummariesFromVersions(snapshot.versions, projectId, documentId, sourcePath || "", {
       activeVersionId: snapshot.currentBasedOnVersionId, latestVersionId: snapshot.latestVersionId, activeModifiedAt,
     });
+    this.#catalogRevision += 1;
     this.#summaryGenerations.set(projectId, (this.#summaryGenerations.get(projectId) || 0) + 1);
     this.#publishVersionSummary(projectId, { documentId, versions, status: "ready", reason: "" });
   }

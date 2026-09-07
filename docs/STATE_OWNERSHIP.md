@@ -475,6 +475,18 @@ checking. Real open/save/restore retains full identity and content validation.
 Startup recovery is unchanged. A discovered folder name is only a display hint
 until an authorized file operation revalidates and records it.
 
+Catalog reads capture the Controller's in-memory catalog revision. If a verified
+Session publishes while a read is pending, ProjectWorkflow discards that result
+and rereads once before publishing any catalog event (including tab reconciliation).
+A second overlap returns stale and preserves the prior projection; a later stable
+read may still remove projects or replace document identity normally.
+A confirmed save timestamp is tied to project/document and the exact decoded
+active Version object. Fresh workspace authority uses its own modifiedAt; cached
+historical row times never override it. This receipt is process-local projection
+input, not a write permission or persisted schema.
+Normal ready/unknown catalog rows do not show repair actions. Repository, Bridge
+and Desktop preserve unknown until the existing open flow validates the file.
+
 ### Shared workbench display projection
 
 `workbench-header-projection.ts` is the pure display projection for the active
