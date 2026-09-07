@@ -13,10 +13,7 @@ import {
   type CSSProperties,
 } from "react";
 import {
-  versionGraphLayout,
-  type VersionLineageInput,
-} from "./version-graph";
-import {
+  orderedProjectVersions,
   formatSidebarVersionDateTime,
   formatSidebarVersionTime,
   versionInheritanceDescription,
@@ -24,29 +21,12 @@ import {
 import type { ProjectVersionSummary } from "./types";
 
 const SIDEBAR_VERSION_ROW_HEIGHT = 34;
-const SIDEBAR_VERSION_LANE_WIDTH = 13;
-const SIDEBAR_VERSION_TRACK_MARGIN = 8;
-const SIDEBAR_VERSION_LANE_COUNT = 4;
-const SIDEBAR_VERSION_NODE_RADIUS = 3.5;
-
 type SidebarStyle = CSSProperties & Record<`--${string}`, string>;
 
 export type ProjectVersionLoadResult = Readonly<{
   versions: ProjectVersionSummary[];
   reason?: string;
 }>;
-
-function laneStroke(lane: number): string {
-  return `var(--sidebar-version-lane-${lane % SIDEBAR_VERSION_LANE_COUNT})`;
-}
-
-function laneCenter(lane: number): number {
-  return SIDEBAR_VERSION_TRACK_MARGIN + lane * SIDEBAR_VERSION_LANE_WIDTH;
-}
-
-function rowCenter(row: number): number {
-  return row * SIDEBAR_VERSION_ROW_HEIGHT + SIDEBAR_VERSION_ROW_HEIGHT / 2;
-}
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
@@ -356,36 +336,12 @@ export function ProjectVersionTree({
 }) {
   const reducedMotion = usePrefersReducedMotion();
   const now = useSidebarClock();
-  const graphVersions = useMemo<VersionLineageInput[]>(() => versions.map((version) => ({
-    id: version.versionId,
-    ordinal: version.ordinal,
-    basedOnVersionId: version.basedOnVersionId,
-    previousVersionId: version.previousVersionId,
-  })), [versions]);
-  const layout = useMemo(() => versionGraphLayout(graphVersions), [graphVersions]);
+  const rows = useMemo(() => orderedProjectVersions(versions), [versions]);
   const byId = useMemo(
     () => new Map(versions.map((version) => [version.versionId, version])),
     [versions],
   );
-  const currentPath = useMemo(() => {
-    const parentById = new Map(versions.map((version) => [
-      version.versionId,
-      version.basedOnVersionId || version.previousVersionId || null,
-    ]));
-    const active = versions.find((version) => version.isActiveWorkingCopy);
-    const path = new Set<string>();
-    let cursor = active?.versionId || null;
-    while (cursor && !path.has(cursor)) {
-      path.add(cursor);
-      cursor = parentById.get(cursor) || null;
-    }
-    return path;
-  }, [versions]);
-  const railWidth = SIDEBAR_VERSION_TRACK_MARGIN
-    + Math.max(0, layout.laneCount - 1) * SIDEBAR_VERSION_LANE_WIDTH
-    + 2;
   const treeStyle: SidebarStyle = {
-    "--sidebar-version-rail-width": `${railWidth}px`,
     "--sidebar-version-row-height": `${SIDEBAR_VERSION_ROW_HEIGHT}px`,
   };
 
@@ -397,71 +353,13 @@ export function ProjectVersionTree({
     <div
       className="sidebar-version-tree"
       style={treeStyle}
-      role="tree"
-      aria-label="版本继承树"
+      role="listbox"
+      aria-label="版本列表"
     >
-      <svg
-        className="sidebar-version-rail"
-        width={railWidth}
-        height={layout.rows.length * SIDEBAR_VERSION_ROW_HEIGHT}
-        aria-hidden="true"
-      >
-        {layout.segments.map((segment) => {
-          return (
-            <path
-              className="sidebar-version-rail-path"
-              d={`M${laneCenter(segment.lane)} ${rowCenter(segment.fromRow)}V${rowCenter(segment.toRow)}`}
-              key={`s${segment.lane}-${segment.fromRow}-${segment.toRow}`}
-              stroke={laneStroke(segment.lane)}
-            />
-          );
-        })}
-        {layout.edges.map((edge) => {
-          const from = laneCenter(edge.fromLane);
-          const to = laneCenter(edge.toLane);
-          const top = rowCenter(edge.fromRow);
-          return (
-            <path
-              className="sidebar-version-rail-path"
-              d={`M${from} ${top}H${to}V${rowCenter(edge.toRow)}`}
-              key={`e${edge.fromVersionId}-${edge.toVersionId}`}
-              stroke={laneStroke(edge.toLane)}
-            />
-          );
-        })}
-        {layout.rows.map((row) => {
-          const selected = isCurrentProject
-            && Boolean(activeVersionId)
-            && row.versionId === activeVersionId;
-          const center = { cx: laneCenter(row.lane), cy: rowCenter(row.row) };
-          return (
-            <g key={`n${row.versionId}`}>
-              <circle
-                className="sidebar-version-node"
-                data-selected={selected ? "true" : undefined}
-                {...center}
-                r={SIDEBAR_VERSION_NODE_RADIUS}
-                stroke={laneStroke(row.lane)}
-              />
-              {selected ? (
-                <circle
-                  className="sidebar-version-node-center"
-                  {...center}
-                  r={1.35}
-                  fill="var(--sidebar-version-current-rail)"
-                />
-              ) : null}
-            </g>
-          );
-        })}
-      </svg>
       <div className="sidebar-version-rows">
-        {layout.rows.map((row) => {
-          const version = byId.get(row.versionId);
-          if (!version) return null;
+        {rows.map((version) => {
           const parentId = version.basedOnVersionId || version.previousVersionId || null;
           const parent = parentId ? byId.get(parentId) || null : null;
-          const onCurrentPath = currentPath.has(version.versionId);
           const selected = isCurrentProject
             && Boolean(activeVersionId)
             && version.versionId === activeVersionId;
@@ -469,13 +367,13 @@ export function ProjectVersionTree({
             <div
               className="sidebar-version-row"
               data-selected={selected ? "true" : undefined}
-              data-working-copy-path={onCurrentPath ? "true" : undefined}
+              data-current-editing={version.isActiveWorkingCopy ? "true" : undefined}
               data-latest={version.isLatestOfficial ? "true" : undefined}
               key={version.versionId}
-              role="treeitem"
-              aria-level={row.lane + 1}
+              role="option"
               aria-selected={selected}
             >
+              <span className="sidebar-version-index" aria-hidden="true">V{version.ordinal}</span>
               <SidebarVersionFileName
                 version={version}
                 parent={parent}
@@ -499,7 +397,6 @@ export function ProjectVersionTree({
 export function ProjectVersionTreeSkeleton() {
   return (
     <div className="sidebar-version-tree sidebar-version-tree-skeleton" aria-busy="true" aria-label="正在读取版本摘要">
-      <span className="sidebar-skeleton-rail" aria-hidden="true" />
       {[0, 1, 2].map((row) => (
         <div className="sidebar-version-skeleton-row" key={row}>
           <span className="sidebar-skeleton-dot" aria-hidden="true" />

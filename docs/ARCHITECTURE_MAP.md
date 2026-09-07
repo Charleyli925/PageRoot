@@ -286,3 +286,11 @@ summary/list port → Repository metadata validation and locator probing.
 it owns no Session or Store. The Controller retains summaries and request generations,
 and injected `project-version-tree-model.ts` projections normalize current and
 background rows. This path never enters open, activation or recovery.
+
+### Workbench display projection
+
+Session snapshots → `workbench-header-projection.ts` → tab title/view badge,
+sidebar selection and toolbar permissions/reasons. This is a pure view projection;
+it cannot change history locks, canvas mode or file-operation authority.
+`project-version-tree.tsx` renders an ordinal list; `version-graph.ts` now retains
+only entry-title projection, with lane layout and connector algorithms removed.

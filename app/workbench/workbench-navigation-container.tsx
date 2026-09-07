@@ -1,5 +1,7 @@
 "use client";
 
+import type { WorkbenchPresentation } from "./workbench-header-projection";
+
 import {
   memo,
   useCallback,
@@ -19,12 +21,14 @@ import { WorkbenchTabBar } from "./WorkbenchChrome";
 
 export const WorkbenchTabBarContainer = memo(function WorkbenchTabBarContainer({
   capability,
+  presentation,
   sidebarOpen,
   onToggleSidebar,
   onBeforeSelect,
   onOutcome,
 }: {
   capability: NavigationControllerCapability;
+  presentation: WorkbenchPresentation;
   sidebarOpen: boolean;
   onToggleSidebar(): void;
   onBeforeSelect(snapshot: WorkbenchTabsSnapshot): void;
@@ -99,6 +103,7 @@ export const WorkbenchTabBarContainer = memo(function WorkbenchTabBarContainer({
   return (
     <WorkbenchTabBar
       snapshot={tabs}
+      presentation={presentation}
       onSelect={selectTab}
       onClose={closeTab}
       onNew={createStartTab}

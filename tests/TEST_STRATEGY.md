@@ -447,3 +447,14 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 每次门禁写入 `output/test-runs/<run-id>/selection.json` 和 `results.json`，记录 HEAD、工作区内容 Hash、改动文件、选择原因、命令、耗时和首个失败。Playwright 的失败截图、trace、视频和 HTML report 继续位于 `output/playwright/`。
 
 新增测试至少要回答四件事：对应哪个真实故障；使用哪个独立 oracle；属于哪个门禁层；是否已经被更低成本测试覆盖。不能给出明确答案的重复排列或纯“代码里存在某个字符串”测试，不应加入常规门禁。
+
+### 第一批版本展示快速回归
+
+复用 Electron 合成项目及现有 Playwright 配置：
+`npx playwright test --config tests/e2e/electron/playwright.smoke.config.mjs --grep @smoke-version-display`
+以及 `npx playwright test --config tests/e2e/electron/playwright.ai-smoke.config.mjs --grep @smoke-version-display`。
+两个既有配置分别负责原生界面和 AI 场景，可加 `--repeat-each 2` 验证重复执行。
+固定覆盖有继承分支的 V1…V3 顺序、后台历史打开、返回当前、跨项目切换、键盘打开，
+同时断言左侧选中、标签标题、工具栏历史/审阅标识与编辑权限。
+该组同时保留原有 project-lifecycle / review 标签，进入对应交付门禁。
+纯函数测试不能替代这组真实 Electron 证据。

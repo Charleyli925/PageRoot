@@ -80,7 +80,7 @@ async function activateReviewMarkerGroup(frame, marker) {
 }
 
 test("a verified AI result stays pending through desktop review until the user accepts it", {
-  tag: ["@gate-smoke","@smoke-review"],
+  tag: ["@gate-smoke","@smoke-review", "@smoke-version-display"],
 }, async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture("generated-ai-loop.html", (source) => source.replace(
@@ -416,6 +416,11 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     const reviewWorkspace = launched.page.getByTestId("ai-review-workspace");
     await expect(reviewWorkspace).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByRole("group", { name: "工作模式", exact: true }))
+      .toHaveAttribute("data-view-label", "审阅");
+    await expect(launched.page.getByRole("tab", { selected: true })).toContainText("审阅");
+    await expect(launched.page.getByRole("group", { name: "工作模式", exact: true })
+      .getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
     const reviewReloadRevision = Number(
       await reviewWorkspace.getAttribute("data-reload-revision"),
     );

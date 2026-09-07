@@ -7,7 +7,7 @@ import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockC
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 
-import type { CanvasMode } from "./types";
+import type { WorkbenchPresentation } from "./workbench-header-projection";
 import { ReviewToolbarControls } from "./review-toolbar-controls";
 import { WorkbenchMoreMenu, type WorkbenchMoreMenuProps } from "./workbench-more-menu";
 import {
@@ -18,15 +18,9 @@ import { WorkbenchTooltipHost } from "./workbench-tooltip";
 
 export type WorkbenchHeaderToolbarProps = {
   runInProgress: boolean;
-  canvasMode: CanvasMode;
-  viewMode: string;
-  interactionLocked: boolean;
+  presentation: WorkbenchPresentation;
   recentRunOutcome: unknown;
   terminalRun: unknown;
-  reviewActive: boolean;
-  reviewAvailable: boolean;
-  reviewPreparing: boolean;
-  refreshAvailable: boolean;
   aiConversationVisible: boolean;
   aiAssistantEntry: ReactNode;
   moreMenu: WorkbenchMoreMenuProps;
@@ -39,15 +33,9 @@ export type WorkbenchHeaderToolbarProps = {
 
 export function WorkbenchHeaderToolbar({
   runInProgress,
-  canvasMode,
-  viewMode,
-  interactionLocked,
+  presentation,
   recentRunOutcome,
   terminalRun,
-  reviewActive,
-  reviewAvailable,
-  reviewPreparing,
-  refreshAvailable,
   aiConversationVisible,
   aiAssistantEntry,
   moreMenu,
@@ -57,6 +45,8 @@ export function WorkbenchHeaderToolbar({
   onRefreshCanvas,
   reopenRecentRunOutcome,
 }: WorkbenchHeaderToolbarProps) {
+  const reviewActive = presentation.review.selected;
+  const { reviewAvailable, refreshAvailable } = presentation;
   return (
     <>
       <WorkbenchHeaderActions aria-label="模式、审阅和文件操作">
@@ -65,20 +55,15 @@ export function WorkbenchHeaderToolbar({
               className="canvas-mode-switch"
               role="group"
               aria-label="工作模式"
-              data-mode={reviewActive ? "review" : canvasMode}
-              data-tooltip={runInProgress ? "本轮还在进行，结束或采纳后可回到编辑" : undefined}
+              data-mode={presentation.mode}
+              data-view-label={presentation.viewLabel || undefined}
+              data-tooltip={presentation.edit.reason}
             >
               <button
                 type="button"
-                aria-pressed={!reviewActive && canvasMode === "edit"}
-                disabled={reviewActive || runInProgress || viewMode === "history"}
-                data-tooltip={
-                  reviewActive
-                      ? "完成审阅后可继续编辑"
-                    : runInProgress
-                      ? "本轮还在进行，结束或采纳后可回到编辑"
-                      : undefined
-                }
+                aria-pressed={presentation.edit.selected}
+                disabled={!presentation.edit.enabled}
+                data-tooltip={presentation.edit.reason}
                 onClick={onSelectEdit}
               >
                 <PencilSimpleIcon aria-hidden="true" size={16} weight="bold" />
@@ -86,13 +71,9 @@ export function WorkbenchHeaderToolbar({
               </button>
               <button
                 type="button"
-                aria-pressed={!reviewActive && canvasMode === "preview"}
-                disabled={reviewActive || interactionLocked}
-                data-tooltip={reviewActive
-                  ? "完成审阅后可继续预览"
-                  : interactionLocked
-                    ? "当前状态只能使用编辑画布"
-                    : undefined}
+                aria-pressed={presentation.preview.selected}
+                disabled={!presentation.preview.enabled}
+                data-tooltip={presentation.preview.reason}
                 onClick={onSelectPreview}
               >
                 <EyeIcon aria-hidden="true" size={16} weight="bold" />
@@ -106,15 +87,9 @@ export function WorkbenchHeaderToolbar({
                   : reviewAvailable
                     ? "审阅，有 AI 修改待查看"
                     : "审阅"}
-                disabled={reviewActive || reviewPreparing || !reviewAvailable}
+                disabled={!presentation.review.enabled}
                 data-review-available={reviewAvailable ? "true" : undefined}
-                data-tooltip={reviewActive
-                  ? "正在审阅 AI 修改"
-                  : reviewPreparing
-                    ? "正在准备审阅…"
-                    : reviewAvailable
-                      ? undefined
-                      : "有待审阅修改时自动可用"}
+                data-tooltip={presentation.review.reason}
                 onClick={onOpenReview}
               >
                 <CheckCircleIcon aria-hidden="true" size={15} weight="duotone" />
@@ -138,11 +113,11 @@ export function WorkbenchHeaderToolbar({
             <button
               className="workbench-refresh-button"
               type="button"
-              aria-label={reviewActive ? "刷新审阅画布" : canvasMode === "preview" ? "刷新预览" : "刷新画布"}
+              aria-label={reviewActive ? "刷新审阅画布" : presentation.mode === "preview" ? "刷新预览" : "刷新画布"}
               disabled={!refreshAvailable}
               data-tooltip={reviewActive
                 ? "刷新审阅画布"
-                : canvasMode === "preview"
+                : presentation.mode === "preview"
                   ? "刷新预览"
                   : "进入预览或审阅后可刷新"}
               onClick={onRefreshCanvas}

@@ -88,6 +88,10 @@ export function projectVersionSummariesFromWorkspace(payload: Record<string, unk
   });
 }
 
+export function orderedProjectVersions(versions: readonly ProjectVersionSummary[]): ProjectVersionSummary[] {
+  return [...versions].sort((left, right) => left.ordinal - right.ordinal);
+}
+
 function parsedDate(value: string | Date): Date | null {
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -129,15 +133,16 @@ export function versionInheritanceDescription(
   version: ProjectVersionSummary,
   parent: ProjectVersionSummary | null,
 ): string {
+  const latest = version.isLatestOfficial ? " · 最新版本" : "";
   if (!parent) {
     return version.isActiveWorkingCopy
-      ? "项目初始导入版本 · 当前编辑文件"
-      : "项目初始导入版本";
+      ? `项目初始导入版本 · 当前编辑文件${latest}`
+      : `项目初始导入版本${latest}`;
   }
   const isIndependentBranch = Boolean(
     version.basedOnVersionId
     && version.previousVersionId
     && version.basedOnVersionId !== version.previousVersionId,
   );
-  return `基于 ${parent.displayFileName} 修改生成${isIndependentBranch ? " · 独立分支" : ""}${version.isActiveWorkingCopy ? " · 当前编辑文件" : ""}`;
+  return `基于 ${parent.displayFileName} 修改生成${isIndependentBranch ? " · 独立分支" : ""}${version.isActiveWorkingCopy ? " · 当前编辑文件" : ""}${latest}`;
 }

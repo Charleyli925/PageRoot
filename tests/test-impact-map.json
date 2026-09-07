@@ -2521,6 +2521,22 @@
         "tests/project-catalog-query.test.mjs",
         "tests/workspace-controller.test.mjs"
       ]
+    },
+    {
+      "id": "workbench-version-presentation",
+      "patterns": [
+        "^app/workbench/(?:workbench-header-projection|file-header-view|project-version-tree|version-graph|workbench-navigation-container)\\.tsx?$",
+        "^tests/workbench-presentation\\.test\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "electron-project-lifecycle-smoke",
+        "ai-review-smoke"
+      ],
+      "nodeTests": [
+        "tests/workbench-presentation.test.mjs",
+        "tests/version-graph.test.mjs"
+      ]
     }
   ],
   "fallback": {

@@ -486,3 +486,22 @@ historical row times never override it. This receipt is process-local projection
 input, not a write permission or persisted schema.
 Normal ready/unknown catalog rows do not show repair actions. Repository, Bridge
 and Desktop preserve unknown until the existing open flow validates the file.
+
+### Shared workbench display projection
+
+`workbench-header-projection.ts` is the pure display projection for the active
+Session, selected navigation tab and existing safety conditions. The tab bar,
+sidebar selection and toolbar consume this result. It owns no mutable state;
+region subscriptions remain separate. Version rows sort by ordinal, retaining
+lineage only as detail. Current editing and latest remain independent identities.
+
+Document-dependent header actions require the active tab's project/document to
+match the Session target. An unmatched snapshot clears display identity and
+cannot offer preview, review, file opening, export or refresh for another target.
+This pure header rule does not change persistence-failure/recovery export actions;
+a matching unsaved document still exposes its current-source export.
+
+A source-less document has no registered project identity. For this existing
+in-memory case only, the navigation Session's runtimeOwnerTabId must match the
+active document tab before edit/preview/current-source export is offered. This
+never authorizes registered-document mismatches or disk/open/review actions.

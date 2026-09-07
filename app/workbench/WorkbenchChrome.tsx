@@ -1,5 +1,7 @@
 "use client";
 
+import type { WorkbenchPresentation } from "./workbench-header-projection";
+
 import {
   useCallback,
   useEffect,
@@ -86,6 +88,7 @@ export function SidebarToggle({
 
 export function WorkbenchTabBar({
   snapshot,
+  presentation,
   onSelect,
   onClose,
   onNew,
@@ -93,6 +96,7 @@ export function WorkbenchTabBar({
   onToggleSidebar,
 }: {
   snapshot: WorkbenchTabsSnapshot;
+  presentation: WorkbenchPresentation;
   onSelect: (tab: WorkbenchTab) => void;
   onClose: (tab: WorkbenchTab) => void;
   onNew: () => void;
@@ -122,10 +126,14 @@ export function WorkbenchTabBar({
         {snapshot.tabs.map((tab) => {
           const selected = snapshot.activeTabId === tab.tabId;
           const pending = snapshot.pendingTabId === tab.tabId;
+          const projected = selected && presentation.tabId === tab.tabId;
+          const title = projected ? presentation.tabTitle : tab.title;
+          const viewLabel = projected ? presentation.viewLabel : null;
           return (
             <div
               className="workbench-tab"
               data-status={tab.status}
+              data-view-label={viewLabel || undefined}
               data-selected={selected ? "true" : undefined}
               data-pending={pending ? "true" : undefined}
               key={tab.tabId}
@@ -162,12 +170,13 @@ export function WorkbenchTabBar({
                 }}
               >
                 <span className="workbench-tab-status" aria-hidden="true" />
-                <span>{tab.title}</span>
+                <span className="workbench-tab-title" title={title}>{title}</span>
+                {viewLabel && viewLabel !== "当前" ? <span className="workbench-tab-view-label">{` · ${viewLabel}`}</span> : null}
               </button>
               <button
                 className="workbench-tab-close"
                 type="button"
-                aria-label={`关闭 ${tab.title}`}
+                aria-label={`关闭 ${title}`}
                 onClick={() => onClose(tab)}
               >
                 <XIcon aria-hidden="true" size={11} weight="bold" />

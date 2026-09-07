@@ -82,9 +82,15 @@
   text-align: left;
 }
 
-.workbench-tab > button:first-child > span:last-child {
+.workbench-tab-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-tab-view-label {
+  flex: none;
   white-space: nowrap;
 }
 
