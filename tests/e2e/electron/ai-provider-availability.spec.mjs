@@ -349,7 +349,12 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
   test.setTimeout(180_000);
   const fixture = createSourceFixture("pageroot-http-agent-bridge.html");
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory);
+  let releaseStream;
+  const streamObserved = new Promise((resolve) => { releaseStream = resolve; });
   const httpAgent = await startPagerootHttpAgent({
+    // Keep the real stream open until the UI observes bytes. A sub-second
+    // fixture can finish between polls and remove the progress row entirely.
+    beforeStreamComplete: () => streamObserved,
     rejectedApiKeys: ["sk-e2e-invalid-replacement"],
     streamDelayMs: 150,
   });
@@ -419,6 +424,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
       /已等待 \d{2}:\d{2} · 已接收 [1-9]\d* KB/u,
     );
     await expect(streamingProgress).not.toContainText("fixture-hidden");
+    releaseStream();
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("等待你的决定", { timeout: 60_000 });
@@ -482,6 +488,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
       "data-pageroot-http-agent",
     );
   } finally {
+    releaseStream();
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
     await httpAgent.close();
