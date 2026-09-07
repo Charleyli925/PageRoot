@@ -2141,7 +2141,8 @@
         "tests/project-file-schema.test.mjs",
         "tests/workspace-performance-timing.test.mjs",
         "tests/source-element-identity-migration.test.mjs",
-        "tests/durable-working-copy-binding.test.mjs"
+        "tests/durable-working-copy-binding.test.mjs",
+        "tests/project-catalog-readonly.test.mjs"
       ]
     },
     {
@@ -2502,6 +2503,23 @@
       ],
       "nodeTests": [
         "tests/architecture-boundaries.test.mjs"
+      ]
+    },
+    {
+      "id": "project-catalog-readonly",
+      "patterns": [
+        "^app/application/project-catalog-query\\.js$",
+        "^app/application/workspace-controller\\.js$",
+        "^app/application/project-workflow\\.js$",
+        "^app/workbench/(?:WorkbenchChrome|workbench-sidebar-container|project-version-tree-model)\\.tsx?$",
+        "^tests/project-catalog-.*\\.test\\.mjs$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/project-catalog-query.test.mjs",
+        "tests/workspace-controller.test.mjs"
       ]
     }
   ],

@@ -295,6 +295,7 @@ export class ProjectWorkflow {
   #documentWorkflow;
   #drainCoordinator;
   #codecs;
+  #getCatalogRevision;
   #hashPort;
   #canvasPort;
   #projectOpenPort;
@@ -334,6 +335,7 @@ export class ProjectWorkflow {
   constructor({
     bridgeClient,
     ensureRegistered,
+    getCatalogRevision = () => 0,
     projectSession,
     documentSession,
     commentSession,
@@ -485,6 +487,7 @@ export class ProjectWorkflow {
     this.#documentWorkflow = documentWorkflow;
     this.#drainCoordinator = drainCoordinator;
     this.#codecs = codecs;
+    this.#getCatalogRevision = getCatalogRevision;
     this.#hashPort = ports.hash;
     this.#canvasPort = ports.canvas;
     this.#projectOpenPort = ports.projectOpen;
@@ -1349,7 +1352,7 @@ export class ProjectWorkflow {
 
   async loadRegisteredProjectVersionSummaries(projectId) {
     if (typeof this.#projectOpenPort.listRegisteredVersionSummaries !== "function") {
-      return succeeded({ projectId: String(projectId || ""), documentId: "", versions: [] });
+      return rejected("PROJECT_VERSION_SUMMARIES_UNAVAILABLE", "当前环境不支持项目版本摘要读取。");
     }
     try {
       const summary = await this.#projectOpenPort.listRegisteredVersionSummaries(
@@ -1368,9 +1371,16 @@ export class ProjectWorkflow {
 
   async #refreshRegisteredProjects() {
     try {
-      const projects = await this.#projectOpenPort.listRegistered();
-      this.#emit({ type: "project-catalog-loaded", projects });
-      return succeeded({ projects });
+      // Coalesced readers must not publish a catalog that predates a Session
+      // publication. Retry once; sustained changes leave the valid projection alone.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const revision = this.#getCatalogRevision();
+        const projects = await this.#projectOpenPort.listRegistered();
+        if (revision !== this.#getCatalogRevision()) continue;
+        this.#emit({ type: "project-catalog-loaded", projects });
+        return succeeded({ projects });
+      }
+      return stale({ operation: "project-catalog" });
     } catch (cause) {
       const reason = projectErrorMessage(
         this.#codecs,

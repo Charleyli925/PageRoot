@@ -450,6 +450,8 @@ test("Electron sidebar opens an imported historical version in the existing proj
       version.ordinal === 1 && !version.isActiveWorkingCopy
     ));
     expect(historicalVersion).toBeTruthy();
+    const catalogRows = await launched.page.evaluate(() => window.htmlAIProjects.listRegisteredProjects());
+    expect(catalogRows.filter((row) => row.availability === "ready").every((row) => row.sourceStatus === "unknown")).toBe(true);
 
     await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
     const sidebar = launched.page.locator(".workbench-global-sidebar");
@@ -475,6 +477,8 @@ test("Electron sidebar opens an imported historical version in the existing proj
       window.htmlAIProjects?.getActiveProject()?.projectId || null
     ))).toBe(beforeExpansion);
 
+    await expect(importedProject.locator(".sidebar-project-load-error")).toHaveCount(0);
+    await expect(importedProject.getByRole("button", { name: "重新检查文件" })).toHaveCount(0);
     const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(tabs).toHaveCount(1);
     await importedProject.getByRole("button", {

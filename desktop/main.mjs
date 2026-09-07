@@ -3275,7 +3275,7 @@ function assertRegisteredProjectCatalogRow(value) {
     latestOfficialVersionId: ready ? String(value.latestOfficialVersionId) : null,
     hasPendingCandidate: value.hasPendingCandidate === true,
     availability,
-    sourceStatus: ["ready", "external-change", "missing", "duplicate", "invalid"].includes(value.sourceStatus) ? value.sourceStatus : "invalid",
+    sourceStatus: ["unknown", "ready", "external-change", "missing", "duplicate", "invalid"].includes(value.sourceStatus) ? value.sourceStatus : "invalid",
     canRestoreWorkingCopy: value.canRestoreWorkingCopy === true,
     availabilityReason: typeof value.availabilityReason === "string"
       ? value.availabilityReason
@@ -3468,6 +3468,8 @@ async function listRegisteredProjectVersionSummaries(projectIdInput) {
   return Object.freeze({
     projectId,
     documentId,
+    currentBasedOnVersionId: payload.currentBasedOnVersionId ?? null,
+    latestVersionId: payload.latestVersionId ?? null,
     versions: Object.freeze(payload.versions.map((version) => (
       assertRegisteredProjectVersionSummary(version, projectId, documentId)
     ))),

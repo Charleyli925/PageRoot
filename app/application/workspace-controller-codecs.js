@@ -42,6 +42,8 @@ export function createWorkspaceControllerCodecs({
   versionsFromWorkspace,
   commentsFromRecords,
   changesFromDraftRecords,
+  projectVersionSummariesFromVersions,
+  projectVersionSummariesFromWorkspace,
   rebindTargetsPreservingGlobal,
 } = {}) {
   return Object.freeze({
@@ -65,6 +67,8 @@ export function createWorkspaceControllerCodecs({
     ),
     commentsFromRecords: requiredFunction(commentsFromRecords, "commentsFromRecords"),
     changesFromDraftRecords: requiredFunction(changesFromDraftRecords, "changesFromDraftRecords"),
+    projectVersionSummariesFromVersions: requiredFunction(projectVersionSummariesFromVersions, "projectVersionSummariesFromVersions"),
+    projectVersionSummariesFromWorkspace: requiredFunction(projectVersionSummariesFromWorkspace, "projectVersionSummariesFromWorkspace"),
     rebindTargetsPreservingGlobal: requiredFunction(
       rebindTargetsPreservingGlobal,
       "rebindTargetsPreservingGlobal",

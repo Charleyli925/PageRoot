@@ -454,3 +454,35 @@ codecs (`decodeWorkspaceResponse`), before Session publication. VersionSession
 rejects missing or duplicate application `id` values. Bridge `versionId` and
 persisted Draft records are not renamed on disk; CommentSession receives decoded
 comment/event projections. See the ingress table in `ARCHITECTURE_MAP.md`.
+
+### Project catalog summaries
+
+`WorkspaceController.projectCatalog` owns the in-memory version summary entries,
+loading/error status and request generations. Entries include document identity;
+a replacement document cannot reuse a previous document's rows. The stateless
+`project-catalog-query.js` procedure reads and publishes through this owner.
+Version Session publication refreshes the active entry and advances its generation;
+a safe document save updates the active timestamp without loading the workspace.
+Rename, relocation and restore refresh the affected summary. A failed refresh
+retains existing rows and exposes the error; stale responses cannot publish.
+Sidebar components own expansion only, and subscribe to this existing capability.
+Both Session and Bridge rows use the same injected summary projection.
+
+Repository catalog and summary reads validate metadata and probe locators without
+HTML loading, activation, recovery or registry/binding writes. Catalog readiness
+means metadata is available; `sourceStatus: unknown` means file content still needs
+checking. Real open/save/restore retains full identity and content validation.
+Startup recovery is unchanged. A discovered folder name is only a display hint
+until an authorized file operation revalidates and records it.
+
+Catalog reads capture the Controller's in-memory catalog revision. If a verified
+Session publishes while a read is pending, ProjectWorkflow discards that result
+and rereads once before publishing any catalog event (including tab reconciliation).
+A second overlap returns stale and preserves the prior projection; a later stable
+read may still remove projects or replace document identity normally.
+A confirmed save timestamp is tied to project/document and the exact decoded
+active Version object. Fresh workspace authority uses its own modifiedAt; cached
+historical row times never override it. This receipt is process-local projection
+input, not a write permission or persisted schema.
+Normal ready/unknown catalog rows do not show repair actions. Repository, Bridge
+and Desktop preserve unknown until the existing open flow validates the file.

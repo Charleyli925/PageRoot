@@ -461,6 +461,8 @@ async function registeredProjectVersionSummaries(projectId) {
       ok: true,
       projectId: summary.projectId,
       documentId: summary.documentId,
+      currentBasedOnVersionId: summary.currentBasedOnVersionId,
+      latestVersionId: summary.latestVersionId,
       versions: summary.versions,
     };
   } catch (cause) {

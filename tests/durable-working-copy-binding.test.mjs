@@ -167,7 +167,7 @@ test("incomplete copied project records do not quarantine a complete registered 
   }
   const rows = await restart(value.projects);
   assert.equal(rows[0].availability, "ready");
-  assert.equal(rows[0].sourceStatus, "ready");
+  assert.equal(rows[0].sourceStatus, "unknown");
   const current = await value.repository.resolveOpenTarget({ sourcePath: target.exactSourcePath });
   assert.equal(current.projectId, target.projectId);
   await value.repository.saveWorkingCopy({ target: current, html: html("saved"), expectedSourceSha256: current.sourceSha256 });
@@ -192,7 +192,7 @@ test("missing HTML retains version browsing and restores only verified anchor by
 for (const atomic of [false,true]) test(`external ${atomic?"replacement":"in-place write"} stays an external-content state`,async(t)=>{
   const value=await fixture(t);const {target}=await importSource(value); const external=html("external");
   if(atomic){await writeFile(`${target.exactSourcePath}.tmp`,external);await rename(`${target.exactSourcePath}.tmp`,target.exactSourcePath);}else await writeFile(target.exactSourcePath,external);
-  const rows=await restart(value.projects);assert.equal(rows[0].sourceStatus,"external-change");assert.equal(await readFile(target.exactSourcePath,"utf8"),external);
+  const rows=await restart(value.projects);assert.equal(rows[0].sourceStatus,"unknown");assert.equal((await value.repository.resolveRegisteredProjectOpenTarget({projectId:target.projectId})).html,external);assert.equal(await readFile(target.exactSourcePath,"utf8"),external);
 });
 test("a replaced path during descriptor read is rejected",async(t)=>{
  const value=await fixture(t);const {target}=await importSource(value);const replacement=path.join(target.projectRootPath,"replacement.tmp");await writeFile(replacement,html("replacement"));

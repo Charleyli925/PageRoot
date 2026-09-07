@@ -22,7 +22,7 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function sendSse(response, content, delayMs) {
+async function sendSse(response, content, delayMs, beforeComplete) {
   response.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache",
@@ -39,6 +39,7 @@ async function sendSse(response, content, delayMs) {
   ];
   for (const frame of frames) {
     if (response.destroyed || response.writableEnded) return;
+    if (frame === "data: [DONE]\n\n") await beforeComplete?.();
     response.write(frame);
     if (delayMs > 0) await wait(delayMs);
   }
@@ -92,6 +93,7 @@ export function startOpenAiCompatibleHttpAgent({
   host = "127.0.0.1",
   rejectedApiKeys = [],
   streamDelayMs = 25,
+  beforeStreamComplete,
 } = {}) {
   const rejected = new Set(rejectedApiKeys.map((value) => String(value)));
   return new Promise((resolve, reject) => {
@@ -143,7 +145,7 @@ export function startOpenAiCompatibleHttpAgent({
             appliedReasoning(payload),
           );
           if (payload.stream === true) {
-            await sendSse(response, candidate, streamDelayMs);
+            await sendSse(response, candidate, streamDelayMs, isPreflight ? undefined : beforeStreamComplete);
           } else {
             sendJson(response, 200, {
               choices: [{ message: { content: candidate } }],

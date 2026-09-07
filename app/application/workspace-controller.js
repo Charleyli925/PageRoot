@@ -1,3 +1,4 @@
+import { loadCatalogVersionSummaries } from "./project-catalog-query.js";
 import { createRuntimeBridgeClient, isBridgeRequestError } from "./bridge-client.js";
 import { CommentSession } from "./comment-session.js";
 import { CommentWorkflow } from "./comment-workflow.js";
@@ -114,8 +115,9 @@ function registrationErrorCode(cause) {
   return "PROJECT_REGISTRATION_REJECTED";
 }
 
-function projectCatalogSnapshot({ recent = [], registered = [], error = "" } = {}) {
+function projectCatalogSnapshot({ recent = [], registered = [], error = "", versionSummaries = {} } = {}) {
   return Object.freeze({
+    versionSummaries: Object.freeze({ ...versionSummaries }),
     recent: Object.freeze(Array.isArray(recent) ? [...recent] : []),
     registered: Object.freeze(Array.isArray(registered) ? [...registered] : []),
     error: String(error || ""),
@@ -313,6 +315,9 @@ export class WorkspaceController {
   #commentsCapabilityListeners = new Set();
   #projectCatalogSnapshot = projectCatalogSnapshot();
   #projectCatalogListeners = new Set();
+  #summaryGenerations = new Map();
+  #catalogRevision = 0;
+  #summarySaveReceipt = null;
   #runsCapabilitySnapshot = Object.freeze({
     session: null,
     workflow: null,
@@ -520,8 +525,12 @@ export class WorkspaceController {
     const projectCatalogCommands = Object.freeze({
       refreshRecents: () => this.refreshRecentProjects(),
       refreshRegistered: () => this.refreshRegisteredProjects(),
-      restoreWorkingCopy: (projectId) => this.#requireProjectWorkflow().restoreRegisteredWorkingCopy(projectId),
-      loadVersionSummaries: (projectId) => this.loadRegisteredProjectVersionSummaries(projectId),
+      restoreWorkingCopy: async (projectId) => {
+        const outcome = await this.#requireProjectWorkflow().restoreRegisteredWorkingCopy(projectId);
+        if (outcome.status === "succeeded") await this.loadRegisteredProjectVersionSummaries(projectId, { refresh: true });
+        return outcome;
+      },
+      loadVersionSummaries: (projectId, options) => this.loadRegisteredProjectVersionSummaries(projectId, options),
     });
     this.projectCatalog = Object.freeze({
       getSnapshot: () => this.#projectCatalogSnapshot,
@@ -658,6 +667,7 @@ export class WorkspaceController {
           ) {
             this.#projectWorkflow?.reportLoadFailure(event.message);
           }
+          if (event.type === "document-persisted" && this.#projectSession.matches(event.context)) this.#captureCurrentVersionSummary(event.lastSavedAt);
           this.#emitEvent(event);
         },
       );
@@ -712,6 +722,7 @@ export class WorkspaceController {
         throw new TypeError("WorkspaceController ProjectWorkflow requires ProjectRulesWorkflow.");
       }
       this.#projectWorkflow = new ProjectWorkflow({
+        getCatalogRevision: () => this.#catalogRevision,
         bridgeClient,
         ensureRegistered: (input) => this.ensureRegistered(input),
         projectSession,
@@ -1636,12 +1647,53 @@ export class WorkspaceController {
     return this.#requireProjectWorkflow().refreshRecents();
   }
 
-  refreshRegisteredProjects() {
-    return this.#requireProjectWorkflow().refreshRegisteredProjects();
+  async refreshRegisteredProjects() {
+    const outcome = await this.#requireProjectWorkflow().refreshRegisteredProjects();
+    if (outcome.status === "succeeded") await Promise.all(Object.keys(this.#projectCatalogSnapshot.versionSummaries)
+      .filter((id) => this.#projectCatalogSnapshot.registered.some((row) => row.projectId === id))
+      .map((id) => this.loadRegisteredProjectVersionSummaries(id, { refresh: true })));
+    return outcome;
   }
 
-  loadRegisteredProjectVersionSummaries(projectId) {
-    return this.#requireProjectWorkflow().loadRegisteredProjectVersionSummaries(projectId);
+  async loadRegisteredProjectVersionSummaries(projectId, { refresh = false } = {}) {
+    return loadCatalogVersionSummaries({ projectId, refresh,
+      getSnapshot: () => this.#projectCatalogSnapshot,
+      generations: this.#summaryGenerations,
+      publish: (id, entry) => this.#publishVersionSummary(id, entry),
+      read: (id) => this.#requireProjectWorkflow().loadRegisteredProjectVersionSummaries(id),
+      decode: this.#codecs.projectVersionSummariesFromWorkspace,
+      isDisposed: () => this.#disposed,
+    });
+  }
+
+  #publishVersionSummary(projectId, entry) {
+    this.#projectCatalogSnapshot = projectCatalogSnapshot({ ...this.#projectCatalogSnapshot,
+      versionSummaries: { ...this.#projectCatalogSnapshot.versionSummaries, [projectId]: Object.freeze({ ...entry, versions: Object.freeze([...entry.versions]) }) },
+    });
+    for (const listener of this.#projectCatalogListeners) {
+      try { listener(); } catch { /* A view cannot change catalog facts. */ }
+    }
+  }
+
+  #captureCurrentVersionSummary(modifiedAt = null) {
+    const { projectId, documentId, sourcePath } = this.#projectSession.snapshot;
+    const snapshot = this.#versionSession.snapshot;
+    if (!projectId || !documentId || !snapshot.versions.length
+      || (snapshot.latestVersionId && !snapshot.versions.some((row) => row.id === snapshot.latestVersionId))
+      || (snapshot.currentBasedOnVersionId && !snapshot.versions.some((row) => row.id === snapshot.currentBasedOnVersionId))) return;
+    const activeVersion = snapshot.versions.find((row) => row.id === snapshot.currentBasedOnVersionId);
+    // A save receipt belongs to this exact decoded Working Copy authority.
+    // A newly decoded workspace must never inherit a historical cache timestamp.
+    if (modifiedAt) this.#summarySaveReceipt = { projectId, documentId, activeVersion, modifiedAt };
+    const receipt = this.#summarySaveReceipt;
+    const activeModifiedAt = receipt?.projectId === projectId && receipt.documentId === documentId
+      && receipt.activeVersion === activeVersion ? receipt.modifiedAt : null;
+    const versions = this.#codecs.projectVersionSummariesFromVersions(snapshot.versions, projectId, documentId, sourcePath || "", {
+      activeVersionId: snapshot.currentBasedOnVersionId, latestVersionId: snapshot.latestVersionId, activeModifiedAt,
+    });
+    this.#catalogRevision += 1;
+    this.#summaryGenerations.set(projectId, (this.#summaryGenerations.get(projectId) || 0) + 1);
+    this.#publishVersionSummary(projectId, { documentId, versions, status: "ready", reason: "" });
   }
 
   openProjectRules(input) {
@@ -2268,25 +2320,38 @@ export class WorkspaceController {
   #updateProjectCatalogFromEvent(event) {
     if (!event || typeof event !== "object") return;
     const current = this.#projectCatalogSnapshot;
+    if (["project-hydrated", "project-source-renamed", "project-source-relocated"].includes(event.type)) this.#captureCurrentVersionSummary();
     if (event.type === "project-recents-loaded") {
       this.#projectCatalogSnapshot = projectCatalogSnapshot({
+        versionSummaries: current.versionSummaries,
         recent: event.projects,
         registered: current.registered,
       });
     } else if (event.type === "project-recents-failed") {
       this.#projectCatalogSnapshot = projectCatalogSnapshot({
+        versionSummaries: current.versionSummaries,
         recent: current.recent,
         registered: current.registered,
         error: event.reason || "最近打开记录暂时无法读取。",
       });
     } else if (event.type === "project-catalog-loaded") {
+      const versionSummaries = { ...current.versionSummaries };
+      for (const [id, entry] of Object.entries(versionSummaries)) {
+        const row = event.projects.find((row) => row.projectId === id);
+        if (!row || (row.documentId && row.documentId !== entry.documentId)) {
+          delete versionSummaries[id];
+          this.#summaryGenerations.set(id, (this.#summaryGenerations.get(id) || 0) + 1);
+        }
+      }
       this.#projectCatalogSnapshot = projectCatalogSnapshot({
+        versionSummaries,
         recent: current.recent,
         registered: event.projects,
         error: current.error,
       });
     } else if (event.type === "project-catalog-failed") {
       this.#projectCatalogSnapshot = projectCatalogSnapshot({
+        versionSummaries: current.versionSummaries,
         recent: current.recent,
         registered: current.registered,
         error: event.reason || "项目目录暂时无法读取。",
@@ -2343,6 +2408,7 @@ export class WorkspaceController {
     this.#versionSession.setObserver((snapshot) => {
       if (this.#disposed) return;
       this.#versionSessionSnapshot = snapshot;
+      this.#captureCurrentVersionSummary();
       this.#publishAggregateSnapshot();
     });
   }

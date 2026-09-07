@@ -253,7 +253,7 @@ import {
   changesFromDraftRecords,
   versionsFromWorkspace,
 } from "./workbench/version-model";
-import { projectVersionSummariesFromVersions } from "./workbench/project-version-tree-model";
+import { projectVersionSummariesFromVersions, projectVersionSummariesFromWorkspace } from "./workbench/project-version-tree-model";
 import type {
   ApplicationUpdateResult,
   CanvasMode,
@@ -645,7 +645,6 @@ export default function Workbench() {
   )
     ? importedCanvasBase.externalSourcePath
     : sourcePath || undefined;
-  const [lastSafeWriteAt, setLastSafeWriteAt] = useState<string | null>(null);
   const commentCapabilitySnapshot = workspaceController
     ? (workspaceController.comments as CommentRailCapability).getSnapshot()
     : null;
@@ -915,6 +914,8 @@ export default function Workbench() {
         versionsFromWorkspace,
         commentsFromRecords,
         changesFromDraftRecords,
+        projectVersionSummariesFromVersions,
+        projectVersionSummariesFromWorkspace,
         rebindTargetsPreservingGlobal,
       }),
       ports: {
@@ -1712,7 +1713,6 @@ export default function Workbench() {
         markProjectApplied(projectEvent.operationId, projectEvent.epoch);
         setStartupIssue(null);
         setProjectName(project.name);
-        setLastSafeWriteAt(null);
         if (
           pendingSidebarHistoryRef.current
           && (
@@ -1896,7 +1896,6 @@ export default function Workbench() {
         && typeof documentEvent.lastSavedAt === "string"
         && documentEvent.lastSavedAt
       ) {
-        setLastSafeWriteAt(documentEvent.lastSavedAt);
         setWorkspaceIssue((current) => (
           current?.source === "locator" ? null : current
         ));
@@ -6083,30 +6082,6 @@ export default function Workbench() {
     && canMountUnboundCanvas
   );
   const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
-  const currentProjectSidebarVersions = useMemo(() => (
-    projectId && documentId
-      ? projectVersionSummariesFromVersions(
-        versions,
-        projectId,
-        documentId,
-        localFileNameFromSourcePath(sourcePath) || projectName,
-        {
-          activeVersionId: currentBasedOnVersionId,
-          latestVersionId,
-          activeModifiedAt: lastSafeWriteAt,
-        },
-      )
-      : []
-  ), [
-    currentBasedOnVersionId,
-    documentId,
-    lastSafeWriteAt,
-    latestVersionId,
-    projectId,
-    projectName,
-    sourcePath,
-    versions,
-  ]);
   const workbenchStyle = useMemo(() => ({
     "--workbench-sidebar-width-saved": `${workspacePreferencesController.panelWidths.sidebarWidth}px`,
     "--workbench-inspector-width": `${workspacePreferencesController.panelWidths.inspectorWidth}px`,
@@ -6397,7 +6372,6 @@ export default function Workbench() {
         currentProjectName={currentProjectDisplayName}
         currentProjectDocumentId={documentId || null}
         currentProjectSourcePath={sourcePath || null}
-        currentProjectVersions={currentProjectSidebarVersions}
         activeVersionId={activeWorkbenchTab?.kind === "document"
           ? viewMode === "history" ? viewingVersionId : currentBasedOnVersionId
           : null}
