@@ -150,6 +150,7 @@ test("completed creation survives registered rename and reports supersession wit
   const operationId = "history_rename_0001";
   const created = await value.repository.createVersionFromHistory({ target, versionId: "ver_0001", operationId,
     expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 });
+  await value.repository.workspace({ sourcePath: created.sourcePath });
   await value.repository.queryHistoryCreation({ target, operationId, markOpened: true });
   const renamedPath = path.join(target.projectRootPath, "renamed-created.html");
   await rename(created.sourcePath, renamedPath);
