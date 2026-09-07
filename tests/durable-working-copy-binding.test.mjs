@@ -9,6 +9,7 @@ import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { readHtmlFile } from "../bridge/project-file-repository/path-safety.mjs";
 import { sourceBindingPath } from "../bridge/project-file-repository/source-binding.mjs";
 import { fixture, importSource, html, json } from "./project-file-repository-harness.mjs";
+import { createBridgeTestEnvironment } from "./helpers/bridge-test-environment.mjs";
 const run = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
 async function restart(projectsRoot) {
@@ -63,6 +64,25 @@ test("five projects migrate all fifteen Working Copies without touching HTML", a
     assert.equal((await lstat(sourceBindingPath(target.projectRootPath,target.workingCopyId))).ino, (await lstat(target.exactSourcePath)).ino);
   }
 });
+test("Bridge startup migrates inactive members before serving the project catalog", async (t) => {
+  const value = await fixture(t); const { target } = await importSource(value);
+  const candidateId = "candidate_bridge_migration_0001";
+  await value.repository.createCandidate({ target, requestId: "req_bridge_migration_0001", candidateId, html: html("next"), expectedSourceSha256: target.sourceSha256 });
+  const promoted = await value.repository.promoteCandidate({ target, candidateId });
+  const members = [target, promoted.target];
+  const bytes = await Promise.all(members.map((member) => readFile(member.exactSourcePath)));
+  await drift(target);
+  for (const member of members) await rm(sourceBindingPath(member.projectRootPath, member.workingCopyId));
+  const bridge = await createBridgeTestEnvironment(t);
+  await bridge.start({ HTML_AI_PROJECT_FILES_ROOT: value.projects });
+  const { response, body } = await bridge.requestJson("/registered-projects");
+  assert.equal(response.status, 200);
+  assert.equal(body.projects[0].availability, "ready");
+  for (const [index, member] of members.entries()) {
+    assert.deepEqual(await readFile(member.exactSourcePath), bytes[index]);
+    assert.equal((await lstat(sourceBindingPath(member.projectRootPath, member.workingCopyId))).ino, (await lstat(member.exactSourcePath)).ino);
+  }
+});
 test("Finder HTML and folder rename survives stale observations and a new process", async (t) => {
   const value = await fixture(t); const {target} = await importSource(value); await drift(target);
   const renamedHtml = path.join(target.projectRootPath,"renamed.html"); await rename(target.exactSourcePath,renamedHtml);
@@ -85,6 +105,21 @@ test("duplicate project quarantines only that identity, even at an existing regi
   assert.equal(rows.find((row)=>row.projectId===healthy.target.projectId).availability,"ready");
   assert.ok(await value.repository.resolveOpenTarget({sourcePath:healthy.target.exactSourcePath}));
   await assert.rejects(value.repository.saveWorkingCopy({target,html:html("denied"),expectedSourceSha256:target.sourceSha256}),{code:"REGISTERED_PROJECT_AMBIGUOUS"});
+});
+test("incomplete copied project records do not quarantine a complete registered project", async (t) => {
+  const value = await fixture(t); const { target } = await importSource(value);
+  for (const missing of ["manifest.json", "runtime-state.json"]) {
+    const partialRoot = path.join(value.projects, `partial-${missing}`);
+    await cp(target.projectRootPath, partialRoot, { recursive: true });
+    await rm(path.join(partialRoot, ".pageroot", missing));
+  }
+  const rows = await restart(value.projects);
+  assert.equal(rows[0].availability, "ready");
+  assert.equal(rows[0].sourceStatus, "ready");
+  const current = await value.repository.resolveOpenTarget({ sourcePath: target.exactSourcePath });
+  assert.equal(current.projectId, target.projectId);
+  await value.repository.saveWorkingCopy({ target: current, html: html("saved"), expectedSourceSha256: current.sourceSha256 });
+  assert.equal(await readFile(target.exactSourcePath, "utf8"), html("saved"));
 });
 test("same-hash unregistered copies never become managed; duplicate hard links isolate the binding", async (t) => {
   const value = await fixture(t); const {target} = await importSource(value);

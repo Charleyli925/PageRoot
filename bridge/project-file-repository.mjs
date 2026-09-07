@@ -4590,7 +4590,10 @@ export class ProjectFileRepository {
           path.join(candidatePath, ".pageroot", "project.json"), "project.json",
           { projectRootPath: candidatePath },
         ));
-        if (project.projectId === projectId) candidates.push({ candidatePath, project });
+        if (project.projectId === projectId) {
+          await this.#loadProject(candidatePath);
+          candidates.push({ candidatePath, project });
+        }
       } catch {
         // Unrelated malformed folders cannot prevent a registered project opening.
       }

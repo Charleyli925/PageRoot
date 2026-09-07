@@ -258,6 +258,10 @@ Rules:
   re-enter single-flight admission after the old receipt settles; waiting for
   the old receipt alone cannot acknowledge the newer revision. Concurrent
   waiters join one next drain using the updated expected source Hash.
+- An Undo/Redo drain may refresh its captured Hash only for the same complete
+  OpenTarget route and session, with unchanged requested HTML/revision and
+  matching persisted/working Hashes. Navigation, a different Working Copy or a
+  different project root still invalidates the history request.
 - A current-source transition first stages one complete candidate containing
   project identity, full OpenTarget identity, source path, Version authority,
   HTML bytes and verified Hash. Only after every field is valid may the

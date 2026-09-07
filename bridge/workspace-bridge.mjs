@@ -2986,6 +2986,17 @@ server.on("error", (error) => {
   process.exitCode = 1;
 });
 
+// Queue recovery/migration before accepting any repository request. The HTTP
+// listener can report readiness while those requests join Repository's serial
+// queue; an unavailable root must not prevent the rest of Bridge from starting.
+void projectFileRepository.initialize().catch((cause) => {
+  process.stderr.write(`${JSON.stringify({
+    type: "warning",
+    code: "PROJECT_REPOSITORY_INITIALIZATION_FAILED",
+    message: cause instanceof Error ? cause.message : "Project initialization failed.",
+  })}\n`);
+});
+
 server.listen(PORT, HOST, () => {
   process.stdout.write(
     `${JSON.stringify({

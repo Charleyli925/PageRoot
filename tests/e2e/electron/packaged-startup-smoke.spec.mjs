@@ -1,6 +1,7 @@
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -13,6 +14,8 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { _electron as electron } from "playwright";
 import { sha256 } from "../../../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../../../bridge/project-file-repository.mjs";
+import { sourceBindingPath } from "../../../bridge/project-file-repository/source-binding.mjs";
 import { activateNativeEdit, currentEditorFrame, setTextSelection, keyShortcut } from "../browser/pageroot-driver.mjs";
 import {
   inspectSourceElementIdentity,
@@ -233,9 +236,26 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     const manifestPath = path.join(path.dirname(liveManagedSourcePath), ".pageroot", "manifest.json");
     await closePackagedGracefully(electronApp, page);
     electronApp = null;
-    const staleManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    for (const member of staleManifest.workingCopies) member.fileIdentity.device = "123";
-    writeFileSync(manifestPath, JSON.stringify(staleManifest));
+    const repository = new ProjectFileRepository({ projectsRoot: path.join(isolatedUserData, "project-files") });
+    const startupTarget = await repository.resolveOpenTarget({ sourcePath: startupManagedSourcePath });
+    const candidateId = "candidate_packaged_restart_0001";
+    await repository.createCandidate({ target: startupTarget, requestId: "req_packaged_restart_0001", candidateId,
+      html: readFileSync(startupManagedSourcePath, "utf8").replace("<title ", "<title data-restart-proof=\"next\" "),
+      expectedSourceSha256: startupTarget.sourceSha256 });
+    await repository.promoteCandidate({ target: startupTarget, candidateId });
+    const migratedMembers = [];
+    for (const root of [path.dirname(startupManagedSourcePath), path.dirname(liveManagedSourcePath)]) {
+      const file = path.join(root, ".pageroot", "manifest.json");
+      const staleManifest = JSON.parse(readFileSync(file, "utf8"));
+      for (const member of staleManifest.workingCopies) {
+        const sourcePath = path.join(root, member.sourceRelativePath);
+        migratedMembers.push({ root, sourcePath, workingCopyId: member.workingCopyId, bytes: readFileSync(sourcePath) });
+        member.fileIdentity.device = "123";
+        rmSync(sourceBindingPath(root, member.workingCopyId), { force: true });
+      }
+      writeFileSync(file, JSON.stringify(staleManifest));
+    }
+    expect(migratedMembers).toHaveLength(3);
     electronApp = await electron.launch({
       executablePath: packagedApp.executable,
       cwd: productRoot,
@@ -258,6 +278,14 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     expect(projects.every((project) => project.availability === "ready")).toBe(true);
     expect(readFileSync(liveManagedSourcePath)).toEqual(managedBeforeRestart);
     expect(JSON.parse(readFileSync(manifestPath, "utf8")).workingCopies.every((member) => member.fileIdentity.device !== "123")).toBe(true);
+    // The inactive startup V1 must migrate too. Catalog/open probes alone
+    // only touch active members and cannot satisfy startup migration.
+    for (const member of migratedMembers) {
+      expect(readFileSync(member.sourcePath)).toEqual(member.bytes);
+      expect(lstatSync(sourceBindingPath(member.root, member.workingCopyId)).ino).toBe(lstatSync(member.sourcePath).ino);
+      const manifest = JSON.parse(readFileSync(path.join(member.root, ".pageroot", "manifest.json"), "utf8"));
+      expect(manifest.workingCopies.find((entry) => entry.workingCopyId === member.workingCopyId).fileIdentity.device).not.toBe("123");
+    }
     const frame = await currentEditorFrame(restarted);
     await activateNativeEdit(frame, "durable-binding");
     await setTextSelection(frame, "durable-binding", 0, "Qoder live HTML".length);

@@ -40,6 +40,10 @@ Migration first recovers transactions, then validates each member and creates or
 refreshes its binding and observation atomically. It creates no Version and does
 not rewrite HTML. This locator migration is separate from the existing explicit
 source-element identity materialization on opening older unidentified content.
+Bridge enqueues initialization before accepting Repository requests, so inactive
+Working Copies migrate too. Only complete project contracts count as duplicate
+roots; a partial copy with only a project identity cannot quarantine a healthy
+registered project.
 
 ## Validation
 

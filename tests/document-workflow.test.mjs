@@ -1785,6 +1785,45 @@ test("DocumentWorkflow applies current-open undo locally and saves the resulting
   assert.equal(harness.sourceHistorySession.capabilities.canRedo, true);
 });
 
+for (const change of ["hash", "working-copy", "project-root"]) {
+  test(`DocumentWorkflow history drain accepts only a same-member Hash refresh (${change})`, async () => {
+    const before = "<!doctype html><html><body><p>one</p></body></html>";
+    const after = before.replace("one", "two");
+    const target = {
+      projectId: PROJECT_ID, documentId: DOCUMENT_ID,
+      projectRootPath: "/tmp/managed-project", targetKind: "working-copy",
+      workingCopyId: "work_ver_0001", versionId: "ver_0001",
+      exactSourcePath: SOURCE_PATH, sourceSha256: sha256(before),
+    };
+    const writes = [];
+    const harness = createHarness({ html: before, bridge: {
+      async autosave(body) {
+        writes.push(body);
+        return { ok: true, content: body.html, sha256: sha256(body.html),
+          persistedRevision: body.editRevision, lastModifiedAt: "2026-09-07T00:00:00.000Z",
+          openTarget: { ...target, sourceSha256: sha256(body.html),
+            ...(change === "working-copy" ? { workingCopyId: "work_ver_0002", versionId: "ver_0002" } : {}),
+            ...(change === "project-root" ? { projectRootPath: "/tmp/other-project" } : {}),
+          } };
+      },
+    } });
+    harness.projectSession.refreshOpenTarget(target);
+    const context = harness.projectSession.context;
+    harness.sourceHistorySession.activate(context, sha256(before), null);
+    harness.workflow.enqueueEdit({ html: after, sourceTransaction: operation(before, after), context });
+    const outcome = await harness.workflow.performHistoryAction({ direction: "undo", context });
+    if (change === "hash") {
+      assert.equal(outcome.status, "succeeded");
+      assert.deepEqual(writes.map((write) => write.html), [after, before]);
+      assert.equal(harness.documentSession.html, before);
+    } else {
+      assert.equal(outcome.status, "stale");
+      assert.equal(writes.length, 1);
+      assert.equal(harness.documentSession.html, after);
+    }
+  });
+}
+
 test("DocumentWorkflow force-unlock adopts disk HTML and clears persistence conflict", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const external = before.replace("one", "external");
