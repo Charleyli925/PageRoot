@@ -4,6 +4,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { cp, link, lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import filesystem from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { fileURLToPath } from "node:url";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { readHtmlFile } from "../bridge/project-file-repository/path-safety.mjs";
@@ -64,6 +66,56 @@ test("five projects migrate all fifteen Working Copies without touching HTML", a
     assert.equal((await lstat(sourceBindingPath(target.projectRootPath,target.workingCopyId))).ino, (await lstat(target.exactSourcePath)).ino);
   }
 });
+for (const removeBindings of [false, true]) {
+  test(`startup migration batches observations and bounds binding scans (missing anchors: ${removeBindings})`, async (t) => {
+    const value = await fixture(t);
+    const imported = await importSource(value);
+    let target = imported.target;
+    const count = 12;
+    for (let ordinal = 2; ordinal <= count; ordinal += 1) {
+      const candidateId = `candidate_startup_scale_${ordinal}`;
+      await value.repository.createCandidate({ target, requestId: `req_startup_scale_${ordinal}`, candidateId,
+        html: html(`version ${ordinal}`), expectedSourceSha256: target.sourceSha256 });
+      target = (await value.repository.promoteCandidate({ target, candidateId })).target;
+    }
+    await drift(target);
+    const manifestPath = path.join(target.projectRootPath, ".pageroot/manifest.json");
+    const before = await json(manifestPath);
+    if (removeBindings) for (const member of before.workingCopies) {
+      await rm(sourceBindingPath(target.projectRootPath, member.workingCopyId));
+    }
+    const original = { readdir: filesystem.readdir, lstat: filesystem.lstat, rename: filesystem.rename };
+    let sourceScans = 0; let bindingStats = 0; let manifestWrites = 0;
+    filesystem.readdir = async (targetPath, ...options) => {
+      if (String(targetPath) === target.projectRootPath) sourceScans += 1;
+      return original.readdir(targetPath, ...options);
+    };
+    filesystem.lstat = async (targetPath, ...options) => {
+      if (String(targetPath).endsWith(".ref")) bindingStats += 1;
+      return original.lstat(targetPath, ...options);
+    };
+    filesystem.rename = async (source, destination, ...options) => {
+      if (String(destination) === manifestPath) manifestWrites += 1;
+      return original.rename(source, destination, ...options);
+    };
+    syncBuiltinESMExports();
+    try { await new ProjectFileRepository({ projectsRoot: value.projects }).initialize(); }
+    finally { Object.assign(filesystem, original); syncBuiltinESMExports(); }
+    assert.equal(manifestWrites, 1, "all observation refreshes share one manifest publication");
+    assert.ok(sourceScans <= 2, `unexpected repeated source scans: ${sourceScans}`);
+    assert.ok(bindingStats <= count * 8, `binding checks must grow linearly: ${bindingStats}`);
+    const after = await json(manifestPath);
+    assert.deepEqual(after.versions, before.versions);
+    for (const member of after.workingCopies) {
+      const sourcePath = path.join(target.projectRootPath, member.sourceRelativePath);
+      const source = await readHtmlFile(sourcePath, "Working Copy", { projectRootPath: target.projectRootPath });
+      const state = await json(path.join(target.projectRootPath, ".pageroot", member.stateRelativePath));
+      assert.equal(source.sha256, state.currentSha256);
+      assert.equal(member.fileIdentity.device, String(source.information.dev));
+      assert.equal((await lstat(sourceBindingPath(target.projectRootPath, member.workingCopyId))).ino, source.information.ino);
+    }
+  });
+}
 test("Bridge startup migrates inactive members before serving the project catalog", async (t) => {
   const value = await fixture(t); const { target } = await importSource(value);
   const candidateId = "candidate_bridge_migration_0001";

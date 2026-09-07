@@ -11,7 +11,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import path from "node:path";
-import { readSourceBinding, findBoundSource, refreshSourceBinding, assertUniqueSourceBinding } from "./project-file-repository/source-binding.mjs";
+import { readSourceBinding, findBoundSource, refreshSourceBinding, assertUniqueSourceBinding, createSourceBindingIndex } from "./project-file-repository/source-binding.mjs";
 
 import {
   WorkspacePerformanceTiming,
@@ -326,10 +326,18 @@ export class ProjectFileRepository {
           const initial = await this.#loadRegisteredProject({ projectId });
           await this.#recoverProject(initial.paths.projectRootPath);
           const loaded = await this.#loadRegisteredProject({ projectId });
+          const bindingIndex = await createSourceBindingIndex(loaded.paths.projectRootPath, loaded.manifest.workingCopies);
+          let locatorChanged = false;
           for (const workingCopy of loaded.manifest.workingCopies) {
-            try { await this.#resolveWorkingCopyPath(loaded, workingCopy); }
-            catch { /* File status is exposed per project by the catalog. */ }
+            try {
+              const resolved = await this.#resolveWorkingCopyPath(loaded, workingCopy, "Working Copy", { persistLocator: false, bindingIndex });
+              locatorChanged = resolved.locatorChanged || locatorChanged;
+            } catch { /* File status is exposed per project by the catalog. */ }
           }
+          if (locatorChanged) await atomicWriteProjectJson(
+            loaded.paths.projectRootPath, loaded.paths.manifestPath,
+            loaded.manifest, "manifest.json",
+          );
         } catch { /* Recovery failures stay local to this registered project. */ }
       }
     });
@@ -5020,7 +5028,7 @@ export class ProjectFileRepository {
     return target;
   }
 
-  async #rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, information) {
+  async #rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, information, { persistLocator = true } = {}) {
     const relative = path.relative(loaded.paths.projectRootPath, exactSourcePath)
       .split(path.sep)
       .join("/");
@@ -5044,7 +5052,7 @@ export class ProjectFileRepository {
     workingCopy.preferredFileStem = naming.preferredFileStem;
     workingCopy.preferredExtension = naming.preferredExtension;
     workingCopy.fileIdentity = copyFileIdentity(information);
-    await atomicWriteProjectJson(
+    if (persistLocator) await atomicWriteProjectJson(
       loaded.paths.projectRootPath,
       loaded.paths.manifestPath,
       loaded.manifest,
@@ -5053,7 +5061,7 @@ export class ProjectFileRepository {
     return true;
   }
 
-  async #resolveWorkingCopyPath(loaded, workingCopy, label = "Working Copy") {
+  async #resolveWorkingCopyPath(loaded, workingCopy, label = "Working Copy", { persistLocator = true, bindingIndex = null } = {}) {
     const projectRootPath = loaded.paths.projectRootPath;
     const state = await readJsonFile(workingCopyStatePath(loaded.paths, workingCopy), "Working Copy state", { projectRootPath });
     if (!state) throw new ProjectFileRepositoryError("WORKING_COPY_STATE_NOT_FOUND", "Working Copy state is missing.");
@@ -5061,8 +5069,8 @@ export class ProjectFileRepository {
     const mappedPath = workingCopySourcePath(loaded.paths, workingCopy);
     const mapped = await regularInformation(mappedPath, label, { projectRootPath });
     const binding = await readSourceBinding(projectRootPath, workingCopy.workingCopyId);
-    await assertUniqueSourceBinding(projectRootPath, loaded.manifest.workingCopies, workingCopy.workingCopyId, binding);
-    const boundPath = await findBoundSource(projectRootPath, binding);
+    await assertUniqueSourceBinding(projectRootPath, loaded.manifest.workingCopies, workingCopy.workingCopyId, binding, bindingIndex);
+    const boundPath = await findBoundSource(projectRootPath, binding, bindingIndex);
     if (mapped && boundPath && !samePath(mappedPath, boundPath)) {
       throw new ProjectFileRepositoryError("MANAGED_PATH_AMBIGUOUS", "登记位置与绑定指向不同工作文件，请处理重复副本。");
     }
@@ -5078,10 +5086,10 @@ export class ProjectFileRepository {
     // A registered path or a unique live binding selects the member. A hash
     // validates that selection; it never searches for/claims an unlisted file.
     if (sourceStatus === "ready") {
-      await refreshSourceBinding(projectRootPath, workingCopy.workingCopyId, exactSourcePath, state.currentSha256);
+      await refreshSourceBinding(projectRootPath, workingCopy.workingCopyId, exactSourcePath, state.currentSha256, { bindingIndex });
     }
-    await this.#rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, source.information);
-    return { exactSourcePath, sourceInformation: source.information, source, sourceStatus };
+    const locatorChanged = await this.#rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, source.information, { persistLocator });
+    return { exactSourcePath, sourceInformation: source.information, source, sourceStatus, locatorChanged };
   }
 
   async #resolveWorkingCopySource(loaded, workingCopy, label = "Working Copy") {

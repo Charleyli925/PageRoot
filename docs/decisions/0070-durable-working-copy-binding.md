@@ -41,7 +41,10 @@ refreshes its binding and observation atomically. It creates no Version and does
 not rewrite HTML. This locator migration is separate from the existing explicit
 source-element identity materialization on opening older unidentified content.
 Bridge enqueues initialization before accepting Repository requests, so inactive
-Working Copies migrate too. Only complete project contracts count as duplicate
+Working Copies migrate too. Each project's refreshed locator observations publish
+in one manifest write. A single current binding/source census bounds startup
+scans; selected paths and bindings are still rechecked live. That census is local
+to migration and never authorizes later opens or HTML writes. Only complete project contracts count as duplicate
 roots; a partial copy with only a project identity cannot quarantine a healthy
 registered project.
 

@@ -21,9 +21,39 @@ export async function readSourceBinding(projectRootPath, workingCopyId) {
   return information ? { bindingPath, information } : null;
 }
 
-export async function assertUniqueSourceBinding(projectRootPath, members, workingCopyId, binding) {
-  if (!binding) return;
+function identityKey(information) {
+  return JSON.stringify(copyFileIdentity(information));
+}
+
+// One census for migration only. It is never retained across Repository turns
+// or used to authorize an HTML write. Normal opens and commits scan afresh.
+export async function createSourceBindingIndex(projectRootPath, members) {
+  const bindings = new Map(); const owners = new Map(); const sources = new Map();
   for (const member of members) {
+    const binding = await readSourceBinding(projectRootPath, member.workingCopyId);
+    if (!binding) continue;
+    const key = identityKey(binding.information);
+    bindings.set(member.workingCopyId, key);
+    owners.set(key, [...(owners.get(key) || []), member.workingCopyId]);
+  }
+  for (const entry of await readdir(projectRootPath, { withFileTypes: true })) {
+    if (!entry.isFile() || entry.isSymbolicLink() || !HTML_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+    const sourcePath = path.join(projectRootPath, entry.name);
+    const information = await regularInformation(sourcePath, "Working Copy", { projectRootPath });
+    if (!information) continue;
+    const key = identityKey(information);
+    sources.set(key, [...(sources.get(key) || []), sourcePath]);
+  }
+  return { bindings, owners, sources };
+}
+
+export async function assertUniqueSourceBinding(projectRootPath, members, workingCopyId, binding, index = null) {
+  if (!binding) return;
+  const key = identityKey(binding.information);
+  const candidates = index?.bindings.get(workingCopyId) === key
+    ? (index.owners.get(key) || []).map((id) => ({ workingCopyId: id }))
+    : members;
+  for (const member of candidates) {
     if (member.workingCopyId === workingCopyId) continue;
     const other = await readSourceBinding(projectRootPath, member.workingCopyId);
     if (other && sameFileIdentity(copyFileIdentity(binding.information), copyFileIdentity(other.information))) {
@@ -32,10 +62,15 @@ export async function assertUniqueSourceBinding(projectRootPath, members, workin
   }
 }
 
-export async function findBoundSource(projectRootPath, binding) {
+export async function findBoundSource(projectRootPath, binding, index = null) {
   if (!binding) return null;
+  const key = identityKey(binding.information);
+  const indexed = index && (index.owners.has(key) || index.sources.has(key));
   const matches = [];
-  for (const entry of await readdir(projectRootPath, { withFileTypes: true })) {
+  const entries = indexed
+    ? (index.sources.get(key) || []).map((sourcePath) => ({ name: path.basename(sourcePath), isFile: () => true, isSymbolicLink: () => false }))
+    : await readdir(projectRootPath, { withFileTypes: true });
+  for (const entry of entries) {
     if (!entry.isFile() || entry.isSymbolicLink() || !HTML_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
     const candidate = path.join(projectRootPath, entry.name);
     const information = await regularInformation(candidate, "Working Copy", { projectRootPath });
@@ -47,7 +82,7 @@ export async function findBoundSource(projectRootPath, binding) {
   return matches[0] || null;
 }
 
-export async function refreshSourceBinding(projectRootPath, workingCopyId, sourcePath, expectedSha256) {
+export async function refreshSourceBinding(projectRootPath, workingCopyId, sourcePath, expectedSha256, { bindingIndex = null } = {}) {
   const bindingPath = sourceBindingPath(projectRootPath, workingCopyId);
   await ensureProjectDirectory(projectRootPath, path.dirname(bindingPath), "source bindings");
   const source = await readHtmlFile(sourcePath, "Working Copy", { projectRootPath });
@@ -55,7 +90,7 @@ export async function refreshSourceBinding(projectRootPath, workingCopyId, sourc
     throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "工作文件内容已变化，未更新绑定。");
   }
   const binding = await readSourceBinding(projectRootPath, workingCopyId);
-  const boundPath = await findBoundSource(projectRootPath, binding);
+  const boundPath = await findBoundSource(projectRootPath, binding, bindingIndex);
   if (boundPath && !samePath(boundPath, sourcePath)) {
     throw new ProjectFileRepositoryError("MANAGED_PATH_AMBIGUOUS", "登记位置与绑定指向不同工作文件，请处理重复副本。");
   }

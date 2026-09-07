@@ -370,23 +370,18 @@ export async function openAgentSettingsPage(page) {
     await page.getByRole("button", { name: "展开左侧边栏" }).click();
   }
   await expect(sidebar).toHaveAttribute("data-open", "true");
-  await sidebar.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: "AI 服务", exact: true }).click();
+  // Provider assertions start in Settings. Keyboard activation avoids making
+  // this precondition depend on a moving sidebar's pointer hit target;
+  // project-lifecycle tests retain real pointer navigation coverage.
+  await sidebar.getByRole("button", { name: "设置", exact: true }).press("Enter");
   const settings = page.locator(".workbench-settings-page");
   await expect(settings).toBeVisible();
+  await page.getByRole("button", { name: "AI 服务", exact: true }).click();
   return settings;
 }
 
 export async function openQoderAvailability(page) {
-  const sidebar = page.locator(".workbench-global-sidebar");
-  if (await sidebar.getAttribute("data-open") !== "true") {
-    await page.getByRole("button", { name: "展开左侧边栏" }).click();
-  }
-  await expect(sidebar).toHaveAttribute("data-open", "true");
-  await sidebar.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: "AI 服务", exact: true }).click();
-  const settings = page.locator(".workbench-settings-page");
-  await expect(settings).toBeVisible();
+  const settings = await openAgentSettingsPage(page);
   const row = settings.getByTestId("settings-agent-row-qoder");
   await expect(row).toBeVisible();
   if (await row.getAttribute("data-expanded") !== "true") {
