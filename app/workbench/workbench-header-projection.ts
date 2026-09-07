@@ -51,7 +51,7 @@ export function deriveWorkbenchPresentation(input: PresentationInput) {
     && input.hasReadyPayload && !input.hasReadyReviewSession && !input.reviewPreparing);
   const editReason = reviewActive ? "完成审阅后可继续编辑"
     : runInProgress ? "本轮还在进行，结束或采纳后可回到编辑"
-      : isHistory ? "历史版本只读，回到当前版本后可编辑"
+      : input.viewTransitioning || input.projectHydrating || input.projectLoadError ? "当前版本暂时不可操作"
         : !hasDocumentTarget ? "请先打开当前文档" : undefined;
   const previewReason = !hasDocumentTarget ? "请先打开当前文档" : reviewActive ? "完成审阅后可继续预览"
     : interactionLocked ? "当前状态只能使用编辑画布" : undefined;
@@ -79,8 +79,7 @@ export function deriveWorkbenchPresentation(input: PresentationInput) {
       : activeTab?.title || "",
     viewLabel: !hasDocumentTarget ? null : reviewActive ? "审阅" : isHistory ? "历史" : "当前",
     isHistory,
-    // The displayed canvas mode remains the real runtime mode, including a
-    // read-only history rendered by the edit canvas. Projection cannot switch it.
+    // History Edit requests creation; it does not unlock the historical preview.
     mode: reviewActive ? "review" : input.canvasMode,
     edit: { enabled: !editReason, selected: !reviewActive && input.canvasMode === "edit", reason: editReason },
     preview: { enabled: hasDocumentTarget && !reviewActive && !interactionLocked, selected: !reviewActive && input.canvasMode === "preview", reason: previewReason },

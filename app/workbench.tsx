@@ -31,6 +31,7 @@ import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preference
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import SettingsPage from "./components/SettingsPage";
 import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
+import HistoryCreationDialog from "./components/HistoryCreationDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
@@ -757,6 +758,8 @@ export default function Workbench() {
   const workspacePreferencesSnapshot = workspacePreferencesController.snapshot;
   const workspacePreferences = workspacePreferencesSnapshot.workspace;
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
+  const [historyCreationConfirmation, setHistoryCreationConfirmation] = useState<string | null>(null);
+  const historyCreation = workspaceControllerSnapshot?.version?.creation;
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
   const [projectRegistrationError, setProjectRegistrationError] = useState("");
   const versionSnapshot = (
@@ -3521,6 +3524,20 @@ export default function Workbench() {
 
   const exportCurrentHtml = useCallback(async (fromDeferred = false) => {
     if (isViewTransitioning()) return;
+    const historical = workspaceController?.getSnapshot().versionSession?.historyPreview;
+    const owner = currentProjectSessionSnapshot();
+    if (historical && historical.projectId === owner.projectId && historical.documentId === owner.documentId
+      && historical.sourcePath === owner.sourcePath) {
+      const name = `${projectName}-${historical.versionId}.html`;
+      try {
+        if (window.htmlAIProjects?.exportHtmlCopy) await window.htmlAIProjects.exportHtmlCopy({
+          html: historical.content, sourcePath: owner.sourcePath, suggestedName: name,
+        });
+        else downloadHtml(historical.content, name);
+      } catch (cause) { setFileStatusNotice(productErrorMessage(cause, "历史版本导出失败，请选择其他位置重试。")); }
+      return;
+    }
+
     if (
       !fromDeferred
       && deferEditorCommand(
@@ -5430,6 +5447,7 @@ export default function Workbench() {
       return;
     }
     if (outcome.status === "stale") return;
+    setFileStatusNotice(outcome.reason);
     reportInternalFailure({
       area: "history",
       operation: "return-current",
@@ -5608,45 +5626,47 @@ export default function Workbench() {
     viewHistoryVersion,
   ]);
 
-  const continueEditingHistoryVersion = useCallback(async () => {
-    if (
-      viewMode !== "history"
-      || !viewingVersionId
-      || isViewTransitioning()
-      || runInProgress
-      || projectHydrating
-      || projectLoadError
-      || !workspaceController
-    ) return;
-    const context = captureProjectContext();
-    if (!context) return;
-    const outcome = await requiredWorkspaceController(workspaceController)
-      .continueEditingHistoryVersion({
-        versionId: viewingVersionId,
-        context,
-      });
-    if (outcome.status === "succeeded") {
-      editorRef.current?.clearSelection();
+  const requestHistoryCreation = () => {
+    if (historyCreation?.context.projectId === projectId && historyCreation.context.documentId === documentId
+      && !["opened", "not-created"].includes(historyCreation.phase)) {
+      setFileStatusNotice("请先查询或打开上一次创建操作的结果。");
       return;
     }
-    if (outcome.status === "stale") return;
-    reportInternalFailure({
-      area: "history",
-      operation: "continue-editing",
-      code: "history-continue-editing-failed",
-      recovered: false,
-      cause: outcome.reason,
-    });
-  }, [
-    captureProjectContext,
-    isViewTransitioning,
-    projectHydrating,
-    projectLoadError,
-    runInProgress,
-    viewMode,
-    viewingVersionId,
-    workspaceController,
-  ]);
+    if (viewMode === "history" && viewingVersionId && !isViewTransitioning()
+      && !runInProgress && !projectHydrating && !projectLoadError) {
+      setHistoryCreationConfirmation(`${projectId}:${documentId}:${viewingVersionId}`);
+    }
+  };
+  const openCreatedHistory = async (operationId: string) => {
+    const context = captureProjectContext();
+    if (!context || !workspaceController) return;
+    const outcome = await workspaceController.openCreatedHistoryVersion({ operationId, context });
+    if (outcome.status === "succeeded" && captureProjectContext()?.projectId === context.projectId
+      && captureProjectContext()?.documentId === context.documentId) {
+      editorRef.current?.clearSelection();
+      setFileStatusNotice("");
+      setCanvasMode("edit");
+    } else if (outcome.status !== "stale" && outcome.status !== "succeeded") setFileStatusNotice(outcome.reason);
+  };
+  const createHistoryVersion = async () => {
+    const versionId = historyCreationConfirmation;
+    setHistoryCreationConfirmation(null);
+    const context = captureProjectContext();
+    if (!context || !workspaceController || versionId !== `${context.projectId}:${context.documentId}:${viewingVersionId}` || viewMode !== "history") return;
+    const operationId = `history_${crypto.randomUUID()}`;
+    const outcome = await workspaceController.createVersionFromHistory({ operationId, context });
+    if (outcome.status === "succeeded") {
+      if (isCurrentProjectContext(context)) await openCreatedHistory(operationId);
+    } else if (outcome.status !== "stale") setFileStatusNotice(outcome.reason);
+  };
+  const recoverHistoryCreation = async () => {
+    if (!historyCreation || historyCreation.context.projectId !== projectId
+      || historyCreation.context.documentId !== documentId) return;
+    if (historyCreation.phase === "unknown") {
+      const outcome = await workspaceController?.queryHistoryCreation({ operationId: historyCreation.operationId, context: captureProjectContext() });
+      if (outcome && outcome.status !== "succeeded" && outcome.status !== "stale") setFileStatusNotice(outcome.reason);
+    } else await openCreatedHistory(historyCreation.operationId);
+  };
 
   const canvasAuthority = documentSnapshot.canvasAuthority;
   const canShowCurrentFileInFolder = Boolean(
@@ -5868,7 +5888,7 @@ export default function Workbench() {
     deferEditorCommand,
     isViewTransitioning,
   });
-  const onSelectEdit = () => createModeHandlers().onSelectEdit();
+  const onSelectEdit = () => presentation.isHistory ? requestHistoryCreation() : createModeHandlers().onSelectEdit();
   const onSelectPreview = () => createModeHandlers().onSelectPreview();
 
   // The review compares immutable snapshots prepared against the
@@ -6168,6 +6188,7 @@ export default function Workbench() {
           aiConversationVisible={aiConversation.visible}
           aiAssistantEntry={aiAssistantEntry}
           moreMenu={{
+            isHistory: presentation.isHistory,
             canShowInFolder: canShowInFinder,
             onShowInFolder: () => void showProjectInFolder(),
             canOpenInBrowser: canOpenCurrentHtml,
@@ -6343,17 +6364,35 @@ export default function Workbench() {
           detail={viewingVersion
             ? `只读 HTML 与 ${viewingVersion.comments.length} 条历史评论已在画布中展开`
             : "画布来自精确不可变版本文件"}
-          secondaryActionLabel="基于此版本继续编辑"
+          secondaryActionLabel="创建新版本并编辑"
           secondaryActionDisabled={
             viewTransitioning
             || runInProgress
             || projectHydrating
             || Boolean(projectLoadError)
           }
-          onSecondaryAction={() => void continueEditingHistoryVersion()}
+          onSecondaryAction={requestHistoryCreation}
           actionLabel="回到当前版本"
           actionDisabled={viewTransitioning}
           onAction={() => void returnToCurrent()}
+        />
+      ) : null}
+
+      {historyCreation && historyCreation.context.projectId === projectId
+        && historyCreation.context.documentId === documentId && historyCreation.phase !== "opened" ? (
+        <PreviewNavigationBanner
+          icon={<ClockCounterClockwiseIcon aria-hidden="true" size={18} />}
+          title={historyCreation.phase === "unknown" ? "创建结果暂时未知"
+            : historyCreation.phase === "not-created" ? "尚未创建新版本"
+              : historyCreation.phase === "creating" ? "正在创建新版本"
+                : historyCreation.phase === "opening" ? "正在打开新版本" : "新版本已创建"}
+          detail={historyCreation.phase === "unknown" ? "请查询同一操作，避免重复创建。"
+            : historyCreation.phase === "not-created" ? "原有版本保留，可以重新创建。"
+              : "创建完成后即使打开失败，也不会再创建另一个版本。"}
+          actionLabel={historyCreation.phase === "unknown" ? "查询创建结果"
+            : historyCreation.phase === "not-created" ? "重试创建" : "打开已创建版本"}
+          actionDisabled={viewTransitioning || (historyCreation.phase === "not-created" && viewMode !== "history")}
+          onAction={() => historyCreation.phase === "not-created" ? requestHistoryCreation() : void recoverHistoryCreation()}
         />
       ) : null}
 
@@ -6646,6 +6685,7 @@ export default function Workbench() {
               key={`preview-authority-${canvasGeneration}-${historyPreview?.versionId || "current"}`}
               ref={interactionPreviewRef}
               html={interactionPreviewHtml}
+              staticFallbackOnFailure={Boolean(historyPreview)}
               documentKey={historyPreview ? `${pageViewDocumentKey}:${historyPreview.versionId}` : pageViewDocumentKey}
               sourcePath={sourcePath || undefined}
               height="100%"
@@ -6702,6 +6742,12 @@ export default function Workbench() {
         />
       ) : null}
 
+      <HistoryCreationDialog
+        open={Boolean(historyCreationConfirmation && historyCreationConfirmation === `${projectId}:${documentId}:${viewingVersionId}` && viewMode === "history")}
+        versionLabel={viewingVersion?.label || "历史版本"}
+        onClose={() => setHistoryCreationConfirmation(null)}
+        onConfirm={() => void createHistoryVersion()}
+      />
       <CancelAiRunDialog
         open={cancelRunConfirmationOpen}
         onClose={() => setCancelRunConfirmationKey(null)}

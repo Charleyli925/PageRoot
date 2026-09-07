@@ -625,6 +625,13 @@ export class VersionWorkflow {
     if (this.#snapshot.navigation.phase !== "idle") {
       return blocked("VERSION_NAVIGATION_BUSY", "当前 HTML 视图正在切换，请稍后重试。");
     }
+    const creation = this.#snapshot.creation;
+    if (creation?.context.projectId === current.projectId && creation.context.documentId === current.documentId) {
+      if (creation.phase === "unknown") return blocked("HISTORY_CREATION_UNKNOWN", "创建结果暂时未知，请先查询同一操作；仍可切换项目或关闭标签。");
+      if (["created", "open-failed"].includes(creation.phase)) {
+        return this.openCreatedHistoryVersion({ operationId: creation.operationId, context: current });
+      }
+    }
     // Leaving a read-only projection must remain possible even when a disk
     // check fails. Observation reports conflicts through DocumentWorkflow and
     // never replaces the protected current source with disk bytes.
@@ -666,6 +673,11 @@ export class VersionWorkflow {
     const current = copyContext(context);
     if (this.#disposed) return blocked("VERSION_WORKFLOW_DISPOSED", "版本工作流已经停止。");
     if (!current || !this.#projectSession.matches(current)) return stale(current || {});
+    const pending = this.#snapshot.creation;
+    if (pending?.context.projectId === current.projectId && pending.context.documentId === current.documentId
+      && !["opened", "not-created"].includes(pending.phase)) {
+      return blocked("HISTORY_CREATION_PENDING", "请先查询或打开上一次创建操作的结果。");
+    }
     const preview = this.#versionSession.snapshot.historyPreview;
     if (!preview || preview.projectId !== current.projectId || preview.documentId !== current.documentId
       || preview.sourcePath !== current.sourcePath || !/^[A-Za-z0-9_-]{8,160}$/.test(String(operationId || ""))) {
@@ -723,6 +735,99 @@ export class VersionWorkflow {
     } catch {
       this.#setHistoryCreation({ phase: "unknown", operationId, context: current }, creationGeneration);
       return unknown(operationId, "暂时无法确认创建结果，请稍后查询同一操作。");
+    }
+  }
+
+  async restoreHistoryCreation({ operationId, context }) {
+    if (!context || !this.#projectSession.matches(context) || this.#snapshot.navigation.phase !== "idle") return;
+    const generation = ++this.#creationGeneration;
+    try {
+      const result = this.#validateHistoryCreation(await this.#bridgeClient.queryHistoryCreation({ target: context, operationId }), context, operationId);
+      if (!this.#projectSession.matches(context)) return;
+      this.#setHistoryCreation({ phase: result.status === "created" ? result.openedAt ? "opened" : "created" : "not-created",
+        operationId, context, result }, generation);
+    } catch {
+      if (this.#projectSession.matches(context)) this.#setHistoryCreation({ phase: "unknown", operationId, context }, generation);
+    }
+  }
+
+  async openCreatedHistoryVersion({ operationId, context = this.#projectSession.context } = {}) {
+    const current = copyContext(context);
+    if (!current || !this.#projectSession.matches(current)) return stale(current || {});
+    if (this.#runSession.activeLocked) return blocked("HISTORY_CREATION_RUN_LOCKED", "请先完成当前 AI 任务或候选的处理。");
+    const operation = this.#beginNavigation("opening", current);
+    if (!operation) return blocked("VERSION_NAVIGATION_BUSY", "版本操作正在进行。");
+    const generation = ++this.#creationGeneration;
+    let result;
+    try {
+      result = this.#validateHistoryCreation(await this.#bridgeClient.queryHistoryCreation({ target: current, operationId }), current, operationId);
+      if (result.status !== "created") {
+        this.#setHistoryCreation({ phase: "not-created", operationId, context: current, result }, generation);
+        return rejected("HISTORY_NOT_CREATED", "尚未创建新版本，可以重试。");
+      }
+      this.#setHistoryCreation({ phase: "opening", operationId, context: current, result }, generation);
+      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      const drained = await this.#projectWorkflow.drain("history", { deadlineAt: this.#clock.now() + 15_000 });
+      if (!drained.ok) throw new Error(drained.reason || "当前修改尚未保护，暂未打开新稿。");
+      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      const payload = await this.#bridgeClient.workspace(result.sourcePath);
+      const decoded = decodeWorkspaceResponse(payload, this.#codecs);
+      const target = payload.openTarget;
+      const content = String(payload.content || "");
+      const sha256 = String(payload.currentHtmlSha256 || payload.sourceSha256 || "");
+      if (payload.projectId !== current.projectId || payload.documentId !== current.documentId
+        || payload.currentBasedOnVersionId !== result.versionId
+        || target?.targetKind !== "working-copy" || target.projectId !== current.projectId
+        || target.documentId !== current.documentId || target.versionId !== result.versionId
+        || target.workingCopyId !== result.workingCopyId || target.exactSourcePath !== result.sourcePath
+        || target.sourceSha256 !== sha256 || !SHA256.test(sha256)
+        || !decoded.versions.some((version) => version.id === result.versionId && version.contentSha256 === result.contentSha256)
+        || await this.#hashPort.sha256(content) !== sha256) {
+        throw new Error("已创建版本的工作文件身份或内容校验失败。");
+      }
+      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      const prepared = await this.#projectWorkflow.prepareManagedSourceTransition({
+        previousSourcePath: current.sourcePath, nextSourcePath: result.sourcePath,
+        expectedSha256: sha256, nextProjectId: current.projectId, nextDocumentId: current.documentId,
+        versionId: result.versionId, openTarget: target, operationId,
+      });
+      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      const nextContext = this.#projectWorkflow.commitManagedSourceTransition({
+        prepared, html: content, sourceSha256: sha256,
+        publishSessions: (publishedContext) => {
+          this.#versionSession.hydrate({ versions: decoded.versions,
+            latestVersionId: payload.latestVersionId, currentBasedOnVersionId: result.versionId,
+            currentExactVersionId: payload.currentExactVersionId, restoredFromVersionId: payload.restoredFromVersionId });
+          this.#versionSession.returnCurrent();
+          this.#draftSession.replaceAuthority(publishedContext, decoded.draft.draftRevision, decoded.draft);
+          this.#commentSession.update({ comments: decoded.comments, changeEvents: decoded.changeEvents,
+            deletedCommentIds: decoded.draft.deletedCommentIds, composerDraft: "", composerCommentId: null,
+            composerAttachments: [], composerTarget: null, editSession: null });
+        },
+      });
+      if (!nextContext || !this.#projectSession.matches(nextContext)) return stale(current);
+      this.#setHistoryCreation({ phase: "opening", operationId, context: nextContext, result }, generation);
+      await this.#canvasPort.verifyRendered(content, sha256, nextContext);
+      if (!this.#isNavigationActive(operation) || !this.#projectSession.matches(nextContext)) return stale(nextContext);
+      // A lost opened acknowledgement cannot turn an already opened file into
+      // another creation. The durable receipt remains queryable on restart.
+      try { await this.#bridgeClient.confirmHistoryCreationOpened({ target: nextContext, operationId }); } catch { /* Retry acknowledgement on the next explicit open. */ }
+      this.#setHistoryCreation({ phase: "opened", operationId, context: nextContext, result }, generation);
+      this.#documentWorkflow.clearAudit();
+      this.#documentWorkflow.clearRecovery(nextContext);
+      this.#projectWorkflow.scheduleProjectListRefreshAfterSettlement(nextContext);
+      this.#emitEvent({ type: "version-history-created-opened", context: nextContext, versionId: result.versionId });
+      return succeeded(result);
+    } catch (cause) {
+      const active = this.#projectSession.context;
+      const owner = active?.projectId === current.projectId && active?.documentId === current.documentId ? active : current;
+      this.#setHistoryCreation({ phase: result?.status === "created" ? "open-failed" : "unknown", operationId, context: owner, result }, generation);
+      return result?.status === "created"
+        ? rejected("HISTORY_CREATED_OPEN_FAILED", this.#codecs.errorMessage(cause, "新版本已创建，但打开失败。可以打开已创建版本。"))
+        : unknown(operationId, "暂时无法确认创建结果，请查询同一操作。");
+    } finally {
+      if (this.#snapshot.creation?.phase === "opening") this.#setHistoryCreation({ ...this.#snapshot.creation, phase: "created" }, generation);
+      this.#finishNavigation(operation);
     }
   }
 

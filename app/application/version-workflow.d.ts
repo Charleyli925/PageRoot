@@ -30,7 +30,7 @@ export type HistoryCreationResult = Readonly<{
 export type VersionNavigationPhase = "idle" | "activating" | "opening" | "history" | "current" | "creating";
 
 export type VersionWorkflowSnapshot = Readonly<{
-  creation?: Readonly<{ phase: "creating" | "created" | "not-created" | "unknown"; operationId: string; context: ProjectContext; result?: HistoryCreationResult }>;
+  creation?: Readonly<{ phase: "creating" | "created" | "opening" | "opened" | "open-failed" | "not-created" | "unknown"; operationId: string; context: ProjectContext; result?: HistoryCreationResult }>;
   navigation: Readonly<{
     phase: VersionNavigationPhase;
     operationId: string | null;
@@ -103,7 +103,7 @@ export type VersionWorkflowCanvasPort = Readonly<{
 export type VersionWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
-    "versionFile"
+    "workspace" | "createVersionFromHistory" | "queryHistoryCreation" | "confirmHistoryCreationOpened" | "versionFile"
       | "source"
       | "activateReadyVersion"
       | "continueEditingHistoryVersion"
@@ -156,6 +156,8 @@ export class VersionWorkflow {
     fromDeferred?: boolean;
   }): Promise<VersionWorkflowOutcome<Record<string, unknown>>>;
   createVersionFromHistory(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<HistoryCreationResult>>;
+  restoreHistoryCreation(input: { operationId: string; context: ProjectContext }): Promise<void>;
+  openCreatedHistoryVersion(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<HistoryCreationResult>>;
   queryHistoryCreation(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<HistoryCreationResult>>;
   continueEditingHistoryVersion(input?: {
     versionId?: string | null;

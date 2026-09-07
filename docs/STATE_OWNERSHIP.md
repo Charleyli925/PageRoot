@@ -520,6 +520,11 @@ manifest commit. Existing Repository serialization and Registry write locking
 cover create/replay/recovery; there is no second queue or persistence store.
 VersionWorkflow owns the in-memory creation result and query generation; it
 exposes creation and same-operation reconciliation without publishing Document
-authority. E does not wire a user entry. F opens an already-created result through
+authority. F wires the confirmation UI and opens an already-created result through
 the existing managed-source transition. Source ownership changes only at that
 validated opening boundary, regardless of creation receipt delivery.
+
+HistoryCreationDialog owns only the confirmation target, scoped by project,
+document and version. Transaction phases and receipts remain in VersionWorkflow.
+Restoration queries the operation locator from the existing project hydration
+event; no component cache or second mutable transaction store is introduced.

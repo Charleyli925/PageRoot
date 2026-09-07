@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { loadedDiskFrame as loadedStaticDiskFrame } from "./helpers/pageroot-app-fixture.mjs";
 import {
   ProjectFileRepository,
+  activateNativeEdit,
+  caseSelector,
+  setTextSelection,
+  keyShortcut,
   closePageRootGracefully,
   createSourceFixture,
   launchPageRoot,
@@ -415,8 +420,10 @@ test("Electron sidebar opens an imported historical version in the existing proj
 }, async () => {
   test.setTimeout(180_000);
   const projectA = createSourceFixture("sidebar-history-a.html");
-  const projectB = createSourceFixture("sidebar-history-b.html");
+  const projectB = createSourceFixture("sidebar-history-b.html", (html) => html.replace("</body>", '<script>throw new Error("test dynamic author failure")</script></body>'));
   const launched = await launchPageRoot({ activeSourcePath: projectA.sourcePath });
+  let firstClosed = false;
+  let reopened = null;
   try {
     await loadedDiskFrame(launched.page, projectA.sourcePath, "list-item");
     await waitForProjectReady(launched.page);
@@ -428,7 +435,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
       expectedSourceSha256: sha256(readFileSync(projectB.sourcePath)),
     });
     let target = imported.target;
-    for (const [ordinal, title] of [[2, "sidebar history V2"], [3, "sidebar history V3"]]) {
+    for (const [ordinal, title] of Array.from({ length: 7 }, (_, index) => [index + 2, `sidebar history V${index + 2}`])) {
       if (ordinal === 3) {
         const continued = await repository.activateVersionWorkingCopy({
           target, versionId: "ver_0001", operationId: "e2e_sidebar_branch_v1_0001",
@@ -458,7 +465,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
       projectId: target.projectId,
     });
     const historicalVersion = importedSummary.versions.find((version) => (
-      version.ordinal === 1 && !version.isActiveWorkingCopy
+      version.ordinal === 3 && !version.isActiveWorkingCopy
     ));
     expect(historicalVersion).toBeTruthy();
     const catalogRows = await launched.page.evaluate(() => window.htmlAIProjects.listRegisteredProjects());
@@ -482,14 +489,14 @@ test("Electron sidebar opens an imported historical version in the existing proj
       .first();
     await expect(importedProject).toBeVisible();
     await importedProject.locator(".sidebar-project-row").click();
-    await expect(importedProject.locator(".sidebar-version-file")).toHaveCount(3, {
+    await expect(importedProject.locator(".sidebar-version-file")).toHaveCount(8, {
       timeout: 30_000,
     });
     expect(await launched.page.evaluate(() => (
       window.htmlAIProjects?.getActiveProject()?.projectId || null
     ))).toBe(beforeExpansion);
 
-    await expect(importedProject.locator(".sidebar-version-index")).toHaveText(["V1", "V2", "V3"]);
+    await expect(importedProject.locator(".sidebar-version-index")).toHaveText(["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8"]);
     await expect(importedProject.locator("svg.sidebar-version-rail")).toHaveCount(0);
     await expect(importedProject.locator(".sidebar-project-load-error")).toHaveCount(0);
     await expect(importedProject.getByRole("button", { name: "重新检查文件" })).toHaveCount(0);
@@ -517,23 +524,23 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(importedProject.locator('[data-selected="true"] .sidebar-version-time'))
       .toHaveAttribute("data-datetime", historicalVersion.modifiedAt);
     await expect(mode).toHaveAttribute("data-view-label", "历史");
-    await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
+    await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeEnabled();
     const historicalPreview = launched.page.frameLocator('iframe[title="HTML 交互预览"]');
     await expect(historicalPreview.locator("body")).toBeVisible();
     await expect.poll(async () => (await launched.page.locator('iframe[title="HTML 交互预览"]').boundingBox())?.height || 0).toBeGreaterThan(400);
     await expect(mode.getByRole("button", { name: "预览", exact: true })).toHaveAttribute("aria-pressed", "true");
     const protectedWorkingBytes = readFileSync(target.exactSourcePath, "utf8");
-    await expect(historicalPreview.locator("title")).not.toHaveText("sidebar history V3");
+    await expect.poll(() => historicalPreview.locator("title").textContent()).toBe("sidebar history V3");
     await launched.page.screenshot({ path: test.info().outputPath("version-history-projection.png") });
     await launched.page.getByRole("button", { name: "回到当前版本", exact: true }).click();
-    await expect(selectedB).toContainText("sidebar-history-b-V3.html");
+    await expect(selectedB).toContainText("sidebar-history-b-V8.html");
     await expect(selectedB).not.toContainText("历史");
     expect(readFileSync(target.exactSourcePath, "utf8")).toBe(protectedWorkingBytes);
     await expect(launched.page.locator('iframe[title="HTML 交互预览"]')).toHaveCount(0);
     await expect(mode).toHaveAttribute("data-view-label", "当前");
     await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeEnabled();
-    await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-file')).toContainText("-V3.html");
-    await expect(importedProject.locator('[data-latest="true"] .sidebar-version-file')).toContainText("-V3.html");
+    await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-file')).toContainText("-V8.html");
+    await expect(importedProject.locator('[data-latest="true"] .sidebar-version-file')).toContainText("-V8.html");
     const currentSummary = await repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId });
     const currentVersion = currentSummary.versions.find((version) => version.isActiveWorkingCopy);
     await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-time'))
@@ -555,7 +562,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(tabs).toHaveCount(2);
     await expect(tabs.filter({ hasText: "sidebar-history-a" })).toHaveAttribute("aria-selected", "true");
     await expect(mode).toHaveAttribute("data-view-label", "当前");
-    await expect(importedProject.locator(".sidebar-version-index")).toHaveText(["V1", "V2", "V3"]);
+    await expect(importedProject.locator(".sidebar-version-index")).toHaveText(["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8"]);
     await expect(importedProject.locator('[data-selected="true"]')).toHaveCount(0);
     await loadedDiskFrame(launched.page, projectA.sourcePath, "list-item");
     const historyButton = importedProject.getByRole("button", { name: historicalVersion.displayFileName, exact: true });
@@ -563,8 +570,80 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(selectedB).toHaveAttribute("aria-selected", "true");
     await expect(selectedB).toContainText(`${historicalVersion.displayFileName} · 历史`);
     await expect(mode).toHaveAttribute("data-view-label", "历史");
+    const edit = mode.getByRole("button", { name: "编辑", exact: true });
+    await edit.click();
+    const dialog = launched.page.getByRole("dialog", { name: /基于.*创建新版本/ });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "取消", exact: true }).click();
+    expect((await repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId })).versions).toHaveLength(8);
+    await expect(mode.getByRole("button", { name: "预览", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+    const exportPath = path.join(projectB.sourceDirectory, "exported-history-v3.html");
+    await launched.electronApp.evaluate(({ dialog }, filePath) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+    }, exportPath);
+    await launched.page.getByRole("button", { name: "更多", exact: true }).click();
+    await expect(launched.page.getByRole("menuitem", { name: "在 Finder 中显示当前工作文件", exact: true })).toBeVisible();
+    await expect(launched.page.getByRole("menuitem", { name: "在浏览器中打开当前工作文件", exact: true })).toBeVisible();
+    await launched.page.getByRole("menuitem", { name: "导出此版本…", exact: true }).click();
+    const historicalBytes = await repository.readVersionFile({ target, versionId: "ver_0003" });
+    await expect.poll(() => { try { return readFileSync(exportPath, "utf8"); } catch { return null; } }).toBe(historicalBytes.content);
+    expect(readFileSync(target.exactSourcePath, "utf8")).toBe(protectedWorkingBytes);
+
+    let creates = 0;
+    const loseReceipt = async (route) => { creates += 1; await route.fetch(); await route.abort("failed"); };
+    const failCreatedOpen = async (route) => {
+      if (decodeURIComponent(route.request().url()).includes("-V9.html")) {
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "TEST_OPEN_FAILED", message: "测试新稿打开失败" } }) });
+      } else await route.continue();
+    };
+    await launched.page.route("**/history-version/create", loseReceipt);
+    await launched.page.route("**/workspace?*", failCreatedOpen);
+    await edit.click();
+    await dialog.getByRole("button", { name: "创建并编辑", exact: true }).click();
+    await expect(launched.page.getByRole("button", { name: "打开已创建版本", exact: true })).toBeEnabled({ timeout: 30_000 });
+    const createdSummary = await repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId });
+    expect(createdSummary.versions).toHaveLength(9);
+    expect(creates).toBe(1);
+    expect(readFileSync(target.exactSourcePath, "utf8")).toBe(protectedWorkingBytes);
+    await expect(mode).toHaveAttribute("data-view-label", "历史");
+    await launched.page.unroute("**/workspace?*", failCreatedOpen);
+    await currentProject.locator(".sidebar-version-file").first().click();
+    await expect(tabs.filter({ hasText: "sidebar-history-a" })).toHaveAttribute("aria-selected", "true");
+    await expect(launched.page.getByRole("button", { name: "打开已创建版本", exact: true })).toHaveCount(0);
+    await waitForProjectReady(launched.page);
+    await importedProject.getByRole("button", { name: historicalVersion.displayFileName, exact: true }).click();
+    await expect(mode).toHaveAttribute("data-view-label", "历史");
+    await expect(launched.page.getByRole("button", { name: "打开已创建版本", exact: true })).toBeEnabled();
+    await launched.page.getByRole("button", { name: "打开已创建版本", exact: true }).click();
+    await expect(selectedB).toContainText("sidebar-history-b-V9.html", { timeout: 60_000 });
+    await expect(mode).toHaveAttribute("data-view-label", "当前");
+    await expect(mode.getByRole("button", { name: "编辑", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-file')).toContainText("-V9.html");
+    expect(creates).toBe(1);
+    const createdPath = await launched.page.evaluate(async () => (await window.htmlAIProjects.getActiveProject()).sourcePath);
+    expect(path.basename(createdPath)).toBe("sidebar-history-b-V9.html");
+    const { frame: createdFrame } = await loadedStaticDiskFrame(launched.page, createdPath, { expectedCase: "list-item", includeEditor: true });
+    await activateNativeEdit(createdFrame, "list-item");
+    await setTextSelection(createdFrame, "list-item", 0, 3);
+    await launched.page.keyboard.insertText("HISTORY_V9_SAVED");
+    await launched.page.keyboard.press(keyShortcut("S"));
+    await expect.poll(() => readFileSync(createdPath, "utf8")).toContain("HISTORY_V9_SAVED");
+    expect((await repository.readVersionFile({ target, versionId: "ver_0003" })).content).toBe(historicalBytes.content);
+    expect(readFileSync(target.exactSourcePath, "utf8")).toBe(protectedWorkingBytes);
+    await launched.page.screenshot({ path: test.info().outputPath("history-created-v9.png") });
+    await closePageRootGracefully(launched.electronApp, launched.page);
+    firstClosed = true;
+    reopened = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
+    await waitForProjectReady(reopened.page);
+    await expect(reopened.page.getByRole("tab", { selected: true })).toContainText("sidebar-history-b-V9.html");
+    expect((await repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId })).versions).toHaveLength(9);
+    const { frame: restartedFrame } = await loadedStaticDiskFrame(reopened.page, createdPath, { expectedCase: "list-item", includeEditor: true });
+    await expect(restartedFrame.locator(caseSelector("list-item"))).toContainText("HISTORY_V9_SAVED");
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    if (reopened) await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+    else if (!firstClosed) await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    else removeIsolatedUserData(launched.isolatedUserData);
     removeSourceFixture(projectA.sourceDirectory);
     removeSourceFixture(projectB.sourceDirectory);
   }

@@ -300,3 +300,10 @@ the manual Version transaction and idempotent recovery; Bridge exposes
 `/history-version/create`, `/result`, `/opened`. VersionWorkflow and the existing
 Controller expose create/query outcomes. The UI cut-over is F. See the unique
 contract in `VERSION_AND_PROJECT_FILES_PRD.md`.
+
+
+History actions F: Workbench history Edit → HistoryCreationDialog → existing
+VersionWorkflow create/query/openCreatedHistoryVersion. Opening validates a full
+workspace through injected codecs before managed-source transition; rendering
+acknowledgement is separate from Repository commit. Project hydration forwards
+the durable history operation locator to the same workflow for recovery.

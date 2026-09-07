@@ -3730,6 +3730,7 @@ export class ProjectWorkflow {
         });
         this.#emit({
           type: "project-hydrated",
+          historyCreation: payload.historyCreation || null,
           context,
           projectName: projectRecord.displayName ? String(projectRecord.displayName) : null,
           lastModifiedAt: authoritativeLastModifiedAt || null,
