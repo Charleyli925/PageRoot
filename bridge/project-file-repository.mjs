@@ -1098,7 +1098,7 @@ export class ProjectFileRepository {
       || transaction.projectId !== loaded.project.projectId
       || transaction.documentId !== loaded.project.documentId
       || !workingCopy
-      || transaction.sourceRelativePath !== workingCopy.sourceRelativePath
+      || (transaction.state !== "committed" && transaction.sourceRelativePath !== workingCopy.sourceRelativePath)
       || transaction.identitySchemaVersion !== PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
       || !SHA256.test(String(transaction.expectedSourceSha256 || ""))
       || !SHA256.test(String(transaction.targetSourceSha256 || ""))
