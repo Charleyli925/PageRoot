@@ -123,18 +123,18 @@ test("inheritance copy identifies sequential, branch, initial, and active files"
   };
   assert.equal(
     versionInheritanceDescription({ ...parent, versionId: "ver_0003", ordinal: 3, basedOnVersionId: "ver_0002", previousVersionId: "ver_0002", displayFileName: "项目-V3.html" }, parent),
-    "基于 项目-V2.html 修改生成",
+    "基于 项目-V2.html 修改生成 · 最新版本",
   );
   assert.equal(
     versionInheritanceDescription({ ...parent, versionId: "ver_0004", ordinal: 4, basedOnVersionId: "ver_0002", previousVersionId: "ver_0003", displayFileName: "项目-V4.html" }, parent),
-    "基于 项目-V2.html 修改生成 · 独立分支",
+    "基于 项目-V2.html 修改生成 · 独立分支 · 最新版本",
   );
   assert.equal(
     versionInheritanceDescription({ ...parent, versionId: "ver_0001", ordinal: 1, basedOnVersionId: null, previousVersionId: null, displayFileName: "项目-V1.html" }, null),
-    "项目初始导入版本",
+    "项目初始导入版本 · 最新版本",
   );
   assert.equal(
     versionInheritanceDescription({ ...parent, isActiveWorkingCopy: true }, parent),
-    "基于 项目-V2.html 修改生成 · 当前编辑文件",
+    "基于 项目-V2.html 修改生成 · 当前编辑文件 · 最新版本",
   );
 });

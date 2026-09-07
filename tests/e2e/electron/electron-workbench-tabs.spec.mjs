@@ -411,7 +411,7 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
 });
 
 test("Electron sidebar opens an imported historical version in the existing project tab", {
-  tag: ["@gate-smoke","@smoke-project-lifecycle"],
+  tag: ["@gate-smoke","@smoke-project-lifecycle", "@smoke-version-display"],
 }, async () => {
   test.setTimeout(180_000);
   const projectA = createSourceFixture("sidebar-history-a.html");
@@ -429,6 +429,17 @@ test("Electron sidebar opens an imported historical version in the existing proj
     });
     let target = imported.target;
     for (const [ordinal, title] of [[2, "sidebar history V2"], [3, "sidebar history V3"]]) {
+      if (ordinal === 3) {
+        const continued = await repository.activateVersionWorkingCopy({
+          target, versionId: "ver_0001", operationId: "e2e_sidebar_branch_v1_0001",
+          expectedActiveWorkingCopyId: "work_ver_0002",
+        });
+        await repository.confirmVersionWorkingCopyActivation({
+          target, operationId: continued.historyActivation.operationId,
+          previousWorkingCopyId: "work_ver_0002", activatedWorkingCopyId: "work_ver_0001", versionId: "ver_0001",
+        });
+        target = continued.target;
+      }
       const candidate = await repository.createCandidate({
         target,
         requestId: `req_sidebar_history_${ordinal}`,
@@ -450,6 +461,9 @@ test("Electron sidebar opens an imported historical version in the existing proj
       version.ordinal === 1 && !version.isActiveWorkingCopy
     ));
     expect(historicalVersion).toBeTruthy();
+    const catalogRows = await launched.page.evaluate(() => window.htmlAIProjects.listRegisteredProjects());
+    expect(catalogRows.filter((row) => row.availability === "ready").every((row) => row.sourceStatus === "unknown")).toBe(true);
+
 
     await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
     const sidebar = launched.page.locator(".workbench-global-sidebar");
@@ -475,6 +489,8 @@ test("Electron sidebar opens an imported historical version in the existing proj
       window.htmlAIProjects?.getActiveProject()?.projectId || null
     ))).toBe(beforeExpansion);
 
+    await expect(importedProject.locator(".sidebar-version-index")).toHaveText(["V1", "V2", "V3"]);
+    await expect(importedProject.locator("svg.sidebar-version-rail")).toHaveCount(0);
     const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(tabs).toHaveCount(1);
     await importedProject.getByRole("button", {
@@ -492,9 +508,34 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(launched.page.locator(".preview-navigation-banner").first())
       .toContainText("正在浏览");
 
-    await currentProject
-      .locator(".sidebar-version-file").first().click();
+    const mode = launched.page.getByRole("group", { name: "工作模式", exact: true });
+    const selectedB = tabs.filter({ hasText: "sidebar-history-b" });
+    await expect(selectedB).toContainText(`${historicalVersion.displayFileName} · 历史`);
+    await expect(importedProject.locator('[data-selected="true"] .sidebar-version-file')).toContainText(historicalVersion.displayFileName);
+    await expect(mode).toHaveAttribute("data-view-label", "历史");
+    await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
+    await launched.page.screenshot({ path: test.info().outputPath("version-history-projection.png") });
+    await launched.page.getByRole("button", { name: "回到当前版本", exact: true }).click();
+    await expect(selectedB).toContainText("sidebar-history-b-V3.html");
+    await expect(selectedB).not.toContainText("历史");
+    await expect(mode).toHaveAttribute("data-view-label", "当前");
+    await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeEnabled();
+    await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-file')).toContainText("-V3.html");
+    await expect(importedProject.locator('[data-latest="true"] .sidebar-version-file')).toContainText("-V3.html");
+    await launched.page.screenshot({ path: test.info().outputPath("version-current-projection.png") });
+
+    await currentProject.locator(".sidebar-version-file").first().click();
     await expect(tabs).toHaveCount(2);
+    await expect(tabs.filter({ hasText: "sidebar-history-a" })).toHaveAttribute("aria-selected", "true");
+    await expect(mode).toHaveAttribute("data-view-label", "当前");
+    await expect(importedProject.locator(".sidebar-version-index")).toHaveText(["V1", "V2", "V3"]);
+    await expect(importedProject.locator('[data-selected="true"]')).toHaveCount(0);
+    await loadedDiskFrame(launched.page, projectA.sourcePath, "list-item");
+    const historyButton = importedProject.getByRole("button", { name: historicalVersion.displayFileName, exact: true });
+    await historyButton.focus(); await historyButton.press("Enter");
+    await expect(selectedB).toHaveAttribute("aria-selected", "true");
+    await expect(selectedB).toContainText(`${historicalVersion.displayFileName} · 历史`);
+    await expect(mode).toHaveAttribute("data-view-label", "历史");
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(projectA.sourceDirectory);
@@ -502,7 +543,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
   }
 });
 
-test("Electron sidebar keeps multiple project trees expanded without switching identity", {
+test("Electron sidebar keeps multiple project lists expanded without switching identity", {
   tag: ["@gate-smoke", "@smoke-project-lifecycle"],
 }, async () => {
   test.setTimeout(180_000);
@@ -601,17 +642,11 @@ test("Electron sidebar keeps multiple project trees expanded without switching i
       .evaluate((tree) => ({
         fileIcons: tree.querySelectorAll(".sidebar-version-file > svg").length,
         currentLabels: tree.querySelectorAll(".sidebar-version-current-label").length,
-        paths: [...tree.querySelectorAll(".sidebar-version-rail-path")]
-          .map((element) => getComputedStyle(element).strokeWidth),
-        nodes: [...tree.querySelectorAll(
-          ".sidebar-version-node:not(.sidebar-version-node-center)",
-        )].map((element) => element.getAttribute("r")),
+        ordinals: [...tree.querySelectorAll(".sidebar-version-index")].map((element) => element.textContent),
       }));
     expect(versionVisualFacts.fileIcons).toBe(0);
     expect(versionVisualFacts.currentLabels).toBe(0);
-    expect(new Set(versionVisualFacts.paths), JSON.stringify(versionVisualFacts))
-      .toEqual(new Set(["1.25px"]));
-    expect(new Set(versionVisualFacts.nodes)).toEqual(new Set(["3.5"]));
+    expect(versionVisualFacts.ordinals).toEqual(["V1", "V2", "V3"]);
 
     const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await projectCContainer.locator(".sidebar-version-file").first().click();

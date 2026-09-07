@@ -138,7 +138,7 @@ test("sidebar controls share inset and tab chrome is vertically centered without
   assert.match(css, /\.workbench-resizer\s*\{[\s\S]*?width:\s*18px/u);
 });
 
-test("project trees use compact unweighted rows and a uniform quiet lineage", async () => {
+test("project version lists retain compact unweighted rows", async () => {
   const css = await readWorkbenchCascadeCss();
 
   const projectRow = lastCssRule(css, ".sidebar-project-row");
@@ -149,12 +149,6 @@ test("project trees use compact unweighted rows and a uniform quiet lineage", as
   assert.doesNotMatch(css, /sidebar-project-row-current|sidebar-project-pending/u);
   assert.match(css, /\.sidebar-project-row > \.sidebar-project-icon\s*\{[\s\S]*?width:\s*16px[\s\S]*?height:\s*16px/u);
 
-  const lineage = lastCssRule(css, ".sidebar-version-rail-path");
-  assert.match(lineage, /stroke-width:\s*1\.25/u);
-  assert.doesNotMatch(css, /\.sidebar-version-rail-path\[data-current=/u);
-  const node = lastCssRule(css, ".sidebar-version-node");
-  assert.match(node, /stroke-width:\s*1\.25/u);
-  assert.match(css, /\.sidebar-version-node\[data-selected="true"\]/u);
   const versionRow = lastCssRule(css, ".sidebar-version-row");
   assert.match(versionRow, /grid-template-columns:\s*var\(--sidebar-row-icon-column\) minmax\(0, 1fr\) 68px/u);
   assert.match(versionRow, /padding:\s*0/u);

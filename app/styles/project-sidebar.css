@@ -6,11 +6,6 @@
   --sidebar-content-right-inset: 12px;
   --sidebar-row-icon-column: 18px;
   --sidebar-row-gap: 8px;
-  --sidebar-version-lane-0: #7169e7;
-  --sidebar-version-lane-1: #918bef;
-  --sidebar-version-lane-2: #aaa5f3;
-  --sidebar-version-lane-3: #bbb7f5;
-  --sidebar-version-current-rail: #5147dc;
 }
 
 .sidebar-project-section {
@@ -170,36 +165,10 @@
   margin: 1px 0 0;
 }
 
-.sidebar-version-rail {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 0;
-  display: block;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.sidebar-version-rail-path {
-  fill: none;
-  stroke-width: 1.25;
-  stroke-linecap: round;
-  stroke-linejoin: miter;
-  opacity: .92;
-}
-
-.sidebar-version-node {
-  fill: #f8f7f8;
-  stroke-width: 1.25;
-}
-
-.sidebar-version-node[data-selected="true"] {
-  fill: #f8f7f8;
-  stroke: var(--sidebar-version-current-rail);
-}
-
-.sidebar-version-node-center {
-  pointer-events: none;
+.sidebar-version-index {
+  font-size: 10px;
+  color: #6f6b79;
+  text-align: center;
 }
 
 .sidebar-version-rows {
@@ -245,10 +214,6 @@
   overflow: hidden;
   color: #4b475d;
   font-size: 12px;
-}
-
-.sidebar-version-row:not([data-working-copy-path="true"]) .sidebar-version-file {
-  color: #6f6b79;
 }
 
 .sidebar-version-file:hover,
@@ -345,16 +310,6 @@
 .sidebar-version-tree-skeleton {
   position: relative;
   padding: 0;
-}
-
-.sidebar-skeleton-rail {
-  position: absolute;
-  top: 17px;
-  bottom: 17px;
-  left: 9px;
-  width: 1.25px;
-  border-radius: 1.25px;
-  background: #d9d6fb;
 }
 
 .sidebar-version-skeleton-row {

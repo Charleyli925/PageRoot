@@ -474,3 +474,11 @@ means metadata is available; `sourceStatus: unknown` means file content still ne
 checking. Real open/save/restore retains full identity and content validation.
 Startup recovery is unchanged. A discovered folder name is only a display hint
 until an authorized file operation revalidates and records it.
+
+### Shared workbench display projection
+
+`workbench-header-projection.ts` is the pure display projection for the active
+Session, selected navigation tab and existing safety conditions. The tab bar,
+sidebar selection and toolbar consume this result. It owns no mutable state;
+region subscriptions remain separate. Version rows sort by ordinal, retaining
+lineage only as detail. Current editing and latest remain independent identities.

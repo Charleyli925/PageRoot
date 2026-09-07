@@ -232,7 +232,7 @@ import { useRuntimeBridgeConnectionReady } from "./workbench/runtime-bridge-conn
 import { WorkbenchTabBarContainer } from "./workbench/workbench-navigation-container";
 import { WorkbenchResizer } from "./workbench/workbench-resizer";
 import { createWorkbenchModeHandlers } from "./workbench/workbench-mode-handlers";
-import { deriveWorkbenchHeaderCapabilities } from "./workbench/workbench-header-projection";
+import { deriveWorkbenchPresentation } from "./workbench/workbench-header-projection";
 import {
   activeRunOperationKey,
   fileStem,
@@ -5652,20 +5652,24 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && window.htmlAIProjects?.openInDefaultBrowser,
   );
-  const {
-    reviewAvailable,
-    canShowInFinder,
-    canOpenCurrentHtml,
-    canExportCurrentHtml,
-    canReloadCurrentSource,
-  } = deriveWorkbenchHeaderCapabilities(
-    activeRun?.status, Boolean(activeRun?.readyPayload), Boolean(readyReviewSession),
-    reviewPreparing, canShowCurrentFileInFolder,
-    canOpenCurrentHtmlInDefaultBrowser, persistState, editRevision, lastPersistedRevision,
-    Boolean(workspaceController), projectHydrating, Boolean(projectLoadError),
-    viewTransitioning, sourcePath, viewMode, runInProgress, Boolean(workspaceIssue),
-    Boolean(externalSourcePreview), Boolean(workspaceController?.hasDocumentHistoryAction),
-  );
+  const hasDocumentHistoryAction = Boolean(workspaceController?.hasDocumentHistoryAction);
+  const presentation = useMemo(() => deriveWorkbenchPresentation({
+    project: { projectId, documentId, sourcePath }, version: versionSnapshot,
+    activeTab: activeWorkbenchTab || null, canvasMode,
+    reviewActive: Boolean(readyReviewSession), activeRunStatus: activeRun?.status,
+    hasReadyPayload: Boolean(activeRun?.readyPayload), hasReadyReviewSession: Boolean(readyReviewSession),
+    reviewPreparing, canShowCurrentFileInFolder, canOpenCurrentHtmlInDefaultBrowser,
+    persistState, editRevision, lastPersistedRevision, hasWorkspaceController: Boolean(workspaceController),
+    projectHydrating, projectLoadError: Boolean(projectLoadError), viewTransitioning,
+    runInProgress, workspaceIssue: Boolean(workspaceIssue), externalSourcePreview: Boolean(externalSourcePreview),
+    hasDocumentHistoryAction, interactionLocked,
+  }), [projectId, documentId, sourcePath, versionSnapshot, activeWorkbenchTab, canvasMode,
+    activeRun?.status, activeRun?.readyPayload, readyReviewSession,
+    reviewPreparing, canShowCurrentFileInFolder, canOpenCurrentHtmlInDefaultBrowser,
+    persistState, editRevision, lastPersistedRevision, workspaceController, projectHydrating,
+    projectLoadError, viewTransitioning, runInProgress, workspaceIssue, externalSourcePreview, interactionLocked, hasDocumentHistoryAction]);
+  const { reviewAvailable, canShowInFinder, canOpenCurrentHtml,
+    canExportCurrentHtml, canReloadCurrentSource } = presentation;
   const pendingRunOutcome = Boolean(
     activeRun?.requestId === "pending" && projectLocked,
   );
@@ -6138,6 +6142,7 @@ export default function Workbench() {
       >
       {navigationCapability ? <WorkbenchTabBarContainer
         capability={navigationCapability}
+        presentation={presentation}
         sidebarOpen={globalSidebarOpen}
         onToggleSidebar={() => {
           setGlobalSidebarOpen(true);
@@ -6150,20 +6155,9 @@ export default function Workbench() {
       {!startPageActive && !settingsPageActive && !projectRulesPageActive ? <>
         <WorkbenchHeaderView
           runInProgress={runInProgress}
-          canvasMode={canvasMode}
-          viewMode={viewMode}
-          interactionLocked={interactionLocked}
+          presentation={presentation}
           recentRunOutcome={recentRunOutcome}
           terminalRun={terminalRun}
-          reviewActive={Boolean(readyReviewOverlay)}
-          reviewAvailable={reviewAvailable}
-          reviewPreparing={reviewPreparing}
-          refreshAvailable={Boolean(
-            (canvasMode === "preview" || readyReviewOverlay)
-            && !projectHydrating
-            && !projectLoadError
-            && !viewTransitioning,
-          )}
           aiConversationVisible={aiConversation.visible}
           aiAssistantEntry={aiAssistantEntry}
           moreMenu={{
@@ -6334,11 +6328,11 @@ export default function Workbench() {
             revealAiConversation();
           }}
         />
-      ) : viewMode === "history" ? (
+      ) : presentation.isHistory ? (
         <PreviewNavigationBanner
           key={`history-${viewingVersionId || "unknown"}`}
           icon={<ClockCounterClockwiseIcon aria-hidden="true" size={18} weight="duotone" />}
-          title={<>正在浏览 {viewingVersion?.label || viewingVersionId}</>}
+          title={<>正在浏览 {presentation.displayedVersion?.label || "历史版本"}</>}
           detail={viewingVersion
             ? `只读 HTML 与 ${viewingVersion.comments.length} 条历史评论已在画布中展开`
             : "画布来自精确不可变版本文件"}
@@ -6372,9 +6366,7 @@ export default function Workbench() {
         currentProjectName={currentProjectDisplayName}
         currentProjectDocumentId={documentId || null}
         currentProjectSourcePath={sourcePath || null}
-        activeVersionId={activeWorkbenchTab?.kind === "document"
-          ? viewMode === "history" ? viewingVersionId : currentBasedOnVersionId
-          : null}
+        activeVersionId={presentation.selectedVersionId}
         projectRulesActive={projectRulesPageActive}
         onToggle={() => {
           setGlobalSidebarOpen((open) => !open);
