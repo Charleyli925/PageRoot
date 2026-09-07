@@ -61,3 +61,7 @@ processes, then verifies unchanged bytes, repaired observations and an edit/save
 Electron also forces both HTML and project-folder renames between classification
 and read, verifies persisted locators and subsequent watcher notifications, and
 fails deterministically when that Desktop rebase is removed.
+
+A watcher reconciliation rejected by a stale pre-save Hash rechecks the current registered path before reporting it missing. A restored regular file enters ordinary content observation without fencing the Canvas; actual absence and symbolic links retain the relocation/recovery path. The Electron regression restores the path immediately before a controlled reconcile rejection and verifies the same editing Document can continue saving.
+
+Initial external and welcome imports retain the verified Working Copy open target in the desktop active locator before file watching starts. Otherwise a newly imported project would bypass the managed recovery path during its first save publication.

@@ -444,8 +444,14 @@ async function recoverWatchedManagedSource(info) {
         });
         sourceMissing = !sameManagedPath(reconciled.sourcePath, activePath);
       } catch {
-        // Renderer still receives the original hint and uses the existing
-        // fail-closed conflict / reselect path.
+        // A queued reconcile may reject the pre-save Hash after publication
+        // has already restored this path. Report the current presence so a
+        // save echo cannot fence and rebuild an active native-edit session.
+        // Present files still go through the renderer's content observation.
+        sourceMissing = await lstat(activePath).then(
+          (information) => !information.isFile() || information.isSymbolicLink(),
+          () => true,
+        );
       }
       // A recovered same-path publication is a save echo, not a relocation.
       // Keep the old path only for a real Finder rename so the renderer can
@@ -999,13 +1005,17 @@ async function rememberAndBindImportedAssetSource({
   await restoreActiveImportedAssetSource(projectSourcePath);
 }
 
-async function activateProject(filePath) {
+async function activateProject(filePath, { managedLocator = null } = {}) {
   const normalizedPath = await existingPathIdentity(assertHtmlPath(filePath));
   const state = await loadProjectState();
   const currentIdentity = state.activePath
     ? await existingPathIdentity(state.activePath).catch(() => null)
     : null;
   if (currentIdentity === normalizedPath) {
+    if (managedLocator) {
+      state.activeManagedLocator = normalizeActiveManagedLocator(managedLocator);
+      await persistProjectState();
+    }
     await restoreActiveImportedAssetSource(normalizedPath);
     sourceFileWatcher.watch(normalizedPath);
     return;
@@ -1016,7 +1026,7 @@ async function activateProject(filePath) {
   const now = Date.now();
   state.activePath = normalizedPath;
   state.lastManagedActivation = null;
-  state.activeManagedLocator = null;
+  state.activeManagedLocator = normalizeActiveManagedLocator(managedLocator);
   state.recent = [
     {
       path: normalizedPath,
@@ -1531,6 +1541,9 @@ async function ensureBridgeProjectRegistered(project) {
       nextSourcePath: workspaceSourceIdentity,
       project: importedProject,
       importedAssetSourcePath: projectSourceIdentity,
+      managedLocator: activeManagedLocatorForActivatedPath(
+        workspace.openTarget, workspaceSourceIdentity, importedProject.sha256,
+      ),
     });
     managedWelcomeRegistration = `${workspaceSourceIdentity}\0${importedProject.sha256}`;
     return projectWithIdentity(importedProject, workspace);
@@ -1709,11 +1722,20 @@ async function importExternalViaBridge(sourcePath, expectedSourceSha256) {
     existingPathIdentity(sourcePath),
     existingPathIdentity(importedProject.sourcePath),
   ]);
+  const managedLocator = activeManagedLocatorForActivatedPath(
+    workspace.openTarget, importedIdentity, importedProject.sha256,
+  );
+  if (!managedLocator
+    || managedLocator.projectId !== workspace.projectId
+    || managedLocator.documentId !== workspace.documentId
+    || !sameManagedPath(workspace.openTarget.exactSourcePath, importedIdentity)) {
+    throw new ProjectFileError("EXTERNAL_IMPORT_FAILED", "导入后的工作文件定位不完整。");
+  }
   await rememberAndBindImportedAssetSource({
     originalPath: originalIdentity,
     projectSourcePath: importedIdentity,
   });
-  await activateProject(importedProject.sourcePath);
+  await activateProject(importedProject.sourcePath, { managedLocator });
   return {
     project: projectWithIdentity(importedProject, workspace),
     imported: workspace.imported === true,

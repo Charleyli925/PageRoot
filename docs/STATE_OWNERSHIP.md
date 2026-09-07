@@ -446,3 +446,5 @@ state and no new drain participant: restoration publishes a missing registered
 file synchronously before returning; save remains in DocumentWorkflow's drain.
 Catalog source status is a disposable projection, with per-project failure
 isolation. The live authority rules are in `SECURITY_MODEL.md`.
+
+Ready-result notifications: Workbench clears the preceding run notice only on the transition into `ready-to-open`. Repeated status observations preserve a later user-triggered Review outcome until its normal dismissal; polling does not own that notice lifetime.

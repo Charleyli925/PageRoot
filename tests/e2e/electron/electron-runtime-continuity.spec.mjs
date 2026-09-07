@@ -157,6 +157,52 @@ const CHART_PAGE = `<!doctype html>
   </script>
 </body></html>`;
 
+test("a restored save publication is not reported as a missing source after stale-hash reconcile", async () => {
+  await withRuntimeProject("pageroot-continuity-publication-e2e-", {
+    "runtime-report.html": STATIC_PAGE,
+  }, async ({ page, electronApp, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "continuity-static");
+    const { target } = await enterNativeEdit(page, frame, "continuity-static");
+    const beforeDocument = await documentToken(page);
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    await page.evaluate(() => {
+      window.__publicationWatchHints = [];
+      window.htmlAIProjects.onSourceFileChanged((hint) => window.__publicationWatchHints.push(hint));
+    });
+    await electronApp.evaluate(async ({ net }, source) => {
+      const { rename } = process.getBuiltinModule("fs/promises");
+      const path = process.getBuiltinModule("path");
+      const parked = path.join(path.dirname(source), ".pageroot", "publication-race.html");
+      const originalFetch = net.fetch.bind(net);
+      let pending = true;
+      net.fetch = async (...args) => {
+        if (pending && new URL(String(args[0])).pathname === "/managed-working-copy/reconcile") {
+          pending = false;
+          // The queued Repository reply can reject the locator's old Hash
+          // after the current save has already restored the visible path.
+          await rename(parked, source);
+          net.fetch = originalFetch;
+          return new Response(JSON.stringify({ error: {
+            code: "WORKING_COPY_CONFLICT", message: "stale pre-save hash",
+          } }), { status: 409, headers: { "Content-Type": "application/json" } });
+        }
+        return originalFetch(...args);
+      };
+      await rename(source, parked);
+    }, workingCopyPath);
+    await expect.poll(() => page.evaluate(() => window.__publicationWatchHints.length))
+      .toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.__publicationWatchHints.every((hint) => hint.sourceMissing === false)))
+      .toBe(true);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(target).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
+    await target.press("End");
+    await page.keyboard.insertText("PUBLICATION_RECOVERED");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("PUBLICATION_RECOVERED");
+  });
+});
+
 test("continuous editing keeps the Runtime document through type, Enter, style and save", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {

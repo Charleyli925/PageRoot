@@ -2954,6 +2954,17 @@ test("CSS and Script comment-only changes stay out of Review", {
       .toContainText("这次没有产生有效变化", { timeout: 30_000 });
     await expect(launched.page.locator(".toast"))
       .toContainText("没有找到能够定位到页面具体位置的内容、结构或视觉变化");
+    // A repeated ready response must not erase the user's Review outcome.
+    // Hover pauses the ordinary notice lifetime while the real poll completes.
+    await launched.page.locator(".toast").hover();
+    await launched.page.bringToFront();
+    const response = await launched.page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/status",
+      { timeout: 30_000 },
+    );
+    expect((await response.json()).status).toBe("ready-to-open");
+    await expect(launched.page.locator(".toast"))
+      .toContainText("这次没有产生有效变化");
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

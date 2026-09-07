@@ -1640,7 +1640,8 @@ export default function Workbench() {
             // "结果 · 等待决定" and its action bar carries the decision. Only the
             // Exceptional states stay in the same conversation when it is open;
             // background projects must never navigate the visible project.
-            if (state === "ready-to-open") {
+            // Repeated ready polls must not erase a later Review outcome.
+            if (state === "ready-to-open" && runEvent.previousState !== state) {
               setInterruption(null);
             }
             if (state === "error" && run) {
