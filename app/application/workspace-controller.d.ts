@@ -197,6 +197,8 @@ export type WorkspaceControllerCodecs = Readonly<{
   authoritativeDraftRevision(draft: Record<string, unknown>): number;
   recoveryIdentityFromRecord(value: unknown): unknown;
   versionsFromWorkspace(payload: Record<string, unknown>): unknown[];
+  commentsFromRecords(value: unknown): unknown[];
+  changesFromDraftRecords(value: unknown): unknown[];
   rebindTargetsPreservingGlobal(
     html: string,
     targets: unknown[],

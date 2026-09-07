@@ -24,6 +24,13 @@ export class VersionSession {
   }
 
   #emit(next) {
+    const ids = new Set();
+    for (const version of next.versions || []) {
+      if (typeof version?.id !== "string" || !version.id.trim() || ids.has(version.id)) {
+        throw new TypeError("VersionSession requires unique decoded Version IDs.");
+      }
+      ids.add(version.id);
+    }
     this.#snapshot = Object.freeze({
       ...next,
       versions: Object.freeze([...(next.versions || [])]),

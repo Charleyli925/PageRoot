@@ -22,7 +22,7 @@ import { ConversationSession } from "./conversation-session.js";
 import { ConversationWorkflow } from "./conversation-workflow.js";
 import { VersionSession } from "./version-session.js";
 import { VersionWorkflow } from "./version-workflow.js";
-import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
+import { createWorkspaceControllerCodecs, decodeWorkspaceResponse } from "./workspace-controller-codecs.js";
 import {
   WorkbenchTabsSession,
 } from "./workbench-tabs-session.js";
@@ -2430,7 +2430,7 @@ export class WorkspaceController {
           "项目记录的身份与当前页面不一致，已停止恢复评论会话。",
         );
       }
-      const authoritativeDraft = this.#codecs.draftAuthorityFromWorkspace(payload);
+      const authoritativeDraft = decodeWorkspaceResponse(payload, this.#codecs).draft;
       this.#draftSession.replaceAuthority(
         existingContext,
         this.#codecs.authoritativeDraftRevision(authoritativeDraft),
@@ -2466,6 +2466,12 @@ export class WorkspaceController {
         );
       }
       if (!this.#isCurrentLocator(identity)) return stale(identity);
+      let decodedWorkspace;
+      try {
+        decodedWorkspace = decodeWorkspaceResponse(payload, this.#codecs);
+      } catch (cause) {
+        return unknown(this.#registration.operationId, cause.message || "项目操作结果待确认。");
+      }
 
       const nextProjectId = String(payload.projectId || "");
       const nextDocumentId = String(payload.documentId || "");
@@ -2633,7 +2639,7 @@ export class WorkspaceController {
         });
       }
       this.#versionSession.hydrate({
-        versions: this.#codecs.versionsFromWorkspace(payload),
+        versions: decodedWorkspace.versions,
         latestVersionId: payload.latestVersionId,
         currentBasedOnVersionId: payload.currentBasedOnVersionId,
         currentExactVersionId: payload.currentExactVersionId,
@@ -2677,7 +2683,7 @@ export class WorkspaceController {
           );
         }
       }
-      const authoritativeDraft = this.#codecs.draftAuthorityFromWorkspace(payload);
+      const authoritativeDraft = decodedWorkspace.draft;
       this.#draftSession.replaceAuthority(
         registeredContext,
         this.#codecs.authoritativeDraftRevision(authoritativeDraft),

@@ -78,6 +78,8 @@ function isRecord(value) {
 }
 
 const codecs = {
+  commentsFromRecords: (value) => Array.isArray(value) ? value : [],
+  changesFromDraftRecords: (value) => Array.isArray(value) ? value : [],
   isRecord,
   sameSourcePath: (left, right) => Boolean(left && right && left === right),
   draftAuthorityFromWorkspace: (payload) => (

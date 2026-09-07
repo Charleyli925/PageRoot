@@ -10,6 +10,14 @@ import { RunSession } from "../app/application/run-session.js";
 import { VersionSession } from "../app/application/version-session.js";
 import { VersionWorkflow } from "../app/application/version-workflow.js";
 
+import { loadWorkbenchModel } from "./helpers/workbench-model-loader.mjs";
+const { versionsFromWorkspace, changesFromDraftRecords } = await loadWorkbenchModel("version-model");
+const { commentsFromRecords } = await loadWorkbenchModel("comment-model");
+const { draftAuthorityFromWorkspace } = await loadWorkbenchModel("record-model");
+function decodedVersions(versions) {
+  return versionsFromWorkspace({ versions, projectId: "project_a", documentId: "document_a" });
+}
+
 const SOURCE_A = "/tmp/version-workflow-a.html";
 const SOURCE_B = "/tmp/version-workflow-b.html";
 const BASE_HTML = "<!doctype html><html><body><p>base</p></body></html>";
@@ -38,8 +46,10 @@ function versionRecord({
   documentId = "document_a",
 } = {}) {
   return {
-    id,
+    schemaVersion: "4.0.0",
     versionId: id,
+    ordinal: Number(id.slice(4)),
+    sourceType: id === "ver_0001" ? "initial" : "internal-ai",
     projectId,
     documentId,
     contentSha256: sha256(content),
@@ -63,7 +73,7 @@ function readyRun(overrides = {}) {
     previousVersionId: "ver_0001",
     basedOnVersionId: "ver_0001",
     freezeCutoffRevision: 0,
-    candidateVersionId: version.id,
+    candidateVersionId: version.versionId,
     candidateVersionLabel: "版本 2",
     submittedAt: "2026-08-12T00:00:00.000Z",
     completionObserved: true,
@@ -72,7 +82,7 @@ function readyRun(overrides = {}) {
       documentId: "document_a",
       requestId: "req_0001",
       attemptId: "attempt_001",
-      versionId: version.id,
+      versionId: version.versionId,
       contentSha256: version.contentSha256,
       candidateDisplayVersionLabel: "版本 2",
       version,
@@ -92,7 +102,7 @@ function readyRun(overrides = {}) {
         documentId: "document_a",
         requestId: "req_0001",
         attemptId: "attempt_001",
-        versionId: version.id,
+        versionId: version.versionId,
         contentSha256: version.contentSha256,
         generatedAt: version.generatedAt,
       },
@@ -136,7 +146,7 @@ function createHarness({
   });
   const versionSession = new VersionSession();
   versionSession.hydrate({
-    versions: [versionRecord({ id: "ver_0001", content: BASE_HTML })],
+    versions: decodedVersions([versionRecord({ id: "ver_0001", content: BASE_HTML })]),
     latestVersionId: "ver_0001",
     currentBasedOnVersionId: "ver_0001",
     currentExactVersionId: "ver_0001",
@@ -394,6 +404,7 @@ function createHarness({
     documentWorkflow,
     commentWorkflow,
     codecs: {
+      versionsFromWorkspace, changesFromDraftRecords, commentsFromRecords, draftAuthorityFromWorkspace,
       isRecord: (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value),
       sameSourcePath,
       operationKey,
@@ -886,8 +897,8 @@ test("history continuation synchronously publishes the V2 Working Copy authority
   const v6 = versionRecord({ id: "ver_0006", content: CANDIDATE_HTML });
   const historyDraft = {
     draftRevision: 4,
-    comments: [{ id: "comment_v2", text: "V2 draft comment" }],
-    changeEvents: [{ id: "change_v2", type: "edit" }],
+    comments: [{ commentId: "comment_v2", text: "V2 draft comment", target: { targetId: "target_v2", selector: "body", tagName: "body", level: "module" } }],
+    changeEvents: [{ eventId: "change_v2", kind: "text", createdAt: "2026-08-14T00:00:00.000Z", target: { targetId: "target_v2", selector: "body", tagName: "body", level: "module" }, before: "old", after: "new", basedOnVersionId: "ver_0002", revision: 1 }],
     deletedCommentIds: ["comment_deleted_v2"],
     appliedOperationIds: ["operation_v2"],
   };
@@ -940,14 +951,14 @@ test("history continuation synchronously publishes the V2 Working Copy authority
     }),
   });
   harness.versionSession.hydrate({
-    versions: [v2, v6],
+    versions: decodedVersions([v2, v6]),
     latestVersionId: "ver_0006",
     currentBasedOnVersionId: "ver_0006",
     currentExactVersionId: "ver_0006",
   });
 
   const viewed = await harness.workflow.viewHistory({
-    version: v2,
+    version: decodedVersions([v2])[0],
     context: harness.context,
   });
   assert.equal(viewed.status, "succeeded");
@@ -967,8 +978,8 @@ test("history continuation synchronously publishes the V2 Working Copy authority
   assert.equal(harness.versionSession.snapshot.currentBasedOnVersionId, "ver_0002");
   assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0002");
   assert.equal(harness.versionSession.snapshot.latestVersionId, "ver_0006");
-  assert.deepEqual(harness.commentSession.snapshot.comments, historyDraft.comments);
-  assert.deepEqual(harness.commentSession.snapshot.changeEvents, historyDraft.changeEvents);
+  assert.deepEqual(harness.commentSession.snapshot.comments, commentsFromRecords(historyDraft.comments));
+  assert.deepEqual(harness.commentSession.snapshot.changeEvents, changesFromDraftRecords(historyDraft.changeEvents));
   assert.deepEqual(
     harness.commentSession.snapshot.deletedCommentIds,
     historyDraft.deletedCommentIds,
@@ -1050,12 +1061,12 @@ test("history continuation retries one lost Bridge response with the same receip
     },
   });
   harness.versionSession.hydrate({
-    versions: [v2, v6],
+    versions: decodedVersions([v2, v6]),
     latestVersionId: "ver_0006",
     currentBasedOnVersionId: "ver_0006",
     currentExactVersionId: "ver_0006",
   });
-  assert.equal((await harness.workflow.viewHistory({ version: v2, context: harness.context })).status, "succeeded");
+  assert.equal((await harness.workflow.viewHistory({ version: decodedVersions([v2])[0], context: harness.context })).status, "succeeded");
 
   const outcome = await harness.workflow.continueEditingHistoryVersion({
     context: harness.projectSession.context,
@@ -1132,10 +1143,10 @@ test("history continuation keeps the V2 Working Copy active when Canvas validati
     },
   });
   harness.versionSession.hydrate({
-    versions: [
+    versions: decodedVersions([
       versionRecord({ id: "ver_0002", content: HISTORY_HTML }),
       versionRecord({ id: "ver_0006", content: CANDIDATE_HTML }),
-    ],
+    ]),
     latestVersionId: "ver_0006",
     currentBasedOnVersionId: "ver_0006",
     currentExactVersionId: "ver_0006",
@@ -1189,4 +1200,21 @@ test("return-current rereads canonical source and restores current Version autho
   assert.equal(harness.versionSession.snapshot.viewMode, "current");
   assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0002");
   assert.equal(harness.calls.render.at(-1)?.html, CANDIDATE_HTML);
+});
+
+test("malformed committed history response remains unknown and preserves Session authority", async () => {
+  const harness = createHarness({ continueHistory: async () => ({
+    ok: true, status: "history-working-copy-activated", projectId: "project_a", documentId: "document_a",
+    versions: [versionRecord({ id: "ver_0001" }), versionRecord({ id: "ver_0001" })],
+  }) });
+  harness.versionSession.enterHistory("ver_0001");
+  const previous = harness.versionSession.snapshot;
+  const project = harness.projectSession.context;
+  const html = harness.documentSession.html;
+  const outcome = await harness.workflow.continueEditingHistoryVersion({ context: project });
+  assert.equal(outcome.status, "unknown");
+  assert.equal(harness.versionSession.snapshot, previous);
+  assert.equal(harness.projectSession.context.sourcePath, project.sourcePath);
+  assert.equal(harness.documentSession.html, html);
+  assert.equal(harness.calls.confirmHistory.length, 0);
 });

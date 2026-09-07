@@ -139,48 +139,69 @@ export function supplementsFromRecords(raw: unknown): UserSupplementRecord[] {
 export function versionsFromWorkspace(
   payload: Record<string, unknown>,
 ): Version[] {
-  if (!Array.isArray(payload.versions)) return [];
-  return payload.versions.flatMap<Version>((raw) => {
-    if (!isRecord(raw)) return [];
-    if (raw.schemaVersion === "4.0.0") {
-      const id = String(raw.versionId || "");
-      const ordinal = Number(raw.ordinal);
-      if (!id || !Number.isSafeInteger(ordinal) || ordinal < 1) return [];
-      const sourceType = String(raw.sourceType || "");
-      if (sourceType !== "initial" && sourceType !== "internal-ai") return [];
-      return [{
-        id,
-        ordinal,
-        label: displayVersionLabel(ordinal),
-        summary: String(raw.summary || (sourceType === "initial" ? "初始登记基线" : "已采纳的 AI Candidate")),
-        generatedAt: String(raw.generatedAt || raw.createdAt || ""),
-        source: (
-          sourceType === "internal-ai" ? "内部 AI" : "初始页面"
-        ) as Version["source"],
-        requirement: raw.requirement ? String(raw.requirement) : null,
-        contentSha256: String(raw.contentSha256 || ""),
-        previousVersionId: raw.previousVersionId ? String(raw.previousVersionId) : null,
-        basedOnVersionId: raw.basedOnVersionId ? String(raw.basedOnVersionId) : null,
-        requestId: raw.requestId ? String(raw.requestId) : null,
-        attemptId: raw.attemptId ? String(raw.attemptId) : null,
-        committed: true,
-        comments: [],
-        directEdits: [],
-        supplements: [],
-        validationReview: null,
-        candidateAssessment: null,
-        workingCopyId: raw.workingCopyId ? String(raw.workingCopyId) : null,
-        displayFileName: raw.displayFileName ? String(raw.displayFileName) : undefined,
-        modifiedAt: raw.modifiedAt ? String(raw.modifiedAt) : undefined,
-        isActiveWorkingCopy: raw.isActiveWorkingCopy === true,
-        isLatestOfficial: raw.isLatestOfficial === true,
-        differsFromBase: raw.differsFromBase === true,
-        saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
-          ? String(raw.saveState) as Version["saveState"]
-          : null,
-      }];
+  if (!Array.isArray(payload.versions)) throw new TypeError("工作区缺少版本列表。");
+  if (payload.versions.length && (!payload.projectId || !payload.documentId)) {
+    throw new TypeError("工作区缺少项目或文档身份。");
+  }
+  const ids = new Set<string>();
+  const ordinals = new Set<number>();
+  for (const raw of payload.versions) {
+    if (!isRecord(raw) || raw.schemaVersion !== "4.0.0"
+      || typeof raw.versionId !== "string" || !raw.versionId.trim()
+      || !Number.isSafeInteger(raw.ordinal) || Number(raw.ordinal) < 1
+      || ids.has(raw.versionId) || ordinals.has(Number(raw.ordinal))
+      || (raw.projectId !== undefined && raw.projectId !== payload.projectId)
+      || (raw.documentId !== undefined && raw.documentId !== payload.documentId)
+      || !["initial", "internal-ai"].includes(String(raw.sourceType))) {
+      throw new TypeError("工作区版本身份或序号无效，已保留原会话。");
     }
-    return [];
+    ids.add(raw.versionId);
+    ordinals.add(Number(raw.ordinal));
+  }
+  if (isRecord(payload.project) && (
+    (payload.project.projectId !== undefined && payload.project.projectId !== payload.projectId)
+    || (payload.project.documentId !== undefined && payload.project.documentId !== payload.documentId)
+  )) throw new TypeError("工作区所属项目不一致。");
+  for (const key of ["latestVersionId", "currentBasedOnVersionId", "currentExactVersionId"]) {
+    if (payload[key] != null && !ids.has(String(payload[key]))) {
+      throw new TypeError(`工作区 ${key} 无法解析。`);
+    }
+  }
+  return payload.versions.map<Version>((raw) => {
+    const id = String(raw.versionId || "");
+    const ordinal = Number(raw.ordinal);
+    const sourceType = String(raw.sourceType || "");
+    return {
+      id,
+      ordinal,
+      label: displayVersionLabel(ordinal),
+      summary: String(raw.summary || (sourceType === "initial" ? "初始登记基线" : "已采纳的 AI Candidate")),
+      generatedAt: String(raw.generatedAt || raw.createdAt || ""),
+      source: (
+        sourceType === "internal-ai" ? "内部 AI" : "初始页面"
+      ) as Version["source"],
+      requirement: raw.requirement ? String(raw.requirement) : null,
+      contentSha256: String(raw.contentSha256 || ""),
+      previousVersionId: raw.previousVersionId ? String(raw.previousVersionId) : null,
+      basedOnVersionId: raw.basedOnVersionId ? String(raw.basedOnVersionId) : null,
+      requestId: raw.requestId ? String(raw.requestId) : null,
+      attemptId: raw.attemptId ? String(raw.attemptId) : null,
+      committed: true,
+      comments: [],
+      directEdits: [],
+      supplements: [],
+      validationReview: null,
+      candidateAssessment: null,
+      workingCopyId: raw.workingCopyId ? String(raw.workingCopyId) : null,
+      displayFileName: raw.displayFileName ? String(raw.displayFileName) : undefined,
+      modifiedAt: raw.modifiedAt ? String(raw.modifiedAt) : undefined,
+      isActiveWorkingCopy: payload.currentBasedOnVersionId == null ? undefined : id === payload.currentBasedOnVersionId,
+      isLatestOfficial: payload.latestVersionId == null ? undefined : id === payload.latestVersionId,
+      differsFromBase: raw.differsFromBase === true,
+      saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
+        ? String(raw.saveState) as Version["saveState"]
+        : null,
+    };
   }).sort((a, b) => b.ordinal - a.ordinal);
 }
 

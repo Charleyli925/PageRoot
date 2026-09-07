@@ -74,8 +74,8 @@ export type ProjectVersionSummary = {
   previousVersionId?: string | null;
   displayFileName: string;
   modifiedAt: string;
-  isActiveWorkingCopy: boolean;
-  isLatestOfficial: boolean;
+  isActiveWorkingCopy: boolean | null;
+  isLatestOfficial: boolean | null;
 };
 
 export type DesktopProjectsApi = {
@@ -524,8 +524,8 @@ export type Version = {
   workingCopyId?: string | null;
   displayFileName?: string;
   modifiedAt?: string;
-  isActiveWorkingCopy?: boolean;
-  isLatestOfficial?: boolean;
+  isActiveWorkingCopy?: boolean | null;
+  isLatestOfficial?: boolean | null;
   differsFromBase?: boolean;
   saveState?: "saved" | "saving" | "failed" | null;
 };

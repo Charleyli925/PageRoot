@@ -57,6 +57,10 @@ export type VersionReviewLease = Readonly<{
 }>;
 
 export type VersionWorkflowCodecs = Readonly<{
+  versionsFromWorkspace(payload: Record<string, unknown>): unknown[];
+  draftAuthorityFromWorkspace(payload: Record<string, unknown>): Record<string, unknown>;
+  commentsFromRecords(value: unknown): unknown[];
+  changesFromDraftRecords(value: unknown): unknown[];
   isRecord(value: unknown): value is Record<string, unknown>;
   sameSourcePath(left: string | null | undefined, right: string | null | undefined): boolean;
   operationKey(run: Record<string, unknown>): string;

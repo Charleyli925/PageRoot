@@ -41,8 +41,7 @@ export function projectVersionSummariesFromVersions(
   const latestVersionId = options.latestVersionId || null;
   const activeFileName = normalizedFileName(currentFileName);
   return versions.map((version) => {
-    const isActiveWorkingCopy = version.isActiveWorkingCopy === true
-      || version.id === activeVersionId;
+    const isActiveWorkingCopy = activeVersionId === null ? null : version.id === activeVersionId;
     const displayFileName = isActiveWorkingCopy
       ? activeFileName
         || normalizedFileName(version.displayFileName)
@@ -62,7 +61,7 @@ export function projectVersionSummariesFromVersions(
       displayFileName,
       modifiedAt,
       isActiveWorkingCopy,
-      isLatestOfficial: version.isLatestOfficial === true || version.id === latestVersionId,
+      isLatestOfficial: latestVersionId === null ? null : version.id === latestVersionId,
     };
   });
 }
