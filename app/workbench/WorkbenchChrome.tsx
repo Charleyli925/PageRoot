@@ -619,7 +619,7 @@ export function WorkbenchGlobalSidebar({
                         <span className="sidebar-project-rules-name">长期规则</span>
                       </button>
                     ) : null}
-                    {expanded && project.availabilityReason ? (
+                    {expanded && project.availabilityReason && !(project.availability === "ready" && project.sourceStatus === "unknown") ? (
                       <div className="sidebar-project-load-error" role="status">
                         <span>{project.availabilityReason}</span>
                         {project.canRestoreWorkingCopy ? (

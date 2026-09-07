@@ -155,6 +155,7 @@ async function waitFor(predicate, message = "condition did not settle") {
 }
 
 function createHarness({
+  getCatalogRevision,
   bridge = {},
   canvas = {},
   projectOpen = {},
@@ -403,6 +404,7 @@ function createHarness({
     },
   };
   const workflow = new ProjectWorkflow({
+    getCatalogRevision,
     bridgeClient: client,
     ensureRegistered: async () => succeeded(projectSession.context),
     projectSession,
@@ -3593,4 +3595,36 @@ test("continue-current opens the bound project without importing again", async (
   });
   assert.equal(finalized, 1);
   assert.equal(harness.projectSession.sourcePath, A_PATH);
+});
+
+
+test("catalog rereads after newer Session facts and still accepts a later removal", async (t) => {
+  let revision = 0;
+  let resolveOld;
+  let reads = 0;
+  const h = createHarness({ getCatalogRevision: () => revision, projectOpen: {
+    listRegistered: () => ++reads === 1 ? new Promise((resolve) => { resolveOld = resolve; })
+      : Promise.resolve(reads === 2 ? [{ projectId: "A" }, { projectId: "B" }] : [{ projectId: "B" }]),
+  } });
+  t.after(() => h.workflow.dispose());
+  const pending = h.workflow.refreshRegisteredProjects();
+  revision += 1; // A has been verified and published while the old B-only read waits.
+  const coalesced = h.workflow.refreshRegisteredProjects();
+  resolveOld([{ projectId: "B" }]);
+  assert.deepEqual((await pending).value.projects.map((row) => row.projectId), ["A", "B"]);
+  assert.equal((await coalesced).status, "succeeded");
+  assert.equal(reads, 2);
+  assert.equal(h.events.filter((event) => event.type === "project-catalog-loaded").length, 1);
+  assert.deepEqual((await h.workflow.refreshRegisteredProjects()).value.projects, [{ projectId: "B" }]);
+});
+
+test("catalog stops after one reread when authority keeps changing", async (t) => {
+  let revision = 0;
+  const h = createHarness({ getCatalogRevision: () => revision, projectOpen: {
+    listRegistered: async () => { revision += 1; return []; },
+  } });
+  t.after(() => h.workflow.dispose());
+  assert.equal((await h.workflow.refreshRegisteredProjects()).status, "stale");
+  assert.equal(revision, 2);
+  assert.equal(h.events.some((event) => event.type === "project-catalog-loaded"), false);
 });

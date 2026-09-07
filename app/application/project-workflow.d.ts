@@ -97,6 +97,7 @@ export type PreparedManagedSourceTransition = Readonly<{
 export type PreparedGeneratedSourceTransition = PreparedManagedSourceTransition;
 
 export type ProjectWorkflowConstruction = Readonly<{
+  getCatalogRevision?: () => number;
   bridgeClient: Pick<
     BridgeClient,
     "workspace" | "source" | "conflictCandidate"
