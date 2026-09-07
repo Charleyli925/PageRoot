@@ -252,6 +252,8 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     await waitForProjectReady(restarted, { timeout: 60_000 });
     const projects = await restarted.evaluate(() => window.htmlAIProjects.listRegisteredProjects());
     expect(projects).toHaveLength(2);
+    const expandSidebar = restarted.getByRole("button", { name: "展开左侧边栏" });
+    if (await expandSidebar.count()) await expandSidebar.click();
     await expect(restarted.locator(".sidebar-project-row[data-availability=ready]")).toHaveCount(2);
     expect(projects.every((project) => project.availability === "ready")).toBe(true);
     expect(readFileSync(liveManagedSourcePath)).toEqual(managedBeforeRestart);
