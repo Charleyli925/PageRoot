@@ -319,3 +319,40 @@ for (const [readNumber, sameBytes] of [[1, true], [1, false], [2, true]]) {
     assert.deepEqual(await readFile(renamed), bytes);
   });
 }
+
+for (const collision of ["occupied-copy", "occupied-link", "replaced-link"]) {
+  test(`restore rejects ${collision} without adopting the occupied file`, async (t) => {
+    const value = await fixture(t); const { target } = await importSource(value);
+    const bindingPath = sourceBindingPath(target.projectRootPath, target.workingCopyId);
+    const bindingBefore = await lstat(bindingPath);
+    const bytes = await readFile(target.exactSourcePath);
+    const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+    const manifestBefore = await readFile(manifestPath);
+    await rm(target.exactSourcePath);
+    const originalLink = filesystem.link;
+    let injected = false;
+    filesystem.link = async (source, destination) => {
+      if (!injected && String(source) === bindingPath && String(destination) === target.exactSourcePath) {
+        injected = true;
+        if (collision === "occupied-copy") await writeFile(destination, bytes);
+        if (collision === "occupied-link") await originalLink(source, destination);
+        if (collision === "replaced-link") {
+          await originalLink(source, destination);
+          const temporary = `${destination}.replacement`;
+          await writeFile(temporary, bytes); await rename(temporary, destination);
+          return;
+        }
+      }
+      return originalLink(source, destination);
+    };
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(value.repository.restoreRegisteredWorkingCopy({ projectId: target.projectId }),
+        { code: "WORKING_COPY_CONFLICT" });
+    } finally { filesystem.link = originalLink; syncBuiltinESMExports(); }
+    assert.equal(injected, true);
+    assert.deepEqual(await readFile(manifestPath), manifestBefore);
+    assert.equal((await lstat(bindingPath)).ino, bindingBefore.ino);
+    assert.deepEqual(await readFile(target.exactSourcePath), bytes);
+  });
+}

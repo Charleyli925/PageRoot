@@ -67,3 +67,5 @@ A watcher reconciliation rejected by a stale pre-save Hash rechecks the current 
 Initial external and welcome imports retain the verified Working Copy open target in the desktop active locator before file watching starts. Otherwise a newly imported project would bypass the managed recovery path during its first save publication.
 
 When a missing registered path is resolved through a live binding, both the returned descriptor and any subsequent binding refresh must still match that same current binding object. An intervening atomic replacement, including identical bytes, cannot acquire the renamed member path. These observations are operation-local and are never read from persisted fileIdentity.
+
+Explicit restoration requires a newly created link and revalidates the published descriptor against the original live binding through final resolution. An occupied destination is refused even when its bytes or inode match; restore never borrows save-recovery idempotence to adopt a competing publication.

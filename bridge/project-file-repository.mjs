@@ -365,9 +365,16 @@ export class ProjectFileRepository {
       const state = await readJsonFile(workingCopyStatePath(loaded.paths, member), "Working Copy state", { projectRootPath: loaded.paths.projectRootPath });
       assertWorkingCopyState(state, loaded, member);
       const source = await readHtmlFile(binding.bindingPath, "Working Copy binding", { projectRootPath: loaded.paths.projectRootPath });
-      if (source.sha256 !== state.currentSha256) throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "绑定内容已变化，未恢复工作文件。");
-      await linkFileNoReplace(binding.bindingPath, sourcePath, state.currentSha256, "Working Copy", { projectRootPath: loaded.paths.projectRootPath });
-      await this.#resolveWorkingCopyPath(loaded, member);
+      if (source.sha256 !== state.currentSha256 || !sameFileIdentity(
+        copyFileIdentity(binding.information), copyFileIdentity(source.information),
+      )) throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "绑定内容或对象已变化，未恢复工作文件。");
+      const publication = await linkFileNoReplace(binding.bindingPath, sourcePath, state.currentSha256, "Working Copy", { projectRootPath: loaded.paths.projectRootPath });
+      if (!publication.created || !sameFileIdentity(
+        copyFileIdentity(binding.information), copyFileIdentity(publication.information),
+      )) {
+        throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "登记位置在恢复时被占用或替换，未采用该文件。");
+      }
+      await this.#resolveWorkingCopyPath(loaded, member, "Working Copy", { expectedInformation: binding.information });
       return { restored: true };
     });
   }
@@ -5061,7 +5068,7 @@ export class ProjectFileRepository {
     return true;
   }
 
-  async #resolveWorkingCopyPath(loaded, workingCopy, label = "Working Copy", { persistLocator = true, bindingIndex = null } = {}) {
+  async #resolveWorkingCopyPath(loaded, workingCopy, label = "Working Copy", { persistLocator = true, bindingIndex = null, expectedInformation = null } = {}) {
     const projectRootPath = loaded.paths.projectRootPath;
     const state = await readJsonFile(workingCopyStatePath(loaded.paths, workingCopy), "Working Copy state", { projectRootPath });
     if (!state) throw new ProjectFileRepositoryError("WORKING_COPY_STATE_NOT_FOUND", "Working Copy state is missing.");
@@ -5082,7 +5089,7 @@ export class ProjectFileRepository {
       { workingCopyId: workingCopy.workingCopyId, canRestore: Boolean(binding) });
     }
     const source = await readHtmlFile(exactSourcePath, label, { projectRootPath });
-    const selectedBindingInformation = !mapped ? binding?.information : null;
+    const selectedBindingInformation = expectedInformation || (!mapped ? binding?.information : null);
     if (selectedBindingInformation && !sameFileIdentity(
       copyFileIdentity(selectedBindingInformation), copyFileIdentity(source.information),
     )) {
