@@ -927,14 +927,17 @@
       "patterns": [
         "^app/application/version-session\\.(?:js|d\\.ts)$",
         "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$",
-        "^shared/direct-edit-compatibility\\.mjs$"
+        "^shared/direct-edit-compatibility\\.mjs$",
+        "^tests/workspace-ingress\\.test\\.mjs$",
+        "^tests/helpers/workbench-model-loader\\.mjs$"
       ],
       "suites": [
         "typecheck"
       ],
       "nodeTests": [
         "tests/compatibility-decoders.test.mjs",
-        "tests/version-session.test.mjs"
+        "tests/version-session.test.mjs",
+        "tests/workspace-ingress.test.mjs"
       ]
     },
     {

@@ -1,3 +1,4 @@
+import { decodeWorkspaceResponse } from "./workspace-controller-codecs.js";
 import { isBridgeRequestError } from "./bridge-client.js";
 import { planVersionActivate, planVersionPrepareReview } from "./version/review-plan.js";
 
@@ -119,31 +120,7 @@ function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function draftAuthorityFromWorkspacePayload(payload) {
-  const runtime = isRecord(payload?.runtimeState) ? payload.runtimeState : {};
-  const source = isRecord(runtime.draft)
-    ? runtime.draft
-    : (isRecord(payload?.activeDraft) ? payload.activeDraft : {});
-  return Object.freeze({
-    draftRevision: Number.isSafeInteger(Number(source.draftRevision))
-      && Number(source.draftRevision) >= 0
-      ? Number(source.draftRevision)
-      : 0,
-    comments: Array.isArray(source.comments) ? source.comments : [],
-    changeEvents: Array.isArray(source.changeEvents) ? source.changeEvents : [],
-    deletedCommentIds: Array.isArray(source.deletedCommentIds)
-      ? source.deletedCommentIds
-      : [],
-    appliedOperationIds: Array.isArray(source.appliedOperationIds)
-      ? source.appliedOperationIds
-      : [],
-  });
-}
 
-// VersionWorkflow is the PR-6 application boundary. It owns only operation
-// identity, Bridge reads/mutations and cross-Session publication sequencing.
-// VersionSession remains the immutable Version projection, and Workbench keeps
-// review layout, animation and all other presentation state.
 export class VersionWorkflow {
   #bridgeClient;
   #projectSession;
@@ -257,6 +234,10 @@ export class VersionWorkflow {
       "sameSourcePath",
       "operationKey",
       "errorMessage",
+      "versionsFromWorkspace",
+      "draftAuthorityFromWorkspace",
+      "commentsFromRecords",
+      "changesFromDraftRecords",
     ]) {
       if (typeof codecs?.[method] !== "function") {
         throw new TypeError(`VersionWorkflow codec ${method} is required.`);
@@ -853,8 +834,8 @@ export class VersionWorkflow {
             resumed.draft,
           );
           this.#commentSession.update({
-            comments: resumed.draft.comments,
-            changeEvents: resumed.draft.changeEvents,
+            comments: resumed.comments,
+            changeEvents: resumed.changeEvents,
             deletedCommentIds: resumed.draft.deletedCommentIds,
             composerDraft: "",
             composerCommentId: null,
@@ -1261,7 +1242,8 @@ export class VersionWorkflow {
     );
     const content = String(payload?.content || "");
     const latestVersionId = String(payload?.latestVersionId || "");
-    const versions = Array.isArray(payload?.versions) ? payload.versions : null;
+    const decodedWorkspace = decodeWorkspaceResponse(payload, this.#codecs);
+    const versions = decodedWorkspace.versions;
     const historyActivation = isRecord(payload?.historyActivation)
       ? payload.historyActivation
       : null;
@@ -1288,7 +1270,7 @@ export class VersionWorkflow {
       || !content
       || !/^ver_\d{4,}$/.test(latestVersionId)
       || !versions
-      || !versions.some((version) => String(version?.versionId || version?.id || "") === versionId)
+      || !versions.some((version) => version.id === versionId)
       || !historyActivation
       || String(historyActivation.projectId || "") !== context.projectId
       || String(historyActivation.documentId || "") !== context.documentId
@@ -1307,7 +1289,7 @@ export class VersionWorkflow {
     ) {
       throw new Error("历史继续编辑响应缺少完整、同一项目的工作文件身份。");
     }
-    const draft = draftAuthorityFromWorkspacePayload(payload);
+    const { draft, comments, changeEvents } = decodedWorkspace;
     return Object.freeze({
       openTarget,
       historyActivation: Object.freeze({
@@ -1332,6 +1314,8 @@ export class VersionWorkflow {
         : null,
       lastModifiedAt: String(payload.lastModifiedAt),
       draft,
+      comments,
+      changeEvents,
     });
   }
 

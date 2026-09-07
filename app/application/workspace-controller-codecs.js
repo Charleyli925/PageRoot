@@ -5,6 +5,30 @@ function requiredFunction(value, name) {
   return value;
 }
 
+// Decode the complete response before any Session publishes it. DraftSession
+// retains persisted records; CommentSession receives their display models.
+export function decodeWorkspaceResponse(payload, codecs) {
+  const versions = codecs.versionsFromWorkspace(payload);
+  const source = codecs.draftAuthorityFromWorkspace(payload);
+  const revision = Number(source.draftRevision ?? 0);
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new TypeError("工作区草稿序号无效。");
+  }
+  const draft = { ...source, draftRevision: revision };
+  for (const key of ["comments", "changeEvents", "deletedCommentIds", "appliedOperationIds"]) {
+    if (source[key] !== undefined && !Array.isArray(source[key])) {
+      throw new TypeError(`工作区草稿 ${key} 无效。`);
+    }
+    draft[key] = source[key] ?? [];
+  }
+  const comments = codecs.commentsFromRecords(draft.comments);
+  const changeEvents = codecs.changesFromDraftRecords(draft.changeEvents);
+  if (comments.length !== draft.comments.length || changeEvents.length !== draft.changeEvents.length) {
+    throw new TypeError("工作区草稿包含无法解码的记录，已保留原会话。");
+  }
+  return Object.freeze({ versions, draft: Object.freeze(draft), comments, changeEvents });
+}
+
 // The controller deliberately receives these pure codecs from its composition
 // root. The existing renderer codecs remain their single decoder source during
 // the staged migration; importing app/workbench from application code would
@@ -16,6 +40,8 @@ export function createWorkspaceControllerCodecs({
   authoritativeDraftRevision,
   recoveryIdentityFromRecord,
   versionsFromWorkspace,
+  commentsFromRecords,
+  changesFromDraftRecords,
   rebindTargetsPreservingGlobal,
 } = {}) {
   return Object.freeze({
@@ -37,6 +63,8 @@ export function createWorkspaceControllerCodecs({
       versionsFromWorkspace,
       "versionsFromWorkspace",
     ),
+    commentsFromRecords: requiredFunction(commentsFromRecords, "commentsFromRecords"),
+    changesFromDraftRecords: requiredFunction(changesFromDraftRecords, "changesFromDraftRecords"),
     rebindTargetsPreservingGlobal: requiredFunction(
       rebindTargetsPreservingGlobal,
       "rebindTargetsPreservingGlobal",

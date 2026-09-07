@@ -59,3 +59,13 @@ test("version session restores a complete immutable projection snapshot", () => 
   assert.equal(session.snapshot.currentExactVersionId, "version_001");
   assert.equal(session.snapshot.viewMode, "current");
 });
+
+test("VersionSession rejects undecoded or duplicate IDs without replacing its snapshot", () => {
+  const session = new VersionSession();
+  session.hydrate({ versions: [{ id: "ver_0001" }], latestVersionId: "ver_0001" });
+  const before = session.snapshot;
+  for (const versions of [[{ versionId: "ver_0002" }], [{ id: "ver_0002" }, { id: "ver_0002" }]]) {
+    assert.throws(() => session.updateAuthority({ versions }));
+    assert.equal(session.snapshot, before);
+  }
+});

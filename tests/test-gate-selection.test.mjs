@@ -1287,3 +1287,8 @@ test("capability contracts select only their independent typecheck owner", () =>
   assert.ok(!plan.matchedOwners.includes("workspace-controller"));
   assert.ok(!plan.suites.some(({ id }) => id.includes("electron") || id.includes("browser")));
 });
+
+test("Version ingress changes select production decoder coverage", () => {
+  const plan = selectGatePlan({ lane: "edit", changedFiles: ["app/workbench/version-model.ts"], map });
+  assert.ok(plan.selectedNodeTests.includes("tests/workspace-ingress.test.mjs"));
+});

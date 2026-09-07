@@ -1,3 +1,4 @@
+import { decodeWorkspaceResponse } from "./workspace-controller-codecs.js";
 import { isBridgeRequestError } from "./bridge-client.js";
 import { planProjectCloseAbort, planProjectCloseHydration, planProjectCloseIdentity } from "./project/close-plan.js";
 import { planProjectOpen } from "./project/open-intent.js";
@@ -3303,6 +3304,7 @@ export class ProjectWorkflow {
       const { envelope } = acquired;
       const payload = envelope.core;
       const supplementalPayload = envelope.supplemental;
+      const decodedWorkspace = decodeWorkspaceResponse({ ...payload, ...supplementalPayload }, this.#codecs);
       this.#markHydrationStage(
         "workspace-response",
         operationId,
@@ -3423,7 +3425,7 @@ export class ProjectWorkflow {
       if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
 
       const publishVersion = () => this.#versionSession.hydrate({
-        versions: [],
+        versions: decodedWorkspace.versions,
         latestVersionId: payload.latestVersionId,
         currentBasedOnVersionId:
           legacyVersionAuthority?.currentBasedOnVersionId || payload.currentBasedOnVersionId,
@@ -3501,15 +3503,15 @@ export class ProjectWorkflow {
         ),
       });
 
-      const draftRecord = this.#codecs.draftAuthorityFromWorkspace(payload);
+      const draftRecord = decodedWorkspace.draft;
       const serverDraftRevision = this.#codecs.authoritativeDraftRevision(draftRecord);
       let recoveredEvents = this.#commentSession.changeEvents;
       if (!this.#draftSession.isActive(context) || serverDraftRevision >= this.#draftSession.revision) {
         this.#draftSession.activate(context, serverDraftRevision, draftRecord);
         const recovered = this.#commentWorkflow.recoverDraft({
           context,
-          serverComments: this.#codecs.commentsFromRecords(draftRecord.comments),
-          serverEvents: this.#codecs.changesFromDraftRecords(draftRecord.changeEvents),
+          serverComments: decodedWorkspace.comments,
+          serverEvents: decodedWorkspace.changeEvents,
           serverDraftRevision: this.#draftSession.revision,
           serverDeletedCommentIds: Array.isArray(draftRecord.deletedCommentIds)
             ? draftRecord.deletedCommentIds.map(String)
@@ -3696,7 +3698,6 @@ export class ProjectWorkflow {
         return succeeded({ context, hydrated: true, supplemental: false, stale: true });
       }
       try {
-        const supplementalVersions = this.#codecs.versionsFromWorkspace(supplementalPayload);
         if (
           nextProjectId
           && nextDocumentId
@@ -3709,7 +3710,6 @@ export class ProjectWorkflow {
             preservePending: Boolean(this.#documentSession.pendingWrite),
           });
         }
-        this.#versionSession.updateAuthority({ versions: supplementalVersions });
         if (!queryIsCurrent()) {
           return succeeded({ context, hydrated: true, supplemental: false, stale: true });
         }

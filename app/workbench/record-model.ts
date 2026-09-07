@@ -51,11 +51,15 @@ export function draftAuthorityFromWorkspace(
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
   const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
-  return isRecord(runtime.draft)
-    ? runtime.draft
-    : isRecord(payload.activeDraft)
-      ? payload.activeDraft
-      : {};
+  if (runtime.draft !== undefined) {
+    if (!isRecord(runtime.draft)) throw new TypeError("工作区草稿无效。");
+    return runtime.draft;
+  }
+  if (payload.activeDraft !== undefined) {
+    if (!isRecord(payload.activeDraft)) throw new TypeError("工作区草稿无效。");
+    return payload.activeDraft;
+  }
+  return {};
 }
 
 export function authoritativeDraftRevision(

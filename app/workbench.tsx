@@ -913,6 +913,8 @@ export default function Workbench() {
         authoritativeDraftRevision,
         recoveryIdentityFromRecord,
         versionsFromWorkspace,
+        commentsFromRecords,
+        changesFromDraftRecords,
         rebindTargetsPreservingGlobal,
       }),
       ports: {
@@ -1302,6 +1304,10 @@ export default function Workbench() {
       },
       versionWorkflow: {
         codecs: {
+          versionsFromWorkspace,
+          draftAuthorityFromWorkspace,
+          commentsFromRecords,
+          changesFromDraftRecords,
           isRecord,
           sameSourcePath: sameLocalSourcePath,
           operationKey: activeRunOperationKey,

@@ -52,6 +52,31 @@ with `ProjectSession` + `ProjectWorkflow`. Open/switch/close now have
 `ProjectWorkflow`. Do not split that workflow for line budget, and do not
 add a second Controller.
 
+## Workspace response ingress
+
+`decodeWorkspaceResponse` in the existing Controller codecs module is the
+single workspace-response normalization step. It uses injected Workbench
+codecs; application code does not import Workbench. Decode and validate the
+complete response before publishing any Session. Invalid Version IDs,
+ordinals, ownership, pointers or draft records retain the previous authority;
+records must not be silently filtered into a partial success.
+
+| Raw response / entry | Decoder | Published owners |
+| --- | --- | --- |
+| Ordinary open, reload, restart recovery: workspace Core + Supplemental | `decodeWorkspaceResponse` → `versionsFromWorkspace`, `draftAuthorityFromWorkspace`, comment/event codecs | Project, Document, Version, Draft, Comment Sessions |
+| Registration / canonical refresh: `ensureProject` | same decoder before registration publication | Project, Document, Version, Draft; CommentWorkflow reconciles its projection |
+| Draft authority rebound: `workspace` | same decoder before replacing draft authority | Draft; CommentWorkflow reconciles Comment |
+| Continue editing history: activation receipt | same decoder before managed-source publication | Project, Document, Version, Draft, Comment Sessions |
+| AI adoption refresh | ProjectWorkflow workspace path above | same existing Session owners |
+
+Bridge/disk records keep `versionId`; decoded Version models keep `id`.
+DraftSession keeps persisted draft records, while CommentSession receives the
+comment/event models produced by the same ingress. Current and latest markers
+are derived independently from their respective authoritative IDs; absent IDs
+remain unknown. A malformed receipt after a possible disk commit remains an
+unknown outcome, not a claim that the operation never happened. This does not
+change disk schemas, historical Working Copy behavior or Canvas publication.
+
 ## Current edit contract
 
 Visual edits use Stable ID semantic operations as the public authorization

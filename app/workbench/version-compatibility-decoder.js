@@ -1,3 +1,4 @@
+import { normalizeProvenance } from "../../shared/provenance.mjs";
 import {
   decodeDirectEditIdentity,
 } from "../../shared/direct-edit-compatibility.mjs";
@@ -16,7 +17,11 @@ function decodeAuditChange(value, {
 }) {
   if (!isRecord(value)) return null;
   try {
-    const identity = decodeDirectEditIdentity(value, {
+    // The Bridge stamps provenance after accepting an edit. Decode that stored
+    // envelope separately from the caller-authored direct-edit contract.
+    const { provenance, ...edit } = value;
+    if (Object.hasOwn(value, "provenance")) normalizeProvenance(provenance);
+    const identity = decodeDirectEditIdentity(edit, {
       fallbackBasedOnVersionId,
       preserveUnassignedVersion,
       label,
