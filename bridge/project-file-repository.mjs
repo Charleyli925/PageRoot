@@ -6572,9 +6572,12 @@ export class ProjectFileRepository {
       if (prepared.sha256 !== transaction.workingCopySourceSha256) {
         throw new ProjectFileRepositoryError("PROMOTION_PREPARED_FILE_CHANGED", "Promotion preparation bytes changed.");
       }
+      if (!sameFileIdentity(copyFileIdentity(prepared.information), copyFileIdentity(visible.information))) {
+        throw new ProjectFileRepositoryError("PROMOTION_PATH_REPLACED", "The published Working Copy no longer matches the prepared file.");
+      }
       await refreshSourceBinding(loaded.paths.projectRootPath, committedWorkingCopy.workingCopyId,
-        visiblePath, transaction.workingCopySourceSha256);
-      committedWorkingCopy.fileIdentity = copyFileIdentity(information);
+        visiblePath, transaction.workingCopySourceSha256, { expectedInformation: prepared.information });
+      committedWorkingCopy.fileIdentity = copyFileIdentity(visible.information);
       loaded.manifest.workingCopies.push(committedWorkingCopy);
       loaded.manifest.latestOfficialVersionId = version.versionId;
       await atomicWriteProjectJson(

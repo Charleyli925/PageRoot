@@ -356,3 +356,56 @@ for (const collision of ["occupied-copy", "occupied-link", "replaced-link"]) {
     assert.deepEqual(await readFile(target.exactSourcePath), bytes);
   });
 }
+
+for (const replacementStage of ["before-recovery", "before-binding-refresh"]) {
+  test(`Promotion recovery rejects identical-byte replacement ${replacementStage}`, async (t) => {
+    const value = await fixture(t);
+    const { target } = await importSource(value);
+    const candidateId = "candidate_promotion_live_identity";
+    await value.repository.createCandidate({ target, requestId: "req_promotion_live_identity", candidateId,
+      html: html("V2"), expectedSourceSha256: target.sourceSha256 });
+    const writer = new ProjectFileRepository({ projectsRoot: value.projects,
+      failpoint: (name) => name === "promotion-working-copy-created" });
+    await assert.rejects(writer.promoteCandidate({ target, candidateId }));
+    const transaction = await json(path.join(target.projectRootPath, ".pageroot", "transactions",
+      `promote_${candidateId}`, "transaction.json"));
+    const visiblePath = path.join(target.projectRootPath, transaction.workingCopy.sourceRelativePath);
+    const original = await readFile(visiblePath);
+    const originalInformation = await lstat(visiblePath);
+    const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+    const manifestBefore = await readFile(manifestPath);
+    let replaced = false;
+    const replace = async () => {
+      await writeFile(`${visiblePath}.replacement`, original);
+      await rename(`${visiblePath}.replacement`, visiblePath);
+      replaced = true;
+    };
+    const originalOpen = filesystem.open;
+    try {
+      if (replacementStage === "before-recovery") await replace();
+      else {
+        filesystem.open = async function (filePath, ...args) {
+          const handle = await originalOpen.call(this, filePath, ...args);
+          if (!replaced && filePath === path.join(target.projectRootPath, ".pageroot", transaction.preparedWorkingCopyRelativePath)) {
+            const close = handle.close.bind(handle);
+            handle.close = async () => { await close(); if (!replaced) await replace(); };
+          }
+          return handle;
+        };
+        syncBuiltinESMExports();
+      }
+      const recovery = new ProjectFileRepository({ projectsRoot: value.projects });
+      await assert.rejects(recovery.promoteCandidate({ target, candidateId }),
+        (error) => ["PROMOTION_PATH_REPLACED", "WORKING_COPY_CONFLICT"].includes(error.code));
+    } finally {
+      filesystem.open = originalOpen;
+      syncBuiltinESMExports();
+    }
+    assert.equal(replaced, true);
+    assert.notEqual((await lstat(visiblePath)).ino, originalInformation.ino);
+    assert.deepEqual(await readFile(visiblePath), original);
+    assert.deepEqual(await readFile(manifestPath), manifestBefore);
+    const binding = await lstat(sourceBindingPath(target.projectRootPath, transaction.workingCopy.workingCopyId)).catch(() => null);
+    assert.ok(!binding || binding.ino === originalInformation.ino);
+  });
+}

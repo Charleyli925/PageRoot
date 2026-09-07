@@ -69,3 +69,5 @@ Initial external and welcome imports retain the verified Working Copy open targe
 When a missing registered path is resolved through a live binding, both the returned descriptor and any subsequent binding refresh must still match that same current binding object. An intervening atomic replacement, including identical bytes, cannot acquire the renamed member path. These observations are operation-local and are never read from persisted fileIdentity.
 
 Explicit restoration requires a newly created link and revalidates the published descriptor against the original live binding through final resolution. An occupied destination is refused even when its bytes or inode match; restore never borrows save-recovery idempotence to adopt a competing publication.
+
+Before Promotion manifest publication, the current prepared and visible descriptors must identify the same file object. Binding refresh carries that live preparation proof through its own read, so an identical-byte external replacement cannot acquire the new Working Copy. Recovery rereads both objects; persisted physical observations remain non-authoritative.
