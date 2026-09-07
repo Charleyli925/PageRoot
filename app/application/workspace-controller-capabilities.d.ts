@@ -183,6 +183,7 @@ export type ProjectCatalogCapabilitySnapshot<
 }>;
 
 export interface ProjectCatalogControllerCommands {
+  restoreWorkingCopy(projectId: string): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{ restored: boolean }>>;
   refreshRecents(): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
     projects: unknown[];
   }>>;

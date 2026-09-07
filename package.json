@@ -367,6 +367,10 @@
         "to": "bridge/project-file-repository/identity.mjs"
       },
       {
+        "from": "bridge/project-file-repository/source-binding.mjs",
+        "to": "bridge/project-file-repository/source-binding.mjs"
+      },
+      {
         "from": "bridge/project-file-repository/path-safety.mjs",
         "to": "bridge/project-file-repository/path-safety.mjs"
       },

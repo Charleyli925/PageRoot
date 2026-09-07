@@ -160,5 +160,11 @@ test("workspace Bridge rejects non-UTF-8 source bytes without creating a project
   assert.deepEqual(await readFile(sourcePath), original);
   const projectEntries = await readdir(join(environment.root, "project-files"))
     .catch(() => []);
-  assert.deepEqual(projectEntries, []);
+  // Startup now initializes Repository even before the first import. An empty
+  // registry is service metadata; rejected bytes must still create no project.
+  assert.deepEqual(projectEntries, [".pageroot-registry.json"]);
+  const registry = JSON.parse(await readFile(
+    join(environment.root, "project-files", ".pageroot-registry.json"), "utf8",
+  ));
+  assert.deepEqual(registry.projects, {});
 });

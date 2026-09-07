@@ -58,6 +58,8 @@ export type RegisteredProject = {
   latestOfficialVersionId: string | null;
   hasPendingCandidate: boolean;
   availability: "ready" | "unavailable" | "invalid";
+  sourceStatus?: "ready" | "external-change" | "missing" | "duplicate" | "invalid";
+  canRestoreWorkingCopy?: boolean;
   availabilityReason?: string | null;
   lastUpdatedAt: string | null;
   lastOpenedAt: number | null;
@@ -190,6 +192,7 @@ export type DesktopProjectsApi = {
   readHtml?: (sourcePath: string) => Promise<HtmlProject>;
   listRecentProjects: () => Promise<RecentProject[]>;
   listRegisteredProjects?: () => Promise<RegisteredProject[]>;
+  restoreRegisteredWorkingCopy?: (projectId: string) => Promise<{ restored: boolean }>;
   listRegisteredProjectVersionSummaries?: (
     projectId: string,
   ) => Promise<{

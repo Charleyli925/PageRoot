@@ -747,8 +747,15 @@ export class DocumentWorkflow {
       );
       if (
         cutoff === undefined
-        || this.#documentSession.lastPersistedRevision >= cutoff
+          ? !this.#documentSession.pendingWrite
+            && this.#documentSession.editRevision <= this.#documentSession.lastPersistedRevision
+          : this.#documentSession.lastPersistedRevision >= cutoff
       ) return outcome;
+      // A new checkpoint can arrive after the write loop has finished, while
+      // its recovery journal is retiring. Re-enter single-flight admission so
+      // every waiter joins the new drain instead of losing that queued edit.
+      this.#documentSession.clearFlushPromise(currentPromise);
+      return this.flush({ throughRevision: cutoff });
     }
 
     this.#reconstructPendingWrite();
@@ -2410,9 +2417,21 @@ export class DocumentWorkflow {
         "当前页面尚未完成项目身份初始化。",
       );
     }
-    const flush = await this.flush({ throughRevision: this.#documentSession.editRevision });
+    const drainedHtml = this.#documentSession.html;
+    const drainedRevision = this.#documentSession.editRevision;
+    const flush = await this.flush({ throughRevision: drainedRevision });
     if (!flush || flush.status !== "succeeded") return flush;
-    if (!this.#isCurrent(context)) return stale(context);
+    if (!this.#isCurrent(context)) {
+      const current = copyContext(this.#projectSession.context);
+      if (!sameOpenRoute(context, current, this.#codecs.sameSourcePath)
+        || this.#documentSession.editRevision !== drainedRevision
+        || this.#documentSession.html !== drainedHtml
+        || current.sourceSha256 !== this.#documentSession.persistedSourceSha256
+        || current.sourceSha256 !== this.#documentSession.workingHtmlSha256) return stale(context);
+      // The completed save may refresh this member's Hash while Undo waits.
+      // Keep every routing field fixed and consume only its exact byte receipt.
+      context = current;
+    }
     try {
       const nextRevision = this.#documentSession.editRevision + 1;
       const applied = this.#sourceHistorySession.apply(

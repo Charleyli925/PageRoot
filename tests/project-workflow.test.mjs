@@ -536,6 +536,13 @@ test("startup publishes the initial active project without fencing a nonexistent
   });
   t.after(() => harness.workflow.dispose());
 
+  const sourcePublications = [];
+  harness.documentSession.setObserver((snapshot) => {
+    if (snapshot.html === A_HTML) sourcePublications.push({
+      generation: snapshot.canvasGeneration,
+      hydrating: harness.workflow.projectHydrating,
+    });
+  });
   const outcome = await harness.workflow.openProject({ kind: "startup" });
   assert.equal(outcome.status, "succeeded");
   await waitFor(
@@ -543,6 +550,9 @@ test("startup publishes the initial active project without fencing a nonexistent
       && !harness.workflow.projectHydrating,
     "initial startup project did not finish hydration",
   );
+  assert.equal(sourcePublications.length > 0, true);
+  assert.equal(sourcePublications[0].hydrating, true,
+    "provisional source observers must see the hydration boundary before preparing Runtime");
   assert.equal(harness.documentSession.html, A_HTML);
   assert.equal(harness.projectSession.context.projectId, `project_${slug(A_PATH)}`);
 });

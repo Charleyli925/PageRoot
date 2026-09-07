@@ -2385,7 +2385,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       return;
     }
-    if (runtimeCandidateRef.current || runtimePromotionRef.current) {
+    // A grant arriving during positioning belongs to the next frame. Keep it
+    // until promotion finalizes instead of mistaking the busy slot for a match.
+    if (runtimePromotionRef.current) return;
+    if (runtimeCandidateRef.current) {
       if (deferredRuntimeCandidateRef.current?.lease === request.lease) {
         deferredRuntimeCandidateRef.current = null;
       }
@@ -2424,7 +2427,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     runtimePromotionRef.current = null;
     containerRef.current?.setAttribute("data-runtime-handoff", "active");
     if (retired) scheduleRuntimeInactiveSlotClear(retired.generation);
-  }, [scheduleRuntimeInactiveSlotClear]);
+    // A recovered grant may arrive while this slot is positioning. Its first
+    // replay cannot start until the visible frame is fully committed.
+    syncRuntimeCandidateDiagnostics();
+    window.requestAnimationFrame(() => replayDeferredRuntimeCandidateRef.current());
+  }, [scheduleRuntimeInactiveSlotClear, syncRuntimeCandidateDiagnostics]);
   finalizeRuntimePromotionRef.current = finalizeRuntimeCandidatePromotion;
 
   const commitRuntimeCandidate = useCallback((

@@ -520,6 +520,7 @@ export class WorkspaceController {
     const projectCatalogCommands = Object.freeze({
       refreshRecents: () => this.refreshRecentProjects(),
       refreshRegistered: () => this.refreshRegisteredProjects(),
+      restoreWorkingCopy: (projectId) => this.#requireProjectWorkflow().restoreRegisteredWorkingCopy(projectId),
       loadVersionSummaries: (projectId) => this.loadRegisteredProjectVersionSummaries(projectId),
     });
     this.projectCatalog = Object.freeze({
@@ -764,6 +765,7 @@ export class WorkspaceController {
       this.#projectWorkflowUnsubscribe = this.#projectWorkflow.subscribe(
         (snapshot) => {
           this.#projectSnapshot = snapshot;
+          this.#refreshEditAuthorRuntime();
           this.#publishAggregateSnapshot();
         },
       );
@@ -2355,6 +2357,9 @@ export class WorkspaceController {
       sourcePath,
       sourceIsAuthoritative: Boolean(
         sourcePath
+        // Hydration publishes a provisional Canvas before its final authority.
+        // Preparing either one early can execute the same author program twice.
+        && !this.projectHydrating
         && document.editRevision === document.lastPersistedRevision
         && document.persistState === "idle"
       ),

@@ -253,6 +253,15 @@ Rules:
   immutable transaction.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
+- `DocumentWorkflow.flush()` includes recovery-journal retirement in its
+  single-flight promise. A checkpoint queued during that retirement must
+  re-enter single-flight admission after the old receipt settles; waiting for
+  the old receipt alone cannot acknowledge the newer revision. Concurrent
+  waiters join one next drain using the updated expected source Hash.
+- An Undo/Redo drain may refresh its captured Hash only for the same complete
+  OpenTarget route and session, with unchanged requested HTML/revision and
+  matching persisted/working Hashes. Navigation, a different Working Copy or a
+  different project root still invalidates the history request.
 - A current-source transition first stages one complete candidate containing
   project identity, full OpenTarget identity, source path, Version authority,
   HTML bytes and verified Hash. Only after every field is valid may the
@@ -302,6 +311,10 @@ Rules:
   candidate immediately. `HtmlCanvasEditor` stores only the latest pending
   source revision/reason/count for diagnostics. It is not save authority and
   never retains an intermediate iframe revision.
+- Project hydration is published before provisional Working HTML. Runtime
+  preparation treats that interval as source-not-authoritative and resumes from
+  the final hydrated source; the Controller refreshes Runtime on hydration
+  transitions as well as Project/Document publications.
 - An active last-known-good Edit Runtime remains visible while the latest
   candidate prepares. A failed dynamic Candidate leases one Script-disabled
   Candidate for the latest Working revision; its predecessor identity and
@@ -325,8 +338,10 @@ Rules:
   `data-render-verified` attribute; that short transactional rollback does not
   span the Candidate lifecycle and never rolls back Working HTML. The former
   active document is cleared on the
-  next animation frame. A stale callback cannot act after its slot lease has
-  been reused. Immediately before the commit, `HtmlCanvasEditor` re-captures
+  next animation frame. A recovered Runtime grant arriving during positioning
+  retains its deferred request; completion synchronizes the terminal slot
+  projection and replays that request against the now committed Active frame.
+  A stale callback cannot act after its slot lease has been reused. Immediately before the commit, `HtmlCanvasEditor` re-captures
   the small Presentation Anchor from the still-visible Active frame so
   scrolling during preparation is the current user intent rather than an old
   restoration target. A selected element becomes the viewport anchor only when
@@ -420,3 +435,16 @@ HTML，因此可以包含 Stable ID。V2+ 新 Working Copy 初始与对应 Versi
 不回写外部原文件。唯一导出动作原样复制当前完整 Working Copy，包括 Stable ID，
 不改变项目、Version、Registry、Recent 或当前打开文件。Undo/Redo 只属于当前打开
 文档会话，不属于正式 Version 历史，也不跨切换、关闭或重启恢复。
+
+## Durable Working Copy file binding
+
+`ProjectFileRepository` owns the registered member mapping, current source state,
+transaction recovery and `.pageroot/source-bindings/` locator evidence. Helpers
+have no independent queues or authority. All bind/restore/save/Promotion work
+runs in the Repository serialization. There is no renderer-persisted binding
+state and no new drain participant: restoration publishes a missing registered
+file synchronously before returning; save remains in DocumentWorkflow's drain.
+Catalog source status is a disposable projection, with per-project failure
+isolation. The live authority rules are in `SECURITY_MODEL.md`.
+
+Ready-result notifications: Workbench clears the preceding run notice only on the transition into `ready-to-open`. Repeated status observations preserve a later user-triggered Review outcome until its normal dismissal; polling does not own that notice lifetime.

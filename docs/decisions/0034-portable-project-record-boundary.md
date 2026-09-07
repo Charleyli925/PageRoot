@@ -1,6 +1,6 @@
 # ADR 0034: The project manifest stays portable by classification, and its one device-scoped member stays put
 
-- Status: Accepted
+- Status: Accepted; physical identity authority superseded by [ADR 0070](0070-durable-working-copy-binding.md)
 - Date: 2026-08-21
 - Extends: ADR 0022, ADR 0057
 

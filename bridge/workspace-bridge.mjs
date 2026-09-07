@@ -361,6 +361,7 @@ function projectFileHttpError(cause) {
       "PROJECT_IDENTITY_CHANGED",
       "REGISTERED_PROJECT_PATH_MISMATCH",
       "REGISTERED_PROJECT_IDENTITY_CHANGED",
+      "REGISTERED_PROJECT_AMBIGUOUS",
       "MANAGED_PATH_AMBIGUOUS",
       "MANAGED_SOURCE_IDENTITY_MISMATCH",
       "WORKING_COPY_CONFLICT",
@@ -467,10 +468,11 @@ async function registeredProjectVersionSummaries(projectId) {
   }
 }
 
-async function registeredProjectOpen(projectId) {
+async function registeredProjectOpen(projectId, workingCopyId = null) {
   try {
     const resolved = await projectFileRepository.resolveRegisteredProjectOpenTarget({
       projectId: registeredProjectId(projectId),
+      workingCopyId,
     });
     return {
       ok: true,
@@ -2620,6 +2622,13 @@ async function route(request, response) {
     );
     return;
   }
+  if (request.method === "POST" && url.pathname === "/registered-project/restore-working-copy") {
+    const body = await readBody(request);
+    try {
+      sendJson(response, 200, await projectFileRepository.restoreRegisteredWorkingCopy({ projectId: registeredProjectId(body.projectId) }));
+    } catch (cause) { throw projectFileHttpError(cause); }
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/registered-projects") {
     sendJson(response, 200, await registeredProjectCatalog());
     return;
@@ -2636,7 +2645,7 @@ async function route(request, response) {
     sendJson(
       response,
       200,
-      await registeredProjectOpen(url.searchParams.get("projectId")),
+      await registeredProjectOpen(url.searchParams.get("projectId"), url.searchParams.get("workingCopyId")),
     );
     return;
   }
@@ -2975,6 +2984,17 @@ server.on("error", (error) => {
     })}\n`,
   );
   process.exitCode = 1;
+});
+
+// Queue recovery/migration before accepting any repository request. The HTTP
+// listener can report readiness while those requests join Repository's serial
+// queue; an unavailable root must not prevent the rest of Bridge from starting.
+void projectFileRepository.initialize().catch((cause) => {
+  process.stderr.write(`${JSON.stringify({
+    type: "warning",
+    code: "PROJECT_REPOSITORY_INITIALIZATION_FAILED",
+    message: cause instanceof Error ? cause.message : "Project initialization failed.",
+  })}\n`);
 });
 
 server.listen(PORT, HOST, () => {

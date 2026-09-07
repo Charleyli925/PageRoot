@@ -81,6 +81,7 @@ const REQUIRED_BRIDGE_FILES = [
   "project-file-repository/errors.mjs",
   "project-file-repository/identity.mjs",
   "project-file-repository/path-safety.mjs",
+  "project-file-repository/source-binding.mjs",
   "project-file-repository/registry.mjs",
   "project-file-repository/request-draft.mjs",
   "project-file-repository/request-attachments.mjs",

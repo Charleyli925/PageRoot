@@ -15,6 +15,7 @@ import {
   moduleSpecifiers,
   newExpressionNames,
   parseModule,
+  persistentFileIdentityComparisons,
   stringLiterals,
 } from "./architecture-ast-query.mjs";
 import {
@@ -163,6 +164,7 @@ const APPROVED_PERSISTENCE_OWNERS = new Set([
   "bridge/project-file-repository.mjs",
   "bridge/project-file-repository/request-attachments.mjs",
   "bridge/project-file-repository/path-safety.mjs",
+  "bridge/project-file-repository/source-binding.mjs",
   "bridge/project-file-repository/registry.mjs",
   "bridge/project-file-repository/working-copy.mjs",
   "bridge/workspace-bridge.mjs",
@@ -508,6 +510,9 @@ export async function architectureViolations() {
     const source = await readFile(filePath, "utf8");
     const ast = parseModule(filePath, source);
     scanned.push({ file, source, module: ast });
+    if (file.startsWith("bridge/project-file-repository")) {
+      violations.push(...persistentFileIdentityComparisons(ast).map((reason) => `${file}: ${reason}`));
+    }
     violations.push(...layerBoundaryViolations({ file, source, module: ast }));
     violations.push(...ownershipBoundaryViolations({ file, source, module: ast }));
     violations.push(...escapeBoundaryViolations({ file, source, module: ast }));

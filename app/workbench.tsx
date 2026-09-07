@@ -1122,6 +1122,11 @@ export default function Workbench() {
             getActive: async () => window.htmlAIProjects?.getActiveProject() ?? null,
             listRecent: async () => window.htmlAIProjects?.listRecentProjects() ?? [],
             listRegistered: async () => window.htmlAIProjects?.listRegisteredProjects?.() ?? [],
+            restoreRegisteredWorkingCopy: async (projectId: string) => {
+              const restore = window.htmlAIProjects?.restoreRegisteredWorkingCopy;
+              if (!restore) throw new Error("当前应用缺少工作文件恢复通道。");
+              return restore(projectId);
+            },
             listRegisteredVersionSummaries: async (registeredProjectId: string) => {
               const list = window.htmlAIProjects?.listRegisteredProjectVersionSummaries;
               if (!list) throw new Error("当前 PageRoot 版本缺少项目版本摘要通道。");
@@ -1635,7 +1640,8 @@ export default function Workbench() {
             // "结果 · 等待决定" and its action bar carries the decision. Only the
             // Exceptional states stay in the same conversation when it is open;
             // background projects must never navigate the visible project.
-            if (state === "ready-to-open") {
+            // Repeated ready polls must not erase a later Review outcome.
+            if (state === "ready-to-open" && runEvent.previousState !== state) {
               setInterruption(null);
             }
             if (state === "error" && run) {

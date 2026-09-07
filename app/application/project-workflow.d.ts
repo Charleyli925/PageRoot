@@ -203,6 +203,7 @@ export class ProjectWorkflow {
     reason?: string;
   }>>;
   refreshRecents(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  restoreRegisteredWorkingCopy(projectId: string): Promise<ProjectWorkflowOutcome<{ restored: boolean }>>;
   refreshRegisteredProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   loadRegisteredProjectVersionSummaries(projectId: string): Promise<ProjectWorkflowOutcome<{
     projectId: string;

@@ -1,9 +1,11 @@
 // Managed-path containment, real-path verification and project-scoped I/O.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import {
   link,
   lstat,
+  open,
   readFile,
   readdir,
   realpath,
@@ -399,30 +401,51 @@ export async function listProjectDirectory(projectRootPath, directoryPath, label
 }
 
 export async function readHtmlFile(filePath, label, options = {}) {
-  const information = await regularInformation(filePath, label, options);
-  if (!information) {
+  const observed = await regularInformation(filePath, label, options);
+  if (!observed) {
     throw new ProjectFileRepositoryError("SOURCE_NOT_FOUND", `${label} was not found.`);
   }
-  if (information.size > MAX_HTML_BYTES) {
+  if (observed.size > MAX_HTML_BYTES) {
     throw new ProjectFileRepositoryError("SOURCE_TOO_LARGE", `${label} is too large.`);
   }
-  if (typeof options.beforeRead === "function") {
-    await options.beforeRead({ filePath, information });
+  await options.beforeRead?.({ filePath, information: observed });
+  const handle = await open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const information = await handle.stat();
+    const changed = () => {
+      throw new ProjectFileRepositoryError("SOURCE_HASH_CONFLICT", `${label} changed while being read.`);
+    };
+    if (!information.isFile() || !sameFileIdentity(copyFileIdentity(observed), copyFileIdentity(information))) changed();
+    if (information.size > MAX_HTML_BYTES) {
+      throw new ProjectFileRepositoryError("SOURCE_TOO_LARGE", `${label} is too large.`);
+    }
+    // All returned facts describe this descriptor, never a second path read.
+    const buffer = await handle.readFile();
+    if (buffer.byteLength > MAX_HTML_BYTES) {
+      throw new ProjectFileRepositoryError("SOURCE_TOO_LARGE", `${label} is too large.`);
+    }
+    const digest = sha256(buffer);
+    const after = await handle.stat();
+    const cache = serialPathCache.getStore();
+    cache?.verifiedRoots.clear();
+    cache?.realPaths.clear();
+    const current = await regularInformation(filePath, label, options);
+    if (!current
+      || !sameFileIdentity(copyFileIdentity(information), copyFileIdentity(current))
+      || information.size !== after.size
+      || information.mtimeMs !== after.mtimeMs
+      || information.ctimeMs !== after.ctimeMs
+      || buffer.byteLength !== after.size) changed();
+    return {
+      buffer,
+      html: decodeHtml(buffer, label),
+      sha256: digest,
+      information: after,
+      lastModifiedAt: after.mtime.toISOString(),
+    };
+  } finally {
+    await handle.close();
   }
-  const buffer = await readFile(filePath);
-  // lstat() and readFile() are separate operations. Check the bytes that were
-  // actually read so a replacement between them cannot bypass the source cap.
-  if (buffer.byteLength > MAX_HTML_BYTES) {
-    throw new ProjectFileRepositoryError("SOURCE_TOO_LARGE", `${label} is too large.`);
-  }
-  const html = decodeHtml(buffer, label);
-  return {
-    buffer,
-    html,
-    sha256: sha256(buffer),
-    information,
-    lastModifiedAt: information.mtime.toISOString(),
-  };
 }
 
 export async function readJsonFileWithSha256(filePath, label, options = {}) {

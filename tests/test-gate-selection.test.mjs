@@ -214,6 +214,7 @@ const TASK_OWNER_CASES = [
   {
     file: "bridge/project-file-repository.mjs",
     nodeTests: [
+      "tests/durable-working-copy-binding.test.mjs",
       "tests/project-ai-task-projection.test.mjs",
       "tests/project-candidate-promotion.test.mjs",
       "tests/project-file-bridge.test.mjs",

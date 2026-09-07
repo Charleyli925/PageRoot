@@ -121,6 +121,7 @@ import {
   activeManagedLocatorForActivatedPath,
   normalizeActiveManagedLocator,
   rebaseActiveManagedLocator,
+  sameManagedPath,
 } from "./active-managed-locator.mjs";
 import {
   createTelemetryBuildConfig,
@@ -259,6 +260,7 @@ const PROJECT_CHANNELS = Object.freeze({
   revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
   listRegisteredProjects: "html-projects:list-registered",
+  restoreRegisteredWorkingCopy: "html-projects:restore-working-copy",
   listRegisteredProjectVersionSummaries: "html-projects:list-registered-version-summaries",
   readRegisteredProjectProjection: "html-projects:read-registered-projection",
   openRegisteredProject: "html-projects:open-registered",
@@ -429,8 +431,9 @@ async function recoverWatchedManagedSource(info) {
         publishSourceFileMayHaveChanged({ ...hint, sourceMissing: true });
         return;
       }
+      let sourceMissing = true;
       try {
-        await reconcileActiveManagedSourceOperation({
+        const reconciled = await reconcileActiveManagedSourceOperation({
           previousSourcePath: activePath,
           expectedSourceSha256: locator.sourceSha256,
           projectId: locator.projectId,
@@ -439,17 +442,24 @@ async function recoverWatchedManagedSource(info) {
           versionId: locator.versionId,
           reason: "watch",
         });
+        sourceMissing = !sameManagedPath(reconciled.sourcePath, activePath);
       } catch {
-        // Renderer still receives the original hint and uses the existing
-        // fail-closed conflict / reselect path.
+        // A queued reconcile may reject the pre-save Hash after publication
+        // has already restored this path. Report the current presence so a
+        // save echo cannot fence and rebuild an active native-edit session.
+        // Present files still go through the renderer's content observation.
+        sourceMissing = await lstat(activePath).then(
+          (information) => !information.isFile() || information.isSymbolicLink(),
+          () => true,
+        );
       }
-      // Always send the pre-rename path. The renderer session still holds that
-      // spelling until it completes the same identity relocate; a new-path hint
-      // would look stale and be ignored.
+      // A recovered same-path publication is a save echo, not a relocation.
+      // Keep the old path only for a real Finder rename so the renderer can
+      // rebase it. A stale missing hint would invalidate an in-flight Request.
       publishSourceFileMayHaveChanged({
         sourcePath: activePath,
         watcherGeneration: Number(hint.watcherGeneration || sourceFileWatcher.watcherGeneration),
-        sourceMissing: true,
+        sourceMissing,
       });
     });
   } catch {
@@ -995,13 +1005,17 @@ async function rememberAndBindImportedAssetSource({
   await restoreActiveImportedAssetSource(projectSourcePath);
 }
 
-async function activateProject(filePath) {
+async function activateProject(filePath, { managedLocator = null } = {}) {
   const normalizedPath = await existingPathIdentity(assertHtmlPath(filePath));
   const state = await loadProjectState();
   const currentIdentity = state.activePath
     ? await existingPathIdentity(state.activePath).catch(() => null)
     : null;
   if (currentIdentity === normalizedPath) {
+    if (managedLocator) {
+      state.activeManagedLocator = normalizeActiveManagedLocator(managedLocator);
+      await persistProjectState();
+    }
     await restoreActiveImportedAssetSource(normalizedPath);
     sourceFileWatcher.watch(normalizedPath);
     return;
@@ -1012,7 +1026,7 @@ async function activateProject(filePath) {
   const now = Date.now();
   state.activePath = normalizedPath;
   state.lastManagedActivation = null;
-  state.activeManagedLocator = null;
+  state.activeManagedLocator = normalizeActiveManagedLocator(managedLocator);
   state.recent = [
     {
       path: normalizedPath,
@@ -1076,12 +1090,23 @@ async function inspectHtmlFile(filePath) {
 }
 
 async function readHtmlProject(filePath) {
-  const normalizedPath = await inspectHtmlFile(filePath);
-  const canonicalPath = await realpath(normalizedPath);
-  return readHtmlFile({
-    sourcePath: canonicalPath,
-    maxHtmlBytes: MAX_HTML_BYTES,
-  });
+  try {
+    const normalizedPath = await inspectHtmlFile(filePath);
+    const canonicalPath = await realpath(normalizedPath);
+    return await readHtmlFile({ sourcePath: canonicalPath, maxHtmlBytes: MAX_HTML_BYTES });
+  } catch (cause) {
+    if (cause?.code !== "ENOENT") throw cause;
+    const state = await loadProjectState();
+    const locator = state.activeManagedLocator;
+    if (!locator || !sameManagedPath(locator.sourcePath, filePath)) throw cause;
+    // A source may be in the Repository's durable publication interval. Join
+    // its serialized read/recovery instead of surfacing an internal missing-file
+    // observation or retrying an unregistered filesystem path.
+    const recovered = await readRegisteredProjectProjection(locator.projectId);
+    if (recovered.openTarget.documentId !== locator.documentId
+      || recovered.openTarget.workingCopyId !== locator.workingCopyId) throw cause;
+    return recovered;
+  }
 }
 
 function projectWithIdentity(project, identity) {
@@ -1516,6 +1541,9 @@ async function ensureBridgeProjectRegistered(project) {
       nextSourcePath: workspaceSourceIdentity,
       project: importedProject,
       importedAssetSourcePath: projectSourceIdentity,
+      managedLocator: activeManagedLocatorForActivatedPath(
+        workspace.openTarget, workspaceSourceIdentity, importedProject.sha256,
+      ),
     });
     managedWelcomeRegistration = `${workspaceSourceIdentity}\0${importedProject.sha256}`;
     return projectWithIdentity(importedProject, workspace);
@@ -1581,6 +1609,29 @@ async function getActiveProjectOperation() {
     project = null;
   }
   try {
+    // Registered reads join the Repository queue even while the visible name is
+    // being published. Carry its bytes and identity together instead of doing
+    // another Main read/classification after that serialized proof.
+    const classified = await classifyViaBridge(activePath);
+    if (classified.kind === "managed-project" && classified.openTarget?.targetKind === "working-copy") {
+      project = await readRegisteredProjectProjection(classified.openTarget.projectId, classified.openTarget);
+      if (!sameManagedPath(activePath, project.sourcePath)
+        || !sameManagedPath(classified.openTarget.projectRootPath, project.openTarget.projectRootPath)) {
+        // Finder may move this same member between classification and the
+        // serialized read. Rebase Main's locator and watcher before exposing
+        // the verified tuple; a later watcher notification is not the receipt.
+        await commitActivatedProjectPath({
+          state: await loadProjectState(),
+          previousSourcePath: await existingPathIdentity(activePath),
+          nextSourcePath: project.sourcePath,
+          project,
+          managedLocator: activeManagedLocatorForActivatedPath(
+            project.openTarget, project.sourcePath, project.sha256,
+          ),
+        });
+        activePath = project.sourcePath;
+      }
+    }
     project ||= await readHtmlProject(activePath);
   } catch (error) {
     if (error?.code === "ENOENT") {
@@ -1605,6 +1656,7 @@ async function getActiveProjectOperation() {
     }
     return taggedProject(project);
   }
+  if (project.openTarget) return taggedProject(project);
   return prepareOrOpenFromPath(project.sourcePath);
 }
 
@@ -1670,11 +1722,20 @@ async function importExternalViaBridge(sourcePath, expectedSourceSha256) {
     existingPathIdentity(sourcePath),
     existingPathIdentity(importedProject.sourcePath),
   ]);
+  const managedLocator = activeManagedLocatorForActivatedPath(
+    workspace.openTarget, importedIdentity, importedProject.sha256,
+  );
+  if (!managedLocator
+    || managedLocator.projectId !== workspace.projectId
+    || managedLocator.documentId !== workspace.documentId
+    || !sameManagedPath(workspace.openTarget.exactSourcePath, importedIdentity)) {
+    throw new ProjectFileError("EXTERNAL_IMPORT_FAILED", "导入后的工作文件定位不完整。");
+  }
   await rememberAndBindImportedAssetSource({
     originalPath: originalIdentity,
     projectSourcePath: importedIdentity,
   });
-  await activateProject(importedProject.sourcePath);
+  await activateProject(importedProject.sourcePath, { managedLocator });
   return {
     project: projectWithIdentity(importedProject, workspace),
     imported: workspace.imported === true,
@@ -3205,7 +3266,7 @@ function assertRegisteredProjectCatalogRow(value) {
   }
   return Object.freeze({
     projectId,
-    documentId: ready ? String(value.documentId) : null,
+    documentId: /^doc_[a-f0-9]{16,64}$/u.test(String(value.documentId || "")) ? String(value.documentId) : null,
     projectName: value.projectName,
     registeredProjectRootPath: path.resolve(value.registeredProjectRootPath),
     activeWorkingCopyId: ready ? String(value.activeWorkingCopyId) : null,
@@ -3214,6 +3275,8 @@ function assertRegisteredProjectCatalogRow(value) {
     latestOfficialVersionId: ready ? String(value.latestOfficialVersionId) : null,
     hasPendingCandidate: value.hasPendingCandidate === true,
     availability,
+    sourceStatus: ["ready", "external-change", "missing", "duplicate", "invalid"].includes(value.sourceStatus) ? value.sourceStatus : "invalid",
+    canRestoreWorkingCopy: value.canRestoreWorkingCopy === true,
     availabilityReason: typeof value.availabilityReason === "string"
       ? value.availabilityReason
       : null,
@@ -3351,6 +3414,10 @@ async function restoreRememberedAgentCredential() {
   }
 }
 
+async function restoreRegisteredWorkingCopy(projectIdInput) {
+  return fetchBridgePost("/registered-project/restore-working-copy", { projectId: assertRegisteredProjectId(projectIdInput) });
+}
+
 async function listRegisteredProjects() {
   const payload = await fetchBridgeJson("/registered-projects");
   if (!Array.isArray(payload.projects)) {
@@ -3407,10 +3474,10 @@ async function listRegisteredProjectVersionSummaries(projectIdInput) {
   });
 }
 
-async function readRegisteredProjectProjection(projectIdInput) {
+async function readRegisteredProjectProjection(projectIdInput, expectedTarget = null) {
   const projectId = assertRegisteredProjectId(projectIdInput);
   const payload = await fetchBridgeJson(
-    `/registered-project/open?projectId=${encodeURIComponent(projectId)}`,
+    `/registered-project/open?projectId=${encodeURIComponent(projectId)}${expectedTarget ? `&workingCopyId=${encodeURIComponent(expectedTarget.workingCopyId)}` : ""}`,
   );
   const target = payload.openTarget;
   if (
@@ -3418,6 +3485,9 @@ async function readRegisteredProjectProjection(projectIdInput) {
     || typeof target !== "object"
     || target.targetKind !== "working-copy"
     || target.projectId !== projectId
+    || (expectedTarget && (target.documentId !== expectedTarget.documentId
+      || target.workingCopyId !== expectedTarget.workingCopyId
+      || target.versionId !== expectedTarget.versionId))
     || payload.projectId !== projectId
     || !/^doc_[a-f0-9]{16,64}$/u.test(String(target.documentId || ""))
     || !/^work_ver_\d{4,}$/u.test(String(target.workingCopyId || ""))
@@ -3441,7 +3511,7 @@ async function readRegisteredProjectProjection(projectIdInput) {
     existingPathIdentity(requestedSourcePath),
     existingPathIdentity(targetSourcePath),
   ]);
-  if (sourcePath !== exactTargetPath) {
+  if (!sameManagedPath(sourcePath, exactTargetPath)) {
     throw new ProjectFileError(
       "REGISTERED_PROJECT_PATH_MISMATCH",
       "项目目录目标路径与经过验证的工作文件不一致。",
@@ -3623,6 +3693,7 @@ function registerProjectIpc() {
       revealAiTask,
       listRecentProjects,
       listRegisteredProjects,
+      restoreRegisteredWorkingCopy,
       listRegisteredProjectVersionSummaries,
       readRegisteredProjectProjection,
       openRegisteredProject,

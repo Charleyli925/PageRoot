@@ -1,5 +1,7 @@
+import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -12,6 +14,9 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { _electron as electron } from "playwright";
 import { sha256 } from "../../../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../../../bridge/project-file-repository.mjs";
+import { sourceBindingPath } from "../../../bridge/project-file-repository/source-binding.mjs";
+import { activateNativeEdit, currentEditorFrame, setTextSelection, keyShortcut } from "../browser/pageroot-driver.mjs";
 import {
   inspectSourceElementIdentity,
   sourceElementIdentityBindingSha256,
@@ -130,7 +135,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
   );
   writeFileSync(
     liveAlias,
-    "<!doctype html><html><head><title>Live</title></head><body><main>Qoder live HTML</main></body></html>",
+    "<!doctype html><html><head><title>Live</title></head><body><main data-native-case=\"durable-binding\">Qoder live HTML</main></body></html>",
     "utf8",
   );
   const startupSourcePath = realpathSync(startupAlias);
@@ -227,7 +232,67 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
       { timeout: 30_000 },
     ).toBe("ready");
 
+    const managedBeforeRestart = readFileSync(liveManagedSourcePath);
+    const manifestPath = path.join(path.dirname(liveManagedSourcePath), ".pageroot", "manifest.json");
     await closePackagedGracefully(electronApp, page);
+    electronApp = null;
+    const repository = new ProjectFileRepository({ projectsRoot: path.join(isolatedUserData, "project-files") });
+    const startupTarget = await repository.resolveOpenTarget({ sourcePath: startupManagedSourcePath });
+    const candidateId = "candidate_packaged_restart_0001";
+    await repository.createCandidate({ target: startupTarget, requestId: "req_packaged_restart_0001", candidateId,
+      html: readFileSync(startupManagedSourcePath, "utf8").replace("<title ", "<title data-restart-proof=\"next\" "),
+      expectedSourceSha256: startupTarget.sourceSha256 });
+    await repository.promoteCandidate({ target: startupTarget, candidateId });
+    const migratedMembers = [];
+    for (const root of [path.dirname(startupManagedSourcePath), path.dirname(liveManagedSourcePath)]) {
+      const file = path.join(root, ".pageroot", "manifest.json");
+      const staleManifest = JSON.parse(readFileSync(file, "utf8"));
+      for (const member of staleManifest.workingCopies) {
+        const sourcePath = path.join(root, member.sourceRelativePath);
+        migratedMembers.push({ root, sourcePath, workingCopyId: member.workingCopyId, bytes: readFileSync(sourcePath) });
+        member.fileIdentity.device = "123";
+        rmSync(sourceBindingPath(root, member.workingCopyId), { force: true });
+      }
+      writeFileSync(file, JSON.stringify(staleManifest));
+    }
+    expect(migratedMembers).toHaveLength(3);
+    electronApp = await electron.launch({
+      executablePath: packagedApp.executable,
+      cwd: productRoot,
+      args: [],
+      env: {
+        ...process.env,
+        PAGEROOT_E2E: "1",
+        PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
+        HTML_AI_WORKSPACE: path.join(isolatedUserData, "workspace"),
+        HTML_AI_PROJECT_FILES_ROOT: path.join(isolatedUserData, "project-files"),
+      },
+    });
+    const restarted = await electronApp.firstWindow();
+    await waitForProjectReady(restarted, { timeout: 60_000 });
+    const projects = await restarted.evaluate(() => window.htmlAIProjects.listRegisteredProjects());
+    expect(projects).toHaveLength(2);
+    const expandSidebar = restarted.getByRole("button", { name: "展开左侧边栏" });
+    if (await expandSidebar.count()) await expandSidebar.click();
+    await expect(restarted.locator(".sidebar-project-row[data-availability=ready]")).toHaveCount(2);
+    expect(projects.every((project) => project.availability === "ready")).toBe(true);
+    expect(readFileSync(liveManagedSourcePath)).toEqual(managedBeforeRestart);
+    expect(JSON.parse(readFileSync(manifestPath, "utf8")).workingCopies.every((member) => member.fileIdentity.device !== "123")).toBe(true);
+    // The inactive startup V1 must migrate too. Catalog/open probes alone
+    // only touch active members and cannot satisfy startup migration.
+    for (const member of migratedMembers) {
+      expect(readFileSync(member.sourcePath)).toEqual(member.bytes);
+      expect(lstatSync(sourceBindingPath(member.root, member.workingCopyId)).ino).toBe(lstatSync(member.sourcePath).ino);
+      const manifest = JSON.parse(readFileSync(path.join(member.root, ".pageroot", "manifest.json"), "utf8"));
+      expect(manifest.workingCopies.find((entry) => entry.workingCopyId === member.workingCopyId).fileIdentity.device).not.toBe("123");
+    }
+    const frame = await currentEditorFrame(restarted);
+    await activateNativeEdit(frame, "durable-binding");
+    await setTextSelection(frame, "durable-binding", 0, "Qoder live HTML".length);
+    await restarted.keyboard.insertText("Saved after durable restart");
+    await restarted.keyboard.press(keyShortcut("S"));
+    await expect.poll(() => readPublishedWorkingCopy(liveManagedSourcePath, "utf8"), { timeout: 30_000 }).toContain("Saved after durable restart");
+    await closePackagedGracefully(electronApp, restarted);
     electronApp = null;
   } finally {
     if (electronApp) await stopPackagedAppForCleanup(electronApp);

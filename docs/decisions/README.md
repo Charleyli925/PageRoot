@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0069 -->
+<!-- adr-history-max: 0070 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0069`.
+`0055` through `0058`; future ADRs must use the next number above `0070`.
 
 ## Active decisions
 
@@ -34,7 +34,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0028 | [Unrecognized project Registry shapes fail closed, with no migration](0028-unrecognized-registry-fails-closed.md) | Living |
 | 0032 | [Trusted-local Qoder ACP Agent Bridge](0032-qoder-acp-agent-bridge.md) | Living |
 | 0033 | [Records carry an authored actor and device, and the device identity is separate from telemetry](0033-record-provenance-actor-and-device.md) | Living |
-| 0034 | [The project manifest stays portable by classification, and its one device-scoped member stays put](0034-portable-project-record-boundary.md) | Living |
+| 0034 | [The project manifest stays portable by classification, and its one device-scoped member stays put](0034-portable-project-record-boundary.md) | Living; physical identity authority superseded by ADR 0070 |
 | 0035 | [A Version ordinal is read from the manifest, and full identifier globalisation is deferred](0035-version-ordinal-from-manifest.md) | Living |
 | 0037 | [执行轮次的可见文本与过程消息](0037-execution-visible-text.md) | Living |
 | 0038 | [A changed original may be imported as a second project, but only by explicit choice, and the path binding transfers instead of forking](0038-changed-original-rebind.md) | Proposed |
@@ -62,6 +62,8 @@ reused. The four collisions found in the first curation pass were assigned
 | 0067 | [AI Candidate identity is validated before PageRoot assigns new IDs](0067-ai-candidate-source-identity.md) | Living |
 | 0068 | [Review keeps source facts authoritative and adds visual enhancement](0068-review-visual-verdict-gate.md) | Living |
 | 0069 | [PageRoot native OpenAI-compatible Agent](0069-pageroot-native-openai-compatible-agent.md) | Living |
+
+| 0070 | [Working Copy identity survives filesystem observation changes](0070-durable-working-copy-binding.md) | Living |
 
 ## Reading guide
 

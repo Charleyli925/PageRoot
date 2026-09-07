@@ -1336,6 +1336,16 @@ export class ProjectWorkflow {
     return this.#registeredProjectsRefresh;
   }
 
+  async restoreRegisteredWorkingCopy(projectId) {
+    try {
+      const value = await this.#projectOpenPort.restoreRegisteredWorkingCopy(String(projectId || ""));
+      await this.refreshRegisteredProjects();
+      return succeeded(value);
+    } catch (cause) {
+      return rejected("WORKING_COPY_RESTORE_REJECTED", projectErrorMessage(this.#codecs, cause, "工作文件无法恢复。"));
+    }
+  }
+
   async loadRegisteredProjectVersionSummaries(projectId) {
     if (typeof this.#projectOpenPort.listRegisteredVersionSummaries !== "function") {
       return succeeded({ projectId: String(projectId || ""), documentId: "", versions: [] });
@@ -3187,15 +3197,17 @@ export class ProjectWorkflow {
     }
     this.#runSession.activate(project.sourcePath || null);
     this.#documentWorkflow.resetForProjectTransition();
-    this.#documentSession.reset({
-      html: project.html,
-      persistedSourceSha256: project.sha256 || null,
-    });
+    // Publish the hydration boundary before provisional HTML reaches Runtime
+    // observers. Only the final hydrated source may start author Script.
     this.#setHydration({
       phase: project.sourcePath ? "hydrating" : "idle",
       epoch: locator.epoch,
       sourcePath: project.sourcePath || null,
       error: null,
+    });
+    this.#documentSession.reset({
+      html: project.html,
+      persistedSourceSha256: project.sha256 || null,
     });
     this.#markHydrationStage("apply-authority", operationId);
     this.#commentWorkflow.resetForProjectTransition();
