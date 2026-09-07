@@ -449,7 +449,18 @@ the Controller reads tabs first, requests the Registry catalog when needed,
 removes missing items with an actionable Finder recovery event, and activates
 the pending identity through its owned workflow.
 
-Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+`ProjectFileRepository` also owns durable file binding. Stable project/document/
+Working Copy IDs plus the registered mapping and state Hash select a member;
+persisted stat fields are observations only. `source-binding.mjs` owns live
+hard-link locator operations under the same Repository serialization. Initialize
+recovers transactions before migrating each member; one project's failure never
+blocks another. Catalog rows retain project metadata and an independent source
+status; Version summaries do not require a usable HTML file. User-requested
+missing-file restoration crosses the existing ProjectWorkflow/ProjectOpenPort,
+trusted desktop IPC and Bridge boundary with only a project ID. Detailed
+recovery and authority rules live in `SECURITY_MODEL.md`.
+
+Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash. Working Copy saves stage complete replacement bytes, capture and verify the actual displaced source in the existing recovery directory, publish without replacing a newly occupied path, then reread the result. External modification causes a fail-closed conflict.
 
 The same Repository serialization owns Working Copy source-element identity.
 `working-copy-state.v4` records the adopted identity schema and a canonical

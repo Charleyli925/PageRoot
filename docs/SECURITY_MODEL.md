@@ -10,7 +10,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - v4 Registry-bound write allowlisting: a privileged project-file write
   requires one Registry record whose `projectId`, registered root path,
   recovered root identity, `project.json`, and manifest mappings agree
-- Hash-checked v4 Working Copy saves with same-directory atomic replacement
+- Hash-checked v4 Working Copy saves with recoverable no-replace publication
   and fail-closed external-modification checks; Canvas Undo/Redo persists only
   through this normal save route, with no separate Bridge history action or
   journal
@@ -200,13 +200,15 @@ backup is not runtime authority. Any validation or publication failure leaves th
 Registry bytes in place and never resets, drops, scans, imports or reassociates
 a Project. HTML Hashes and equal bytes never participate in this migration.
 
-A same-parent Finder rename can update that Registry record only through a
-compare-and-swap after the stable project identity and root filesystem identity
-match. Moving a root elsewhere, crossing a volume, or copying it never grants
-write authority: the in-memory session remains readable but writes fail closed
-until the exact registered location is available and revalidated. Import
-recovery is likewise limited to Registry-owned pending intents; a discovered
-`.pageroot/import.json` is never proof that an arbitrary copied root is managed.
+A registered project may relocate within the configured Projects root only when
+one direct-child project has its stable project identity and a complete valid
+project contract. Duplicate IDs isolate that project even if its registered
+name still exists. Registry updates compare the recorded business mapping;
+`rootFileIdentity` is a refreshable observation, never a restart gate. Returning
+or copy-delete moving a complete project within this root may rebuild local
+bindings after content verification. Moving outside this root still grants no
+write authority. Import recovery remains limited to Registry-owned pending
+intents; an arbitrary `.pageroot/import.json` is not an import grant.
 The same canonical external path binds to at most one `projectId`. Content Hash
 never matches a file at another path into that project. Duplicate source-key
 claims fail closed without deleting or merging projects. Ordinary Registry
@@ -231,17 +233,34 @@ release that cannot complete leaves an inert directory to be reclaimed on age,
 and never becomes the outcome of an operation that already committed nor replaces
 the original error whose code drives recovery.
 
-Working-copy filename changes retain their immutable IDs. A missing mapping may
-be repaired only by one unique direct-child file-identity continuity clue; Hash
-may validate bytes afterwards but never grants identity. An ambiguity is a
-content-preserving error. Promotion may prepare a provisional relative path in
-a durable transaction, but freezes the final visible path only after its
-no-replace publication succeeds. Recovery re-derives every identity-bearing
-transaction field and any created Working Copy from the runtime-sealed
-Candidate and its managed source Working Copy; a transaction is never an
-independent authority for version ordinal, lineage or path identity. A replaced
-preparation file or an untrusted collision fails closed rather than deleting
-user data.
+Working-copy filename changes retain their immutable IDs. The Repository owns
+`.pageroot/source-bindings/<workingCopyId>.ref` hard links as recoverable locator
+evidence. A registered relative path selects a member; its state Hash validates
+bytes. If that path is absent, only a unique currently matching anchor/file pair
+can recover its name. Equal bytes at an unlisted path never grant membership.
+Multiple visible links or conflicting member paths fail closed. Persisted
+`device`, `inode`, and `birthtimeMs` never authorize startup, open or writes.
+Physical comparisons use live observations within one operation only.
+
+After pending transaction recovery, valid registered members gain anchors
+without changing HTML or Version records. Atomic anchor publication is the
+per-member migration checkpoint. Missing/unsupported anchors do not invalidate
+a verified registered path. A missing file remains missing until the user
+requests restoration; the Repository rechecks the state Hash and publishes
+only at its registered path without replacement. Metadata/version browsing is
+independent of source probing, and source failures remain project-local.
+
+HTML identity and bytes come from the same no-follow descriptor, with fstat,
+Hash, and post-read path revalidation. Save retains the old object and prepares
+a new binding inside the existing recovery directory, revalidates the current
+project/member and expected Hash, atomically publishes, then switches the live
+anchor. Recovery accepts only the transaction's old/new Hashes and retains
+external changes as conflicts. Filesystem operations are not a lock against an
+uncooperative external writer; displaced old bytes remain available for conflict
+recovery. Promotion continues to derive IDs, lineage, paths and Hashes from the
+runtime-sealed Candidate; its preparation file supplies live publication
+identity, never the previous process's stat values. Collision publication stays
+no-replace. An invalid prepared Hash or changed visible content is never deleted.
 
 Source-element identity migration is narrower than path identity recovery. A
 new import materializes IDs only in its managed Working Copy; the external file

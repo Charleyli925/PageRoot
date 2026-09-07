@@ -410,40 +410,18 @@ test("unlisted HTML never acquires a v4 binding from equal bytes or an inode", a
   assert.deepEqual(manifestAfterImport, manifestBeforeImport);
 });
 
-test("a copied project remains external and its first import creates an independent V1", async (t) => {
+test("a duplicate project identity is isolated until the extra copy is moved out", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
   const copiedRoot = path.join(value.projects, "copied-project");
   await cp(imported.target.projectRootPath, copiedRoot, { recursive: true });
   const copiedHtml = path.join(copiedRoot, path.basename(imported.target.exactSourcePath));
-  const copiedManifestBefore = await readFile(path.join(
-    copiedRoot,
-    ".pageroot",
-    "manifest.json",
-  ));
-
-  assert.equal(
-    await value.repository.resolveOpenTarget({ sourcePath: copiedHtml }),
-    null,
-  );
-
-  const importedAsNew = await value.repository.importExternal({
-    sourcePath: copiedHtml,
-    expectedSourceSha256: imported.target.sourceSha256,
-  });
-  assert.equal(importedAsNew.imported, true);
-  assert.notEqual(importedAsNew.target.projectId, imported.target.projectId);
-  const newManifest = await json(path.join(
-    importedAsNew.target.projectRootPath,
-    ".pageroot",
-    "manifest.json",
-  ));
-  assert.deepEqual(newManifest.versions.map((version) => version.versionId), ["ver_0001"]);
-  assert.deepEqual(await readFile(path.join(
-    copiedRoot,
-    ".pageroot",
-    "manifest.json",
-  )), copiedManifestBefore);
+  const before = await readFile(copiedHtml);
+  await assert.rejects(value.repository.resolveOpenTarget({ sourcePath: copiedHtml }), { code: "REGISTERED_PROJECT_AMBIGUOUS" });
+  await assert.rejects(value.repository.importExternal({ sourcePath: copiedHtml }), { code: "REGISTERED_PROJECT_AMBIGUOUS" });
+  assert.deepEqual(await readFile(copiedHtml), before);
+  await rename(copiedRoot, path.join(value.root, "extra-copy"));
+  assert.ok(await value.repository.resolveOpenTarget({ sourcePath: imported.target.exactSourcePath }));
 });
 
 test("a damaged v4 record is ignored and its HTML imports as a fresh V1", async (t) => {

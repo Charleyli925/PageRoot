@@ -2438,3 +2438,36 @@ test("a late keep-external result cannot reload a reopened project generation", 
   assert.equal(event?.current, false);
   assert.equal(event?.reloadCurrentSource, false);
 });
+
+
+test("submit accepts only its own frozen Hash acknowledgement during a durable save", async () => {
+  for (const change of ["hash", "wrong-hash", "working-copy", "version", "root", "epoch"]) {
+    let harness;
+    harness = createHarness({
+      drain: async () => {
+        const target = { ...harness.projectSession.context, sourceSha256: sha256(HTML_A) };
+        if (change === "wrong-hash") target.sourceSha256 = sha256("external");
+        if (change === "working-copy") target.workingCopyId = "work_other";
+        if (change === "version") target.versionId = "version_other";
+        if (change === "root") target.projectRootPath = "/tmp/other";
+        if (change === "epoch") harness.projectSession.openLocator(SOURCE_A);
+        else harness.projectSession.refreshOpenTarget(target);
+        return { ok: true };
+      },
+    });
+    harness.projectSession.refreshOpenTarget({
+      ...harness.projectSession.context,
+      projectRootPath: "/tmp",
+      targetKind: "working-copy",
+      workingCopyId: "work_001",
+      versionId: "version_001",
+      exactSourcePath: SOURCE_A,
+      sourceSha256: sha256("previous persisted bytes"),
+    });
+    const outcome = await harness.workflow.submit();
+    assert.equal(outcome.status, change === "hash" ? "succeeded" : "rejected", `${change}: ${JSON.stringify(outcome)}`);
+    assert.equal(harness.calls.createRequest.length, change === "hash" ? 1 : 0, change);
+    if (change !== "hash") assert.equal(outcome.code, "RUN_SUBMISSION_CONTEXT_STALE", change);
+    harness.workflow.dispose();
+  }
+});

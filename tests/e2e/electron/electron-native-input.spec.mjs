@@ -1,3 +1,4 @@
+import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { expect, test } from "@playwright/test";
 import {
   activateNativeEdit,
@@ -332,7 +333,7 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     await expect.poll(() => frame.locator(
       `${caseSelector("managed-line-break")} > br`,
     ).count()).toBeGreaterThan(0);
-    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(managedSourcePath, "utf8"))
       .toMatch(/<br data-pageroot-id="pr1_/u);
     await expect(editor).not.toHaveAttribute("data-edit-block-detail", /.+/u);
     await expect(editor).toHaveAttribute(
@@ -361,7 +362,7 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     await expect(target).toContainText("Omega");
     await launched.page.keyboard.press(keyShortcut("S"));
     await expect(editor).not.toHaveAttribute("data-edit-block-detail", /.+/u);
-    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(managedSourcePath, "utf8"))
       .toContain("Omega");
     const finalSavedHtml = readFileSync(managedSourcePath, "utf8");
     expect(finalSavedHtml.match(/data-pageroot-id=/gu)?.length)
@@ -431,7 +432,7 @@ test("Electron keeps full-identity text formatting in one Runtime editing transa
     const toolbar = editor.getByRole("toolbar");
 
     await toolbar.getByRole("button", { name: "加粗", exact: true }).click();
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/font-weight:\s*700/u);
     await expect.poll(() => documentToken(frame)).toBe(initialDocument);
     await expect(editor.locator('iframe:not([data-frame-role])'))
@@ -455,12 +456,12 @@ test("Electron keeps full-identity text formatting in one Runtime editing transa
     });
 
     await launched.page.keyboard.press(keyShortcut("I"));
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/font-style:\s*italic/u);
 
     await toolbar.getByText("样式与间距", { exact: true }).click();
     await toolbar.getByLabel("字号（像素）").fill("28");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/font-size:\s*28px/u);
     const color = toolbar.getByLabel("文字颜色");
     await color.evaluate((element) => {
@@ -472,7 +473,7 @@ test("Electron keeps full-identity text formatting in one Runtime editing transa
       element.dispatchEvent(new Event("input", { bubbles: true }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/color:\s*#123456/u);
 
     const editingHost = frame.locator(
@@ -496,7 +497,7 @@ test("Electron keeps full-identity text formatting in one Runtime editing transa
     ))).toBe(true);
     await toolbar.getByText("样式与间距", { exact: true }).click();
     await toolbar.getByLabel("内边距（像素）").fill("12");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/padding-top:\s*12px/u);
     await expect.poll(() => editingHost.evaluate((element) => (
       element.ownerDocument.activeElement === element

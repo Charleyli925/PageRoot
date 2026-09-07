@@ -7,6 +7,7 @@ import {
   activeManagedLocatorFromOpenTarget,
   normalizeActiveManagedLocator,
   rebaseActiveManagedLocator,
+  sameManagedPath,
 } from "../desktop/active-managed-locator.mjs";
 
 const LOCATOR = {
@@ -91,4 +92,12 @@ test("activated path spelling wins over OpenTarget aliases and rebases across /v
   });
   assert.equal(rebased.sourcePath, path.resolve(finderPath));
   assert.equal(rebased.workingCopyId, "work_ver_0001");
+});
+
+
+test("publication reads match macOS path aliases without matching a different file", () => {
+  assert.equal(sameManagedPath("/private/var/folders/test/page.html", "/var/folders/test/page.html"), true);
+  assert.equal(sameManagedPath("/private/tmp/test/page.html", "/tmp/test/page.html"), true);
+  assert.equal(sameManagedPath("/private/var/folders/test/page.html", "/var/folders/test/other.html"), false);
+  assert.equal(sameManagedPath(null, "/tmp/page.html"), false);
 });

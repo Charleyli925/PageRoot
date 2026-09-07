@@ -467,10 +467,11 @@ async function registeredProjectVersionSummaries(projectId) {
   }
 }
 
-async function registeredProjectOpen(projectId) {
+async function registeredProjectOpen(projectId, workingCopyId = null) {
   try {
     const resolved = await projectFileRepository.resolveRegisteredProjectOpenTarget({
       projectId: registeredProjectId(projectId),
+      workingCopyId,
     });
     return {
       ok: true,
@@ -2620,6 +2621,13 @@ async function route(request, response) {
     );
     return;
   }
+  if (request.method === "POST" && url.pathname === "/registered-project/restore-working-copy") {
+    const body = await readBody(request);
+    try {
+      sendJson(response, 200, await projectFileRepository.restoreRegisteredWorkingCopy({ projectId: registeredProjectId(body.projectId) }));
+    } catch (cause) { throw projectFileHttpError(cause); }
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/registered-projects") {
     sendJson(response, 200, await registeredProjectCatalog());
     return;
@@ -2636,7 +2644,7 @@ async function route(request, response) {
     sendJson(
       response,
       200,
-      await registeredProjectOpen(url.searchParams.get("projectId")),
+      await registeredProjectOpen(url.searchParams.get("projectId"), url.searchParams.get("workingCopyId")),
     );
     return;
   }

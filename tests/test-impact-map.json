@@ -2116,11 +2116,11 @@
       "id": "project-file-lifecycle",
       "patterns": [
         "^bridge/project-file-(?:repository|finalizer)\\.mjs$",
-        "^bridge/project-file-repository/(?:constants|errors|request-attachments|workspace-performance-timing)\\.mjs$",
+        "^bridge/project-file-repository/(?:constants|errors|request-attachments|workspace-performance-timing|source-binding)\\.mjs$",
         "^tests/project-file-(?:finalizer|bridge|schema)\\.test\\.mjs$",
         "^tests/project-file-repository(?:-harness|\\.integration\\.test)\\.mjs$",
         "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$",
-        "^tests/workspace-performance-timing\\.test\\.mjs$"
+        "^tests/(?:workspace-performance-timing|durable-working-copy-binding)\\.test\\.mjs$"
       ],
       "suites": [
         "ai-review-smoke"
@@ -2137,7 +2137,8 @@
         "tests/project-file-bridge.test.mjs",
         "tests/project-file-schema.test.mjs",
         "tests/workspace-performance-timing.test.mjs",
-        "tests/source-element-identity-migration.test.mjs"
+        "tests/source-element-identity-migration.test.mjs",
+        "tests/durable-working-copy-binding.test.mjs"
       ]
     },
     {

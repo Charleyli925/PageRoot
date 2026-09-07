@@ -420,3 +420,14 @@ HTML，因此可以包含 Stable ID。V2+ 新 Working Copy 初始与对应 Versi
 不回写外部原文件。唯一导出动作原样复制当前完整 Working Copy，包括 Stable ID，
 不改变项目、Version、Registry、Recent 或当前打开文件。Undo/Redo 只属于当前打开
 文档会话，不属于正式 Version 历史，也不跨切换、关闭或重启恢复。
+
+## Durable Working Copy file binding
+
+`ProjectFileRepository` owns the registered member mapping, current source state,
+transaction recovery and `.pageroot/source-bindings/` locator evidence. Helpers
+have no independent queues or authority. All bind/restore/save/Promotion work
+runs in the Repository serialization. There is no renderer-persisted binding
+state and no new drain participant: restoration publishes a missing registered
+file synchronously before returning; save remains in DocumentWorkflow's drain.
+Catalog source status is a disposable projection, with per-project failure
+isolation. The live authority rules are in `SECURITY_MODEL.md`.

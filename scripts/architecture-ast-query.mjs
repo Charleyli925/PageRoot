@@ -239,3 +239,48 @@ export function countReactHooks(handle) {
   const names = callNames(handle);
   return REACT_HOOKS.reduce((total, hook) => total + names.filter((name) => name === hook).length, 0);
 }
+
+// Persisted filesystem observations may be refreshed, but must never feed a
+// physical equality gate. Follow local aliases so reformatting/renaming does
+// not hide the dependency; behavioral restart tests cover the public outcome.
+export function persistentFileIdentityComparisons(handle) {
+  const observationNames = new Set(["fileIdentity", "rootFileIdentity", "preparedWorkingCopyFileIdentity"]);
+  const aliases = new Set();
+  const comparators = new Set(["sameFileIdentity"]);
+  eachNode(handle, (node) => {
+    if (ts.isImportSpecifier(node) && node.propertyName?.text === "sameFileIdentity") comparators.add(node.name.text);
+  });
+  function persisted(node) {
+    if (!node) return false;
+    if (ts.isIdentifier(node) && aliases.has(node.text)) return true;
+    if (ts.isPropertyAccessExpression(node) && observationNames.has(node.name.text)) return true;
+    if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)
+      && observationNames.has(node.argumentExpression.text)) return true;
+    let result = false;
+    node.forEachChild((child) => { if (persisted(child)) result = true; });
+    return result;
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    eachNode(handle, (node) => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
+        && !aliases.has(node.name.text) && persisted(node.initializer)) {
+        aliases.add(node.name.text); changed = true;
+      }
+      if (ts.isBindingElement(node) && ts.isIdentifier(node.name)
+        && observationNames.has(node.propertyName?.getText(handle.sourceFile) || node.name.text)
+        && !aliases.has(node.name.text)) {
+        aliases.add(node.name.text); changed = true;
+      }
+    });
+  }
+  const violations = [];
+  eachNode(handle, (node) => {
+    if (ts.isCallExpression(node) && comparators.has(expressionPath(node.expression))
+      && node.arguments.some(persisted)) {
+      violations.push("persisted fileIdentity cannot authorize physical identity equality; compare live observations only");
+    }
+  });
+  return violations;
+}

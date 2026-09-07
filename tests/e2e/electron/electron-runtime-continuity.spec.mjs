@@ -1,3 +1,4 @@
+import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { expect, test } from "@playwright/test";
 
 import {
@@ -192,7 +193,7 @@ test("continuous editing keeps the Runtime document through type, Enter, style a
     const toolbar = page.getByTestId("html-canvas-editor").getByRole("toolbar");
     await toolbar.getByRole("button", { name: "加粗", exact: true }).click();
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/font-weight:\s*700/u);
     await expectCheckpointPersisted(page, 0);
     await page.keyboard.press(keyShortcut("S"));
@@ -346,7 +347,7 @@ test("double-clicking the sixth blank line after a Runtime refresh places the ca
     await page.keyboard.insertText(marker);
     await expect(target).toContainText(marker);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain(marker);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8")).toContain(marker);
     const inner = readFileSync(workingCopyPath, "utf8").match(
       /data-native-case="continuity-blank-caret"[^>]*>([\s\S]*?)<\/p>/u,
     )?.[1] ?? "";

@@ -1,5 +1,16 @@
 # PageRoot 版本与项目文件产品需求
 
+> Current durable binding amendment: persisted `device / inode / birthtime`
+> observations do not gate project availability or writes. Within the configured
+> Projects root, unique stable identity, registered member paths and verified
+> content evidence recover renamed/copy-moved projects automatically. Duplicate
+> project identities isolate that project while catalog browsing remains usable.
+> Hidden hard links locate renamed members and support explicit no-overwrite
+> missing-file restoration. This supersedes the older physical-identity and
+> duplicate-copy rows below; detailed current rules: `SECURITY_MODEL.md`, section
+> “V4 Registry and managed-root authority”. Outside-root writes remain forbidden.
+
+
 - 文档版本：PRD v1.4
 - 最近更新：2026-08-31（Asia/Shanghai，UTC+8）
 - 状态：产品规则已确认，按两期串行实施

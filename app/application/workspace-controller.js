@@ -520,6 +520,7 @@ export class WorkspaceController {
     const projectCatalogCommands = Object.freeze({
       refreshRecents: () => this.refreshRecentProjects(),
       refreshRegistered: () => this.refreshRegisteredProjects(),
+      restoreWorkingCopy: (projectId) => this.#requireProjectWorkflow().restoreRegisteredWorkingCopy(projectId),
       loadVersionSummaries: (projectId) => this.loadRegisteredProjectVersionSummaries(projectId),
     });
     this.projectCatalog = Object.freeze({

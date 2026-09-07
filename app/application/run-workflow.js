@@ -865,7 +865,8 @@ export class RunWorkflow {
     } catch {
       return rejected("RUN_DELIVERY_MODE_INVALID", "选择的 Agent 交接方式无效。");
     }
-    const { context, plan: submitPlan } = this.#captureSubmissionPlan();
+    const { context: entryContext, plan: submitPlan } = this.#captureSubmissionPlan();
+    let context = entryContext;
     if (submitPlan.kind === "reject") {
       return blocked(submitPlan.code, submitPlan.reason);
     }
@@ -1018,6 +1019,23 @@ export class RunWorkflow {
       });
 
       const drained = await this.#drain({ boundary: "submit", deadlineAt });
+      // The drain may acknowledge the very Working Copy bytes frozen above.
+      // Revalidate every captured identity field, allowing only that proven
+      // Hash transition; a new epoch, path, Version or Working Copy stays stale.
+      if (
+        !this.#isCurrentContext(context)
+        && context.targetKind === "working-copy"
+        && drained?.ok
+        && this.#documentSession.lastPersistedRevision === freezeCutoffRevision
+        && this.#documentSession.editRevision === freezeCutoffRevision
+        && this.#documentSession.persistedSourceSha256 === frozenWorkingSourceSha256
+      ) {
+        const acknowledgedContext = Object.freeze({
+          ...context,
+          sourceSha256: frozenWorkingSourceSha256,
+        });
+        if (this.#isCurrentContext(acknowledgedContext)) context = acknowledgedContext;
+      }
       if (!this.#isCurrentContext(context)) {
         throw responseError(
           "RUN_SUBMISSION_CONTEXT_STALE",

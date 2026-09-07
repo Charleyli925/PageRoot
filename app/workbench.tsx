@@ -1122,6 +1122,11 @@ export default function Workbench() {
             getActive: async () => window.htmlAIProjects?.getActiveProject() ?? null,
             listRecent: async () => window.htmlAIProjects?.listRecentProjects() ?? [],
             listRegistered: async () => window.htmlAIProjects?.listRegisteredProjects?.() ?? [],
+            restoreRegisteredWorkingCopy: async (projectId: string) => {
+              const restore = window.htmlAIProjects?.restoreRegisteredWorkingCopy;
+              if (!restore) throw new Error("当前应用缺少工作文件恢复通道。");
+              return restore(projectId);
+            },
             listRegisteredVersionSummaries: async (registeredProjectId: string) => {
               const list = window.htmlAIProjects?.listRegisteredProjectVersionSummaries;
               if (!list) throw new Error("当前 PageRoot 版本缺少项目版本摘要通道。");

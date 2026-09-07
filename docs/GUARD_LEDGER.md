@@ -72,3 +72,16 @@ Project open/switch/close now have `ready | wait | reject` plans. Those
 classifiers are not a license to delete navigation, close-generation, or tab
 persistence guards. Those rows stay **keep** until a comments-scale contract
 plus shadow exists for the same operation.
+
+## Working Copy recovery
+
+Persisted filesystem-number drift is reversible internal uncertainty: refresh
+observations after stable project/member/content verification. Never expose it
+as a project lock. Missing source, external changes and duplicate bindings are
+separate per-project states; metadata and Version browsing remain available.
+“恢复工作文件” requires a missing registered target and the anchor's exact state
+Hash, and publishes without replacement. “重新检查文件” re-reads after the user
+has returned a missing file or removed duplicate folders/links. It never grants
+a same-hash unregistered copy write authority. See `SECURITY_MODEL.md`.
+
+- Durable save / Request handoff: a submit drain may refresh only the captured Working Copy Hash to its verified frozen bytes; epoch, project, document, root, path, Working Copy and Version must still match. `tests/run-workflow.test.mjs` rejects unrelated authority changes; the Electron static-fallback editing test covers the real pending-save handoff.

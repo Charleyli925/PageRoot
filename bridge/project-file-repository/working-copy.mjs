@@ -1,8 +1,8 @@
 // Working Copy layout, state validation and same-directory CAS replacement.
 import { randomUUID } from "node:crypto";
 import {
-  lstat,
-  readFile,
+  link,
+  unlink,
   rename,
   rm,
 } from "node:fs/promises";
@@ -48,8 +48,11 @@ import {
 } from "./identity.mjs";
 import {
   assertId,
+  copyFileIdentity,
+  readHtmlFile,
+  regularInformation,
+  sameFileIdentity,
   assertRealPathInsideProject,
-  decodeHtml,
   ensureRelativePath,
   isObject,
   pathInside,
@@ -820,70 +823,93 @@ export function saveRecoveryPaths(paths, workingCopyIdValue, revision, recoveryI
 }
 
 export async function compareAndSwapWorkingCopyFile({
-  sourcePath,
-  nextBuffer,
-  expectedSha256,
-  nextSha256,
-  projectRootPath,
+  sourcePath, nextBuffer, expectedSha256, nextSha256, projectRootPath,
+  expectedInformation = null, previousPath = null, preparedBindingPath = null,
+  beforeCommit = null, beforePublication = null, afterDisplacement = null,
 }) {
   const parent = path.dirname(sourcePath);
-  await assertRealPathInsideProject(projectRootPath, parent, "Working Copy parent", {
-    expectedKind: "directory",
-  });
-  const temporary = path.join(
-    parent,
-    `.pageroot-save-${process.pid}-${randomUUID()}.tmp`,
-  );
+  await assertRealPathInsideProject(projectRootPath, parent, "Working Copy parent", { expectedKind: "directory" });
+  const temporary = path.join(parent, `.pageroot-save-${process.pid}-${randomUUID()}.tmp`);
   await atomicWriteFile(temporary, nextBuffer);
   let swapped = false;
   try {
-    let currentBuffer;
-    try {
-      const information = await lstat(sourcePath);
-      if (information.isSymbolicLink() || !information.isFile()) {
-        throw new ProjectFileRepositoryError(
-          "UNSAFE_FILE",
-          "Working Copy must be a regular file, not a symbolic link.",
-        );
+    if (preparedBindingPath) {
+      await assertRealPathInsideProject(projectRootPath, preparedBindingPath, "prepared source binding");
+      try { await link(temporary, preparedBindingPath); }
+      catch (cause) {
+        if (!["ENOTSUP", "EOPNOTSUPP", "EXDEV", "ENOSYS", "EPERM"].includes(cause?.code)) throw cause;
       }
-      currentBuffer = await readFile(sourcePath);
-    } catch (cause) {
-      if (cause?.code === "ENOENT") {
-        return { swapped: false, actualSha256: null, written: null };
-      }
+      await syncDirectory(path.dirname(preparedBindingPath));
+    }
+    await beforeCommit?.();
+    let current;
+    try { current = await readHtmlFile(sourcePath, "Working Copy", { projectRootPath }); }
+    catch (cause) {
+      if (cause?.code === "ENOENT" || cause?.code === "SOURCE_NOT_FOUND") return { swapped: false, actualSha256: null, written: null };
       throw cause;
     }
-    const actualSha256 = sha256(currentBuffer);
-    if (actualSha256 !== expectedSha256) {
-      return { swapped: false, actualSha256, written: null };
+    if (current.sha256 !== expectedSha256) return { swapped: false, actualSha256: current.sha256, written: null };
+    if (expectedInformation && !sameFileIdentity(copyFileIdentity(expectedInformation), copyFileIdentity(current.information))) {
+      throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "工作文件在保存操作中被替换，未覆盖磁盘。");
     }
-    await rename(temporary, sourcePath);
+    const verified = await readHtmlFile(sourcePath, "Working Copy", { projectRootPath });
+    if (verified.sha256 !== expectedSha256
+      || !sameFileIdentity(copyFileIdentity(current.information), copyFileIdentity(verified.information))) {
+      return { swapped: false, actualSha256: verified.sha256, written: null };
+    }
+    await beforePublication?.();
+    if (previousPath) {
+      await assertRealPathInsideProject(projectRootPath, previousPath, "previous Working Copy");
+      if (await regularInformation(previousPath, "previous Working Copy", { projectRootPath })) {
+        throw new ProjectFileRepositoryError("SAVE_RECOVERY_CONFLICT", "The save recovery path is already occupied.");
+      }
+      // Capture the object actually displaced by the syscall. A final lstat
+      // followed by overwrite-rename cannot protect an uncooperative writer.
+      await rename(sourcePath, previousPath);
+      await syncDirectory(parent);
+      await syncDirectory(path.dirname(previousPath));
+      await afterDisplacement?.();
+      let parked;
+      try { parked = await readHtmlFile(previousPath, "previous Working Copy", { projectRootPath }); }
+      catch (cause) {
+        // Never follow a swapped symlink, and never delete the displaced entry.
+        throw new ProjectFileRepositoryError("SAVE_RECOVERY_CONFLICT", "保存期间文件被替换，移出的文件已保留。", { cause: cause?.code || null });
+      }
+      if (parked.sha256 !== expectedSha256
+        || !sameFileIdentity(copyFileIdentity(verified.information), copyFileIdentity(parked.information))) {
+        // Restore only into the still-empty name. If another writer already
+        // published there, both its bytes and the displaced bytes survive.
+        await link(previousPath, sourcePath).catch((cause) => { if (cause?.code !== "EEXIST") throw cause; });
+        await syncDirectory(parent);
+        throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "工作文件在提交时发生外部变化，未覆盖磁盘。");
+      }
+      try { await link(temporary, sourcePath); }
+      catch (cause) {
+        if (cause?.code !== "EEXIST") throw cause;
+        throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "其他程序已写入工作文件，未覆盖磁盘。");
+      }
+      await unlink(temporary);
+    } else {
+      // Legacy source-element migration already owns complete before/after
+      // recovery bytes and uses its existing publication path.
+      await rename(temporary, sourcePath);
+    }
     swapped = true;
     await syncDirectory(parent);
+    const written = await readHtmlFile(sourcePath, "Working Copy", { projectRootPath });
+    if (written.sha256 !== nextSha256) {
+      throw new ProjectFileRepositoryError("SOURCE_HASH_CONFLICT", "The Working Copy changed while PageRoot was verifying its save.", { expectedSourceSha256: nextSha256, actualSourceSha256: written.sha256 });
+    }
+    if (previousPath) {
+      const previous = await readHtmlFile(previousPath, "previous Working Copy", { projectRootPath });
+      if (previous.sha256 !== expectedSha256) {
+        throw new ProjectFileRepositoryError("SAVE_RECOVERY_CONFLICT", "外部程序修改了保存前的文件，已保留两份内容供恢复。");
+      }
+    }
+    return { swapped: true, actualSha256: written.sha256, written };
   } finally {
     if (!swapped) await rm(temporary, { force: true }).catch(() => {});
   }
-
-  const writtenBuffer = await readFile(sourcePath);
-  const writtenSha256 = sha256(writtenBuffer);
-  if (writtenSha256 !== nextSha256) {
-    throw new ProjectFileRepositoryError(
-      "SOURCE_HASH_CONFLICT",
-      "The Working Copy changed while PageRoot was verifying its save.",
-      { expectedSourceSha256: nextSha256, actualSourceSha256: writtenSha256 },
-    );
-  }
-  const information = await lstat(sourcePath);
-  return {
-    swapped: true,
-    actualSha256: writtenSha256,
-    written: {
-      buffer: writtenBuffer,
-      html: decodeHtml(writtenBuffer, "Working Copy"),
-      sha256: writtenSha256,
-      information,
-    },
-  };
 }
 
 export function workingCopyStatePath(paths, workingCopy) {

@@ -130,6 +130,7 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
     capability.getSnapshot,
     capability.getSnapshot,
   );
+  const [restoreError, setRestoreError] = useState("");
   const loadProjectVersions = useCallback(async (
     projectId: string,
   ): Promise<ProjectVersionLoadResult> => {
@@ -153,8 +154,16 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
     <WorkbenchGlobalSidebar
       {...props}
       registeredProjects={[...catalog.registered]}
-      projectsError={catalog.error}
+      projectsError={[catalog.error, restoreError].filter(Boolean).join(" ")}
       loadProjectVersions={loadProjectVersions}
+      onRecheckProjects={() => { void capability.commands.refreshRegistered(); }}
+      onRestoreWorkingCopy={async (projectId) => {
+        setRestoreError("");
+        const outcome = await capability.commands.restoreWorkingCopy(projectId);
+        if (outcome.status !== "succeeded") {
+          setRestoreError("reason" in outcome ? String(outcome.reason) : "工作文件无法恢复。");
+        }
+      }}
       onToggle={() => {
         props.onToggle();
         if (!props.open) {

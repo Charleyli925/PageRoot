@@ -1,0 +1,188 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { cp, link, lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
+import { readHtmlFile } from "../bridge/project-file-repository/path-safety.mjs";
+import { sourceBindingPath } from "../bridge/project-file-repository/source-binding.mjs";
+import { fixture, importSource, html, json } from "./project-file-repository-harness.mjs";
+const run = promisify(execFile);
+const root = fileURLToPath(new URL("../", import.meta.url));
+async function restart(projectsRoot) {
+  const { stdout } = await run(process.execPath, ["--input-type=module", "-e", `
+    import { ProjectFileRepository } from './bridge/project-file-repository.mjs';
+    const repository = new ProjectFileRepository({projectsRoot:process.argv[1]});
+    await repository.initialize();
+    console.log(JSON.stringify(await repository.listRegisteredProjects()));
+  `, projectsRoot], { cwd: root });
+  return JSON.parse(stdout);
+}
+async function drift(target, fields = ["device", "inode", "birthtimeMs"]) {
+  const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+  const manifest = await json(manifestPath);
+  for (const member of manifest.workingCopies) for (const field of fields) {
+    member.fileIdentity[field] = field === "birthtimeMs" ? 123 : "123";
+  }
+  await writeFile(manifestPath, JSON.stringify(manifest));
+}
+for (const fields of [["device"], ["inode"], ["birthtimeMs"], ["device", "inode", "birthtimeMs"]]) {
+  test(`new process recovers persisted ${fields.join("/")} drift without changing source or Version`, async (t) => {
+    const value = await fixture(t); const { target } = await importSource(value);
+    const before = await readFile(target.exactSourcePath);
+    await drift(target, fields);
+    const rows = await restart(value.projects);
+    assert.equal(rows[0].availability, "ready");
+    assert.deepEqual(await readFile(target.exactSourcePath), before);
+    const manifest = await json(path.join(target.projectRootPath, ".pageroot", "manifest.json"));
+    assert.equal(manifest.versions.length, 1);
+    assert.equal(manifest.workingCopies[0].fileIdentity.device, String((await lstat(target.exactSourcePath)).dev));
+    assert.equal((await lstat(sourceBindingPath(target.projectRootPath, target.workingCopyId))).ino, (await lstat(target.exactSourcePath)).ino);
+  });
+}
+test("five projects migrate all fifteen Working Copies without touching HTML", async (t) => {
+  const value = await fixture(t); const copies = [];
+  for (let i = 0; i < 5; i += 1) {
+    const { target } = await importSource(value, `project-${i}.html`);
+    copies.push(target);
+    for (let version = 2; version <= 3; version += 1) {
+      const candidateId = `candidate_binding_${i}_${version}`;
+      await value.repository.createCandidate({target, requestId:`req_binding_${i}_${version}`, candidateId, html:html(`v${version}`), expectedSourceSha256:target.sourceSha256});
+      const promoted = await value.repository.promoteCandidate({target, candidateId}); copies.push(promoted.target);
+    }
+    await drift(target);
+  }
+  const bytes = await Promise.all(copies.map((target) => readFile(target.exactSourcePath)));
+  for (const target of copies) await rm(sourceBindingPath(target.projectRootPath, target.workingCopyId), {force:true});
+  const rows = await restart(value.projects);
+  assert.equal(rows.length, 5); assert.ok(rows.every((row) => row.availability === "ready"));
+  for (const [index,target] of copies.entries()) {
+    assert.deepEqual(await readFile(target.exactSourcePath), bytes[index]);
+    assert.equal((await lstat(sourceBindingPath(target.projectRootPath,target.workingCopyId))).ino, (await lstat(target.exactSourcePath)).ino);
+  }
+});
+test("Finder HTML and folder rename survives stale observations and a new process", async (t) => {
+  const value = await fixture(t); const {target} = await importSource(value); await drift(target);
+  const renamedHtml = path.join(target.projectRootPath,"renamed.html"); await rename(target.exactSourcePath,renamedHtml);
+  const renamedRoot = path.join(value.projects,"renamed-project"); await rename(target.projectRootPath,renamedRoot);
+  const rows = await restart(value.projects);
+  assert.equal(rows[0].availability,"ready"); assert.equal(rows[0].activeSourcePath,path.join(renamedRoot,"renamed.html"));
+});
+test("copy-delete move with broken hard links rebinds exact member paths", async (t) => {
+  const value = await fixture(t); const {target} = await importSource(value);
+  const destination = path.join(value.projects,"moved-to-new-volume"); await cp(target.projectRootPath,destination,{recursive:true}); await rm(target.projectRootPath,{recursive:true});
+  const rows = await restart(value.projects); assert.equal(rows[0].availability,"ready");
+  const memberPath = path.join(destination,path.basename(target.exactSourcePath));
+  assert.equal((await lstat(sourceBindingPath(destination,target.workingCopyId))).ino,(await lstat(memberPath)).ino);
+});
+test("duplicate project quarantines only that identity, even at an existing registered path", async (t) => {
+  const value = await fixture(t); const {target} = await importSource(value); const healthy = await importSource(value,"healthy.html");
+  await cp(target.projectRootPath,path.join(value.projects,"duplicate"),{recursive:true});
+  const rows = await restart(value.projects);
+  assert.equal(rows.find((row)=>row.projectId===target.projectId).sourceStatus,"duplicate");
+  assert.equal(rows.find((row)=>row.projectId===healthy.target.projectId).availability,"ready");
+  assert.ok(await value.repository.resolveOpenTarget({sourcePath:healthy.target.exactSourcePath}));
+  await assert.rejects(value.repository.saveWorkingCopy({target,html:html("denied"),expectedSourceSha256:target.sourceSha256}),{code:"REGISTERED_PROJECT_AMBIGUOUS"});
+});
+test("same-hash unregistered copies never become managed; duplicate hard links isolate the binding", async (t) => {
+  const value = await fixture(t); const {target} = await importSource(value);
+  const copy = path.join(target.projectRootPath,"copy.html"); await cp(target.exactSourcePath,copy);
+  assert.equal(await value.repository.resolveOpenTarget({sourcePath:copy}),null);
+  await link(target.exactSourcePath,path.join(target.projectRootPath,"hardlink.html"));
+  const rows = await restart(value.projects); assert.equal(rows[0].sourceStatus,"duplicate");
+  await assert.rejects(value.repository.saveWorkingCopy({target,html:html("denied"),expectedSourceSha256:target.sourceSha256}),{code:"MANAGED_PATH_AMBIGUOUS"});
+});
+test("missing HTML retains version browsing and restores only verified anchor bytes without overwrite", async (t) => {
+  const value = await fixture(t); const {target} = await importSource(value); const bytes=await readFile(target.exactSourcePath);
+  await rm(target.exactSourcePath); const rows=await restart(value.projects);
+  assert.equal(rows[0].sourceStatus,"missing"); assert.equal(rows[0].canRestoreWorkingCopy,true); assert.equal(rows[0].documentId,target.documentId);
+  assert.equal((await value.repository.listRegisteredProjectVersionSummaries({projectId:target.projectId})).versions.length,1);
+  await value.repository.restoreRegisteredWorkingCopy({projectId:target.projectId}); assert.deepEqual(await readFile(target.exactSourcePath),bytes);
+  await assert.rejects(value.repository.restoreRegisteredWorkingCopy({projectId:target.projectId}),{code:"WORKING_COPY_CONFLICT"});
+});
+for (const atomic of [false,true]) test(`external ${atomic?"replacement":"in-place write"} stays an external-content state`,async(t)=>{
+  const value=await fixture(t);const {target}=await importSource(value); const external=html("external");
+  if(atomic){await writeFile(`${target.exactSourcePath}.tmp`,external);await rename(`${target.exactSourcePath}.tmp`,target.exactSourcePath);}else await writeFile(target.exactSourcePath,external);
+  const rows=await restart(value.projects);assert.equal(rows[0].sourceStatus,"external-change");assert.equal(await readFile(target.exactSourcePath,"utf8"),external);
+});
+test("a replaced path during descriptor read is rejected",async(t)=>{
+ const value=await fixture(t);const {target}=await importSource(value);const replacement=path.join(target.projectRootPath,"replacement.tmp");await writeFile(replacement,html("replacement"));
+ await assert.rejects(readHtmlFile(target.exactSourcePath,"Working Copy",{beforeRead:()=>rename(replacement,target.exactSourcePath)}),{code:"SOURCE_HASH_CONFLICT"});
+});
+for (const stage of ["save-prepared","save-source-displaced","save-source-written","save-anchor-switched","save-state-written","save-manifest-written","save-committed"]) test(`new process resolves ${stage} crash plus device drift`,async(t)=>{
+ const value=await fixture(t);const {target}=await importSource(value);const before=await readFile(target.exactSourcePath,"utf8");const after=html("saved");
+ const writer=new ProjectFileRepository({projectsRoot:value.projects,failpoint:(name)=>name===stage});
+ await assert.rejects(writer.saveWorkingCopy({target,html:after,expectedSourceSha256:target.sourceSha256,editRevision:1}));await drift(target);
+ assert.equal((await restart(value.projects))[0].availability,"ready");assert.equal(await readFile(target.exactSourcePath,"utf8"),stage==="save-prepared"?before:after);
+});
+test("save detects same-hash physical replacement at the commit boundary",async(t)=>{
+ const value=await fixture(t);const {target}=await importSource(value); const before=await readFile(target.exactSourcePath);
+ const writer=new ProjectFileRepository({projectsRoot:value.projects,failpoint:async(name)=>{if(name==="save-before-commit"){await writeFile(`${target.exactSourcePath}.tmp`,before);await rename(`${target.exactSourcePath}.tmp`,target.exactSourcePath);}return false;}});
+ await assert.rejects(writer.saveWorkingCopy({target,html:html("must not overwrite"),expectedSourceSha256:target.sourceSha256,editRevision:1}),{code:"WORKING_COPY_CONFLICT"});assert.deepEqual(await readFile(target.exactSourcePath),before);
+});
+
+for (const stage of ["promotion-prepared", "promotion-snapshot-created", "promotion-working-copy-prepared", "promotion-working-copy-created", "promotion-manifest-committed"]) {
+  test(`new process recovers ${stage} with stale transaction and manifest observations`, async (t) => {
+    const value = await fixture(t); const { target } = await importSource(value);
+    const candidateId = "candidate_binding_crash_01";
+    await value.repository.createCandidate({ target, requestId:"req_binding_crash_01", candidateId, html:html("V2"), expectedSourceSha256:target.sourceSha256 });
+    const writer = new ProjectFileRepository({ projectsRoot:value.projects, failpoint:(name)=>name===stage });
+    await assert.rejects(writer.promoteCandidate({target,candidateId}));
+    await drift(target);
+    const journalPath=path.join(target.projectRootPath,".pageroot","transactions",`promote_${candidateId}`,"transaction.json");
+    // Promotion journals keep legacy observations for compatibility, not authority.
+    const transaction=await json(journalPath);
+    if(transaction.preparedWorkingCopyFileIdentity) transaction.preparedWorkingCopyFileIdentity.device="777";
+    if(transaction.workingCopy) transaction.workingCopy.fileIdentity.device="888";
+    await writeFile(journalPath,JSON.stringify(transaction));
+    const rows=await restart(value.projects);assert.equal(rows[0].availability,"ready");
+    const manifest=await json(path.join(target.projectRootPath,".pageroot","manifest.json"));
+    assert.equal(manifest.versions.length,2);assert.equal(manifest.latestOfficialVersionId,"ver_0002");
+  });
+}
+test("architecture rejects persisted physical comparisons including local aliases", async () => {
+  const { parseModule, persistentFileIdentityComparisons } = await import("../scripts/architecture-ast-query.mjs");
+  for (const source of [
+    "sameFileIdentity(member.fileIdentity, copyFileIdentity(stat))",
+    "const stored = member.fileIdentity; const saved = stored; sameFileIdentity(saved, current)",
+    "const { fileIdentity: old } = member; sameFileIdentity(old, current)",
+    "import { sameFileIdentity as equal } from './path-safety.mjs'; equal(record['rootFileIdentity'], current)",
+  ]) assert.ok(persistentFileIdentityComparisons(parseModule("example.mjs",source)).length);
+  assert.equal(persistentFileIdentityComparisons(parseModule("example.mjs","sameFileIdentity(copyFileIdentity(anchor.information), copyFileIdentity(current))")).length,0);
+});
+
+test("replacement after the final Hash check is preserved instead of overwritten",async(t)=>{
+ const value=await fixture(t);const {target}=await importSource(value);const external=html("late external replacement");
+ const writer=new ProjectFileRepository({projectsRoot:value.projects,failpoint:async(name)=>{
+   if(name==="save-before-publication"){await writeFile(`${target.exactSourcePath}.external`,external);await rename(`${target.exactSourcePath}.external`,target.exactSourcePath);}return false;
+ }});
+ await assert.rejects(writer.saveWorkingCopy({target,html:html("must not overwrite"),expectedSourceSha256:target.sourceSha256,editRevision:1}),{code:"WORKING_COPY_CONFLICT"});
+ assert.equal(await readFile(target.exactSourcePath,"utf8"),external);
+});
+
+
+test("two Working Copy anchors cannot claim one surviving visible HTML", async (t) => {
+  const value = await fixture(t); const { target } = await importSource(value);
+  await value.repository.createCandidate({ target, requestId: "req_binding_duplicate", candidateId: "candidate_binding_duplicate", html: html("v2"), expectedSourceSha256: target.sourceSha256 });
+  const promoted = await value.repository.promoteCandidate({ target, candidateId: "candidate_binding_duplicate" });
+  const second = promoted.target;
+  await rm(sourceBindingPath(second.projectRootPath, second.workingCopyId));
+  await rm(second.exactSourcePath);
+  await link(sourceBindingPath(target.projectRootPath, target.workingCopyId), sourceBindingPath(second.projectRootPath, second.workingCopyId));
+  assert.equal((await restart(value.projects))[0].sourceStatus, "duplicate");
+  await assert.rejects(value.repository.saveWorkingCopy({ target, html: html("denied"), expectedSourceSha256: target.sourceSha256 }), { code: "MANAGED_PATH_AMBIGUOUS" });
+});
+
+
+test("registered projection reads an exact inactive Working Copy without activating another Version", async (t) => {
+  const value = await fixture(t); const { target } = await importSource(value);
+  await value.repository.createCandidate({ target, requestId: "req_binding_projection", candidateId: "candidate_binding_projection", html: html("v2"), expectedSourceSha256: target.sourceSha256 });
+  const promoted = await value.repository.promoteCandidate({ target, candidateId: "candidate_binding_projection" });
+  const exact = await value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId, workingCopyId: target.workingCopyId });
+  assert.equal(exact.target.workingCopyId, target.workingCopyId);
+  assert.equal(exact.html, await readFile(target.exactSourcePath, "utf8"));
+  assert.equal((await value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId })).target.workingCopyId, promoted.target.workingCopyId);
+  await assert.rejects(value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId, workingCopyId: "../escape" }));
+});

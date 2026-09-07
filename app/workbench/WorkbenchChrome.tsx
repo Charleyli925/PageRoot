@@ -402,6 +402,8 @@ export function WorkbenchGlobalSidebar({
   onOpenCurrentVersion,
   onOpenRegisteredVersion,
   loadProjectVersions,
+  onRestoreWorkingCopy,
+  onRecheckProjects,
   updateActionVisible,
   updateDownloaded,
   updateDownloading,
@@ -417,6 +419,8 @@ export function WorkbenchGlobalSidebar({
   open: boolean;
   registeredProjects: RegisteredProject[];
   projectsError?: string;
+  onRestoreWorkingCopy?: (projectId: string) => Promise<void>;
+  onRecheckProjects?: () => void;
   currentProjectId: string | null;
   currentProjectName: string;
   currentProjectDocumentId: string | null;
@@ -531,7 +535,7 @@ export function WorkbenchGlobalSidebar({
     const token = requestSequenceRef.current + 1;
     requestSequenceRef.current = token;
     requestTokensRef.current.set(project.projectId, token);
-    if (project.availability !== "ready" || !project.documentId) {
+    if (!project.documentId) {
       setVersionStates((current) => ({
         ...current,
         [project.projectId]: {
@@ -665,6 +669,16 @@ export function WorkbenchGlobalSidebar({
                         <span className="sidebar-project-rules-name">长期规则</span>
                       </button>
                     ) : null}
+                    {expanded && project.availabilityReason ? (
+                      <div className="sidebar-project-load-error" role="status">
+                        <span>{project.availabilityReason}</span>
+                        {project.canRestoreWorkingCopy ? (
+                          <button type="button" onClick={() => void onRestoreWorkingCopy?.(project.projectId)}>恢复工作文件</button>
+                        ) : project.sourceStatus !== "external-change" ? (
+                          <button type="button" onClick={onRecheckProjects}>重新检查文件</button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {expanded ? (
                       isCurrentProject ? (
                         <ProjectVersionTree
@@ -679,7 +693,7 @@ export function WorkbenchGlobalSidebar({
                       ) : state.status === "error" ? (
                         <div className="sidebar-project-load-error" role="status">
                           <span>{state.reason || "项目版本摘要暂时无法读取。"}</span>
-                          <button type="button" onClick={() => void loadImportedProject(project, true)}>重试</button>
+                          <button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button>
                         </div>
                       ) : (
                         <ProjectVersionTree

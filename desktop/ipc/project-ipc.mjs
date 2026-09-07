@@ -6,6 +6,9 @@ export function registerProjectIpc({
   EDIT_RUNTIME_CHANNELS,
   handlers,
 }) {
+  if (PROJECT_CHANNELS.restoreRegisteredWorkingCopy) {
+    ipcMain.handle(PROJECT_CHANNELS.restoreRegisteredWorkingCopy, trustedProject(handlers.restoreRegisteredWorkingCopy));
+  }
   ipcMain.handle(PROJECT_CHANNELS.getActiveProject, trustedProject(handlers.getActiveProject));
   ipcMain.handle(PROJECT_CHANNELS.openHtml, trustedProject(handlers.openHtml));
   ipcMain.handle(PROJECT_CHANNELS.readHtml, trustedProject(handlers.readHtml));

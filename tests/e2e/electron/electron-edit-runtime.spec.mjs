@@ -1,3 +1,4 @@
+import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { expect, test } from "@playwright/test";
 
 import { buildSourceIndex } from "../../../app/lib/source-index.js";
@@ -1299,7 +1300,7 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
       Math.abs(element.scrollTop - 518.5) <= 2
     ))).toBe(true);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/id="second"[\s\S]*id="first"/u);
     const moveRevision = await expectCheckpointPersisted(page, 0);
 
@@ -1647,7 +1648,7 @@ test("overlapping edits promote only the latest Runtime without losing charts or
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
     )).toBe("settled");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/(?:&nbsp;| ){8}/u);
     frame = await currentEditorFrame(page);
     await expect(frame.locator("#supersession-chart canvas")).toHaveCount(1);
@@ -1658,7 +1659,7 @@ test("overlapping edits promote only the latest Runtime without losing charts or
     await page.keyboard.insertText("仍可继续编辑");
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toContain("仍可继续编辑");
   });
 });
@@ -1714,10 +1715,10 @@ test("Runtime style edits stay in one document and coalesce at selection boundar
     await expect(toolbar).toBeVisible();
     await toolbar.getByText("样式与间距", { exact: true }).click();
     await toolbar.getByLabel("内边距（像素）").fill("20");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/padding-top:\s*20px/u);
     await toolbar.getByLabel("内边距（像素）").fill("22");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/padding-top:\s*22px/u);
     await expect(first).toHaveCSS("padding-top", "22px");
     await expect(forgedFirst).toHaveCSS("padding-top", "0px");
@@ -1760,7 +1761,7 @@ test("Runtime style edits stay in one document and coalesce at selection boundar
     await frame.locator('[data-native-case="runtime-style-first"]').click();
     await clickEditHistoryMenu(electronApp, page, "undo");
     const undoRevision = await expectCheckpointPersisted(page, styleRevision);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/padding-top:\s*20px/u);
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="runtime-style-first"]'))
@@ -1768,7 +1769,7 @@ test("Runtime style edits stay in one document and coalesce at selection boundar
 
     await clickEditHistoryMenu(electronApp, page, "redo");
     await expectCheckpointPersisted(page, undoRevision);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/padding-top:\s*22px/u);
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="runtime-style-first"]'))
@@ -1819,7 +1820,7 @@ test("Runtime range styling never grants a forged clone source authority", {
     await expect(bold).toBeEnabled();
     await bold.click();
 
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/<span[^>]*font-weight:\s*700/iu);
     await expect(target.locator('span[style*="font-weight"]')).toHaveCount(1);
     await expect(forged.locator('span[style*="font-weight"]')).toHaveCount(0);
@@ -2007,8 +2008,8 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await expect(heading).toContainText("你好");
     await page.keyboard.insertText("                        ");
     const textRevision = await expectCheckpointPersisted(page, revisionBeforeText);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("你好");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8")).toContain("你好");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/(?:&nbsp;| ){8}/u);
     frame = await currentEditorFrame(page);
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
@@ -2049,7 +2050,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
       await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
     }
     await expect(heading).toHaveAttribute("contenteditable", "true");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("你好");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8")).toContain("你好");
     await expectCheckpointPersisted(page, textRevision);
 
     // The explicit edit boundary coalesces the text and Enter checkpoints into
@@ -2158,7 +2159,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await page.keyboard.press("Backspace");
     await expect(heading).not.toContainText("候选失败");
     await page.keyboard.press("Escape");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8").match(
+    await expect.poll(async () => (await readPublishedWorkingCopy(workingCopyPath, "utf8")).match(
       /<h2[^>]*data-native-case="runtime-latest-wins-text"[^>]*>([\s\S]*?)<\/h2>/u,
     )?.[1] ?? "").not.toContain("候选失败");
 
@@ -2256,7 +2257,7 @@ test("long text Enter checkpoints Working HTML without replacing the Runtime doc
     }
     await expect(parent.locator(":scope > br")).toHaveCount(20);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/runtime-enter-parent[\s\S]*<br/u);
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
     await expect(page.getByTestId("html-canvas-editor")
@@ -2282,7 +2283,7 @@ test("long text Enter checkpoints Working HTML without replacing the Runtime doc
     await page.keyboard.insertText("后续输入");
     await expect(parent).toContainText("后续输入");
     await parent.press("Meta+s");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toContain("后续输入");
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
     await expect(parent).toHaveAttribute("contenteditable", "true");
@@ -2442,7 +2443,7 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
     await page.keyboard.insertText(" 静态继续编辑");
     await page.keyboard.press("Escape");
     await expect(staticTarget).toContainText("静态继续编辑");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toContain("静态继续编辑");
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
@@ -2779,7 +2780,7 @@ test("a failed candidate after text editing promotes static without resuming Nat
     await target.press("Enter");
     await expect(target.locator(":scope > br")).toHaveCount(1);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/runtime-text-candidate-failure[\s\S]*<br/u);
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
     await expect(page.getByTestId("html-canvas-editor")
@@ -2889,7 +2890,7 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
     await page.keyboard.insertText(" 提交后继续");
     await page.keyboard.press("Escape");
     await expect(activeTarget).not.toHaveAttribute("contenteditable", "true");
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("提交后继续");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8")).toContain("提交后继续");
     await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
       timeout: 12_000,
     }).toBe("ready");
@@ -3158,7 +3159,7 @@ test("static fallback can reload dynamic content and dismiss itself after succes
     await page.keyboard.insertText(" 已保存的新文字");
     await page.keyboard.press("Escape");
     await expectCheckpointPersisted(page, revisionBeforeEdit);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toContain("已保存的新文字");
     const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
     const latestWorkingHash = buildSourceIndex(latestWorkingSource).sourceSha256;
@@ -3492,7 +3493,7 @@ test("accepted Canvas text, style and structure edits each apply once", {
     const textDocument = await documentToken(frame);
     await page.keyboard.insertText(" Gamma");
     await page.locator(".comments-panel.comment-rail").click({ position: { x: 4, y: 4 } });
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("Alpha Gamma");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8")).toContain("Alpha Gamma");
     expect(await documentToken(await currentEditorFrame(page))).toBe(textDocument);
     const textCounts = await readPipelineCounters(page);
     expect(textCounts.fullPatchApplies).toBe(1);
@@ -3505,7 +3506,7 @@ test("accepted Canvas text, style and structure edits each apply once", {
     await setTextSelection(frame, "pipeline-text", 0, "Alpha Gamma".length);
     await expect(editor.getByRole("toolbar")).toBeVisible();
     await editor.getByRole("button", { name: "加粗", exact: true }).click();
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/font-weight:\s*700/u);
     const styleCounts = await readPipelineCounters(page);
     expect(styleCounts.fullPatchApplies).toBe(1);
@@ -3541,7 +3542,7 @@ test("accepted Canvas text, style and structure edits each apply once", {
     )).toBe(1);
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="pipeline-first"]')).toHaveCount(1);
-    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toMatch(/font-weight:\s*700/u);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8")).toMatch(/font-weight:\s*700/u);
     expect((await readPipelineCounters(page)).fullPatchApplies).toBe(0);
 
     await resetPipelineCounters(page);

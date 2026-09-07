@@ -37,7 +37,7 @@ function comparableManagedPath(value) {
   return resolved;
 }
 
-function sameManagedPath(left, right) {
+export function sameManagedPath(left, right) {
   return Boolean(left && right && comparableManagedPath(left) === comparableManagedPath(right));
 }
 
