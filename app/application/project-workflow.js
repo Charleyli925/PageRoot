@@ -3197,15 +3197,17 @@ export class ProjectWorkflow {
     }
     this.#runSession.activate(project.sourcePath || null);
     this.#documentWorkflow.resetForProjectTransition();
-    this.#documentSession.reset({
-      html: project.html,
-      persistedSourceSha256: project.sha256 || null,
-    });
+    // Publish the hydration boundary before provisional HTML reaches Runtime
+    // observers. Only the final hydrated source may start author Script.
     this.#setHydration({
       phase: project.sourcePath ? "hydrating" : "idle",
       epoch: locator.epoch,
       sourcePath: project.sourcePath || null,
       error: null,
+    });
+    this.#documentSession.reset({
+      html: project.html,
+      persistedSourceSha256: project.sha256 || null,
     });
     this.#markHydrationStage("apply-authority", operationId);
     this.#commentWorkflow.resetForProjectTransition();

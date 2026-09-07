@@ -20,11 +20,14 @@ import {
   mkdtempSync,
   path,
   readFileSync,
+  ProjectFileRepository,
+  sha256,
   removeValidatedTemporaryDirectory,
   setTextSelection,
   stopPageRoot,
   tmpdir,
   waitForRuntimeHandoffSettled,
+  waitForProjectReady,
   writeFileSync,
 } from "./electron-native-harness.mjs";
 import { queuedStaticFallbackOracle } from "./queued-static-fallback-oracle.mjs";
@@ -3380,7 +3383,15 @@ test("compatible ECharts activation failure recovers exactly once with exact 5.4
 </body></html>`;
   await withRuntimeProject("pageroot-echarts-exact-recovery-e2e-", {
     "runtime-report.html": html,
-  }, async ({ electronApp, page, sourcePath }) => {
+  }, async ({ electronApp, page, sourcePath, diagnostics }) => {
+    await waitForProjectReady(page);
+    await waitForRuntimeHandoffSettled(page);
+    // Use an already managed project so provisional external-import canvases
+    // do not count as extra activations of this one recovery attempt.
+    const repository = new ProjectFileRepository({ projectsRoot: diagnostics.projectFilesRoot });
+    const imported = await repository.importExternal({
+      sourcePath, expectedSourceSha256: sha256(readFileSync(sourcePath)),
+    });
     // Hold the exact download before opening this source. Startup hydration can
     // otherwise warm its cache before the compatible candidate executes, which
     // exercises a cache hit rather than the activation failure under test.
@@ -3394,15 +3405,43 @@ test("compatible ECharts activation failure recovers exactly once with exact 5.4
         return fetch(url, options);
       };
     });
+    // Return the exact grant during the static Candidate's positioning window.
+    // The grant must survive that busy slot and run after the handoff finishes.
+    await page.evaluate(() => {
+      const schedule = window.requestAnimationFrame.bind(window);
+      const held = [];
+      let released = false;
+      window.requestAnimationFrame = (callback) => schedule((time) => {
+        if (!released && document.querySelector('[data-testid="html-canvas-editor"]')
+          ?.getAttribute("data-runtime-handoff") === "positioning") held.push(callback);
+        else callback(time);
+      });
+      window.__PAGEROOT_RELEASE_EXACT_POSITIONING__ = () => {
+        released = true;
+        window.requestAnimationFrame = schedule;
+        held.splice(0).forEach((callback) => schedule(callback));
+      };
+    });
     await electronApp.evaluate(({ app }, filePath) => {
       app.emit("open-file", { preventDefault() {} }, filePath);
-    }, sourcePath);
+    }, imported.target.exactSourcePath);
     try {
       await expect.poll(() => page.evaluate(() => (
         window.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ || []
       ))).toEqual(["5.6.0"]);
+      await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+        "data-edit-runtime-phase", "recovering",
+      );
+      await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+        "data-runtime-handoff", "positioning",
+      );
+      await electronApp.evaluate(() => globalThis.__PAGEROOT_RELEASE_EXACT_ECHARTS__());
+      await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+        "data-edit-runtime-phase", "ready",
+      );
     } finally {
       await electronApp.evaluate(() => globalThis.__PAGEROOT_RELEASE_EXACT_ECHARTS__());
+      await page.evaluate(() => window.__PAGEROOT_RELEASE_EXACT_POSITIONING__());
     }
     const { frame } = await loadedDiskFrame(
       page,
