@@ -75,7 +75,7 @@ The renderer's main workspace facts are partitioned as follows:
   compensation; it publishes through `CommentSession` and `DraftSession` and
   is not a second Draft aggregate owner;
 - `ProjectRulesSession`: `PROJECT.md` working copy, generation, composition
-  fence and save projection facts and the verified immutable history preview bytes;
+  fence and save projection facts;
 - `ProjectRulesWorkflow`: `PROJECT.md` Bridge read/write, 700ms autosave,
   unknown-write authority reconciliation, close/switch drain and narrow native
   editor-restore host port. It publishes through `ProjectRulesSession` and is
@@ -153,7 +153,7 @@ The renderer's main workspace facts are partitioned as follows:
   trusted local processes with the signed-in user's native read authority. Any
   future registered `agent-native` provider requires a separate sandbox
   conformance and security gate before registration;
-- `VersionSession`: immutable Version records plus the current/history
+- `VersionSession`: immutable Version records, verified immutable history preview bytes, plus the current/history
   projection facts;
 - `VersionWorkflow`: Version operation identity/generation, Bridge version
   reads and activation mutation, review-candidate preparation, historical

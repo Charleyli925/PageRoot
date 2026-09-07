@@ -528,3 +528,10 @@ HistoryCreationDialog owns only the confirmation target, scoped by project,
 document and version. Transaction phases and receipts remain in VersionWorkflow.
 Restoration queries the operation locator from the existing project hydration
 event; no component cache or second mutable transaction store is introduced.
+
+Creation receipts prove immutable project/document/version/operation and source
+lineage facts. Their source path comes from current registered Working Copy
+metadata, not the creation filename. `recoveryState` separately reports pending,
+opened or superseded using the current manifest/runtime. Prepared recovery uses
+fresh prepared/private-anchor/visible object evidence and the sealed hash; stored
+physical observations are diagnostics, not persistent write authorization.

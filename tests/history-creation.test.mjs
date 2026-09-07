@@ -3,7 +3,7 @@ import test from "node:test";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 import path from "node:path";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { fixture, html, importSource, promoteNextVersion } from "./project-file-repository-harness.mjs";
 
 test("history creation allocates V9 from V3 and replays the same operation", async (t) => {
@@ -142,3 +142,62 @@ test("legacy current Working Copy remains selected until explicit historical cre
   assert.equal(created.previousVersionId, "ver_0002");
   assert.equal(await readFile(activated.target.exactSourcePath, "utf8"), html("V1"));
 });
+
+
+test("completed creation survives registered rename and reports supersession without changing its fact", async (t) => {
+  const value = await fixture(t);
+  const { target } = await importSource(value);
+  const operationId = "history_rename_0001";
+  const created = await value.repository.createVersionFromHistory({ target, versionId: "ver_0001", operationId,
+    expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 });
+  await value.repository.queryHistoryCreation({ target, operationId, markOpened: true });
+  const renamedPath = path.join(target.projectRootPath, "renamed-created.html");
+  await rename(created.sourcePath, renamedPath);
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  const workspace = await restarted.workspace({ sourcePath: renamedPath });
+  const receipt = await restarted.queryHistoryCreation({ target: workspace.target, operationId });
+  assert.equal(receipt.status, "created");
+  assert.equal(receipt.versionId, created.versionId);
+  assert.equal(receipt.sourcePath, renamedPath);
+  assert.equal(receipt.recoveryState, "opened");
+  const next = await promoteNextVersion(restarted, workspace.target, "after_history_rename");
+  const older = await new ProjectFileRepository({ projectsRoot: value.projects }).queryHistoryCreation({ target: next, operationId });
+  assert.equal(older.recoveryState, "superseded");
+  assert.equal(older.versionId, created.versionId);
+});
+
+for (const stage of ["working-copy-prepared", "working-copy-created"]) {
+  for (const replacement of [null, "prepared", "visible"]) {
+    if (stage === "working-copy-prepared" && replacement === "visible") continue;
+    test(`history recovery ${stage}: ${replacement || "observation drift"}`, async (t) => {
+      const value = await fixture(t);
+      const { target } = await importSource(value);
+      const operationId = "history_identity_recovery_0001";
+      const repository = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: (name) => name === `history-creation-${stage}` });
+      await assert.rejects(repository.createVersionFromHistory({ target, versionId: "ver_0001", operationId,
+        expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 }), { code: "INJECTED_FAILPOINT" });
+      const directory = path.join(target.projectRootPath, ".pageroot/transactions", `history_${operationId}`);
+      const journalPath = path.join(directory, "transaction.json");
+      const journal = JSON.parse(await readFile(journalPath, "utf8"));
+      // Durable observations differ from this process; no authority is inferred
+      // from these values. Current anchor links must still prove the object.
+      journal.preparedFileIdentity.device += 17;
+      journal.preparedFileIdentity.inode += 23;
+      await writeFile(journalPath, JSON.stringify(journal));
+      if (replacement) {
+        const file = replacement === "prepared" ? path.join(directory, "working-copy.html")
+          : path.join(target.projectRootPath, journal.finalWorkingCopyRelativePath);
+        const bytes = await readFile(file);
+        await unlink(file);
+        await writeFile(file, bytes);
+      }
+      const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+      await restarted.recoverProject({ projectRootPath: target.projectRootPath });
+      const result = await restarted.queryHistoryCreation({ target, operationId });
+      assert.equal(result.status, replacement ? "not-created" : "created");
+      if (replacement) assert.equal(result.code, "HISTORY_CREATION_FILE_CHANGED");
+      else assert.equal(result.versionId, "ver_0002");
+      assert.equal(await readFile(target.exactSourcePath, "utf8"), html("V1"));
+    });
+  }
+}
