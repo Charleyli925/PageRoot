@@ -1,3 +1,4 @@
+import { loadWorkbenchModel } from "./helpers/workbench-model-loader.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -78,6 +79,8 @@ function isRecord(value) {
 }
 
 const codecs = {
+  projectVersionSummariesFromVersions: (versions) => versions,
+  projectVersionSummariesFromWorkspace: (payload) => payload.versions,
   commentsFromRecords: (value) => Array.isArray(value) ? value : [],
   changesFromDraftRecords: (value) => Array.isArray(value) ? value : [],
   isRecord,
@@ -141,6 +144,7 @@ function createHarness({
   projectSource = null,
   editRuntimePort = null,
   initialDocument = null,
+  controllerCodecs = codecs,
 } = {}) {
   const projectSession = new ProjectSession();
   projectSession.openLocator(SOURCE_PATH);
@@ -175,7 +179,7 @@ function createHarness({
     draftSession,
     versionSession,
     sourceHistorySession,
-    codecs,
+    codecs: controllerCodecs,
     ports: {
       hash: { sha256: async (value) => sha256(value) },
       recovery: { replace: (identity) => recovery.push(identity) },
@@ -1023,4 +1027,25 @@ test("confirmExternalOpen rejects view-initial before ProjectWorkflow is require
       reason: "这条打开确认不提供查看初始版本。",
     },
   );
+});
+
+
+test("catalog retains active V3 after switching projects using the production summary projection", async () => {
+  const projection = await loadWorkbenchModel("project-version-tree-model");
+  const h = createHarness({ controllerCodecs: { ...codecs, ...projection } });
+  await h.controller.ensureRegistered();
+  const a = h.projectSession.snapshot;
+  const versions = (count) => Array.from({ length: count }, (_, i) => ({ id: `ver_000${i+1}`, ordinal: i+1, generatedAt: "2026-09-07T00:00:00.000Z", displayFileName: `A-V${i+1}.html` }));
+  h.versionSession.hydrate({ versions: versions(2), currentBasedOnVersionId: "ver_0001", latestVersionId: "ver_0002" });
+  h.versionSession.updateAuthority({ versions: versions(3), latestVersionId: "ver_0003" });
+  h.versionSession.reset();
+  h.projectSession.openLocator("/tmp/B.html");
+  h.projectSession.register({ epoch: h.projectSession.epoch, sourcePath: "/tmp/B.html", projectId: "project_b", documentId: "document_b" });
+  h.versionSession.hydrate({ versions: versions(1), currentBasedOnVersionId: "ver_0001", latestVersionId: "ver_0001" });
+  const catalog = h.controller.projectCatalog.getSnapshot();
+  assert.equal(catalog.versionSummaries[a.projectId].documentId, a.documentId);
+  assert.equal(catalog.versionSummaries[a.projectId].versions.length, 3);
+  assert.equal(catalog.versionSummaries[a.projectId].versions.find((row) => row.isLatestOfficial).versionId, "ver_0003");
+  assert.equal(catalog.versionSummaries.project_b.versions.length, 1);
+  h.controller.dispose();
 });

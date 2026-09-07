@@ -177,6 +177,7 @@ export type ProjectCatalogCapabilitySnapshot<
   TRecent = unknown,
   TRegistered = unknown,
 > = Readonly<{
+  versionSummaries: Readonly<Record<string, Readonly<{ documentId: string | null; versions: readonly unknown[]; status: "loading" | "ready" | "error"; reason?: string }>>>;
   recent: ReadonlyArray<TRecent>;
   registered: ReadonlyArray<TRegistered>;
   error: string;
@@ -190,7 +191,7 @@ export interface ProjectCatalogControllerCommands {
   refreshRegistered(): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
     projects: unknown[];
   }>>;
-  loadVersionSummaries(projectId: string): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
+  loadVersionSummaries(projectId: string, options?: { refresh?: boolean }): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
     projectId: string;
     documentId: string;
     versions: unknown[];

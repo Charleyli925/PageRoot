@@ -277,3 +277,12 @@ current cold-start query. The byte columns are **preset first-locate reading
 size**, not observed Agent reading. The current map still validates that
 referenced paths and headings exist; the historical baseline does not require
 those old paths to remain in today's tree.
+
+### Read-only project catalog query path
+
+Sidebar/start page → existing `projectCatalog` capability → ProjectWorkflow
+summary/list port → Repository metadata validation and locator probing.
+`project-catalog-query.js` is a stateless query procedure under WorkspaceController;
+it owns no Session or Store. The Controller retains summaries and request generations,
+and injected `project-version-tree-model.ts` projections normalize current and
+background rows. This path never enters open, activation or recovery.

@@ -31,7 +31,7 @@ export type VersionSummaryOptions = Readonly<{
 }>;
 
 export function projectVersionSummariesFromVersions(
-  versions: readonly Version[],
+  versions: readonly Pick<Version, "id" | "ordinal" | "displayFileName" | "modifiedAt" | "generatedAt" | "basedOnVersionId" | "previousVersionId">[],
   projectId: string,
   documentId: string,
   currentFileName: string,
@@ -63,6 +63,28 @@ export function projectVersionSummariesFromVersions(
       isActiveWorkingCopy,
       isLatestOfficial: latestVersionId === null ? null : version.id === latestVersionId,
     };
+  });
+}
+
+export function projectVersionSummariesFromWorkspace(payload: Record<string, unknown>): ProjectVersionSummary[] {
+  if (!payload.projectId || !payload.documentId || !Array.isArray(payload.versions)) throw new TypeError("项目摘要身份无效。");
+  const ids = new Set<string>();
+  const ordinals = new Set<number>();
+  const versions = payload.versions.map((row) => {
+    if (!row || typeof row.versionId !== "string" || !row.versionId.trim()
+      || ids.has(row.versionId) || !Number.isSafeInteger(row.ordinal) || row.ordinal < 1 || ordinals.has(row.ordinal)
+      || row.projectId !== payload.projectId || row.documentId !== payload.documentId) throw new TypeError("项目版本摘要身份无效。");
+    ids.add(row.versionId); ordinals.add(row.ordinal);
+    return { id: row.versionId, ordinal: row.ordinal, displayFileName: row.displayFileName,
+      modifiedAt: row.modifiedAt, generatedAt: row.modifiedAt,
+      basedOnVersionId: row.basedOnVersionId, previousVersionId: row.previousVersionId };
+  });
+  for (const key of ["currentBasedOnVersionId", "latestVersionId"]) {
+    if (payload[key] != null && !ids.has(String(payload[key]))) throw new TypeError("项目摘要指针无法解析。");
+  }
+  return projectVersionSummariesFromVersions(versions, String(payload.projectId), String(payload.documentId), "", {
+    activeVersionId: payload.currentBasedOnVersionId == null ? null : String(payload.currentBasedOnVersionId),
+    latestVersionId: payload.latestVersionId == null ? null : String(payload.latestVersionId),
   });
 }
 

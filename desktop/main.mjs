@@ -3468,6 +3468,8 @@ async function listRegisteredProjectVersionSummaries(projectIdInput) {
   return Object.freeze({
     projectId,
     documentId,
+    currentBasedOnVersionId: payload.currentBasedOnVersionId ?? null,
+    latestVersionId: payload.latestVersionId ?? null,
     versions: Object.freeze(payload.versions.map((version) => (
       assertRegisteredProjectVersionSummary(version, projectId, documentId)
     ))),

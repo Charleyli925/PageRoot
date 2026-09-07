@@ -192,6 +192,8 @@ test("the Bridge exposes content-free version summaries without rewriting a rena
   assert.equal(summaries.response.status, 200, JSON.stringify(summaries.body));
   assert.equal(summaries.body.projectId, ensured.body.projectId);
   assert.equal(summaries.body.documentId, ensured.body.documentId);
+  assert.equal(summaries.body.currentBasedOnVersionId, "ver_0001");
+  assert.equal(summaries.body.latestVersionId, "ver_0001");
   assert.equal(summaries.body.versions.length, 1);
   assert.deepEqual(summaries.body.versions[0], {
     projectId: ensured.body.projectId,

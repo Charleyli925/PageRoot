@@ -217,6 +217,7 @@ const TASK_OWNER_CASES = [
       "tests/durable-working-copy-binding.test.mjs",
       "tests/project-ai-task-projection.test.mjs",
       "tests/project-candidate-promotion.test.mjs",
+      "tests/project-catalog-readonly.test.mjs",
       "tests/project-file-bridge.test.mjs",
       "tests/project-file-finalizer.test.mjs",
       "tests/project-file-repository.integration.test.mjs",

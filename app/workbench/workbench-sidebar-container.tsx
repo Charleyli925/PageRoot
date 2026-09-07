@@ -22,7 +22,6 @@ import type {
 import {
   WorkbenchGlobalSidebar,
   WorkbenchStartPage,
-  type ProjectVersionLoadResult,
 } from "./WorkbenchChrome";
 import type { SettingsCategory } from "./settings-types";
 import { localFileNameFromSourcePath } from "./project-model";
@@ -103,7 +102,6 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   currentProjectName: string;
   currentProjectDocumentId: string | null;
   currentProjectSourcePath: string | null;
-  currentProjectVersions: readonly ProjectVersionSummary[];
   activeVersionId: string | null;
   projectRulesActive: boolean;
   onToggle(): void;
@@ -131,31 +129,21 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
     capability.getSnapshot,
   );
   const [restoreError, setRestoreError] = useState("");
-  const loadProjectVersions = useCallback(async (
-    projectId: string,
-  ): Promise<ProjectVersionLoadResult> => {
-    const outcome = await capability.commands.loadVersionSummaries(projectId);
-    if (outcome.status === "succeeded") {
-      const value = outcome.value as { versions?: unknown };
-      return {
-        versions: Array.isArray(value.versions)
-          ? value.versions as ProjectVersionSummary[]
-          : [],
-      };
-    }
-    return {
-      versions: [],
-      reason: "reason" in outcome && typeof outcome.reason === "string"
-        ? outcome.reason
-        : "项目版本摘要暂时无法读取。",
-    };
+  const loadProjectVersions = useCallback(async (projectId: string, refresh = false): Promise<void> => {
+    await capability.commands.loadVersionSummaries(projectId, { refresh });
   }, [capability]);
+  const versionStates = catalog.versionSummaries as Readonly<Record<string, {
+    documentId: string | null; versions: ProjectVersionSummary[]; status: "loading" | "ready" | "error"; reason?: string;
+  }>>;
+  const activeEntry = props.currentProjectId ? versionStates[props.currentProjectId] : null;
   return (
     <WorkbenchGlobalSidebar
       {...props}
       registeredProjects={[...catalog.registered]}
       projectsError={[catalog.error, restoreError].filter(Boolean).join(" ")}
       loadProjectVersions={loadProjectVersions}
+      versionStates={versionStates}
+      currentProjectVersions={activeEntry?.documentId === props.currentProjectDocumentId ? activeEntry?.versions || [] : []}
       onRecheckProjects={() => { void capability.commands.refreshRegistered(); }}
       onRestoreWorkingCopy={async (projectId) => {
         setRestoreError("");

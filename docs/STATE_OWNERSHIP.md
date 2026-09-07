@@ -454,3 +454,23 @@ codecs (`decodeWorkspaceResponse`), before Session publication. VersionSession
 rejects missing or duplicate application `id` values. Bridge `versionId` and
 persisted Draft records are not renamed on disk; CommentSession receives decoded
 comment/event projections. See the ingress table in `ARCHITECTURE_MAP.md`.
+
+### Project catalog summaries
+
+`WorkspaceController.projectCatalog` owns the in-memory version summary entries,
+loading/error status and request generations. Entries include document identity;
+a replacement document cannot reuse a previous document's rows. The stateless
+`project-catalog-query.js` procedure reads and publishes through this owner.
+Version Session publication refreshes the active entry and advances its generation;
+a safe document save updates the active timestamp without loading the workspace.
+Rename, relocation and restore refresh the affected summary. A failed refresh
+retains existing rows and exposes the error; stale responses cannot publish.
+Sidebar components own expansion only, and subscribe to this existing capability.
+Both Session and Bridge rows use the same injected summary projection.
+
+Repository catalog and summary reads validate metadata and probe locators without
+HTML loading, activation, recovery or registry/binding writes. Catalog readiness
+means metadata is available; `sourceStatus: unknown` means file content still needs
+checking. Real open/save/restore retains full identity and content validation.
+Startup recovery is unchanged. A discovered folder name is only a display hint
+until an authorized file operation revalidates and records it.

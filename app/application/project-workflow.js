@@ -1349,7 +1349,7 @@ export class ProjectWorkflow {
 
   async loadRegisteredProjectVersionSummaries(projectId) {
     if (typeof this.#projectOpenPort.listRegisteredVersionSummaries !== "function") {
-      return succeeded({ projectId: String(projectId || ""), documentId: "", versions: [] });
+      return rejected("PROJECT_VERSION_SUMMARIES_UNAVAILABLE", "当前环境不支持项目版本摘要读取。");
     }
     try {
       const summary = await this.#projectOpenPort.listRegisteredVersionSummaries(

@@ -402,6 +402,7 @@ export function WorkbenchGlobalSidebar({
   onOpenCurrentVersion,
   onOpenRegisteredVersion,
   loadProjectVersions,
+  versionStates,
   onRestoreWorkingCopy,
   onRecheckProjects,
   updateActionVisible,
@@ -435,7 +436,8 @@ export function WorkbenchGlobalSidebar({
     project: RegisteredProject,
     version: ProjectVersionSummary,
   ) => void;
-  loadProjectVersions: (projectId: string) => Promise<ProjectVersionLoadResult>;
+  loadProjectVersions: (projectId: string, refresh?: boolean) => Promise<void>;
+  versionStates: Readonly<Record<string, ProjectVersionLoadState>>;
   updateActionVisible: boolean;
   updateDownloaded: boolean;
   updateDownloading: boolean;
@@ -448,13 +450,9 @@ export function WorkbenchGlobalSidebar({
   onResizeCommit?: (width: number) => void;
   openHtmlError?: string | null;
 }) {
-  const [projectExpansionState, setProjectExpansionState] = useState<ProjectExpansionState>(
+  const [storedExpansionState, setProjectExpansionState] = useState<ProjectExpansionState>(
     () => createProjectExpansionState(currentProjectId),
   );
-  const [versionStates, setVersionStates] = useState<Record<string, ProjectVersionLoadState>>({});
-  const requestTokensRef = useRef(new Map<string, number>());
-  const requestSequenceRef = useRef(0);
-
   const fallbackProjectLastUpdatedAt = useMemo(() => {
     const timestamps = currentProjectVersions
       .map((version) => Date.parse(String(version.modifiedAt || "")))
@@ -503,23 +501,12 @@ export function WorkbenchGlobalSidebar({
     return projects.map((project) => project.projectId).join("\u0000");
   }, [projects]);
 
-  useEffect(() => {
-    const knownProjectIds = knownProjectIdsKey ? knownProjectIdsKey.split("\u0000") : [];
-    setProjectExpansionState((state) => reconcileProjectExpansionState(
-      state,
-      knownProjectIds,
-      currentProjectId,
-    ));
-    setVersionStates((states) => {
-      const next = Object.fromEntries(
-        Object.entries(states).filter(([projectId]) => knownProjectIds.includes(projectId)),
-      ) as Record<string, ProjectVersionLoadState>;
-      return Object.keys(next).length === Object.keys(states).length ? states : next;
-    });
-    for (const projectId of requestTokensRef.current.keys()) {
-      if (!knownProjectIds.includes(projectId)) requestTokensRef.current.delete(projectId);
-    }
-  }, [currentProjectId, knownProjectIdsKey]);
+  const projectExpansionState = useMemo(() => reconcileProjectExpansionState(
+    storedExpansionState,
+    knownProjectIdsKey ? knownProjectIdsKey.split("\u0000") : [],
+    currentProjectId,
+  ), [storedExpansionState, currentProjectId, knownProjectIdsKey]);
+  if (projectExpansionState !== storedExpansionState) setProjectExpansionState(projectExpansionState);
 
   const otherProjects = useMemo(
     () => projects.filter((project) => project.projectId !== currentProjectId),
@@ -532,44 +519,7 @@ export function WorkbenchGlobalSidebar({
   ) => {
     const existing = versionStates[project.projectId];
     if (!retry && (existing?.status === "loading" || existing?.status === "ready")) return;
-    const token = requestSequenceRef.current + 1;
-    requestSequenceRef.current = token;
-    requestTokensRef.current.set(project.projectId, token);
-    if (!project.documentId) {
-      setVersionStates((current) => ({
-        ...current,
-        [project.projectId]: {
-          status: "error",
-          versions: [],
-          reason: project.availabilityReason || "项目内容暂不可用。",
-        },
-      }));
-      return;
-    }
-    setVersionStates((current) => ({
-      ...current,
-      [project.projectId]: { status: "loading", versions: [] },
-    }));
-    try {
-      const result = await loadProjectVersions(project.projectId);
-      if (requestTokensRef.current.get(project.projectId) !== token) return;
-      setVersionStates((current) => ({
-        ...current,
-        [project.projectId]: result.reason && !result.versions.length
-          ? { ...result, status: "error" }
-          : { ...result, status: "ready" },
-      }));
-    } catch (cause) {
-      if (requestTokensRef.current.get(project.projectId) !== token) return;
-      setVersionStates((current) => ({
-        ...current,
-        [project.projectId]: {
-          status: "error",
-          versions: [],
-          reason: cause instanceof Error ? cause.message : "项目版本摘要暂时无法读取。",
-        },
-      }));
-    }
+    await loadProjectVersions(project.projectId, retry);
   }, [loadProjectVersions, versionStates]);
 
   useEffect(() => {
@@ -679,6 +629,7 @@ export function WorkbenchGlobalSidebar({
                         ) : null}
                       </div>
                     ) : null}
+                    {expanded && isCurrentProject && state?.reason ? <div className="sidebar-project-load-error" role="status">{state.reason}（显示上次结果）<button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button></div> : null}
                     {expanded ? (
                       isCurrentProject ? (
                         <ProjectVersionTree
@@ -688,20 +639,24 @@ export function WorkbenchGlobalSidebar({
                           activeVersionId={activeVersionId}
                           onOpenVersion={onOpenCurrentVersion}
                         />
-                      ) : !state || state.status === "loading" ? (
+                      ) : !state || (state.status === "loading" && !state.versions.length) ? (
                         <ProjectVersionTreeSkeleton />
-                      ) : state.status === "error" ? (
+                      ) : state.status === "error" && !state.versions.length ? (
                         <div className="sidebar-project-load-error" role="status">
                           <span>{state.reason || "项目版本摘要暂时无法读取。"}</span>
                           <button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button>
                         </div>
                       ) : (
+                        <>
+                        {state.reason ? <div className="sidebar-project-load-error" role="status">{state.reason}（显示上次结果）<button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button></div> : null}
+                        {state.status === "loading" ? <span role="status">正在更新版本…</span> : null}
                         <ProjectVersionTree
                           versions={state.versions}
                           isCurrentProject={false}
                           activeVersionId={null}
                           onOpenVersion={(version) => onOpenRegisteredVersion(project, version)}
                         />
+                        </>
                       )
                     ) : null}
                   </div>

@@ -4589,7 +4589,7 @@ export class ProjectFileRepository {
     return { paths, project, manifest, runtime };
   }
 
-  async #recoverRegisteredRootRename(projectId, record, { documentId = null } = {}) {
+  async #discoverRegisteredRoot(projectId, record, { documentId = null } = {}) {
     const registeredRootPath = normalizedPath(record.registeredProjectRootPath);
     const registered = await this.#assertRegisteredProjectRootPath(registeredRootPath, { allowMissing: true });
     if (registered.information) await this.#loadProject(registeredRootPath);
@@ -4625,25 +4625,32 @@ export class ProjectFileRepository {
     await this.#loadProject(chosen.candidatePath);
     const current = await this.#assertRegisteredProjectRootPath(chosen.candidatePath);
     const observedIdentity = copyFileIdentity(current.information);
-    if (!samePath(registeredRootPath, chosen.candidatePath)
-      || JSON.stringify(record.rootFileIdentity) !== JSON.stringify(observedIdentity)) {
+    return { projectRootPath: chosen.candidatePath, observedIdentity };
+  }
+
+  async #recoverRegisteredRootRename(projectId, record, options = {}) {
+    const found = await this.#discoverRegisteredRoot(projectId, record, options);
+    if (!found) return null;
+    if (!samePath(record.registeredProjectRootPath, found.projectRootPath)
+      || JSON.stringify(record.rootFileIdentity) !== JSON.stringify(found.observedIdentity)) {
       const latest = await this.#readRegistry();
       const latestRecord = latest.projects[projectId];
       if (!latestRecord || JSON.stringify(latestRecord) !== JSON.stringify(record)) {
         throw new ProjectFileRepositoryError("REGISTERED_PROJECT_RACE", "项目登记在恢复过程中发生变化。", { projectId });
       }
-      latestRecord.registeredProjectRootPath = chosen.candidatePath;
-      latestRecord.rootFileIdentity = observedIdentity;
+      latestRecord.registeredProjectRootPath = found.projectRootPath;
+      latestRecord.rootFileIdentity = found.observedIdentity;
       latestRecord.updatedAt = nowIso(this.#clock);
       await this.#writeRegistry(latest);
     }
-    return chosen.candidatePath;
+    return found.projectRootPath;
   }
 
   async #loadRegisteredProject({
     projectId,
     documentId = null,
     declaredProjectRootPath = null,
+    readOnly = false,
   }) {
     const id = assertId(projectId, PROJECT_ID, "projectId");
     const expectedDocumentId = documentId
@@ -4671,9 +4678,9 @@ export class ProjectFileRepository {
         },
       );
     }
-    const projectRootPath = await this.#recoverRegisteredRootRename(id, record, {
-      documentId: expectedDocumentId,
-    });
+    const projectRootPath = readOnly
+      ? (await this.#discoverRegisteredRoot(id, record, { documentId: expectedDocumentId }))?.projectRootPath
+      : await this.#recoverRegisteredRootRename(id, record, { documentId: expectedDocumentId });
     if (!projectRootPath) {
       throw new ProjectFileRepositoryError(
         "REGISTERED_PROJECT_UNAVAILABLE",
@@ -4802,7 +4809,7 @@ export class ProjectFileRepository {
     for (const [projectId, record] of Object.entries(registry.projects)) {
       let row = this.#registeredProjectCatalogFallback(projectId, record, "invalid");
       try {
-        let loaded = await this.#loadRegisteredProject({ projectId });
+        const loaded = await this.#loadRegisteredProject({ projectId, readOnly: true });
         const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
         row = {
           ...row,
@@ -4815,21 +4822,27 @@ export class ProjectFileRepository {
           hasPendingCandidate: loaded.runtime.activeCandidateId !== null,
           lastUpdatedAt: this.#registeredProjectLastUpdatedAt({ loaded }),
         };
-        // Project metadata remains browsable even when recovery/source probing fails.
-        await this.#recoverProject(loaded.paths.projectRootPath);
-        loaded = await this.#loadRegisteredProject({ projectId });
-        const active = await this.#activeRegisteredWorkingCopy(loaded);
-        const resolved = await this.#resolveWorkingCopyPath(loaded, active);
+        const active = workingCopy;
+        const declaredPath = workingCopySourcePath(loaded.paths, active);
+        const binding = await readSourceBinding(loaded.paths.projectRootPath, active.workingCopyId);
+        await assertUniqueSourceBinding(loaded.paths.projectRootPath, loaded.manifest.workingCopies, active.workingCopyId, binding);
+        const boundPath = await findBoundSource(loaded.paths.projectRootPath, binding);
+        const information = await regularInformation(declaredPath, "Working Copy", { projectRootPath: loaded.paths.projectRootPath });
+        if (boundPath && information && !samePath(boundPath, declaredPath)) {
+          throw new ProjectFileRepositoryError("MANAGED_PATH_AMBIGUOUS", "登记位置与绑定指向不同工作文件，请核对文件。");
+        }
+        const displayPath = boundPath || (information ? declaredPath : null);
+        if (!displayPath) throw new ProjectFileRepositoryError("WORKING_COPY_UNAVAILABLE", "工作文件暂不可用。", { canRestore: Boolean(binding) });
         const state = await readJsonFile(workingCopyStatePath(loaded.paths, active), "Working Copy state", { projectRootPath: loaded.paths.projectRootPath });
         const rulesInformation = await regularInformation(path.join(loaded.paths.projectRootPath, "PROJECT.md"), "PROJECT.md", { projectRootPath: loaded.paths.projectRootPath });
         Object.assign(row, {
           activeWorkingCopyId: active.workingCopyId,
           currentBasedOnVersionId: active.basedOnVersionId,
           latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
-          activeSourcePath: resolved.exactSourcePath,
+          activeSourcePath: displayPath,
           availability: "ready",
-          sourceStatus: resolved.sourceStatus,
-          availabilityReason: resolved.sourceStatus === "external-change" ? "工作文件有外部变化，打开后核对内容。" : null,
+          sourceStatus: "unknown",
+          availabilityReason: "文件内容尚未核对，打开时检查。",
           lastUpdatedAt: this.#registeredProjectLastUpdatedAt({ loaded, workingCopyState: state, rulesInformation }),
         });
       } catch (cause) {
@@ -4847,7 +4860,7 @@ export class ProjectFileRepository {
 
   async #listRegisteredProjectVersionSummaries({ projectId }) {
     const id = assertId(projectId, PROJECT_ID, "projectId");
-    const loaded = await this.#loadRegisteredProject({ projectId: id });
+    const loaded = await this.#loadRegisteredProject({ projectId: id, readOnly: true });
     const activeWorkingCopy = await this.#activeRegisteredWorkingCopy(loaded);
     let activeDisplayPath = workingCopySourcePath(loaded.paths, activeWorkingCopy);
     try {
@@ -4888,6 +4901,8 @@ export class ProjectFileRepository {
     return {
       projectId: loaded.project.projectId,
       documentId: loaded.project.documentId,
+      currentBasedOnVersionId: activeWorkingCopy.basedOnVersionId,
+      latestVersionId: loaded.manifest.latestOfficialVersionId,
       versions,
     };
   }
