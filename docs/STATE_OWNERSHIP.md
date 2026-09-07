@@ -482,3 +482,9 @@ Session, selected navigation tab and existing safety conditions. The tab bar,
 sidebar selection and toolbar consume this result. It owns no mutable state;
 region subscriptions remain separate. Version rows sort by ordinal, retaining
 lineage only as detail. Current editing and latest remain independent identities.
+
+Document-dependent header actions require the active tab's project/document to
+match the Session target. An unmatched snapshot clears display identity and
+cannot offer preview, review, file opening, export or refresh for another target.
+This pure header rule does not change persistence-failure/recovery export actions;
+a matching unsaved document still exposes its current-source export.

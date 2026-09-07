@@ -512,6 +512,8 @@ test("Electron sidebar opens an imported historical version in the existing proj
     const selectedB = tabs.filter({ hasText: "sidebar-history-b" });
     await expect(selectedB).toContainText(`${historicalVersion.displayFileName} · 历史`);
     await expect(importedProject.locator('[data-selected="true"] .sidebar-version-file')).toContainText(historicalVersion.displayFileName);
+    await expect(importedProject.locator('[data-selected="true"] .sidebar-version-time'))
+      .toHaveAttribute("data-datetime", historicalVersion.modifiedAt);
     await expect(mode).toHaveAttribute("data-view-label", "历史");
     await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
     await launched.page.screenshot({ path: test.info().outputPath("version-history-projection.png") });
@@ -522,6 +524,10 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeEnabled();
     await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-file')).toContainText("-V3.html");
     await expect(importedProject.locator('[data-latest="true"] .sidebar-version-file')).toContainText("-V3.html");
+    const currentSummary = await repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId });
+    const currentVersion = currentSummary.versions.find((version) => version.isActiveWorkingCopy);
+    await expect(importedProject.locator('[data-current-editing="true"] .sidebar-version-time'))
+      .toHaveAttribute("data-datetime", currentVersion.modifiedAt);
     await launched.page.screenshot({ path: test.info().outputPath("version-current-projection.png") });
 
     await currentProject.locator(".sidebar-version-file").first().click();

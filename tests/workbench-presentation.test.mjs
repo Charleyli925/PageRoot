@@ -57,3 +57,29 @@ test("a branching lineage still renders V1 through Vn without mutating input", (
   assert.deepEqual(versions.map((row) => row.ordinal), [3, 1, 2]);
   assert.equal(versions[0].basedOnVersionId, "v1");
 });
+
+
+test("document-dependent actions require the same target, even with a ready review", () => {
+  for (const activeTab of [null, { ...input().activeTab, projectId: "B", documentId: "docB" },
+    { ...input().activeTab, documentId: "replacement" }]) {
+    const p = deriveWorkbenchPresentation({ ...input(), activeTab, canvasMode: "preview",
+      activeRunStatus: "ready-to-open", hasReadyPayload: true });
+    assert.equal(p.projectId, null);
+    assert.equal(p.selectedVersionId, null);
+    for (const action of [p.edit, p.preview, p.review]) {
+      assert.equal(action.enabled, false);
+      assert.ok(action.reason);
+    }
+    for (const key of ["canShowInFinder", "canOpenCurrentHtml", "canExportCurrentHtml", "canReloadCurrentSource", "refreshAvailable"]) {
+      assert.equal(p[key], false, key);
+    }
+  }
+});
+
+test("a matching unsaved document retains its source export during persistence failure", () => {
+  const p = deriveWorkbenchPresentation({ ...input(), persistState: "error",
+    editRevision: 4, lastPersistedRevision: 2, workspaceIssue: true });
+  assert.equal(p.canExportCurrentHtml, true);
+  assert.equal(p.canOpenCurrentHtml, false);
+  assert.equal(p.canReloadCurrentSource, false);
+});

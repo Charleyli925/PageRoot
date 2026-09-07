@@ -32,28 +32,29 @@ type PresentationInput = {
 };
 
 export function deriveWorkbenchPresentation(input: PresentationInput) {
-  const { project, version, activeTab, reviewActive, runInProgress, interactionLocked } = input;
-  const sameDocument = Boolean(activeTab?.kind === "document"
+  const { project, version, activeTab, runInProgress, interactionLocked } = input;
+  const sameDocument = Boolean(project.projectId && project.documentId && activeTab?.kind === "document"
     && activeTab.projectId === project.projectId && activeTab.documentId === project.documentId);
+  const reviewActive = sameDocument && input.reviewActive;
   const isHistory = sameDocument && version.viewMode === "history";
   const displayedVersionId = sameDocument
     ? isHistory ? version.viewingVersionId : version.currentBasedOnVersionId
     : null;
   const displayedVersion = version.versions.find((row) => row.id === displayedVersionId) || null;
-  const reviewAvailable = Boolean(input.activeRunStatus === "ready-to-open"
+  const reviewAvailable = Boolean(sameDocument && input.activeRunStatus === "ready-to-open"
     && input.hasReadyPayload && !input.hasReadyReviewSession && !input.reviewPreparing);
   const editReason = reviewActive ? "完成审阅后可继续编辑"
     : runInProgress ? "本轮还在进行，结束或采纳后可回到编辑"
       : isHistory ? "历史版本只读，回到当前版本后可编辑"
         : !sameDocument ? "请先打开当前文档" : undefined;
-  const previewReason = reviewActive ? "完成审阅后可继续预览"
+  const previewReason = !sameDocument ? "请先打开当前文档" : reviewActive ? "完成审阅后可继续预览"
     : interactionLocked ? "当前状态只能使用编辑画布" : undefined;
-  const reviewReason = reviewActive ? "正在审阅 AI 修改"
+  const reviewReason = !sameDocument ? "请先打开当前文档" : reviewActive ? "正在审阅 AI 修改"
     : input.reviewPreparing ? "正在准备审阅…"
       : !reviewAvailable ? "有待审阅修改时自动可用" : undefined;
-  const fileReady = input.hasWorkspaceController && !input.projectHydrating
+  const fileReady = sameDocument && input.hasWorkspaceController && !input.projectHydrating
     && !input.projectLoadError && !input.viewTransitioning;
-  const canReloadCurrentSource = Boolean(project.sourcePath && version.viewMode === "current"
+  const canReloadCurrentSource = Boolean(sameDocument && project.sourcePath && version.viewMode === "current"
     && input.persistState === "idle" && input.editRevision === input.lastPersistedRevision
     && !runInProgress && !input.projectHydrating && !input.projectLoadError
     && !input.workspaceIssue && !input.externalSourcePreview && !input.viewTransitioning
@@ -76,15 +77,15 @@ export function deriveWorkbenchPresentation(input: PresentationInput) {
     // read-only history rendered by the edit canvas. Projection cannot switch it.
     mode: reviewActive ? "review" : input.canvasMode,
     edit: { enabled: !editReason, selected: !reviewActive && input.canvasMode === "edit", reason: editReason },
-    preview: { enabled: !reviewActive && !interactionLocked, selected: !reviewActive && input.canvasMode === "preview", reason: previewReason },
+    preview: { enabled: sameDocument && !reviewActive && !interactionLocked, selected: !reviewActive && input.canvasMode === "preview", reason: previewReason },
     review: { enabled: !reviewActive && !input.reviewPreparing && reviewAvailable, selected: reviewActive, reason: reviewReason },
     reviewAvailable,
-    canShowInFinder: input.canShowCurrentFileInFolder,
-    canOpenCurrentHtml: input.canOpenCurrentHtmlInDefaultBrowser && input.persistState === "idle"
+    canShowInFinder: sameDocument && input.canShowCurrentFileInFolder,
+    canOpenCurrentHtml: sameDocument && input.canOpenCurrentHtmlInDefaultBrowser && input.persistState === "idle"
       && input.editRevision === input.lastPersistedRevision,
     canExportCurrentHtml: fileReady,
     canReloadCurrentSource,
-    refreshAvailable: Boolean((input.canvasMode === "preview" || reviewActive)
+    refreshAvailable: Boolean(sameDocument && (input.canvasMode === "preview" || reviewActive)
       && !input.projectHydrating && !input.projectLoadError && !input.viewTransitioning),
   };
 }
