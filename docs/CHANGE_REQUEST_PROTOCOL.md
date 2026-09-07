@@ -29,6 +29,15 @@ v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧�
 - 只因 HTML 在固定窗口内未变化就自动成功。
 - 把非权威摘要文件当作可选或替代完成信号。
 
+## v4 手动历史创建补充（E）
+
+手动历史创建不走 AI Request、Candidate 或 finalizer，也不使用本文件归档的
+`restore`/`local-editor` Version 类型。v4 manifest 新增可选 `sourceType`，新手动
+记录取 `history-copy`，以 `sourceOperationId` 绑定事务，AI 来源字段保持 null。
+其来源快照 Hash、前序 Version、幂等操作、提交和恢复合同统一见
+[版本与项目文件产品需求的历史创建章节](VERSION_AND_PROJECT_FILES_PRD.md#历史创建e-的事务合同与-f-的入口切换)。
+现有 v4 记录不迁移；客户端必须识别该来源，不能把它解释为初始导入或 AI 生成。
+
 ## 1. 协议原则
 
 1. 项目 `sourcePath` 当前指向的 HTML 是当前可编辑内容的唯一事实源。本地直接编辑修改这份文件；AI 成功先创建不可变 Version 与新工作文件，用户明确点击打开后才切换 `sourcePath`，不覆盖旧文件。

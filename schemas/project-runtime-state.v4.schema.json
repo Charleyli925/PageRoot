@@ -15,6 +15,7 @@
     "schemaVersion": { "const": "4.0.0" },
     "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
     "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "historyCreation": {"type": ["object", "null"], "required": ["operationId", "versionId"], "properties": {"operationId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{8,160}$"}, "versionId": {"type": "string", "pattern": "^ver_\\d{4,}$"}}},
     "activeWorkingCopyId": { "type": ["string", "null"], "pattern": "^work_ver_\\d{4,}$" },
     "activeRequest": {
       "type": ["object", "null"],

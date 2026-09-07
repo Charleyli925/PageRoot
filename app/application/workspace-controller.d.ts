@@ -707,6 +707,8 @@ export class WorkspaceController {
   openCommittedVersion(input: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   viewHistory(input: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   returnToCurrent(input?: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
+  createVersionFromHistory(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome>;
+  queryHistoryCreation(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome>;
   continueEditingHistoryVersion(input?: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   ensureRegistered(
     input?: RegistrationInput,

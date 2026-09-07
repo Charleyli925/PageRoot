@@ -582,3 +582,15 @@ installed provider/runtime and freezes canonical selection plus fingerprint in
 a one-use ticket; start compares that ticket to the durable Request selection.
 Malformed policies, cross-provider model ids, unknown providers and selection
 drift fail closed.
+
+### Manual historical Version creation
+
+The existing Registry-authorized Repository serializes manual creation and its
+recovery. A renderer-supplied path is not write authority: project/document and
+Working Copy identity, expected current Hash, selected immutable snapshot Hash,
+next ordinal and transaction provenance must agree. Snapshot and visible HTML
+publication never overwrite an existing file. The final boundary rechecks the
+old source plus prepared/published file identity and bytes before the manifest
+commit. Replays validate operation inputs and return committed facts; a render
+failure cannot allocate another Version. AI task/Candidate decisions are never
+automatically cancelled by manual creation.

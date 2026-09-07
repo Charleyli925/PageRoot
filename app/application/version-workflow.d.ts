@@ -17,9 +17,20 @@ export type VersionWorkflowOutcome<T = Record<string, unknown>> =
   | Readonly<{ status: "unknown"; operationId: string; reason: string }>
   | Readonly<{ status: "stale"; identity: Readonly<Record<string, unknown>> }>;
 
-export type VersionNavigationPhase = "idle" | "activating" | "opening" | "history" | "current";
+export type HistoryCreationResult = Readonly<{
+  status: "not-created"; operationId: string; projectId: string; documentId: string;
+  aborted?: boolean; code?: string; reason?: string;
+}> | Readonly<{
+  status: "created"; operationId: string; projectId: string; documentId: string;
+  versionId: string; versionOrdinal: number; workingCopyId: string;
+  basedOnVersionId: string; previousVersionId: string; contentSha256: string;
+  sourcePath: string; openedAt: string | null;
+}>;
+
+export type VersionNavigationPhase = "idle" | "activating" | "opening" | "history" | "current" | "creating";
 
 export type VersionWorkflowSnapshot = Readonly<{
+  creation?: Readonly<{ phase: "creating" | "created" | "not-created" | "unknown"; operationId: string; context: ProjectContext; result?: HistoryCreationResult }>;
   navigation: Readonly<{
     phase: VersionNavigationPhase;
     operationId: string | null;
@@ -144,6 +155,8 @@ export class VersionWorkflow {
     context?: ProjectContext | null;
     fromDeferred?: boolean;
   }): Promise<VersionWorkflowOutcome<Record<string, unknown>>>;
+  createVersionFromHistory(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<HistoryCreationResult>>;
+  queryHistoryCreation(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<HistoryCreationResult>>;
   continueEditingHistoryVersion(input?: {
     versionId?: string | null;
     context?: ProjectContext | null;
