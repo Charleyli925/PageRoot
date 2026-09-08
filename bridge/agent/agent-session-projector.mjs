@@ -50,6 +50,12 @@ export function safePublicAgentText(value) {
     .replace(/https?:\/\/[^\s]+/giu, "[链接已隐藏]");
 }
 
+// Sealed public narration only; callers must never supply reasoning or tool output.
+export function safePublicAgentSummary(value) {
+  const text = safePublicAgentText(value).trim();
+  return text.length > 4096 ? `${text.slice(0, 4080)}\n（摘要已截断）` : text;
+}
+
 const MAX_VISIBLE_TEXT_UPDATES = 80;
 const SENTENCE_END = /[。！？.!?]\s*$/u;
 

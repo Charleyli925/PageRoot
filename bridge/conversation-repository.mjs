@@ -6,6 +6,8 @@ import {
   appendConversationFact,
   archiveConversation,
   conversationAtMessageLimit,
+  conversationHasCapacity,
+  conversationHasInFlightTurn,
   conversationSummary,
   conversationTitleFromMessage,
   conversationsForDocument,
@@ -280,6 +282,20 @@ export async function ensureCurrentConversation(context) {
     );
     if (currentId) {
       const existing = await readConversation(context, currentId);
+      if (existing?.status === "archived" && existing.supersededByConversationId) {
+        // Recover a rotation interrupted after archiving but before index write.
+        let replacement = await readConversation(context, existing.supersededByConversationId);
+        if (!replacement) {
+          replacement = createEmptyConversation({ conversationId: existing.supersededByConversationId,
+            projectId: context.projectId, documentId: context.documentId, title: existing.title,
+            supersedesConversationId: existing.conversationId, now: nowIso });
+          await writeConversation(context, replacement);
+        }
+        await writeConversationIndex(context, recordConversationInIndex(
+          recordConversationInIndex(index, existing, { current: false, now: nowIso }),
+          replacement, { current: true, now: nowIso }));
+        return replacement;
+      }
       if (existing) return existing;
     }
     return await createConversation(context);
@@ -291,9 +307,12 @@ export async function ensureCurrentConversation(context) {
 // A conversation that reached its message limit is archived and replaced. No
 // record is deleted: the new conversation points back at the archived one so
 // the user can still read it.
-export async function rotateConversationAtLimit(context, conversation) {
+export async function rotateConversationAtLimit(context, conversation, { reserve } = {}) {
   try {
-    if (!conversationAtMessageLimit(conversation)) return conversation;
+    if (conversationHasCapacity(conversation, reserve)) return conversation;
+    if (conversationHasInFlightTurn(conversation)) {
+      throw new LifecycleError("CONVERSATION_TURN_IN_FLIGHT", "Finish the current turn before rotating history.", undefined, 409);
+    }
     const replacement = createEmptyConversation({
       conversationId: newConversationId(),
       projectId: context.projectId,
@@ -310,8 +329,8 @@ export async function rotateConversationAtLimit(context, conversation) {
       },
       { now: nowIso },
     );
-    await writeConversation(context, archived);
     await writeConversation(context, replacement);
+    await writeConversation(context, archived);
     let index = await readConversationIndex(context);
     index = recordConversationInIndex(index, archived, {
       current: false,
