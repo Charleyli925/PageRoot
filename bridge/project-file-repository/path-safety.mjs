@@ -72,8 +72,26 @@ export async function verifiedProjectRoot(projectRoot, { allowMissing = true } =
   return verified;
 }
 
-export function defaultProjectsRoot() {
-  return path.join(os.homedir(), "Documents", "PageRoot", "项目");
+export function defaultProjectsRoot(environment = process.env) {
+  const configured = String(environment.HTML_AI_PROJECT_FILES_ROOT || "").trim();
+  if (configured) {
+    if (!path.isAbsolute(configured)) {
+      const error = new Error("HTML_AI_PROJECT_FILES_ROOT must be an absolute path.");
+      error.code = "RUNTIME_PATH_REQUIRED";
+      throw error;
+    }
+    return path.resolve(configured);
+  }
+  const channel = String(environment.HTML_AI_RUNTIME_CHANNEL || "").trim().toLowerCase();
+  if (channel === "stable" || channel === "preview") {
+    const error = new Error(`HTML_AI_PROJECT_FILES_ROOT is required for runtime channel ${channel}.`);
+    error.code = "RUNTIME_PATH_REQUIRED";
+    throw error;
+  }
+  // Repository-only source/test callers receive a disposable root. The
+  // desktop Bridge always supplies an explicit channel root and therefore
+  // never reaches this fallback in a packaged runtime.
+  return path.join(os.tmpdir(), "pageroot-project-runtime", channel || "test", "项目");
 }
 
 export function nowIso(clock) {
@@ -125,12 +143,6 @@ export function pathInside(root, candidate, { allowRoot = false } = {}) {
   if (allowRoot && comparableRoot === comparableCandidate) return true;
   return comparableCandidate.startsWith(`${comparableRoot}${path.sep}`);
 }
-
-// A lexical `..` check is only the first half of managed-path validation. A
-// user can otherwise replace any intermediate directory with a symlink after
-// the manifest has been written and redirect a later save outside the project.
-// Walk every existing component with lstat(), then compare its resolved real
-// path to the resolved project root before doing a managed read or write.
 
 // A lexical `..` check is only the first half of managed-path validation. A
 // user can otherwise replace any intermediate directory with a symlink after

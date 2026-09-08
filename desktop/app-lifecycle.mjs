@@ -41,7 +41,7 @@ export function createWindowLifecycle(ctx) {
       minWidth: 960,
       minHeight: 720,
       backgroundColor: "#f7f8fa",
-      title: "源页",
+      title: ctx.applicationName || "源页",
       show: e2eWindowForeground,
       ...(process.platform === "darwin"
         ? {

@@ -148,7 +148,12 @@ export class AgentCatalogState {
     providers?: readonly AgentProviderDescriptor[];
     selected?: AgentSelection | null;
     preferencesPort?: import("./workspace-preferences-session.js").WorkspacePreferencesPort | null;
-    credentialStatusPort?: (() => Promise<{ remembered?: boolean }>) | null;
+    credentialStatusPort?: (() => Promise<{
+      remembered?: boolean;
+      unreadable?: boolean;
+      reconnectRequired?: boolean;
+      reason?: string;
+    }>) | null;
   });
   getSnapshot(): AgentCatalogSnapshot;
   subscribe(listener: (snapshot: AgentCatalogSnapshot) => void): () => void;

@@ -137,6 +137,7 @@ export async function candidatePayloadEntries(appPath) {
     path.join(resourcesPath, "app-update.yml"),
     path.join(resourcesPath, "build-info.json"),
     path.join(resourcesPath, "usage-telemetry-config.json"),
+    path.join(resourcesPath, "runtime-environment.json"),
     ...LEGAL_RESOURCES.map((name) => path.join(resourcesPath, name)),
   ];
   for (const directory of ["bridge", "schemas", "shared"]) {

@@ -70,11 +70,23 @@ downloads or reuses dry-run bytes.
 ## Optional developer preview
 
 When the developer explicitly asks for an installable test package, manually
-dispatch `Developer Preview` for the intended branch and architecture, or run
-`npm run package:developer` on a clean committed tree. The default preview
-builds one ad-hoc, unnotarized DMG, verifies packaged contents and performs one
-isolated startup. Its Actions artifact is retained for seven days and its
+dispatch `Developer Preview` on a runner that has the stable Developer ID
+Application identity, or run `npm run package:developer` on a clean committed
+tree with that identity available in the local macOS keychain. The preview
+requires that signature and stops if the certificate is missing or signing
+fails; it never falls back to ad-hoc. Notarization remains optional for this
+personal test package. It verifies packaged contents and performs one isolated
+startup, while its automatic update checks and installation path stay disabled.
+Its Actions artifact is retained for seven days and its
 `developer-preview.json` always says `releaseEligible: false`.
+
+The first Preview launch uses only its new roots (`~/Library/Application
+Support/PageRoot Developer Preview`, `~/Documents/PageRoot Developer Preview`
+and `~/Library/Logs/PageRoot Developer Preview`). Existing PageRoot data is not
+scanned, migrated, copied, opened or deleted. Later Preview installs reuse this
+new data. Source development and E2E use separate isolated roots; the formal
+PageRoot release keeps its existing name, directories, signature and updater
+behavior.
 
 This step is optional. A request to make a formal candidate or publish a
 release does not imply a developer preview, and the formal workflows never

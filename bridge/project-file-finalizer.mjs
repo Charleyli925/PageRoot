@@ -6,6 +6,7 @@ import {
   requireCompleteHtml,
   sha256,
 } from "./lifecycle-core.mjs";
+import { prepareCandidateSourceIdentity } from "./project-file-repository/candidate-identity.mjs";
 import { PROJECT_FILE_SCHEMA_VERSION } from "./project-file-repository.mjs";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,160}$/u;
@@ -903,6 +904,8 @@ export async function finalizeProjectFileAttempt({
       cause instanceof Error ? cause.message : "Candidate output is incomplete.",
     );
   }
+  // A rejected Candidate must never acquire completion evidence, including manual agents.
+  prepareCandidateSourceIdentity(input.toString("utf8"), html);
   const outputSha256 = sha256(output);
   const completion = {
     schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
