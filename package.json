@@ -356,6 +356,10 @@
         "to": "bridge/project-file-repository.mjs"
       },
       {
+        "from": "bridge/project-file-repository/submission.mjs",
+        "to": "bridge/project-file-repository/submission.mjs"
+      },
+      {
         "from": "bridge/project-file-repository/constants.mjs",
         "to": "bridge/project-file-repository/constants.mjs"
       },
@@ -709,6 +713,7 @@
           "promotion-transaction.v4.schema.json",
           "runtime-state.v3.schema.json",
           "scope-report.v1.schema.json",
+          "submission-receipt.v1.schema.json",
           "source-element-identity-migration.v1.schema.json",
           "task-spec.v1.schema.json",
           "user-supplement.v1.schema.json",

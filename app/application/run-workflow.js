@@ -906,24 +906,9 @@ export class RunWorkflow {
     let durableRun = null;
     let agentPreflight = null;
     let reservedAgentStartKey = null;
+    let recordedSubmission = null;
+    let submissionRequest = null;
     try {
-      if (frozenAgentDelivery.mode === MANAGED_AGENT_MODE) {
-        agentPreflight = await this.#agentCatalog.spendTicket(
-          frozenAgentDelivery.selection,
-          {
-            purpose: "execution",
-            trustPolicyVersion: frozenAgentDelivery.trustPolicyVersion,
-          },
-        );
-        if (!this.#isCurrentContext(context)) return stale(context);
-        frozenAgentDelivery = Object.freeze({
-          ...frozenAgentDelivery,
-          selection: agentPreflight.selection,
-          ...(agentPreflight.configuration
-            ? { configuration: agentPreflight.configuration }
-            : {}),
-        });
-      }
       const registered = await this.#ensureRegistered({
         sourcePath: context.sourcePath,
         expectedSourceSha256: this.#documentSession.persistedSourceSha256,
@@ -1152,6 +1137,36 @@ export class RunWorkflow {
         changeEvents: persistedEvents.map(this.#codecs.persistedChangeEvent),
         agentDelivery: frozenAgentDelivery,
       };
+      const submissionOperationId = `submission_${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+      request.submissionOperationId = submissionOperationId;
+      submissionRequest = request;
+      const receipt = await this.#bridgeClient.recordSubmission(request);
+      if (receipt?.operationId !== submissionOperationId || receipt?.status !== "accepted") {
+        throw responseError("SUBMISSION_RECEIPT_INVALID", "本轮要求的保存结果尚未确认，没有发送。");
+      }
+      recordedSubmission = receipt;
+      if (!this.#isCurrentContext(context)) return stale(context);
+      if (frozenAgentDelivery.mode === MANAGED_AGENT_MODE) {
+        agentPreflight = await this.#agentCatalog.spendTicket(
+          frozenAgentDelivery.selection,
+          {
+            purpose: "execution",
+            trustPolicyVersion: frozenAgentDelivery.trustPolicyVersion,
+          },
+        );
+        if (!this.#isCurrentContext(context)) return stale(context);
+        frozenAgentDelivery = Object.freeze({
+          ...frozenAgentDelivery,
+          selection: agentPreflight.selection,
+          ...(agentPreflight.configuration
+            ? { configuration: agentPreflight.configuration }
+            : {}),
+        });
+      }
+      request.agentDelivery = frozenAgentDelivery;
+      if (sourceAgentBudgetExceeded(frozenAgentDelivery, agentPreflight, frozen.html, persistedComments, finalAttachmentBytes)) {
+        throw responseError("RUN_AGENT_PROMPT_TOO_LARGE", "当前页面超过所选模型输出能力，请更换模型。");
+      }
       const operationId = this.#codecs.operationKey(pendingRun);
       let dispatched = false;
       try {
@@ -1252,6 +1267,11 @@ export class RunWorkflow {
       }
       return succeeded({ run: durableRun });
     } catch (cause) {
+      if (recordedSubmission && !durableRun && !submissionUncertain) {
+        await this.#bridgeClient.finishSubmission({ ...submissionRequest,
+          errorCode: errorCode(cause, "SUBMISSION_NOT_STARTED"),
+        }).catch(() => null);
+      }
       const message = this.#codecs.errorMessage(
         cause,
         "这次发送没有成功。页面和评论仍然保留。",

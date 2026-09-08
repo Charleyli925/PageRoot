@@ -567,3 +567,7 @@ remain deprecated compatibility surfaces exercised by the legacy activation
 protocol tests (`tests/version-workflow.test.mjs`); Repository recovery of old
 `historyActivation` journals remains separate. New UI commands must use create,
 query and openCreatedHistoryVersion. This batch does not remove the disk protocol.
+
+## Preflight submission receipts
+
+ProjectFileRepository serializes `submissions/<submissionOperationId>.json` inside the managed control root. The receipt owns only frozen submission requirements, preflight acceptance outcome, and stable Conversation/Request linkage. It is not an execution owner. Request/Attempt and Promotion retain execution and result authority. Receipt write precedes Conversation projection; stable identities allow projection repair without replaying Agent execution.
