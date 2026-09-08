@@ -359,6 +359,11 @@ function AgentSettings({
     setFollowedChoiceId(selectedChoiceId);
     setExpandedId(selectedChoiceId);
   }
+  const showOtherProvider = (excludedId: string) => {
+    const other = cards.find((card) => cardChoiceId(card) !== excludedId && card.availability.status === "ready")
+      || cards.find((card) => cardChoiceId(card) !== excludedId);
+    setExpandedId(other ? cardChoiceId(other) : null);
+  };
   const selectedCard = expandedId
     ? cards.find((card) => cardChoiceId(card) === expandedId) || null
     : null;
@@ -453,6 +458,7 @@ function AgentSettings({
                         setExpandedId(id);
                         return;
                       }
+                      if (recovery?.action === "change-provider") { showOtherProvider(id); return; }
                       if (primaryLabel === "重新连接") {
                         if (!credentialRestoreFailed) void onReconnectProvider?.(card.selection);
                       }
@@ -682,6 +688,7 @@ function AgentSettings({
                     <BoundAgentSetupPanel
                       card={selectedCard}
                       surface="settings"
+                      onUseOtherProvider={() => showOtherProvider(id)}
                       actionButtonRef={actionButtonRef}
                       hideDisconnectAction
                       initialApiKeyOpen={selectedCard.credentialPersist?.status === "failed"

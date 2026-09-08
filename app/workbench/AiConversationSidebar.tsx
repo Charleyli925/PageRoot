@@ -1116,6 +1116,7 @@ export default function AiConversationSidebar({
               hideDisconnectAction
               initialApiKeyOpen={recovery?.field === "apiKey"}
               {...agentAccess.bindings}
+              onUseOtherProvider={() => { setSetupProviderId(null); setOpenChoice("service"); }}
             />
             <button type="button" className={styles.action} data-tone="quiet"
               onClick={() => setSetupProviderId(null)}>返回任务</button>

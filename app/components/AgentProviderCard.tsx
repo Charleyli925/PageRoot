@@ -17,7 +17,7 @@ type AgentActionOutcome = Readonly<{
   code?: string;
   persistFailed?: boolean;
 }> | null | undefined;
-type CardActionKind = AgentProviderGuidanceKind | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning" | "reopen-login";
+type CardActionKind = AgentProviderGuidanceKind | "change-provider" | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning" | "reopen-login";
 type ApiKeyExtras = Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>;
 type ApiKeyField = "apiKey" | "baseUrl" | "modelId" | "form";
 type VendorOption = Readonly<{
@@ -84,6 +84,7 @@ export type AgentProviderCardProps = {
   onInstall?: () => Promise<AgentActionOutcome>;
   onCancelInstall?: () => Promise<AgentActionOutcome>;
   onRecheck?: () => Promise<AgentActionOutcome>;
+  onUseOtherProvider?: () => void;
   onConnectApiKey?: (apiKey: string, extras?: ApiKeyExtras) => Promise<AgentActionOutcome>;
   onRetryPersistCredential?: () => Promise<AgentActionOutcome>;
   onDisconnectApiKey?: () => Promise<AgentActionOutcome>;
@@ -168,6 +169,7 @@ export default function AgentProviderCard({
   onInstall,
   onCancelInstall,
   onRecheck,
+  onUseOtherProvider,
   onConnectApiKey,
   onDisconnectApiKey,
   onOpenVendorApiKeyPage,
@@ -248,6 +250,7 @@ export default function AgentProviderCard({
       ]
       : (recovery ? [
         { kind: recovery.action, label: recovery.actionLabel, copiedLabel: recovery.actionLabel },
+        ...(recovery.allowRecheck ? [{ kind: "recheck" as const, label: "重新检查", copiedLabel: "重新检查" }] : []),
         ...(recovery.allowLogin ? [{ kind: "login" as const, label: "重新登录", copiedLabel: "重新登录" }] : []),
       ] : actionsForAvailability(availability, provider)).filter((action) => !(
         action.kind === "api-key"
@@ -271,6 +274,10 @@ export default function AgentProviderCard({
   const runAction = async (kind: CardActionKind) => {
     if (disabled) return;
     setFieldError("");
+    if (kind === "change-provider") {
+      onUseOtherProvider?.();
+      return;
+    }
     if (kind === "cancel-install") {
       if (cancelPending || cancelRequested || typeof onCancelInstall !== "function") return;
       setCancelRequested(true);

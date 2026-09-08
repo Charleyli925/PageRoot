@@ -9,7 +9,7 @@ export type AgentProviderGuidanceKind = "install" | "login";
 export function agentSetupOperationLabel(operation: Readonly<{ kind: string; state: string }> | null | undefined, installState?: string): string | null;
 export function agentSetupRecovery(diagnostic: AgentDiagnosticSnapshot | null | undefined, availability: AgentProviderAvailabilitySnapshot): Readonly<{
   statusLabel: string; detail: string; tone: "attention";
-  action: "install" | "recheck"; actionLabel: string; allowLogin?: boolean;
+  action: "install" | "recheck" | "change-provider"; actionLabel: string; allowLogin?: boolean; allowRecheck?: boolean;
 }> | null;
 export type AgentDiagnosticReadiness =
   | "checking"

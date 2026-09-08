@@ -29,6 +29,7 @@ test("Codex recovery distinguishes local authentication from protocol and networ
     ["CODEX_AUTH_UNVERIFIED", "检测登录", true],
     ["CODEX_AUTH_REQUIRED", "检测登录", true],
     ["CODEX_PREFLIGHT_FAILED", "重新检查", undefined],
+    ["CODEX_EXECUTION_CONTRACT_UNSUPPORTED", "使用其他 AI", undefined],
     ["CODEX_PROTOCOL_UNSUPPORTED", "更新连接组件", undefined],
     ["CODEX_CONNECTION_FAILED", "重新检查", undefined],
     ["AGENT_PREFLIGHT_TIMEOUT", "重新检查", undefined],
@@ -1627,4 +1628,15 @@ test("Codex leaves automatic browser opening to native login and retains manual 
   await catalog.cancelAccessOperation(catalog.freezeSelected());
   await pending.catch(() => null);
   catalog.dispose();
+});
+
+
+test("known incompatible Codex components offer a different service without reinstalling or relogging", () => {
+  const diagnostic = agentDiagnosticSnapshot({ readiness: "connection-failed", cause: "CODEX_EXECUTION_CONTRACT_UNSUPPORTED",
+    facts: { authentication: "ready", protocol: "failed" } });
+  const recovery = agentSetupRecovery(diagnostic, { status: "unavailable", reason: "service-unavailable" });
+  assert.equal(recovery.action, "change-provider");
+  assert.equal(recovery.allowRecheck, true);
+  assert.equal(recovery.allowLogin, undefined);
+  assert.match(recovery.detail, /账号已登录/u);
 });

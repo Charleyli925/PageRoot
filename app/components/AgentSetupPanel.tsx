@@ -20,6 +20,7 @@ export type BoundAgentSetupPanelProps = Readonly<{
   actionButtonRef?: AgentProviderCardProps["actionButtonRef"];
   hideDisconnectAction?: boolean;
   initialApiKeyOpen?: boolean;
+  onUseOtherProvider?: () => void;
   onCopyGuidance(kind: AgentProviderGuidanceKind, selection: AgentSelection): Promise<AgentActionOutcome>;
   onStartLogin(selection: AgentSelection): Promise<AgentActionOutcome>;
   onReopenLogin?(selection: AgentSelection): Promise<AgentActionOutcome>;
@@ -44,6 +45,7 @@ export function BoundAgentSetupPanel({
   actionButtonRef,
   hideDisconnectAction,
   initialApiKeyOpen,
+  onUseOtherProvider,
   onCopyGuidance,
   onStartLogin,
   onReopenLogin,
@@ -79,6 +81,7 @@ export function BoundAgentSetupPanel({
       actionButtonRef={actionButtonRef}
       hideDisconnectAction={hideDisconnectAction}
       initialApiKeyOpen={initialApiKeyOpen}
+      onUseOtherProvider={onUseOtherProvider}
       onCopyGuidance={(kind) => onCopyGuidance(kind, card.selection)}
       onStartLogin={() => onStartLogin(card.selection)}
       onReopenLogin={onReopenLogin ? () => onReopenLogin(card.selection) : undefined}

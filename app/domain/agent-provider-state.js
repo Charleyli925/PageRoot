@@ -13,6 +13,11 @@ export function agentSetupRecovery(diagnostic, availability) {
   const cause = diagnostic.cause || "";
   const auth = diagnostic.facts?.authentication?.status;
   const protocol = diagnostic.facts?.protocol?.status;
+  if (cause === "CODEX_EXECUTION_CONTRACT_UNSUPPORTED") {
+    return { statusLabel: "当前 Codex 组件暂不支持完成修改",
+      detail: `${auth === "ready" ? "账号已登录。" : ""}当前组件缺少所需的受限执行能力。`,
+      tone: "attention", action: "change-provider", actionLabel: "使用其他 AI", allowRecheck: true };
+  }
   if (/NETWORK|TIMEOUT|CONNECTION_FAILED/u.test(cause)) {
     return { statusLabel: "暂时无法连接", detail: "", tone: "attention", action: "recheck", actionLabel: "重新检查" };
   }
