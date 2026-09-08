@@ -84,16 +84,17 @@ git commit -m "feat: describe the user-visible outcome"
 git push -u origin feature/short-name
 ```
 
-Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
+Open a Draft Pull Request. After explicit Ready/merge authorization, wait for the applicable required CI, review the final diff, and squash-merge only within that authorization. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
 
 Every Pull Request starts as Draft. `opened`, `synchronize` and `reopened`
 on a Draft PR run impact-selected `pr-feedback` (`gate:draft`: Node plus the
 selected capability canary) inside `ci.yml`. Mark the frozen head Ready once to
 start the complete source matrix. A PR opened already Ready also takes that
 path. Codex review is requested automatically, shown on the PR, and never
-blocks merge. `release-gate` is the required check. Active P0/P1 comments
-are informational; deterministic dependency, source, security and release
-checks remain hard gates.
+fails `release-gate` by itself. `release-gate` is the required check. Comments
+remain informational until verified against the current diff and actual impact;
+verified P0/P1 defects block delivery under `docs/CODEX_WORKFLOW.md`.
+Deterministic dependency, source, security and release checks remain hard gates.
 
 `branch-policy` and `baseline-policy` run on the Ready path, and the
 complete source matrix starts after the deterministic baseline.
