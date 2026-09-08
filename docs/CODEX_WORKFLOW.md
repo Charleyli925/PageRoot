@@ -26,6 +26,23 @@ the managed adapter/native closure and its integrity checks. 源页 Agent is a
 separate `pageroot`/`http` path: PageRoot calls the user-selected OpenAI-compatible
 HTTPS endpoint with a session Token and never grants the model filesystem access.
 
+## Validation handoff and instruction scope
+
+The implementing agent runs short edit-time checks and returns the tested source,
+commands and results. The assigned tester owns task-level gates and version-bound
+reports. The root agent reviews the diff, coverage and underlying evidence; it
+requests additional execution only for changed source, missing coverage, failure
+or a specific unresolved risk. Follow the applicable session's tester routing.
+`task:finish` already runs `gate:task`; do not run both as separate completion gates.
+Required local, Draft, Ready and release boundaries remain distinct and mandatory.
+
+This checkout's `AGENTS.md` is the portable project entrypoint. Do not assume a
+parent-workspace AGENTS file, skill or agent profile is available in a separate
+checkout or worktree. When handing off to a fresh agent, include the applicable
+user constraints and routing explicitly with the checkout, scope and acceptance
+criteria. Preserve the user's root model; missing local configuration does not
+authorize substitution. Do not copy the whole parent conversation.
+
 ## Standard commands
 
 ### Inspect
@@ -35,7 +52,7 @@ npm run task:status
 npm run task:status -- --json
 ```
 
-The command reports the repository, branch, commit, upstream, divergence from `origin/main`, changed files and clean/dirty state. Run it before and after every task.
+The command reports the repository, branch, commit, upstream, divergence from `origin/main`, changed files and clean/dirty state. Run it before editing and at implementation handoff; for read-only questions, inspect repository state only when it affects the answer.
 
 ### Start
 
@@ -171,7 +188,7 @@ for Ready, packaging, installation, merge, and publication.
 2. Keep one coherent outcome per PR.
 3. Open every PR as Draft. Draft opens, pushes and reopens run impact-selected `pr-feedback` (`gate:draft`: Node plus the selected capability canary) inside `ci.yml`.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
-5. Keep the PR Draft while implementation and focused feedback converge. Batch accepted P0/P1 product fixes before promotion. Codex findings are informational: they never block merge. Apply the mandatory scope-stop rule above; P2/P3 and unclassified minor findings do not require a new SHA or another repair cycle unless the developer explicitly escalates them.
+5. Keep the PR Draft while implementation and focused feedback converge. Batch accepted P0/P1 product fixes before promotion. The review service status, absence and unverified comments are informational. Root-agent-verified P0/P1 defects still block delivery, even when the review job and `release-gate` are green. Apply the mandatory scope-stop rule above; P2/P3 and unclassified minor findings do not require a new SHA or another repair cycle unless the developer explicitly escalates them.
 6. When the head is ready, update it onto current `main` and mark the PR Ready once. That starts the complete source matrix. A PR opened already Ready also takes this path because `draft == false`. Codex review is requested automatically for that head, shown on the PR, and never included in `release-gate`.
 7. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff. Do not restart already-green source lanes merely because `github.run_attempt` changed. A failed product suite on the same SHA cannot be washed green by rerunning; classify a true `ci_environment` failure first.
 8. After explicit merge authorization, enable GitHub native Auto-merge for the exact head instead of polling and issuing a later manual merge. GitHub deletes the remote task branch after the squash merge; then audit and explicitly retire the local task before fast-forwarding primary `main`.
@@ -182,7 +199,7 @@ Do not use an installed app, DMG, backup folder or another checkout as a source 
 
 ### Informational Codex review
 
-Ready posts at most one `@codex review` comment per exact head via `scripts/request-codex-review.mjs`. `scripts/check-pr-review-policy.mjs` then writes an informational snapshot of live threads. P0/P1 findings stay visible; they do not fail the job or `release-gate`. There is no 30-second settle wait, no probe marker, no review-gate recovery workflow, and no weekly review-debt issue. Deterministic source fidelity, IPC, dependency, security and release checks remain hard gates in their owning tests and `baseline-policy`.
+Ready posts at most one `@codex review` comment per exact head via `scripts/request-codex-review.mjs`. `scripts/check-pr-review-policy.mjs` then writes an informational snapshot of live threads. P0/P1 comments stay visible; the review service itself does not fail the job or `release-gate`. The root agent verifies findings against the current diff and actual impact: verified P0/P1 defects block delivery, while lower-severity findings follow the scope-stop rule. There is no 30-second settle wait, no probe marker, no review-gate recovery workflow, and no weekly review-debt issue. Deterministic source fidelity, IPC, dependency, security and release checks remain hard gates in their owning tests and `baseline-policy`.
 
 `candidate-context` classifies changed paths and calls the reusable credential-free `Release Dry Run` only when packaging, release metadata, Electron, packaged Bridge, Schema or bundled-resource risk exists. The classification reports changed-file count and scope for planning only: it never rejects a PR because it is large. The dry run crosses an unsigned App checkpoint between two clean macOS jobs, restores metadata, rebuilds the renderer oracle and launch-checks name/version/Bundle ID. The checkpoint is `releaseEligible: false`; the workflow has no secrets, signing, notarization, distributable, Candidate, tag or publication authority and cannot replace the formal post-merge flow.
 
@@ -262,18 +279,11 @@ If no document changes, the final report and PR must say why existing documentat
 
 ## Agent final report
 
-Every completed task reports:
+Match the report to the task:
 
-```text
-Branch:
-Commit:
-Changed:
-Verification:
-Documentation:
-Pull Request:
-Release:
-Worktree:
-```
+- Read-only investigation: findings, evidence and unresolved questions. Omit empty branch, PR and release fields.
+- Implementation: outcome and changed scope, verification and remaining risks, documentation impact, branch/commit, PR link and worktree state. Include release details only when applicable.
+- Installer or publication: include the implementation provenance and the mandatory package block below.
 
 If the task generated or published an installer, append this mandatory block:
 

@@ -21,8 +21,8 @@ listed under Progressive disclosure.
 3. Keep the diff focused. Add tests and documentation in the same change when behavior, contracts, commands or public expectations change.
 4. While editing, use `npm run gate:edit` as needed. Before publishing a branch, run `npm run task:finish` once; it already owns the end-of-task gate, so do not precede it with a duplicate `gate:task` run.
 5. Review `git diff`, stage only intentional paths, review `git diff --cached`, then commit and push the task branch.
-6. Open every PR as Draft. Ordinary Draft pushes run only impact-selected `pr-feedback`. Moving the frozen head to Ready starts the complete source matrix; `release-gate` is the sole required merge check. Codex review is informational and never blocks merge. Apply the mandatory P0/P1 scope-stop rule in `docs/CODEX_WORKFLOW.md`: record P2/P3 and unclassified minor findings, but do not let them cause another edit, commit, Ready run, packaging delay or merge delay unless the user explicitly escalates them. After explicit merge authorization, prefer GitHub native Auto-merge over polling and a later manual merge click.
-7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean. After merge, run `npm run task:audit` from the primary worktree and retire only the exact merged task with `task:retire --apply`.
+6. Open every PR as Draft. Ordinary Draft pushes run only impact-selected `pr-feedback`. Moving the frozen head to Ready starts the complete source matrix; `release-gate` is the sole required merge check. The review service status, absence and unverified comments are informational; verified P0/P1 defects still block delivery. Apply the mandatory P0/P1 scope-stop rule in `docs/CODEX_WORKFLOW.md`: record P2/P3 and unclassified minor findings, but do not let them cause another edit, commit, Ready run, packaging delay or merge delay unless the user explicitly escalates them. After explicit merge authorization, prefer GitHub native Auto-merge over polling and a later manual merge click.
+7. For implementation tasks, report outcome, verification, documentation impact, branch/commit, PR and worktree state; include release details only when applicable. For read-only tasks, report findings, evidence and unresolved questions. After merge, run `npm run task:audit` from the primary worktree and retire only the exact merged task with `task:retire --apply`.
 
 Ordinary development stops at `gate:edit` / `task:finish` and a Draft PR.
 Installer composition and package delivery: `docs/CODEX_WORKFLOW.md`.
@@ -50,7 +50,7 @@ Release, packaging, and Candidate publication: `docs/RELEASING.md`.
 - Expand reading only when a dependency, a failing check or a contract change requires it. A smaller reading set is not permission to skip persistence, authority or cross-owner checks.
 - If guidance conflicts, name the files, quote the sentences and state the affected decision. Distinguish living contracts, historical ADR text and your own inference. Do not silently pick the stricter sentence.
 - Living ADR status lives in `docs/decisions/README.md`. Use that index and `ARCHITECTURE_MAP.md` for today's contract; do not reconstruct current architecture from historical ADR paragraphs.
-- Independent read-only investigations and edits to different owners may run in parallel. Changes that share one state owner or the same Canvas lifecycle must be integrated serially.
+- Preserve the user-selected root model and reasoning level. Delegate only bounded work that adds value, using the applicable session routing; local profiles do not authorize model substitution. Independent read-only investigations may run in parallel; only one agent may write a given worktree at a time.
 - After the checks required by this change pass, enlarge or repeat verification only for new code, a new failure or a specific unresolved risk. Do not rerun the complete matrix, Browser, Electron or packaging as extra insurance. Environment flakes resume only through the existing fingerprint / `--resume` rules.
 - Node tests do not prove Enter, IME, caret or iframe continuity. Keep public-behavior evidence for those paths. Do not replace that evidence with private field names, method names or source-string checks.
 - Deliver the actual result, verification evidence and remaining limits. Do not widen the task into packaging, merge or release.
@@ -58,11 +58,13 @@ Release, packaging, and Candidate publication: `docs/RELEASING.md`.
 ## Progressive disclosure
 
 Read only the documents needed for the task. Start architecture work at
-`docs/ARCHITECTURE_MAP.md` and the capability-context query above. Read full
-state ownership only when crossing owners or persistence. Update the unique
-owner document when a contract changes; other files should keep a pointer.
+`docs/ARCHITECTURE_MAP.md` and the capability-context query above. Read the
+relevant state-ownership sections when crossing owners or persistence; expand to
+the full document only if those sections leave a specific contract unresolved.
+The table routes to relevant sections, not a full-document reading checklist.
+Update the unique owner document when a contract changes; other files should keep a pointer.
 
-| Task area | Required source |
+| Task area | Source for relevant sections |
 | --- | --- |
 | Git, branches, commits, recovery, multi-PR package composition | `docs/GIT_WORKFLOW.md` |
 | Ordinary Codex task commands and final reports | `docs/CODEX_WORKFLOW.md` (`## Standard commands`); installer composition stays in that file's installer section and `docs/RELEASING.md` |
