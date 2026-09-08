@@ -805,6 +805,12 @@ test("the review projection annotates a dense report cleanly and accurately", as
         focusedOutsidePixels[index],
         overviewOutsidePixels[index],
       );
+      if (insideComparison.meanChannelDelta >= .75) {
+        writeFileSync(path.join(captureDirectory, `inside-${index}-focused.png`), focusedPixels);
+        writeFileSync(path.join(captureDirectory, `inside-${index}-overview.png`), overviewInsidePixels[index]);
+        writeFileSync(path.join(captureDirectory, `outside-${index}-focused.png`), focusedOutsidePixels[index]);
+        writeFileSync(path.join(captureDirectory, `outside-${index}-overview.png`), overviewOutsidePixels[index]);
+      }
       expect(insideComparison.dimensionsMatch).toBe(true);
       expect(outsideComparison.dimensionsMatch).toBe(true);
       // Locator screenshots can shift glyph antialiasing by a fraction after
