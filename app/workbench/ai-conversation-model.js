@@ -22,6 +22,7 @@ const SIDEBAR_STATES = new Set([
   "ready-to-open",
   "review-view",
   "promoting",
+  "adoption-unknown",
   "run-error",
 ]);
 
@@ -66,6 +67,7 @@ const MODE_PRESENTATION = Object.freeze({
   "review-view": {
     label: "审阅中",
   },
+  "adoption-unknown": { label: "采用结果待确认" },
   promoting: {
     label: "采用中",
   },
@@ -107,6 +109,8 @@ export function sidebarStateFromRun({
   submissionPending = false,
   reviewing = false,
 } = {}) {
+  if (activeRun?.adoptionPhase === "unknown") return "adoption-unknown";
+  if (activeRun?.adoptionPhase === "applying") return "promoting";
   if (reviewing) return "review-view";
   const mapped = RUN_STATUS_TO_SIDEBAR_STATE[String(activeRun?.status || "")];
   const handoffMatchesRun = Boolean(
@@ -163,6 +167,7 @@ const RUN_PROGRESS_STATES = Object.freeze([
   "processing",
   "validating",
   "promoting",
+  "adoption-unknown",
   // The result states keep the record on screen. The process drawer used to be the
   // only place the round's stages existed, so once it is gone the thread has to
   // hold them — a user deciding whether to adopt still wants to see what happened.
@@ -341,6 +346,30 @@ export function sidebarMessageStream(messages) {
       requestId: String(message.requestId || "") || null,
       attemptId: String(message.attemptId || "") || null,
     }));
+}
+
+// Older receipts used text for fixed stage facts. Preserve those records while
+// presenting them with the same disclosure as newly typed progress messages.
+const LEGACY_EXECUTION_PROGRESS = new Set([
+  "已开始执行本轮修改。", "正在建立执行会话。", "已发出本轮修改要求。",
+  "已收到服务响应。", "正在生成修改。", "本轮结果接收结束。",
+  "正在读取本轮资料。", "正在写入修改结果。", "正在核对修改结果。",
+  "正在校验修改结果。", "正在准备审阅。", "已请求停止，正在等待确认。",
+  "执行已结束，结果仍需校验。",
+]);
+
+export function sidebarTurnPresentation(messages = []) {
+  const process = [];
+  const primary = [];
+  for (const message of messages) {
+    if (message.kind === "progress" || (message.actor === "pageroot" && LEGACY_EXECUTION_PROGRESS.has(message.text))) process.push(message);
+    else primary.push(message);
+  }
+  const order = (message) => message.actor === "user" ? 0
+    : message.actor === "agent" ? 1
+    : message.kind === "decision-outcome" || ["已采用本次修改。", "未采用本次修改，修改要求与历史已保留。"].includes(message.text) ? 3 : 2;
+  primary.sort((a, b) => order(a) - order(b));
+  return { primary, process };
 }
 
 function historyIdentity(value) {
@@ -721,11 +750,11 @@ export function sidebarActionBar({
       actions: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
     };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return {
       kind: "progress",
-      title: "正在采用候选版本",
-      detail: "采用完成后会切换到新页面。",
+      title: state === "adoption-unknown" ? "采用结果待确认" : "正在采用候选版本",
+      detail: state === "adoption-unknown" ? "正在自动核对已提交的采用决定，确认后会切换到新页面。" : "采用完成后会切换到新页面。",
       actions: [],
     };
   }
@@ -806,7 +835,7 @@ export function sidebarSendState({
       reason: `${boundedAgentName} 完成本轮后可发送`,
     };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return {
       kind: "send",
       canSend: false,
@@ -966,7 +995,7 @@ export function sidebarCopyTaskState({
   if (state === "processing" || state === "validating") {
     return { canCopy: false, reason: `${boundedAgentName} 完成本轮后可发送` };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return { canCopy: false, reason: "正在采用候选版本" };
   }
   if (queued) {

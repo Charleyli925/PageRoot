@@ -98,6 +98,10 @@
           },
           "candidateId": {
             "type": "string"
+          },
+          "publicSummary": {
+            "type": "string",
+            "maxLength": 4096
           }
         }
       }

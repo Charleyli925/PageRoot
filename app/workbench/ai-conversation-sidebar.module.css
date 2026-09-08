@@ -799,3 +799,14 @@
 .close { margin-left: auto; width: 28px; height: 28px; flex: none; border: 0; border-radius: 6px; background: transparent; color: #666171; font-size: 20px; cursor: pointer; }
 .close:hover { background: #e9e7f0; }
 .close:focus-visible { outline: 2px solid #7868b9; outline-offset: 2px; }
+.turnProcess {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 4px 0 8px;
+}
+.turnProcess summary { cursor: pointer; width: fit-content; }
+.turnProcess summary:focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; }
+.turnProcess ol { margin: 8px 0 0; padding-left: 18px; }
+.turnProcess li { padding: 3px 0; overflow-wrap: anywhere; }
+.turnProcess time { margin-left: 8px; color: var(--faint); white-space: nowrap; }

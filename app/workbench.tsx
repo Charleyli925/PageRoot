@@ -5054,7 +5054,7 @@ export default function Workbench() {
         });
       performance.mark("pageroot:accept:activated");
       if (outcome.status !== "succeeded") {
-        if (outcome.status !== "stale") {
+        if (outcome.status !== "stale" && outcome.status !== "unknown") {
           const published = readyVersionPublicationMatches(workspaceController, run);
           if (!published) {
             setCanvasMode("preview");
@@ -5976,7 +5976,7 @@ export default function Workbench() {
     <WorkbenchReviewOverlay
       session={readyReviewSession}
       fileName={localFileNameFromSourcePath(readyReviewSession.sourcePath) || currentSourceFileName}
-      accepting={openingReadyVersion}
+      accepting={openingReadyVersion || Boolean(activeRun?.adoptionPhase)}
       activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
       onAbout={openAboutPageRoot}
       onCancelBefore={cancelActiveRun}

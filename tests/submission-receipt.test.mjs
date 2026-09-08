@@ -6,8 +6,8 @@ import Ajv2020 from "ajv/dist/2020.js";
 import path from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
-import { fixture, importSource } from "./project-file-repository-harness.mjs";
-import { ensureCurrentConversation } from "../bridge/conversation-repository.mjs";
+import { fixture, importSource, html as fixtureHtml } from "./project-file-repository-harness.mjs";
+import { ensureCurrentConversation, readConversation, writeConversation } from "../bridge/conversation-repository.mjs";
 
 const operationId = "submission_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 async function setup(t) {
@@ -223,4 +223,76 @@ test("Request binding permits resolved preflight evidence but rejects changed fr
     assert.equal(submissionRequestMatches(receipt.snapshot, changed, receipt.snapshot.taskSpec), false);
   }
   assert.equal(submissionRequestMatches(receipt.snapshot, body, { ...receipt.snapshot.taskSpec, scope: "changed" }), false);
+});
+
+for (const boundary of ["messages", "contexts", "bytes"]) {
+  test(`submission reserves terminal capacity near conversation ${boundary} limit`, async (t) => {
+    const { appendConversationContext, startConversationTurn, sealConversationTurn } = await import("../shared/conversation.mjs");
+    const value = await setup(t);
+    const context = { projectRoot: path.join(value.target.projectRootPath, ".pageroot"),
+      projectId: value.target.projectId, documentId: value.target.documentId };
+    const now = () => "2026-09-08T00:00:00.000Z";
+    let old = await ensureCurrentConversation(context);
+    for (let i = 0; i < (boundary === "contexts" ? 199 : 1); i++) {
+      old = appendConversationContext(old, { contextId: `context_history_${String(i).padStart(12, "0")}`,
+        sourceSha256: value.target.sourceSha256, side: "working-copy" }, { now });
+    }
+    old = startConversationTurn(old, { turnId: "turn_history_000000000001", contextId: old.activeContextId,
+      mode: "discussion", status: "running" }, { now });
+    const messageCount = boundary === "messages" ? 499 : boundary === "bytes" ? 62 : 1;
+    old = sealConversationTurn(old, { turnId: "turn_history_000000000001", status: "completed",
+      messages: Array.from({ length: messageCount }, (_, i) => ({
+        messageId: `message_history_${String(i).padStart(12, "0")}`, actor: "user", kind: "text",
+        status: "completed", text: boundary === "bytes" ? "x".repeat(120000) : `old requirement ${i}`,
+      })) }, { now });
+    await writeConversation(context, old);
+    const receipt = await prepareRecordedRequest(value);
+    assert.notEqual(receipt.conversationId, old.conversationId);
+    const current = await ensureCurrentConversation(context);
+    assert.equal(current.supersedesConversationId, old.conversationId);
+    const candidate = await value.repository.completeRequest({ target: value.target,
+      requestId: receipt.requestId, attemptId: receipt.attemptId, html: fixtureHtml("V2") });
+    assert.equal(candidate.status, "candidate-ready");
+    const adopted = await value.repository.promoteCandidate({ target: value.target,
+      candidateId: candidate.candidate.candidateId });
+    assert.equal(adopted.promoted, true);
+    const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+    await restarted.initialize();
+    const archived = await readConversation(context, old.conversationId);
+    assert.equal(archived.status, "archived");
+    assert.deepEqual(archived.messages, old.messages);
+    const restored = await ensureCurrentConversation(context);
+    assert.equal(restored.conversationId, receipt.conversationId);
+    assert.equal(restored.turns[0].status, "completed");
+    assert.equal(restored.messages.filter((message) => message.text === "已采用本次修改。").length, 1);
+    await restarted.recordSubmission({ target: adopted.target,
+      operationId: "submission_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      input: { ...value.input, expectedSourceSha256: adopted.target.sourceSha256 } });
+  });
+}
+
+test("sealed public summary is sanitized, bounded and restored once after failure and restart", async (t) => {
+  const value = await setup(t);
+  value.input.agentDelivery = { ...defaultManagedAgentDelivery(), configuration: {
+    providerId: "qoder", runtimeId: "acp", modelId: null, reasoning: "auto",
+    configurationDigest: `sha256:${"a".repeat(64)}` } };
+  const receipt = await prepareRecordedRequest(value);
+  const event = { eventId: "event_public_summary_0001", kind: "public-summary",
+    timestamp: "2026-09-08T00:00:00.000Z",
+    publicSummary: "已检查标题。Bearer sk-synthetic-secret /tmp/private-source.txt " + "公开说明。".repeat(2000),
+    reasoning: "hidden-synthetic-thought", toolOutput: "raw-synthetic-command" };
+  await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId,
+    attemptId: receipt.attemptId, event });
+  await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId });
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  await restarted.initialize();
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const summaries = conversation.messages.filter((message) => message.messageId === "message_event_public_summary_0001");
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].actor, "agent");
+  assert.equal(summaries[0].kind, "result-summary");
+  assert.ok(summaries[0].text.startsWith("已检查标题。"));
+  assert.ok(summaries[0].text.length <= 4096);
+  assert.doesNotMatch(JSON.stringify(conversation), /sk-synthetic|private-source|hidden-synthetic|raw-synthetic/);
 });

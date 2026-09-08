@@ -6,6 +6,7 @@ export type SidebarState =
   | "ready-to-open"
   | "review-view"
   | "promoting"
+  | "adoption-unknown"
   | "run-error"
   | "no-change";
 
@@ -253,3 +254,5 @@ export const SIDEBAR_STATES: ReadonlySet<string>;
 export const INTENT_MODIFY: "modify";
 export const INTENT_CONTINUE: "continue";
 export const FORBIDDEN_MESSAGE_KEYS: readonly string[];
+
+export function sidebarTurnPresentation(messages?: readonly SidebarMessage[]): { primary: SidebarMessage[]; process: SidebarMessage[] };

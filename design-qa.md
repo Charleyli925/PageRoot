@@ -2898,3 +2898,11 @@ Synthetic Qoder Electron execution reached a validated Candidate and Review. The
 Evidence: `output/design-qa/ai-assistant-redesign/trusted-loop-pr6-ready-{340,400,480}.png`, `qoder-processing-thinking.png`; scenario `Qoder ACP Agent Bridge streams public execution text without clipboard or automatic adoption`.
 
 Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, and final adoption layout in PR-7/PR-8. This entry does not certify those paths. Continuous resize was timing-sensitive in the combined test and remains a separate check.
+
+## 2026-09-08 — Trusted loop revision: compact, recoverable Turn history
+
+- Visual truth: the existing four-region sidebar and the reviewed requirement → public summary → result → decision reading order. Per-stage articles are superseded by a native, default-closed “查看处理记录” disclosure.
+- Verified in the current rebuilt Electron renderer with synthetic Qoder: sealed public narration appears once, eight stage facts are collapsed, expansion reveals all retained facts, and current actions remain outside the scroll region at 340/400/480 CSS px.
+- Inspected `output/design-qa/ai-assistant-redesign/trusted-loop-pr6-ready-340.png`; summary, result and disclosure are readable, with existing typography, tokens and controls. The existing processing capture and `trusted-loop-process-expanded.png` preserve the before/expanded context. Native disclosure provides keyboard focus and activation without new motion.
+- CI desktop feedback and formal AI evidence now upload `output/design-qa` on success as well as failure. Generated screenshots remain outside source control. Long-history/200% and adoption uncertainty evidence are integrated in PR-8; this entry does not certify real accounts.
+- final result: passed (focused compact history and three supported widths).

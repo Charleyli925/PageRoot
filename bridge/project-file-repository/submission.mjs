@@ -1,14 +1,20 @@
 // Preflight submission receipts are not Requests and grant no execution authority.
 // ProjectFileRepository invokes these helpers under its existing serial writer.
 import path from "node:path";
+import { safePublicAgentSummary } from "../agent/agent-session-projector.mjs";
 import { readFile } from "node:fs/promises";
-import { ensureCurrentConversation, readConversation, mutateConversation } from "../conversation-repository.mjs";
+import { ensureCurrentConversation, rotateConversationAtLimit, readConversation, mutateConversation } from "../conversation-repository.mjs";
 import { appendConversationContext, startConversationTurn, appendConversationTurnMessage, sealConversationTurn } from "../../shared/conversation.mjs";
 import { sha256 } from "../lifecycle-core.mjs";
 import { normalizeAgentDelivery } from "../../shared/agent-delivery.mjs";
 import { compileTaskSpec } from "../../shared/task-spec.mjs";
 import { atomicWriteProjectJson, readJsonFile } from "./path-safety.mjs";
 import { ProjectFileRepositoryError } from "./errors.mjs";
+
+function submissionRequirementText(snapshot) {
+  return snapshot.comments.map((comment) => String(comment.text || comment.content || "")).join("\n\n")
+    || snapshot.taskSpec.objective;
+}
 
 function receiptPath(loaded, operationId) {
   if (!/^submission_[a-f0-9]{32}$/u.test(String(operationId || ""))) {
@@ -47,6 +53,11 @@ export async function saveSubmissionReceipt(loaded, { operationId, input, projec
   if (snapshot.sourceSha256 !== loaded.source.sha256) {
     throw new ProjectFileRepositoryError("SOURCE_HASH_CONFLICT", "Source changed before submission was recorded.");
   }
+  // Reject oversized requirements before accepting a durable Turn. The draft
+  // remains editable; no provider has been contacted and nothing is truncated.
+  if (Buffer.byteLength(JSON.stringify(submissionRequirementText(snapshot)), "utf8") > 1024 * 1024) {
+    throw new ProjectFileRepositoryError("SUBMISSION_REQUIREMENTS_TOO_LARGE", "本轮要求过长，请拆分后提交；尚未发送。");
+  }
   const snapshotSha256 = sha256(JSON.stringify(snapshot));
   const existing = await readSubmissionReceipt(loaded, operationId);
   if (existing) {
@@ -57,10 +68,14 @@ export async function saveSubmissionReceipt(loaded, { operationId, input, projec
     return existing;
   }
   const suffix = operationId.slice("submission_".length);
+  const conversationContext = { projectRoot: path.join(loaded.paths.projectRootPath, ".pageroot"),
+    projectId: loaded.project.projectId, documentId: loaded.project.documentId };
+  const conversation = await rotateConversationAtLimit(conversationContext,
+    await ensureCurrentConversation(conversationContext),
+    { reserve: { messages: 128, contexts: 2, turns: 1, bytes: 2 * 1024 * 1024 } });
   const receipt = {
     schemaVersion: "1.0.0", operationId,
-    conversationId: (await ensureCurrentConversation({ projectRoot: path.join(loaded.paths.projectRootPath, ".pageroot"),
-      projectId: loaded.project.projectId, documentId: loaded.project.documentId })).conversationId,
+    conversationId: conversation.conversationId,
     projectId: loaded.project.projectId, documentId: loaded.project.documentId,
     workingCopyId: loaded.workingCopy.workingCopyId,
     turnId: `turn_${suffix}`, requestId: `req_${suffix}`, attemptId: "attempt_001",
@@ -110,11 +125,14 @@ export async function projectSubmissionReceipt(loaded, receipt) {
         startedAt: receipt.createdAt, submissionOperationId: receipt.operationId,
       }, { now });
     }
-    next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
-      messageId: `message_${suffix}_submitted`, actor: "user", kind: "text", status: "completed",
-      text: receipt.snapshot.comments.map((comment) => String(comment.text || comment.content || "")).join("\n\n")
-        || receipt.snapshot.taskSpec.objective,
-    } }, { now });
+    const requirement = submissionRequirementText(receipt.snapshot);
+    for (let offset = 0; offset < requirement.length; offset += 100000) {
+      next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
+        messageId: `message_${suffix}_submitted${offset ? `_${offset}` : ""}`,
+        actor: "user", kind: "text", status: "completed",
+        text: requirement.slice(offset, offset + 100000),
+      } }, { now });
+    }
     const turn = next.turns.find((entry) => entry.turnId === receipt.turnId);
     if (receipt.status === "not-started" && ["queued", "running"].includes(turn.status)) {
       next = sealConversationTurn(next, { turnId: receipt.turnId, status: "failed", messages: [{
@@ -130,9 +148,16 @@ export async function projectSubmissionReceipt(loaded, receipt) {
     }
     for (const input of receipt.events || []) {
       const event = submissionExecutionFact(input);
+      const messageId = `message_${event.eventId}`;
+      const messageKind = event.kind === "public-summary" ? "result-summary"
+        : ["promoted", "rejected"].includes(event.kind) ? "decision-outcome"
+        : ["candidate-ready", "no-change", "cancelled", "error", "failed", "interrupted", "stop-confirmed"].includes(event.kind) ? "result-summary" : "progress";
       next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
-        messageId: `message_${event.eventId}`, actor: "pageroot", kind: "text", status: "completed",
-        text: EXECUTION_FACTS[event.kind], createdAt: event.timestamp, completedAt: event.timestamp,
+        messageId, actor: event.kind === "public-summary" && receipt.snapshot.agentDelivery.selection?.providerId ? "agent" : "pageroot",
+        ...(event.kind === "public-summary" && receipt.snapshot.agentDelivery.selection?.providerId
+          ? { providerId: receipt.snapshot.agentDelivery.selection.providerId } : {}),
+        kind: next.messages.find((message) => message.messageId === messageId)?.kind || messageKind, status: "completed",
+        text: event.kind === "public-summary" ? event.publicSummary : EXECUTION_FACTS[event.kind], createdAt: event.timestamp, completedAt: event.timestamp,
         requestId: receipt.requestId, attemptId: receipt.attemptId, candidateId: event.candidateId,
       } }, { now: () => event.timestamp });
       const currentTurn = next.turns.find((value) => value.turnId === receipt.turnId);
@@ -148,6 +173,7 @@ export async function projectSubmissionReceipt(loaded, receipt) {
 }
 
 const EXECUTION_FACTS = Object.freeze({
+  "public-summary": "",
   started: "已开始执行本轮修改。",
   "starting-session": "正在建立执行会话。",
   "sending-task": "已发出本轮修改要求。",
@@ -172,12 +198,13 @@ const EXECUTION_FACTS = Object.freeze({
   promoted: "已采用本次修改。",
 });
 
-export function submissionExecutionFact({ eventId, kind, timestamp, candidateId = null }) {
+export function submissionExecutionFact({ eventId, kind, timestamp, candidateId = null, publicSummary = null }) {
   if (!Object.hasOwn(EXECUTION_FACTS, kind) || !/^[A-Za-z0-9_-]{1,180}$/u.test(eventId)
     || !Number.isFinite(Date.parse(timestamp))) {
     throw new ProjectFileRepositoryError("SUBMISSION_EVENT_INVALID", "Execution fact is invalid.");
   }
   return { eventId, kind, timestamp,
+    ...(kind === "public-summary" ? { publicSummary: safePublicAgentSummary(publicSummary) } : {}),
     ...(candidateId && /^candidate_[A-Za-z0-9_-]{1,160}$/u.test(candidateId) ? { candidateId } : {}) };
 }
 

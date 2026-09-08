@@ -22,7 +22,7 @@
 
 | 里程碑 | PR | 范围 | 状态 |
 | --- | --- | --- | --- |
-| A | PR-0 | ADR、场景和基线 | Draft #474，task:finish 通过 |
+| A | PR-0 | ADR、场景和基线 | 已合并 #474；后续 PR 保持 Draft、不合并 |
 | A | PR-1 | 检查、登录、连接修复 | Draft #475，task:finish 通过 |
 | A | PR-2 | 服务选择与计时 | Draft #476，task:finish 通过（独立分支，PR-6 集成） |
 | B | PR-3 | 预检前提交、冻结要求、防重、复制 | Draft #477，完整 task:finish 通过 |
@@ -64,3 +64,4 @@ PR-1：新增诊断编号、失败阶段、配置代次与操作回执；检查�
 PR-7 implementation: Candidate-specific Review → adopt/discard, source-hash and decision identity validation, pre-adoption Draft drain, transactional preservation of later comments, and completed-Promotion history replay. Focused repository, workflow and Electron checks are recorded in the PR; real accounts remain PR-8.
 
 PR-8 最终集成基线：主线 7fdfab1f，包括 #473 运行隔离与 #480 Stable ID 自动纠错。保留本轮真实进度事件及模型绑定；共享运行时冲突已逐项合并并纳入最终门禁。
+PR-2 归属：#476 保持服务选择与计时修复的独立交付入口。PR-6 已纳入其同一分支祖先；本次整合无功能净差异，避免把它们视为两份独立功能。后续获准合并时先处理 #476，再处理依赖它的 PR-6；当前全部后续 PR 保持 Draft，不合并。
