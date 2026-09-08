@@ -40,6 +40,7 @@ import {
 } from "./packaged-app-identity.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
 import { AGENT_FEATURE_GATES } from "../shared/agent-feature-gates.mjs";
+import { parseRuntimeEnvironmentMarker } from "../desktop/runtime-environment.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_PRODUCT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
@@ -196,6 +197,7 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
   "desktop/agent-session-credential-store.mjs",
+  "desktop/runtime-environment.mjs",
   "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
@@ -577,6 +579,32 @@ async function assertUsageTelemetryConfig({
   return config;
 }
 
+async function assertRuntimeEnvironmentMarker({
+  productRoot,
+  resourcesPath,
+  packageJson,
+}) {
+  const runtimeResource = packageJson.build?.extraResources?.find(
+    (entry) => entry?.to === "runtime-environment.json",
+  );
+  assert.equal(
+    runtimeResource?.from,
+    "output/release-metadata/runtime-environment.json",
+    "the packaged runtime marker must come from release metadata",
+  );
+  const sourcePath = path.resolve(productRoot, runtimeResource.from);
+  const packagedPath = path.join(resourcesPath, "runtime-environment.json");
+  await assertFilesEqual(sourcePath, packagedPath, "runtime-environment.json");
+  const marker = parseRuntimeEnvironmentMarker(
+    JSON.parse(await readFile(packagedPath, "utf8")),
+  );
+  const expectedChannel = packageJson.build?.appId?.endsWith(".developer-preview")
+    ? "preview"
+    : "stable";
+  assert.equal(marker.channel, expectedChannel, "packaged runtime channel does not match the app identity");
+  return marker;
+}
+
 async function assertApplicationUpdateConfig({
   productRoot,
   resourcesPath,
@@ -910,6 +938,11 @@ export async function verifyAppBundle({
     resourcesPath,
     packageJson,
   });
+  const runtimeEnvironment = await assertRuntimeEnvironmentMarker({
+    productRoot,
+    resourcesPath,
+    packageJson,
+  });
   const applicationUpdate = await assertApplicationUpdateConfig({
     productRoot,
     resourcesPath,
@@ -965,7 +998,7 @@ export async function verifyAppBundle({
       assert.match(
         signatureDetails,
         /Signature=adhoc/u,
-        "developer preview app must use an ad-hoc signature",
+        "the app must use the explicitly requested ad-hoc signature",
       );
     }
     if (
@@ -998,6 +1031,7 @@ export async function verifyAppBundle({
     legalResourceCount: REQUIRED_LEGAL_RESOURCES.length,
     applicationUpdate,
     provenance,
+    runtimeEnvironment,
     telemetry,
   };
 }
@@ -1230,7 +1264,7 @@ export async function verifyPackagedArtifact({
         appPath: layout.appPath,
         packageJson,
         sourcePackageJson,
-        signaturePolicy: "adhoc",
+        signaturePolicy: "developer-id",
         expectedProvenance: provenance,
         arch,
       }),
@@ -1241,7 +1275,7 @@ export async function verifyPackagedArtifact({
         packageJson,
         sourcePackageJson,
         expectedProvenance: provenance,
-        signaturePolicy: "adhoc",
+        signaturePolicy: "developer-id",
         arch,
       }),
     ]);

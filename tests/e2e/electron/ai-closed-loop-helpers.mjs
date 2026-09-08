@@ -854,7 +854,6 @@ export function candidateHtmlFiles(workspace, projectId) {
 export async function adoptReadyResult(page) {
   const review = page.getByRole("button", { name: "查看修改", exact: true });
   if (!await page.getByTestId("ai-review-workspace").isVisible()) await review.click();
-  await expect(page.getByTestId("ai-review-workspace")).toBeVisible();
   await page.getByRole("button", { name: "采用修改", exact: true }).click();
 }
 

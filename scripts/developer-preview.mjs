@@ -27,9 +27,6 @@ const SENSITIVE_BUILD_ENVIRONMENT = new Set([
   "APPLE_KEYCHAIN",
   "APPLE_KEYCHAIN_PROFILE",
   "APPLE_TEAM_ID",
-  "CSC_KEY_PASSWORD",
-  "CSC_LINK",
-  "CSC_NAME",
   "GH_TOKEN",
   "GITHUB_TOKEN",
   "NPM_TOKEN",
@@ -218,6 +215,29 @@ export function resolveDeveloperPreviewIdentity({ productRoot, packageJson }) {
 
 export function developerPreviewPackageJson(packageJson, identity) {
   assert.equal(identity?.kind, "developer-preview", "developer preview identity is required");
+  const developerPreviewMac = packageJson.build?.mac
+    ? {
+      ...packageJson.build.mac,
+      hardenedRuntime: true,
+      notarize: false,
+    }
+    : {
+      hardenedRuntime: true,
+      notarize: false,
+    };
+  const developerPreviewDmg = packageJson.build?.dmg
+    ? {
+      ...packageJson.build.dmg,
+      title: `PageRoot Developer Preview ${identity.version}`,
+      contents: Array.isArray(packageJson.build.dmg.contents)
+        ? packageJson.build.dmg.contents.map((entry) => (
+          entry?.path === "desktop/resources/首次打开说明.txt"
+            ? { ...entry, path: "desktop/resources/开发者测试版说明.txt" }
+            : entry
+        ))
+        : packageJson.build.dmg.contents,
+    }
+    : undefined;
   return {
     ...packageJson,
     version: identity.version,
@@ -227,8 +247,30 @@ export function developerPreviewPackageJson(packageJson, identity) {
       appId: identity.appId,
       productName: identity.productName,
       artifactName: identity.artifactPattern,
+      mac: developerPreviewMac,
+      ...(developerPreviewDmg ? { dmg: developerPreviewDmg } : {}),
     },
   };
+}
+
+export async function writeDeveloperPreviewBuilderConfig({
+  productRoot,
+  packageJson,
+} = {}) {
+  assert.equal(path.isAbsolute(productRoot), true, "product root must be absolute");
+  assert.equal(packageJson && typeof packageJson.build === "object", true, "developer preview build config is required");
+  const destination = path.join(
+    productRoot,
+    "output",
+    "release-metadata",
+    "developer-preview-builder.json",
+  );
+  await mkdir(path.dirname(destination), { recursive: true });
+  await writeFile(destination, `${JSON.stringify(packageJson.build, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o644,
+  });
+  return destination;
 }
 
 export function developerPreviewRoot(productRoot) {
@@ -252,6 +294,7 @@ export function developerPreviewBuilderArguments({
   architecture,
   identity,
   releaseDirectory,
+  configPath = null,
 }) {
   assertArchitecture(architecture);
   assert.equal(identity?.kind, "developer-preview", "developer preview identity is required");
@@ -260,16 +303,22 @@ export function developerPreviewBuilderArguments({
     true,
     "developer preview release directory must be absolute",
   );
+  if (configPath !== null) {
+    assert.equal(
+      path.isAbsolute(configPath),
+      true,
+      "developer preview config path must be absolute",
+    );
+  }
   return [
     "--mac",
     "dmg",
     `--${architecture}`,
     "--publish",
     "never",
-    "--config.forceCodeSigning=false",
-    "--config.mac.identity=-",
+    "--config.forceCodeSigning=true",
     "--config.mac.notarize=false",
-    "--config.mac.hardenedRuntime=false",
+    "--config.mac.hardenedRuntime=true",
     `--config.appId=${identity.appId}`,
     `--config.productName=${identity.productName}`,
     `--config.extraMetadata.productName=${identity.productName}`,
@@ -279,6 +328,7 @@ export function developerPreviewBuilderArguments({
     `--config.mac.bundleShortVersion=${identity.version}`,
     `--config.directories.output=${releaseDirectory}`,
     `--config.artifactName=${identity.artifactPattern}`,
+    ...(configPath ? [`--config=${configPath}`] : []),
   ];
 }
 
@@ -287,7 +337,7 @@ export function developerPreviewEnvironment(environment = process.env) {
   for (const name of SENSITIVE_BUILD_ENVIRONMENT) delete sanitized[name];
   return {
     ...sanitized,
-    CSC_IDENTITY_AUTO_DISCOVERY: "false",
+    CSC_IDENTITY_AUTO_DISCOVERY: "true",
     PAGEROOT_REQUIRE_NOTARIZATION: "0",
     PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "0",
   };
@@ -339,6 +389,7 @@ export async function writeDeveloperPreviewAttestation({
     schemaVersion: 2,
     kind: "developer-preview",
     releaseEligible: false,
+    signaturePolicy: "developer-id",
     notarized: false,
     sourceVersion: identity.sourceVersion,
     stableVersion: identity.stableVersion,

@@ -438,7 +438,7 @@ export class VersionWorkflow {
       if (!drained.ok) return blocked("ADOPTION_DRAFT_NOT_SAVED", drained.reason || "当前修改意见尚未保存，本次修改尚未采用。");
       const readyTarget = this.#readyOpenTarget(ready);
       perfMark("pageroot:accept:promote-start");
-      const activatedPayload = await this.#bridgeClient.activateReadyVersion({
+      const activationRequest = {
         ...readyTarget,
         candidateId: ready.readyPayload?.candidate?.candidateId || ready.candidateId || null,
         ...(ready.readyPayload?.candidate?.candidateId || ready.candidateId ? {
@@ -451,7 +451,16 @@ export class VersionWorkflow {
         requestId: ready.requestId,
         attemptId: ready.attemptId,
         versionId: ready.candidateVersionId,
-      });
+      };
+      let activatedPayload;
+      try {
+        activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
+      } catch (cause) {
+        if (!activationRequest.decisionOperationId || !isBridgeRequestError(cause) || cause.outcome !== "unknown") throw cause;
+        if (!this.#isNavigationCurrent(operation) || !this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
+        // Reconcile the same idempotent Promotion transaction after a lost reply.
+        activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
+      }
       perfMark("pageroot:accept:promote-end");
       if (!this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
       const opened = await this.#openCommittedVersion({

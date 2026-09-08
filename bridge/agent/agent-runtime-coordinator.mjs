@@ -162,6 +162,7 @@ export class AgentRuntimeCoordinator {
   #tickets = new Map();
   #executionSessions = new Map();
   #pendingStarts = new Set();
+  #executionStarts = new Map();
   #eventReducer;
   #ownerToken = `agent_owner_${randomUUID().replaceAll("-", "")}`;
   #acceptingStarts = true;
@@ -784,13 +785,26 @@ export class AgentRuntimeCoordinator {
     return true;
   }
 
-  async submit({
+  submit(input = {}) {
+    const key = executionKey(validateExecutionIdentity(input));
+    const existing = this.#executionStarts.get(key);
+    if (existing) return existing.promise;
+    const pending = { cancelRequested: false, promise: null };
+    pending.promise = this.#trackStart(() => this.#performSubmit(input, pending));
+    this.#executionStarts.set(key, pending);
+    void pending.promise.finally(() => {
+      if (!pending.cleanupUnconfirmed && this.#executionStarts.get(key) === pending) this.#executionStarts.delete(key);
+    }).catch(() => {});
+    return pending.promise;
+  }
+
+  async #performSubmit({
     selection,
     trustPolicyAccepted,
     preflightId,
     configurationDigest,
     ...identityInput
-  } = {}) {
+  } = {}, pending) {
     this.#assertAcceptingStarts();
     validateTrustPolicy(trustPolicyAccepted);
     const requestedSelection = this.#selectionForInput({
@@ -910,7 +924,11 @@ export class AgentRuntimeCoordinator {
         }
       }
     } catch (cause) {
-      if (!existing?.lease) await this.#leaseStore.release(lease).catch(() => false);
+      if (!existing?.lease && await this.#leaseStore.release(lease).catch(() => false) !== true) {
+        pending.cleanupUnconfirmed = true;
+        this.#preflightCleanupUnconfirmed = true;
+        failAgentRuntime("AGENT_CANCEL_UNCONFIRMED", "启动失败后清理未确认。", { status: 503 });
+      }
       throw cause;
     }
     if (!this.#acceptingStarts) {
@@ -956,8 +974,21 @@ export class AgentRuntimeCoordinator {
         eventId: `event_${randomUUID().replaceAll("-", "")}`, kind: "started", timestamp: entry.startedAt,
       });
     } catch (cause) {
-      await this.#leaseStore.release(lease).catch(() => false);
+      if (await this.#leaseStore.release(lease).catch(() => false) !== true) {
+        pending.cleanupUnconfirmed = true;
+        this.#preflightCleanupUnconfirmed = true;
+        failAgentRuntime("AGENT_CANCEL_UNCONFIRMED", "启动失败后清理未确认。", { status: 503 });
+      }
       throw cause;
+    }
+    if (pending.cancelRequested) {
+      const released = await this.#leaseStore.release(lease).catch(() => false);
+      if (released !== true) {
+        pending.cleanupUnconfirmed = true;
+        this.#preflightCleanupUnconfirmed = true;
+        failAgentRuntime("AGENT_CANCEL_UNCONFIRMED", "启动取消后清理未确认。", { status: 503 });
+      }
+      failAgentRuntime("AGENT_CANCELLED", "Agent 启动已取消。", { status: 409 });
     }
     this.#executionSessions.set(key, entry);
     const pendingEvents = [];
@@ -1089,6 +1120,16 @@ export class AgentRuntimeCoordinator {
 
   async cancelExecution(identityInput) {
     const identity = validateExecutionIdentity(identityInput);
+    const pending = this.#executionStarts.get(executionKey(identity));
+    if (pending) {
+      pending.cancelRequested = true;
+      const timeout = timeoutAfter(this.#cancelTimeoutMs, "AGENT_CANCEL_UNCONFIRMED", "Agent 启动尚未确认停止。");
+      try {
+        await Promise.race([pending.promise.catch((cause) => {
+          if (cause?.code === "AGENT_CANCEL_UNCONFIRMED") throw cause;
+        }), timeout.promise]);
+      } finally { timeout.clear(); }
+    }
     const entry = this.#executionSessions.get(executionKey(identity));
     if (!entry || !LIVE_STATES.has(entry.state)) {
       return { ok: true, stopped: false, session: publicExecutionSession(entry) };

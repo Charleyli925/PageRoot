@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { submissionRequestMatches } from "./project-file-repository/submission.mjs";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import {
@@ -8,7 +9,6 @@ import {
   rm,
 } from "node:fs/promises";
 import { createServer } from "node:http";
-import os from "node:os";
 import path from "node:path";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { promisify } from "node:util";
@@ -56,24 +56,25 @@ import {
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
 const SERVICE_NAME = "html-ai-workspace-bridge";
-const DEFAULT_WORKSPACE = path.join(
-  os.homedir(),
-  "Documents",
-  "PageRoot",
-  "项目记录",
-);
-const WORKSPACE_ROOT = path.resolve(
-  process.env.HTML_AI_WORKSPACE || DEFAULT_WORKSPACE,
-);
-const DEFAULT_PROJECT_FILE_ROOT = path.join(
-  os.homedir(),
-  "Documents",
-  "PageRoot",
-  "项目",
-);
-const PROJECT_FILE_ROOT = path.resolve(
-  process.env.HTML_AI_PROJECT_FILES_ROOT || DEFAULT_PROJECT_FILE_ROOT,
-);
+const RUNTIME_CHANNEL = String(process.env.HTML_AI_RUNTIME_CHANNEL || "test").trim().toLowerCase();
+if (!["stable", "preview", "source", "e2e", "test"].includes(RUNTIME_CHANNEL)) {
+  const error = new Error(`Unsupported runtime channel: ${RUNTIME_CHANNEL || "(missing)"}.`);
+  error.code = "RUNTIME_CHANNEL_INVALID";
+  throw error;
+}
+
+function requiredRuntimeRoot(name) {
+  const configured = String(process.env[name] || "").trim();
+  if (!configured || !path.isAbsolute(configured)) {
+    const error = new Error(`${name} must be an absolute path for runtime channel ${RUNTIME_CHANNEL || "(missing)"}.`);
+    error.code = "RUNTIME_PATH_REQUIRED";
+    throw error;
+  }
+  return path.resolve(configured);
+}
+
+const WORKSPACE_ROOT = requiredRuntimeRoot("HTML_AI_WORKSPACE");
+const PROJECT_FILE_ROOT = requiredRuntimeRoot("HTML_AI_PROJECT_FILES_ROOT");
 
 function e2eAgentInstallFetch(_url, { signal } = {}) {
   if (process.env.PAGEROOT_AGENT_INSTALL_STUB_FETCH === "pending") {
@@ -1321,12 +1322,6 @@ async function createProjectFileRequest(body) {
   if (body.submissionOperationId && (!submission || submission.status === "not-started")) {
     throw new HttpError(409, "SUBMISSION_NOT_ACCEPTED", "A recorded submission is required.");
   }
-  if (submission && (submission.snapshot.sourceSha256 !== body.expectedSourceSha256
-    || JSON.stringify(submission.snapshot.comments) !== JSON.stringify(body.comments || [])
-    || submission.snapshot.agentDelivery.mode !== body.agentDelivery?.mode
-    || submission.snapshot.agentDelivery.selection?.providerId !== body.agentDelivery?.selection?.providerId)) {
-    throw new HttpError(409, "SUBMISSION_SNAPSHOT_CHANGED", "Submitted requirements cannot be replaced.");
-  }
   const requestId = submission?.requestId || `req_${randomUUID().replaceAll("-", "")}`;
   const attemptId = "attempt_001";
   let taskSpec;
@@ -1341,6 +1336,9 @@ async function createProjectFileRequest(body) {
       cause?.code || "TASK_SPEC_INVALID",
       "The current comments could not be compiled into a valid Task Spec.",
     );
+  }
+  if (submission && !submissionRequestMatches(submission.snapshot, body, taskSpec)) {
+    throw new HttpError(409, "SUBMISSION_SNAPSHOT_CHANGED", "Submitted requirements cannot be replaced.");
   }
   const request = {
     ...(submission ? { submissionOperationId: submission.operationId } : {}),
@@ -3045,16 +3043,37 @@ server.on("error", (error) => {
   process.exitCode = 1;
 });
 
-// Queue recovery/migration before accepting any repository request. The HTTP
-// listener can report readiness while those requests join Repository's serial
-// queue; an unavailable root must not prevent the rest of Bridge from starting.
-void projectFileRepository.initialize().catch((cause) => {
-  process.stderr.write(`${JSON.stringify({
-    type: "warning",
-    code: "PROJECT_REPOSITORY_INITIALIZATION_FAILED",
-    message: cause instanceof Error ? cause.message : "Project initialization failed.",
-  })}\n`);
-});
+if (RUNTIME_CHANNEL === "preview") {
+  // Preview is a fully isolated environment. Its project repository and
+  // workspace root must be ready before the Bridge advertises readiness; a
+  // failure must not fall back to the formal PageRoot directory.
+  try {
+    await Promise.all([
+      ensureDirectory(WORKSPACE_ROOT),
+      projectFileRepository.initialize(),
+    ]);
+  } catch (cause) {
+    process.stderr.write(`${JSON.stringify({
+      type: "fatal",
+      error: {
+        code: cause?.code || "PROJECT_REPOSITORY_INITIALIZATION_FAILED",
+        message: cause instanceof Error ? cause.message : "Project initialization failed.",
+      },
+    })}\n`);
+    process.exit(1);
+  }
+} else {
+  // Stable, source and test callers retain the pre-isolation behavior: the
+  // Bridge can report readiness while an unavailable project repository is
+  // recorded as a warning and handled by its existing request-time guards.
+  void projectFileRepository.initialize().catch((cause) => {
+    process.stderr.write(`${JSON.stringify({
+      type: "warning",
+      code: "PROJECT_REPOSITORY_INITIALIZATION_FAILED",
+      message: cause instanceof Error ? cause.message : "Project initialization failed.",
+    })}\n`);
+  });
+}
 
 server.listen(PORT, HOST, () => {
   process.stdout.write(

@@ -172,6 +172,30 @@ test("a recovery journal initialization failure degrades before the main window 
   );
 });
 
+test("runtime directory initialization is strict only for Developer Preview", async () => {
+  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  const initialization = mainProcess.slice(
+    mainProcess.indexOf("async function initializeRuntimeEnvironment()"),
+    mainProcess.indexOf("function ensurePreviewProtocolController()"),
+  );
+  assert.match(
+    initialization,
+    /if \(runtimeEnvironment\.channel !== "preview"\)[\s\S]*?Promise\.all\(requiredPaths\)\.catch\(\(\) => \{\}\)[\s\S]*?return;/u,
+  );
+  assert.match(
+    initialization,
+    /runtimeEnvironment\.channel === "preview"|channel !== "preview"[\s\S]*?requiredPaths\.push\([\s\S]*?recoveryJournalPath/u,
+  );
+});
+
+test("packaged launches preserve the executable product identity under E2E", async () => {
+  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  assert.match(
+    mainProcess,
+    /const applicationName = app\.isPackaged\s*\?\s*path\.basename\(process\.execPath, path\.extname\(process\.execPath\)\)\s*:\s*runtimeEnvironment\.applicationName;/u,
+  );
+});
+
 test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {
   const [mainProcess, windowIpc, projectIpc] = await Promise.all([
     readFile(sourceUrl("../desktop/main.mjs"), "utf8"),

@@ -122,6 +122,12 @@ export async function projectSubmissionReceipt(loaded, receipt) {
         text: "本次未开始，修改要求已保留。请修复服务后重新尝试。", errorCode: receipt.errorCode,
       }] }, { now: () => receipt.completedAt });
     }
+    if (receipt.eventsTruncated) {
+      next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
+        messageId: `message_${suffix}_truncated`, actor: "pageroot", kind: "text", status: "completed",
+        text: "部分早期过程已省略；修改要求与最终结果仍保留。",
+      } }, { now });
+    }
     for (const input of receipt.events || []) {
       const event = submissionExecutionFact(input);
       next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
@@ -186,13 +192,33 @@ export async function appendSubmissionExecutionFact(loaded, operationId, input) 
   }
   let receipt = current;
   if (!existing) {
-    // Stage entries are bounded; terminal outcomes must always remain durable.
-    const retained = events.length >= 128
-      ? events.filter((value) => !["starting-session", "sending-task", "reading-task", "writing-candidate", "generating-modification"].includes(value.kind)).slice(-120)
-      : events;
-    receipt = { ...current, events: [...retained, event], eventsTruncated: current.eventsTruncated === true || retained.length !== events.length };
+    // Cap progress before projection too, reserving room for terminal facts.
+    // Keeping the retained IDs stable avoids replaying evicted activity.
+    const progressKinds = new Set(["starting-session", "sending-task", "reading-task",
+      "writing-candidate", "generating-modification", "receiving-response",
+      "response-received", "finalizing", "validating-html", "preparing-review"]);
+    const omitProgress = progressKinds.has(event.kind)
+      && events.filter((value) => progressKinds.has(value.kind)).length >= 64;
+    receipt = { ...current, events: omitProgress ? events : [...events, event],
+      eventsTruncated: current.eventsTruncated === true || omitProgress };
+
     await atomicWriteProjectJson(loaded.paths.projectRootPath, receiptPath(loaded, operationId), receipt, "submission");
   }
   await projectSubmissionReceipt(loaded, receipt);
   return receipt;
+}
+
+
+export function submissionRequestMatches(snapshot, body, taskSpec) {
+  const frozen = snapshot.agentDelivery.selection;
+  const requested = body.agentDelivery?.selection;
+  return snapshot.sourceSha256 === body.expectedSourceSha256
+    && JSON.stringify(snapshot.comments) === JSON.stringify(body.comments || [])
+    && JSON.stringify(snapshot.changeEvents) === JSON.stringify(body.changeEvents || [])
+    && JSON.stringify(snapshot.taskSpec) === JSON.stringify(taskSpec)
+    && snapshot.agentDelivery.mode === body.agentDelivery?.mode
+    && frozen?.providerId === requested?.providerId
+    && frozen?.runtimeId === requested?.runtimeId
+    && frozen?.requestedModelId === requested?.requestedModelId
+    && frozen?.reasoning?.requested === requested?.reasoning?.requested;
 }

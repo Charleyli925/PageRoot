@@ -22,7 +22,7 @@
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "desktop:renderer": "vite build --config desktop/vite.config.ts",
-    "desktop:dev": "npm run desktop:renderer && electron desktop/main.mjs",
+    "desktop:dev": "npm run desktop:renderer && PAGEROOT_RUNTIME_CHANNEL=source electron desktop/main.mjs",
     "desktop:pack": "npm run desktop:renderer && node scripts/build-package.mjs --arch arm64",
     "ci:source-build": "npm run typecheck && npm run lint && npm run build",
     "architecture:check": "node scripts/check-architecture.mjs",
@@ -193,6 +193,7 @@
       "desktop/usage-telemetry.mjs",
       "desktop/ui-preferences.mjs",
       "desktop/agent-session-credential-store.mjs",
+      "desktop/runtime-environment.mjs",
       "desktop/device-identity.mjs",
       "desktop/preview-protocol.mjs",
       "desktop/imported-asset-root.mjs",
@@ -737,6 +738,10 @@
       {
         "from": "output/release-metadata/usage-telemetry-config.json",
         "to": "usage-telemetry-config.json"
+      },
+      {
+        "from": "output/release-metadata/runtime-environment.json",
+        "to": "runtime-environment.json"
       },
       {
         "from": "LICENSE",

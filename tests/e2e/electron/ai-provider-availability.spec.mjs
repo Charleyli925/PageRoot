@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { writeFileSync } from "node:fs";
+import { ensureCurrentConversation, mutateConversation } from "../../../bridge/conversation-repository.mjs";
+import { appendConversationTurnMessage } from "../../../shared/conversation.mjs";
 import {
   QODER_VISUAL_OUTPUT,
   addComment,
@@ -146,13 +149,67 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     // The current decision must remain outside history at every supported width.
     for (const width of [340, 400, 480]) {
       const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
-      await sidebar.evaluate((element, targetWidth) => element.closest(".workbench").style.setProperty("--workbench-inspector-width", `${targetWidth}px`), width);
+      const resizer = launched.page.getByTestId("workbench-resizer-inspector");
+      const handle = await resizer.boundingBox();
+      const currentWidth = (await sidebar.boundingBox()).width;
+      const x = handle.x + handle.width / 2;
+      const y = handle.y + Math.min(80, handle.height / 2);
+      await launched.page.mouse.move(x, y);
+      await launched.page.mouse.down();
+      // A real Conversation refresh during capture must not cancel the drag.
+      await launched.page.waitForResponse((response) => new URL(response.url()).pathname === "/conversation");
+      await launched.page.mouse.move(x + currentWidth - width, y, { steps: 8 });
+      await launched.page.mouse.up();
       const action = launched.page.getByTestId("ai-conversation-action-bar");
       await expect(action).toBeVisible();
       expect(await action.evaluate((element) => element.closest('[data-testid="ai-conversation-stream"]') === null)).toBe(true);
       await expect.poll(async () => Math.abs((await sidebar.boundingBox()).width - width)).toBeLessThanOrEqual(2);
       await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, `trusted-loop-pr6-ready-${width}.png`), animations: "disabled" });
     }
+    const resizer = launched.page.getByTestId("workbench-resizer-inspector");
+    await resizer.focus();
+    await resizer.press("ArrowRight");
+    await expect(resizer).toHaveAttribute("aria-valuenow", "464");
+    await expect(resizer).toBeFocused();
+    const unzoomedWidth = await launched.page.evaluate(() => innerWidth);
+    await launched.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+    await expect.poll(() => launched.page.evaluate(() => innerWidth)).toBeLessThan(unzoomedWidth);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")).toBeVisible();
+    await expect.poll(() => launched.page.getByTestId("ai-conversation-sidebar").evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const stage = element.closest(".review-scroll-stage").getBoundingClientRect();
+      return bounds.left >= stage.left - 1 && bounds.right <= innerWidth + 1 && bounds.bottom <= innerHeight + 1 && element.scrollWidth <= element.clientWidth + 1;
+    })).toBe(true);
+    await expect(launched.page.getByRole("button", { name: "收起会话面板", exact: true })).toBeInViewport();
+    await launched.page.getByRole("button", { name: "收起会话面板", exact: true }).focus();
+    await expect.poll(() => launched.page.locator(".workbench").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ")[0])).toBe("0px");
+    const zoomCapture = await launched.electronApp.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString("base64"));
+    writeFileSync(path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-pr8-zoom-200.png"), zoomCapture, "base64");
+    await launched.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+    const identity = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+    const conversationContext = { projectRoot: path.join(path.dirname(workingCopyPath), ".pageroot"), projectId: identity.projectId, documentId: identity.documentId };
+    const history = await ensureCurrentConversation(conversationContext);
+    const turnId = history.turns[0].turnId;
+    const appendSyntheticHistory = (count, prefix) => mutateConversation(conversationContext, history.conversationId, (value) => {
+      let next = value;
+      for (let index = 0; index < count; index += 1) next = appendConversationTurnMessage(next, { turnId, message: {
+        messageId: `message_${prefix}_${index}`, actor: "pageroot", kind: "text", status: "completed",
+        text: `长历史验收 ${prefix} ${index}：` + "这是合成测试的公开摘要。".repeat(20),
+      } }, { now: () => new Date().toISOString() });
+      return next;
+    });
+    await appendSyntheticHistory(20, "long_history_fixture");
+    const stream = launched.page.getByTestId("ai-conversation-stream");
+    await expect(stream).toContainText("长历史验收 long_history_fixture 19");
+    await stream.evaluate((element) => { element.scrollTop = 0; element.dispatchEvent(new Event("scroll", { bubbles: true })); });
+    await appendSyntheticHistory(1, "new_tail_fixture");
+    await expect(stream).toContainText("长历史验收 new_tail_fixture 0");
+    expect(await stream.evaluate((element) => element.scrollTop)).toBeLessThan(2);
+    await expect(launched.page.getByTestId("ai-conversation-unseen-content")).toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")).toBeVisible();
+    await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-pr8-long-history.png"), animations: "disabled" });
+    await launched.page.getByTestId("ai-conversation-unseen-content").click();
+    await expect.poll(() => stream.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(2);
     await launched.page.screenshot({
       path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "qoder-result-ready.png"),
       fullPage: false,

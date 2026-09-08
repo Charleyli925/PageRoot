@@ -396,6 +396,7 @@ export async function runAcpTask({
   turnTimeoutMs,
   cancellationSignal,
   expectedAgentName,
+  sessionModelId,
   createHost,
   clock = Date,
   scheduler,
@@ -484,6 +485,14 @@ export async function runAcpTask({
         startupTimeout.expired,
         cancellation.promise,
       ]);
+      if (sessionModelId) {
+        await Promise.race([
+          context.request("session/set_model", {
+            sessionId: session.sessionId, modelId: sessionModelId,
+          }, { cancellationSignal: startupSignal }),
+          startupTimeout.expired, cancellation.promise,
+        ]);
+      }
       startupTimeout.clear();
       host.bindSessionId(session.sessionId);
       const turnTimeout = timeoutController(
@@ -508,7 +517,8 @@ export async function runAcpTask({
       turnTimeout.controller.signal.addEventListener("abort", cancelTurn, { once: true });
       cancellationSignal?.addEventListener("abort", cancelTurn, { once: true });
       try {
-        const promptPromise = session.prompt(prompt, {
+        let identityRepairTurns = 0;
+        let promptPromise = session.prompt(prompt, {
           cancellationSignal: turnSignal,
         });
         void promptPromise.catch(() => {});
@@ -527,9 +537,23 @@ export async function runAcpTask({
           turnTimeout.activity();
           if (message.kind === "stop") {
             onEvent(Object.freeze({ kind: "turn-stopping", stopReason: message.stopReason }));
-            const completion = profile.requiresTurnCompletion
-              ? await host.assertTurnCompleted()
-              : null;
+            let completion;
+            try {
+              completion = profile.requiresTurnCompletion ? await host.assertTurnCompleted() : null;
+            } catch (error) {
+              if (error.code !== "AGENT_IDENTITY_REPAIR_REQUIRED" || identityRepairTurns >= 2) throw error;
+              if (turnSignal?.aborted) throw turnSignal.reason;
+              identityRepairTurns += 1;
+              onEvent(Object.freeze({ kind: "identity-repair-started" }));
+              await promptPromise;
+              promptPromise = session.prompt(
+                "Continue this same frozen task. The last output failed identity validation and was not committed. "
+                  + error.message + " After correction, run the original finalizer. Do not change frozen inputs.",
+                { cancellationSignal: turnSignal },
+              );
+              void promptPromise.catch(() => {});
+              continue;
+            }
             onEvent(Object.freeze({ kind: "turn-stopped", stopReason: message.stopReason }));
             return {
               initialized,

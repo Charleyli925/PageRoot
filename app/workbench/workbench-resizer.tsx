@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type MutableRefObject, type RefObject } from "react";
 
 type WorkbenchResizeKind = "sidebar" | "inspector";
 
@@ -61,6 +61,8 @@ function readStoredWidth(root: HTMLElement, variable: string, fallback: number):
 
 export function WorkbenchResizer({ kind, onCommit }: WorkbenchResizerProps) {
   const handleRef = useRef<HTMLDivElement>(null);
+  const onCommitRef = useRef(onCommit);
+  useLayoutEffect(() => { onCommitRef.current = onCommit; }, [onCommit]);
   const dragRef = useRef<{
     root: HTMLElement;
     startX: number;
@@ -90,7 +92,7 @@ export function WorkbenchResizer({ kind, onCommit }: WorkbenchResizerProps) {
       if (!drag || drag.root !== root) return;
       if (commit) {
         const width = roundedPixels(readCommittedWidth());
-        onCommit?.(width);
+        onCommitRef.current?.(width);
       } else {
         root.style.setProperty(config.variable, `${drag.startStoredWidth}px`);
         syncAriaValue(drag.startWidth);
@@ -121,7 +123,7 @@ export function WorkbenchResizer({ kind, onCommit }: WorkbenchResizerProps) {
         delete root.dataset.resizing;
       }
     };
-  }, [config, kind, onCommit]);
+  }, [config, kind]);
 
   const reset = () => {
     const handle = handleRef.current;

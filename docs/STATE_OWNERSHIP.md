@@ -595,3 +595,11 @@ ConversationWorkflow owns a bounded single-flight read refresh while the sidebar
 ### Trusted modification adoption
 
 VersionWorkflow drains current source and Draft before adoption. The decision carries the reviewed Candidate ID, original source hash and existing `promote_<candidateId>` transaction identity. Promotion freezes comments whose content/revision differs from the submission and publishes them with the next Working Copy; unchanged submitted comments alone are consumed. Completed Promotion is the authority for an idempotent adopted Conversation fact. Unknown or failed delivery never implies adoption. The sidebar opens Review first; adopt and explicit discard remain separate decisions.
+
+PR-8: AgentRuntimeCoordinator owns in-flight execution startup keyed by the
+existing execution identity. Cancellation marks that startup, waits for its
+bounded settlement and only then allows durable cancellation. The final launch
+check prevents a stopped, unpublished startup from spawning later. This registry
+is transient coordination, not a new durable Task/Run authority. VersionWorkflow
+may reconcile one lost adoption response using the identical Candidate decision
+operation; Promotion remains the idempotent authority.

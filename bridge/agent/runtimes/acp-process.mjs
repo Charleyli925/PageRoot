@@ -134,6 +134,7 @@ export async function runAcpProcessTask({
   turnTimeoutMs,
   cancellationSignal,
   expectedAgentName,
+  sessionModelId,
   expectedExecutable,
   useVerifiedJavaScriptRuntime = false,
   baseEnvironment = process.env,
@@ -193,6 +194,7 @@ export async function runAcpProcessTask({
   try {
     const observeEvent = (event) => {
       if (event?.kind === "turn-stopping") turnStopObserved = true;
+      if (event?.kind === "identity-repair-started") turnStopObserved = false;
       onEvent(event);
     };
     const result = await Promise.race([
@@ -203,6 +205,7 @@ export async function runAcpProcessTask({
         onEvent: observeEvent,
         cancellationSignal,
         expectedAgentName,
+        sessionModelId,
         ...(inactivityTimeoutMs ? { inactivityTimeoutMs } : {}),
         ...(createHost ? { createHost } : {}),
         ...(startupTimeoutMs ? { startupTimeoutMs } : {}),

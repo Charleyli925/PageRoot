@@ -1383,3 +1383,22 @@ test("adoption refuses mutation when newer draft comments cannot drain", async (
   assert.equal(harness.calls.activate, 0);
   assert.equal(harness.runSession.activeRun.status, "ready-to-open");
 });
+
+
+test("lost adoption reply reconciles the same Candidate decision without a new operation", async () => {
+  let count = 0;
+  const harness = createHarness({ activation: async (input) => {
+    if (++count === 1) throw new BridgeRequestError("response lost", { outcome: "unknown" });
+    const version = versionRecord({ id: input.versionId });
+    return { ...input, contentSha256: version.contentSha256, sourceSha256: version.contentSha256,
+      currentHtmlSha256: version.contentSha256, version };
+  } });
+  const run = readyRun({ candidateId: "candidate_synthetic" });
+  harness.runSession.trackRun(run, { activate: "always" });
+  const outcome = await harness.workflow.activateReadyVersion({ run });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.calls.activate, 2);
+  assert.deepEqual(harness.calls.activateInputs[0], harness.calls.activateInputs[1]);
+  assert.equal(harness.calls.activateInputs[0].decisionOperationId, "promote_candidate_synthetic");
+  assert.equal(harness.calls.commit.length, 1);
+});

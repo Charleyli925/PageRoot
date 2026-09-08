@@ -2505,3 +2505,21 @@ test("submission persistence failure never spends a ticket or sends a Request", 
   assert.equal(harness.calls.startAgent.length, 0);
   harness.workflow.dispose();
 });
+
+
+test("a lost submission receipt retries identical authority before any external spend", async () => {
+  const operations = [];
+  const harness = createHarness({ bridge: { async recordSubmission(input) {
+    operations.push(structuredClone(input));
+    assert.equal(harness.calls.preflight.length, 0);
+    if (operations.length === 1) throw new Error("response lost");
+    return { operationId: input.submissionOperationId, status: "accepted" };
+  } } });
+  const result = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+  assert.equal(result.status, "succeeded");
+  assert.equal(operations.length, 2);
+  assert.deepEqual(operations[0], operations[1]);
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.equal(harness.calls.startAgent.length, 1);
+  harness.workflow.dispose();
+});
