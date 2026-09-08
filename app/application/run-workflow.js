@@ -490,6 +490,8 @@ export class RunWorkflow {
     this.#agentCatalog = agentCatalog || new AgentCatalogState({
       bridgeClient,
       handoffPort: this.#handoffPort,
+      preferencesPort: ports.uiPreferences || null,
+      credentialStatusPort: ports.agentCredentialStatus || null,
       clock,
     });
     this.#ownsAgentCatalog = !agentCatalog;
@@ -2435,12 +2437,16 @@ export class RunWorkflow {
     return noteOutcome(outcome);
   }
 
-  selectAgentModel(modelId, expectedSelection) {
-    return this.#agentCatalog.selectModel(modelId, expectedSelection);
+  async selectAgentModel(modelId, expectedSelection) {
+    const selection = this.#agentCatalog.selectModel(modelId, expectedSelection);
+    if (selection) await this.#agentCatalog.saveConfiguration();
+    return selection;
   }
 
-  selectAgentReasoning(reasoning, expectedSelection) {
-    return this.#agentCatalog.selectReasoning(reasoning, expectedSelection);
+  async selectAgentReasoning(reasoning, expectedSelection) {
+    const selection = this.#agentCatalog.selectReasoning(reasoning, expectedSelection);
+    if (selection) await this.#agentCatalog.saveConfiguration();
+    return selection;
   }
 
   applyDisabledAgentProviders(ids) {

@@ -248,6 +248,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     projectSource?: ProjectSourceActivationPort;
     editRuntime?: EditAuthorRuntimePort;
     uiPreferences?: FirstEditGuidePort;
+    agentCredentialStatus?: () => Promise<{ remembered?: boolean }>;
     workbenchTabs?: Readonly<{
       get(): Promise<unknown>;
       set(value: Readonly<Record<string, unknown>>): Promise<unknown>;
@@ -600,8 +601,8 @@ export class WorkspaceController {
   ): import("./run-workflow.js").RunWorkflowSnapshot["accessRepair"];
   clearAccessRepair(expectedIntentId?: string): import("./run-workflow.js").RunWorkflowSnapshot["accessRepair"];
   resendAfterAccessRepair(): Promise<RunWorkflowOutcome>;
-  selectAgentModel(modelId: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
-  selectAgentReasoning(reasoning: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
+  selectAgentModel(modelId: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): Promise<import("../domain/agent-provider-state.js").AgentSelection | null>;
+  selectAgentReasoning(reasoning: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): Promise<import("../domain/agent-provider-state.js").AgentSelection | null>;
   applyDisabledAgentProviders(ids?: readonly string[]): void;
   connectAgentApiKey(
     selection: import("../domain/agent-provider-state.js").AgentSelection,

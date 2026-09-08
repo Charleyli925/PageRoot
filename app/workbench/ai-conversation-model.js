@@ -540,7 +540,7 @@ export function sidebarExecutionStatus({
     : 0;
   return Object.freeze({
     title: `${boundedAgentName(providerName)} 正在生成`,
-    detail: `已等待 ${formatElapsedDuration(elapsedMs)} · 已接收 ${Math.ceil(bytes / 1024)} KB`,
+    detail: `${bytes > 0 ? "正在接收结果" : "正在等待响应"} · 已用时 ${formatElapsedDuration(elapsedMs)}`,
     elapsedMs,
     receivedBytes: bytes,
   });

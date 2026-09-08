@@ -288,8 +288,8 @@ export interface AgentSelectionControllerCapability {
   beginAccessRepair(run?: ActiveRun | null, field?: "apiKey" | "login" | "install" | "model" | "provider"): unknown;
   clearAccessRepair(expectedIntentId?: string): unknown;
   resendAfterAccessRepair(): Promise<RunWorkflowOutcome>;
-  selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
-  selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
+  selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): Promise<AgentSelection | null>;
+  selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): Promise<AgentSelection | null>;
   applyDisabledAgentProviders(ids?: readonly string[]): void;
   connectAgentApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>): Promise<RunWorkflowOutcome>;
   disconnectAgentApiKey(selection: AgentSelection): Promise<RunWorkflowOutcome>;

@@ -290,6 +290,7 @@ export class WorkspaceController {
   #workbenchNavigationUnsubscribe = null;
   #workbenchNavigationSnapshot = null;
   #uiPreferencesPort = null;
+  #agentCredentialStatusPort = null;
   #workbenchTabsUnsubscribe = null;
   #workbenchTabsSnapshot = null;
   #workbenchTabsReady = false;
@@ -456,6 +457,7 @@ export class WorkspaceController {
     this.#workbenchTabsPersistenceSnapshot = workbenchTabsPersistenceCoordinator?.snapshot || null;
     this.#navigationHostPort = ports.navigation || null;
     this.#uiPreferencesPort = ports.uiPreferences || null;
+    this.#agentCredentialStatusPort = ports.agentCredentialStatus || null;
     this.#documentProjectionPort = projectWorkflow?.ports?.projectOpen
       ?.readRegisteredProjection || null;
     this.#surfaceFramePort = projectWorkflow?.ports?.canvas?.requestFrame || null;
@@ -883,6 +885,8 @@ export class WorkspaceController {
         ports: {
           canvas: runWorkflow.canvas,
           handoff: runWorkflow.handoff,
+          uiPreferences: this.#uiPreferencesPort,
+          agentCredentialStatus: this.#agentCredentialStatusPort,
           hash: this.#hashPort,
         },
         scheduler: runWorkflow.scheduler,

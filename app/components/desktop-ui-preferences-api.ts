@@ -5,6 +5,7 @@ export type WorkspacePreferences = {
   motion: "system" | "reduced";
   restoreTabsOnLaunch: boolean;
   defaultAgentProviderId: "pageroot" | "qoder" | "codex";
+  agentConfigurations: Readonly<Record<string, Readonly<{ modelId: string | null; reasoning: string | null }>>>;
   disabledAgentProviderIds: ReadonlyArray<"pageroot" | "qoder" | "codex">;
 };
 

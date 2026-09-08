@@ -11,6 +11,8 @@ import { createDefaultProviderRegistry } from "../bridge/agent/providers/provide
 import {
   assertCodexAcpInstallationUnchanged,
   diagnoseCodexAcp,
+  checkCodexAuthentication,
+  startCodexLogin,
   probeCodexAcp,
   publicCodexAcpModels,
   resolveCodexAcpCommand,
@@ -304,8 +306,12 @@ test("Codex diagnosis uses protected native login status when available", async 
   const native = path.join(root, "codex-native");
   await writeFile(native, "#!/bin/sh\necho Logged in\n", { mode: 0o755 });
   await chmod(native, 0o755);
-  const ready = await diagnoseCodexAcp({ nativeCommand: native }, {});
+  const ready = await checkCodexAuthentication({ nativeCommand: native }, {});
   assert.equal(ready.readiness, "ready");
+  const disconnected = await diagnoseCodexAcp({ nativeCommand: native }, {});
+  assert.equal(disconnected.readiness, "connection-failed");
+  assert.equal(disconnected.facts.authentication, "ready");
+  assert.equal(disconnected.facts.protocol, "failed");
 
   await writeFile(native, "#!/bin/sh\necho Not logged in\n", { mode: 0o755 });
   await assert.rejects(
@@ -334,4 +340,42 @@ test("Codex diagnosis verifies native login and ACP initialize without session/n
   assert.equal(diagnostic.facts.protocol, "ready");
   assert.equal(diagnostic.facts.service, "unknown");
   await assert.rejects(() => readFile(marker, "utf8"), { code: "ENOENT" });
+});
+
+test("login completion accepts verified local authentication even when the ACP adapter is broken", async (t) => {
+  const root = await isolatedHome(t);
+  const native = path.join(root, "codex-native");
+  const adapter = path.join(root, "broken-adapter");
+  await writeFile(native, "#!/bin/sh\necho Logged in\n", { mode: 0o755 });
+  await writeFile(adapter, "#!/bin/sh\nexec 0<&-\nsleep 0.05\nexit 7\n", { mode: 0o755 });
+  let loginCount = 0;
+  const command = { nativeCommand: native, command: adapter, version: "1.7.0" };
+  await startCodexLogin(command, { environment: {}, loginRunner: async () => { loginCount += 1; } });
+  assert.equal(loginCount, 1);
+  const diagnosis = await diagnoseCodexAcp(command, {});
+  assert.equal(diagnosis.readiness, "connection-failed");
+  assert.equal(diagnosis.facts.authentication, "ready");
+  assert.equal(diagnosis.facts.protocol, "failed");
+  assert.equal(diagnosis.details.stage, "protocol");
+  assert.equal(diagnosis.details.version, "1.7.0");
+  assert.equal(diagnosis.details.exitCode, 7);
+  assert.doesNotMatch(JSON.stringify(diagnosis), /stderr|auth\.json|broken-adapter/u);
+});
+
+test("verified JavaScript Codex adapter uses the host runtime without PATH node and rejects changed bytes", async (t) => {
+  const root = await isolatedHome(t);
+  const command = path.join(root, "adapter.mjs");
+  const fixture = (await readFile(fixtureAgent, "utf8")).replace(
+    '"@agentclientprotocol/sdk"', JSON.stringify(import.meta.resolve("@agentclientprotocol/sdk")),
+  );
+  await writeFile(command, fixture, { mode: 0o755 });
+  const information = await lstat(command);
+  const installation = { command, identity: {
+    dev: information.dev, ino: information.ino, nlink: information.nlink,
+    size: information.size, mtimeMs: information.mtimeMs, sha256: sha256(await readFile(command)),
+  } };
+  const evidence = await probeCodexAcp(installation, { PATH: path.join(root, "no-node") });
+  assert.ok(evidence);
+  await writeFile(command, "throw new Error('changed fixture');\n");
+  await assert.rejects(probeCodexAcp(installation, {}), { code: "ACP_AGENT_EXECUTABLE_CHANGED" });
 });

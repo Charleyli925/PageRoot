@@ -105,6 +105,8 @@ export type RunWorkflowConstruction = Readonly<{
   }>>;
   codecs: RunWorkflowCodecs;
   ports: Readonly<{
+    uiPreferences?: import("./workspace-preferences-session.js").WorkspacePreferencesPort | null;
+    agentCredentialStatus?: (() => Promise<{ remembered?: boolean }>) | null;
     canvas: Readonly<{
       checkpointNativeTextIntent(input: Record<string, unknown>): {
         ok: boolean;
@@ -233,8 +235,8 @@ export class RunWorkflow {
   ): RunWorkflowSnapshot["accessRepair"];
   clearAccessRepair(expectedIntentId?: string): RunWorkflowSnapshot["accessRepair"];
   resendAfterAccessRepair(): Promise<RunWorkflowOutcome>;
-  selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
-  selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
+  selectAgentModel(modelId: string | null, expectedSelection?: AgentSelection | null): Promise<AgentSelection | null>;
+  selectAgentReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): Promise<AgentSelection | null>;
   applyDisabledAgentProviders(ids?: readonly string[]): void;
   connectAgentApiKey(
     selection: AgentSelection,

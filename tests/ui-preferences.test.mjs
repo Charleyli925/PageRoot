@@ -98,6 +98,7 @@ test("v1 preferences migrate without losing guide or welcome identity", async (t
     restoreTabsOnLaunch: true,
     defaultAgentProviderId: "qoder",
     disabledAgentProviderIds: [],
+    agentConfigurations: {},
   });
   assert.equal(JSON.parse(await readFile(
     path.join(userDataPath, "ui-preferences.json"),
@@ -158,6 +159,22 @@ test("workspace preference decoding clamps damaged values and strict writes reje
     normalizeWorkspacePatch({ disabledAgentProviderIds: ["codex", "codex"] }).disabledAgentProviderIds,
     ["codex"],
   );
+});
+
+test("provider configurations accept only bounded public choices and preserve the default", async (t) => {
+  const userDataPath = await temporaryUserData(t);
+  const configurations = { pageroot: { modelId: "pageroot:deepseek-v4-pro", reasoning: "high" } };
+  await recordUiWorkspacePreferences({ userDataPath, workspace: { defaultAgentProviderId: "codex" } });
+  await recordUiWorkspacePreferences({ userDataPath, workspace: { agentConfigurations: configurations } });
+  const persisted = await readUiPreferences({ userDataPath });
+  assert.deepEqual(persisted.workspace.agentConfigurations, configurations);
+  assert.equal(persisted.workspace.defaultAgentProviderId, "codex");
+  for (const unsafe of [
+    { pageroot: { ...configurations.pageroot, apiKey: "secret" } },
+    { pageroot: { ...configurations.pageroot, modelId: "codex:other-provider" } },
+    { pageroot: { ...configurations.pageroot, reasoning: "../../secret" } },
+    { other: configurations.pageroot },
+  ]) assert.throws(() => normalizeWorkspacePatch({ agentConfigurations: unsafe }), /服务配置无效/u);
 });
 
 test("present and dismiss are install-level and dismissed is terminal", async (t) => {

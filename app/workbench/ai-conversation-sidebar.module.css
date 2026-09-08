@@ -628,6 +628,9 @@
   row-gap: 4px;
 }
 
+.runActivity[data-execution="true"] { display: flex; flex-direction: column; gap: 8px; }
+.runActivity[data-execution="true"] .runSummaryDetail { font-size: 13px; color: #6f6c78; }
+
 .runSummary {
   row-gap: 3px;
 }
@@ -751,7 +754,17 @@
 .setupPanel {
   margin: 0 8px 10px;
   overflow: auto;
-  max-height: 280px;
+  max-height: min(420px, 55vh);
   border: 1px solid #ecebf0;
   border-radius: 12px;
 }
+
+.setupPanel > button { margin: 0 16px 12px; }
+
+.executionDetails {
+  color: #6f6c78;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.executionDetails summary { cursor: pointer; }

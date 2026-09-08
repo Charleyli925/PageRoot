@@ -540,7 +540,7 @@ test("execution status derives elapsed time and received bytes from the public p
     now: startedAt + 125_000,
   });
   assert.equal(status.title, "Codex 正在生成");
-  assert.equal(status.detail, "已等待 02:05 · 已接收 2 KB");
+  assert.equal(status.detail, "正在接收结果 · 已用时 02:05");
   assert.equal(
     sidebarExecutionStatus({
       state: "processing",
@@ -549,7 +549,7 @@ test("execution status derives elapsed time and received bytes from the public p
       receivedBytes: 0,
       now: startedAt,
     }).detail,
-    "已等待 00:00 · 已接收 0 KB",
+    "正在等待响应 · 已用时 00:00",
   );
   assert.equal(sidebarExecutionStatus({ state: "validating" }), null);
 });

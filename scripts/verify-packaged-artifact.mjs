@@ -204,6 +204,7 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/agent-login-url.mjs",
   "shared/agent-vendor-key-url.mjs",
+  "shared/agent-configuration-preferences.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
 ];

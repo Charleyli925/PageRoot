@@ -1,5 +1,9 @@
 export type WorkspacePreferenceMotion = "system" | "reduced";
 export type WorkspacePreferenceAgentId = "pageroot" | "qoder" | "codex";
+export type WorkspacePreferencesPort = Readonly<{
+  get(): Promise<unknown>;
+  record(input: Readonly<{ workspace: Readonly<Record<string, unknown>> }>): Promise<unknown>;
+}>;
 
 export type WorkspacePreferences = Readonly<{
   rememberPanelWidths: boolean;
@@ -8,6 +12,7 @@ export type WorkspacePreferences = Readonly<{
   motion: WorkspacePreferenceMotion;
   restoreTabsOnLaunch: boolean;
   defaultAgentProviderId: WorkspacePreferenceAgentId;
+  agentConfigurations: Readonly<Record<string, Readonly<{ modelId: string | null; reasoning: string | null }>>>;
   disabledAgentProviderIds: readonly WorkspacePreferenceAgentId[];
 }>;
 

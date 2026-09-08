@@ -1,5 +1,25 @@
 # Design QA
 
+## 2026-09-08 — 独立服务配置与接入恢复
+
+- Truth: 本批三条真实旅程要求；沿用既有桌面视觉语言，共享控件但分别布局设置页与侧栏。
+- Evidence: `output/design-qa/agent-setup-journeys/` 中的 `settings-key-form.png`、
+  `settings-deepseek-high.png`、`settings-codex-authenticated-repair.png`、
+  `narrow-sidebar-generating.png`、`narrow-sidebar-codex-repair.png`、
+  `review-result.png`、`codex-second-round.png`（真实 Electron，合成页面与本地协议 fixture）。
+- 核对：复选框实际 16×16 CSS px；正文 13–14px、控件 34px；无遗留品牌空列或浏览器默认按钮。
+  默认 Codex 标记在故障时保留；非默认 DeepSeek 的“高”经进程重启仍保留，实际请求与 Candidate
+  fixture 标记一致。生成状态与停止在同一条目，没有空 Thinking 消息，字节数折叠。
+  侧栏恢复区只有一个强调修复操作，原发送区被替换；修复后完成首轮、审阅采纳和第二轮。
+- 修复复核：旧安装行停留在安装前状态，改为从现有 access operation / installState 派生临时状态；
+  删除设置行旧有的 140–220px 控制槽、10px 按钮与 11px 截断说明覆盖规则，并以实际计算样式和按钮横坐标回归；
+  受管任务完成后也不再重新出现旧交接摘要，审阅截图等待真实审阅工作区出现。
+  尚未检查的折叠服务显示“未检查 / 检查”，不把初始未知状态伪装成正在执行检查。
+  未确认认证的普通连接失败不再误导为组件修复。字段错误在对应控件附近，更多菜单不被卡片裁切。
+- 验收边界：组件故障与安装回执使用受控 fixture，不能代替真实下载安装或账号旅程。
+  真实浏览器登录及其后两轮验收由用户明确暂缓；本批不启动浏览器登录，不替换已安装应用。
+- final result: scoped visual/fixture journeys passed; real-account acceptance pending.
+
 ## AI review workspace — final seven-state contract
 
 Date: 2026-08-03

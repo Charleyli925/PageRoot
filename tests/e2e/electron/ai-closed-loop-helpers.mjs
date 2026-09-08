@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { inflateSync } from "node:zlib";
+import { pathToFileURL } from "node:url";
 
 import { expect } from "@playwright/test";
 
@@ -322,13 +323,14 @@ export function createQoderAcpE2ECommand(directory, {
 }
 
 export function createCodexAcpE2ECommand(directory, {
+  javascript = false,
   hang = false,
   pidFile = null,
   authRequired = false,
   visibleText = false,
   visibleTextGateMs = 0,
 } = {}) {
-  const command = path.join(directory, "pageroot-codex-acp-e2e");
+  const command = path.join(directory, javascript ? "pageroot-codex-acp-e2e.mjs" : "pageroot-codex-acp-e2e");
   const agent = path.join(productRoot, "tests", "fixtures", "codex-acp-agent.mjs");
   const fixtureArgs = [
     hang ? "--hang" : null,
@@ -336,12 +338,15 @@ export function createCodexAcpE2ECommand(directory, {
     authRequired ? "--auth-required" : null,
     visibleText ? "--visible-text" : null,
     visibleTextGateMs > 0 ? `--visible-text-gate-ms=${visibleTextGateMs}` : null,
-  ].filter(Boolean).map(shellQuote).join(" ");
+  ].filter(Boolean);
+  const shellArgs = fixtureArgs.map(shellQuote).join(" ");
   writeFileSync(
     command,
-    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agent)}${
-      fixtureArgs ? ` ${fixtureArgs}` : ""
-    } "$@"\n`,
+    javascript
+      ? `#!${process.execPath}\nprocess.argv.push(...${JSON.stringify(fixtureArgs)});\nawait import(${JSON.stringify(pathToFileURL(agent).href)});\n`
+      : `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agent)}${
+        shellArgs ? ` ${shellArgs}` : ""
+      } "$@"\n`,
     { encoding: "utf8", mode: 0o755 },
   );
   chmodSync(command, 0o755);
@@ -389,7 +394,7 @@ export async function openQoderAvailability(page) {
   }
   const card = settings.locator(".qoder-availability-card").first();
   await expect(card).toBeVisible();
-  return card;
+  return row;
 }
 
 export async function expandSettingsAgent(settings, providerId) {

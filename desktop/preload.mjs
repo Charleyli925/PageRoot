@@ -659,6 +659,7 @@ const workspacePreferenceKeys = new Set([
   "motion",
   "restoreTabsOnLaunch",
   "defaultAgentProviderId",
+  "agentConfigurations",
   "disabledAgentProviderIds",
 ]);
 
@@ -671,6 +672,17 @@ function validWorkspacePreferencePatch(value) {
     || Object.keys(value).some((key) => !workspacePreferenceKeys.has(key))
   ) return false;
   return Object.entries(value).every(([key, next]) => {
+    if (key === "agentConfigurations") {
+      return next && typeof next === "object" && !Array.isArray(next)
+        && Object.entries(next).every(([id, entry]) => ["pageroot", "qoder", "codex"].includes(id)
+          && entry && typeof entry === "object" && !Array.isArray(entry)
+          && Object.keys(entry).every((name) => name === "modelId" || name === "reasoning")
+          && (entry.modelId === null || (typeof entry.modelId === "string"
+            && entry.modelId.length <= 160 && entry.modelId.startsWith(`${id}:`)
+            && /^[A-Za-z0-9._/:+-]+$/u.test(entry.modelId)))
+          && (entry.reasoning === null || (typeof entry.reasoning === "string"
+            && /^[A-Za-z0-9_-]{1,40}$/u.test(entry.reasoning))));
+    }
     if (key === "rememberPanelWidths" || key === "restoreTabsOnLaunch") {
       return typeof next === "boolean";
     }

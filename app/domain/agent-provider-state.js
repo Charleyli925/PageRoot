@@ -6,6 +6,43 @@ export const AGENT_PROVIDER_AVAILABILITY_STATUSES = Object.freeze([
   "unavailable",
 ]);
 
+// A shared, derived next step; authentication is not synonymous with protocol readiness.
+export function agentSetupRecovery(diagnostic, availability) {
+  if (!diagnostic || availability?.status !== "unavailable" || availability?.reason === "disabled") return null;
+  if (["account-capacity", "model-unavailable"].includes(availability.reason)) return null;
+  const cause = diagnostic.cause || "";
+  const auth = diagnostic.facts?.authentication?.status;
+  const protocol = diagnostic.facts?.protocol?.status;
+  if (/NETWORK|TIMEOUT|CONNECTION_FAILED/u.test(cause)) {
+    return { statusLabel: "暂时无法连接", detail: "", tone: "attention", action: "recheck", actionLabel: "重新检查" };
+  }
+  if (cause === "CODEX_AUTH_UNVERIFIED") {
+    return { statusLabel: "登录状态尚未确认", detail: "检测本机登录状态；仍无法确认时可重新登录。", tone: "attention",
+      action: "recheck", actionLabel: "检测登录", allowLogin: true };
+  }
+  if (cause === "CODEX_AUTH_REQUIRED" && auth === "ready") {
+    return { statusLabel: "连接组件未确认登录", detail: "本机已有认证，但连接组件未接受登录。", tone: "attention",
+      action: "recheck", actionLabel: "检测登录", allowLogin: true };
+  }
+  if (/VERSION|PROTOCOL_UNSUPPORTED|IDENTITY_MISMATCH/u.test(cause)) {
+    return { statusLabel: "当前组件无法使用", detail: auth === "ready" ? "账号已登录，需要更新连接组件。" : "需要更新受验证的连接组件。", tone: "attention",
+      action: "install", actionLabel: "更新连接组件" };
+  }
+  if (protocol === "failed" && auth === "ready" || availability.reason === "invalid-installation") {
+    return { statusLabel: "连接需要修复", detail: auth === "ready" ? "账号已登录，但连接组件未能启动。" : "连接组件未能启动。", tone: "attention",
+      action: "install", actionLabel: "修复连接" };
+  }
+  return { statusLabel: "暂时无法连接", detail: "", tone: "attention", action: "recheck", actionLabel: "重新检查" };
+}
+
+export function agentSetupOperationLabel(operation, installState) {
+  if (operation?.state === "stop-unconfirmed") return "尚未确认操作已停止";
+  if (operation?.state === "cancelling" || installState === "cancelling") return "正在取消…";
+  if (operation?.kind === "login" && ["running", "waiting"].includes(operation.state)) return "请在浏览器完成登录";
+  if (installState === "installing") return "正在安装…";
+  return null;
+}
+
 // Diagnostics are the safe, side-effect-free projection used by Settings.
 // Keep this separate from availability/preflight: a diagnostic never carries
 // an installation path, command, or process output back to the renderer.

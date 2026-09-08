@@ -51,7 +51,7 @@ test("a managed Agent failure immediately replaces processing with retry or end"
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const qoderCard = await openQoderAvailability(launched.page);
-    await expect(qoderCard.getByText("Qoder CLI · 已连接", { exact: true }))
+    await expect(qoderCard.getByText("已连接", { exact: true }))
       .toBeVisible({ timeout: 60_000 });
     await closeQoderAvailability(launched.page);
     await chooseModifyIntent(launched.page);
