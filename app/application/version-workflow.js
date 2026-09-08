@@ -464,7 +464,8 @@ export class VersionWorkflow {
       try {
         activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
       } catch (cause) {
-        if (!isBridgeRequestError(cause) || cause.outcome !== "unknown") throw cause;
+        if (!activationRequest.decisionOperationId || !isBridgeRequestError(cause) || cause.outcome !== "unknown") throw cause;
+        if (!this.#isNavigationCurrent(operation) || !this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
         activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
       }
       perfMark("pageroot:accept:promote-end");
@@ -531,7 +532,7 @@ export class VersionWorkflow {
 
   #scheduleActivationReconciliation(key) {
     const pending = this.#pendingActivations.get(key);
-    if (!pending || pending.timer || this.#disposed) return;
+    if (!pending || !pending.request.decisionOperationId || pending.timer || this.#disposed) return;
     pending.timer = setTimeout(async () => {
       pending.timer = null;
       if (this.#disposed || this.#pendingActivations.get(key) !== pending) return;
