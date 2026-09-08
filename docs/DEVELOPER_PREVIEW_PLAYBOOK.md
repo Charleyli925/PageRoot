@@ -1,6 +1,24 @@
 # 开发者测试包 Playbook
 
-开发者测试包（Developer Preview）是一个按需使用的轻量安装包，用来在正式签名、公证和发布之前，让开发者先安装并确认“这次提交的内容确实被打进去了，应用可以基本启动”。它不是每次发布的必经步骤，也不是 Release Candidate。
+开发者测试包（Developer Preview）是一个按需使用的安装包，用来在正式发布前验证这次提交确实被打进去了、应用可以启动并且数据可以持续保留。它使用独立的 Developer Preview 身份和数据根目录，不是 Release Candidate，也不是正式版的更新渠道。
+
+本轮切换只在第一次启动新版测试包时发生一次：测试版从全新的独立环境开始，旧的 PageRoot 文件、项目和钥匙串项目原地保留，不扫描、不复制、不迁移、不自动打开，也不删除。之后安装新的测试包会继续使用这份新的 Preview 数据。
+
+Preview 的运行目录固定为：
+
+```text
+~/Library/Application Support/PageRoot Developer Preview/
+  应用设置、标签页状态、最近项目、加密凭证文件
+  agents/
+  recovery-journals-v1/
+  chromium/
+~/Documents/PageRoot Developer Preview/
+  项目/
+  项目记录/
+~/Library/Logs/PageRoot Developer Preview/
+```
+
+源码开发和 E2E 使用各自的临时隔离目录；它们不会把正式版或 Preview 的数据当作测试夹具。Preview 的 `sessionData` 明确位于 `chromium/`，其中 Cookies 等会话数据随 Preview 保留，不能当作普通缓存清空。
 
 ## 什么时候执行
 
@@ -38,7 +56,15 @@ Tree 时，必须停止并报告，不能静默漏包。`npm run package:develop
 
 ## 默认入口
 
-推荐使用 GitHub Actions：
+本机有 Developer ID Application 证书时，优先在本机干净 Tree 上执行：
+
+```bash
+npm run package:developer
+```
+
+electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID Application 身份；也可以通过本机环境中的 `CSC_NAME` 指定证书名称。证书私钥不进入仓库或安装包。证书缺失、签名失败或身份不符合要求时命令直接失败，不会退回 ad-hoc。
+
+如需在具备同一签名身份的专用 macOS runner 上运行，也可以手动使用 GitHub Actions：
 
 1. 打开 `Developer Preview` 工作流。
 2. 选择需要验证的提交所在分支。
@@ -49,12 +75,6 @@ Tree 时，必须停止并报告，不能静默漏包。`npm run package:develop
 工作流摘要会同时给出“安装包内容报告”，artifact 内也包含
 `package-delivery-report.json` 和可直接用于交付回复的
 `package-delivery-report.md`。
-
-本机明确需要生成时，也可以在干净且已提交的目标 Tree 上执行：
-
-```bash
-npm run package:developer
-```
 
 产物位于 `output/developer-preview/`。GitHub artifact 保留 7 天。
 
@@ -87,16 +107,17 @@ npm run package:developer
 2. 构建最新 Electron renderer。
 3. 只生成一个对应架构的 DMG，不生成 updater ZIP、blockmap 或发布元数据。
 4. 校验 `app.asar` 文件闭包、源文件、Bridge、Schema、法律资源、测试应用名、测试版本、独立 Bundle ID、架构、DMG 完整性和只读挂载内容，并确认没有私有 Codex/App Server 资源或预埋 native Codex。
-5. 要求 ad-hoc 签名，不读取 Developer ID、Apple 公证或发布凭据。
-6. 使用隔离 userData 启动真实 `.app`，确认首个窗口、版本、Bridge、Workbench 就绪状态和正常退出。
-7. 写入 `developer-preview.json`，包括 DMG SHA-256，并固定：
+5. 要求稳定的 Developer ID Application 签名；不读取 Apple 公证、发布或遥测凭据。签名失败直接停止，不生成可安装的 ad-hoc 替代包。
+6. 关闭 Preview 的自动更新检查、下载和安装；新包继续手动安装。
+7. 使用上述新根目录启动真实 `.app`，确认首个窗口、版本、Bridge、Workbench 就绪状态和正常退出。
+8. 写入 `developer-preview.json`，包括 DMG SHA-256，并固定：
    - `kind: developer-preview`
    - `releaseEligible: false`
    - `notarized: false`
-8. 在所有校验通过后查询 GitHub，生成安装包内容报告：绑定 DMG Hash、
+9. 在所有校验通过后查询 GitHub，生成安装包内容报告：绑定 DMG Hash、
    `v0.9.5..HEAD` 一类的源码范围、提交/文件统计，逐个列出关联 PR 的当前
    状态和一句话摘要，并显式列出没有 PR 的直接提交。
-9. 对照打包前 PR 清单，确认所有选中项已进入 Tree，并在交付中列出
+10. 对照打包前 PR 清单，确认所有选中项已进入 Tree，并在交付中列出
    所有明确排除或被替代的 PR 及理由。
 
 它不会运行完整 Node、Browser、Electron 或 AI 发布矩阵，不会访问真实用户文档，不会创建 tag、GitHub Release 或更新器资产，也不会上传到正式发布通道。
@@ -108,9 +129,12 @@ npm run package:developer
 1. 对照 `developer-preview.json` 确认测试版本、正式基线、测试序号、架构、commit 与 DMG SHA-256。
 2. 对照 `package-delivery-report.md` 确认内容范围、所有关联 PR、PR 当前
    状态/检查结果、每个 PR 的一句话修改摘要，以及未关联 PR 的直接提交。
-3. 安装并打开应用。因为包使用 ad-hoc 签名且未公证，macOS 可能要求在 Finder 中按住 Control 点击应用并选择“打开”。
-4. 使用真实文档的副本打开应用，确认本次最关键的一到两个能力能正常运行。
-5. 记录通过或明确的失败现象。
+3. 安装并打开应用。Developer ID 签名未公证时，macOS 仍可能显示首次打开确认；按系统提示确认即可。
+4. 确认首次启动没有旧项目、旧设置或旧连接；新建项目、编辑、保存、重启后数据仍在上述 Preview 目录。
+5. 使用真实文档的副本打开应用，确认本次最关键的一到两个能力能正常运行。
+6. 记录通过或明确的失败现象。
+
+如果保存的连接凭证无法读取，应用保留凭证文件、不循环请求钥匙串，也不阻止本地编辑；界面只提示“无法读取已保存的连接凭证。你仍可编辑项目。”并提供“重新连接”。没有凭证文件时不会为了展示状态主动解密。API Key 若选择记住，仍按现有 Electron `safeStorage` 方式写入 Preview 自己的加密凭证文件，不会以明文写入安装包。
 
 ## 安装包交付回复
 

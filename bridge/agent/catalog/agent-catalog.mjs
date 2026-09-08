@@ -22,11 +22,24 @@ export const INSTALL_STATES = Object.freeze(["idle", "installing", "failed", "ca
 
 export function defaultAgentsRoot(environment = process.env) {
   const configured = String(environment.HTML_AI_AGENTS_ROOT || "").trim();
-  if (configured) return path.resolve(configured);
-  if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "PageRoot", "agents");
+  if (configured) {
+    if (!path.isAbsolute(configured)) {
+      const error = new Error("HTML_AI_AGENTS_ROOT must be an absolute path.");
+      error.code = "RUNTIME_PATH_REQUIRED";
+      throw error;
+    }
+    return path.resolve(configured);
   }
-  return path.join(os.homedir(), ".pageroot", "agents");
+  const channel = String(environment.HTML_AI_RUNTIME_CHANNEL || "").trim().toLowerCase();
+  if (channel === "stable" || channel === "preview") {
+    const error = new Error(`HTML_AI_AGENTS_ROOT is required for runtime channel ${channel}.`);
+    error.code = "RUNTIME_PATH_REQUIRED";
+    throw error;
+  }
+  // Source/test callers that construct a catalog without the desktop launcher
+  // still get an isolated disposable root. Production channels must always be
+  // wired explicitly by Main and never fall back to the user's formal data.
+  return path.join(os.tmpdir(), "pageroot-agent-runtime", channel || "test");
 }
 
 function publicInstallState(snapshot) {
