@@ -34,8 +34,8 @@ export type BoundAgentSetupPanelProps = Readonly<{
   onRetryPersistCredential?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onDisconnectApiKey?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onOpenVendorApiKeyPage?(vendorId: string): Promise<AgentActionOutcome>;
-  onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
-  onSelectAgentReasoning(reasoning: string, expectedSelection: AgentSelection): AgentSelection | null;
+  onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null | Promise<AgentSelection | null>;
+  onSelectAgentReasoning(reasoning: string, expectedSelection: AgentSelection): AgentSelection | null | Promise<AgentSelection | null>;
 }>;
 
 export function BoundAgentSetupPanel({
@@ -69,6 +69,7 @@ export function BoundAgentSetupPanel({
     <AgentProviderCard
       key={`${card.selection.providerId}:${card.selection.runtimeId}`}
       availability={card.availability}
+      diagnostic={card.diagnostic}
       connection={card.connection}
       models={card.models}
       selectedModelId={card.selection.resolvedModelId}
@@ -117,7 +118,7 @@ export function BoundAgentSetupPanel({
         };
         const checked = await onCheckSelection(candidateSelection);
         if (!checked || checked.status !== "succeeded") return checked;
-        const committed = onSelectAgentModel(modelId, card.selection);
+        const committed = await onSelectAgentModel(modelId, card.selection);
         return committed
           ? { status: "succeeded" }
           : { status: "rejected", reason: "模型选择已经变化，请重新选择。" };
@@ -132,7 +133,7 @@ export function BoundAgentSetupPanel({
         } as AgentSelection;
         const checked = await onCheckSelection(candidateSelection);
         if (!checked || checked.status !== "succeeded") return checked;
-        const committed = onSelectAgentReasoning(reasoning, card.selection);
+        const committed = await onSelectAgentReasoning(reasoning, card.selection);
         return committed
           ? { status: "succeeded" }
           : { status: "rejected", reason: "思考深度已经变化，请重新选择。" };

@@ -401,21 +401,21 @@
   margin-bottom: 10px;
 }
 
+.settings-agent-default-summary { flex: 1; color: #6f6c78; font-size: 13px; }
+
 .settings-agent-service-list {
   display: grid;
   gap: 8px;
 }
 
 .settings-agent-service {
-  overflow: hidden;
   border: 1px solid #e2e1e8;
   border-radius: 12px;
   background: #fff;
 }
 
 .settings-agent-service-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  display: flex;
   align-items: center;
   gap: 12px;
   min-height: 52px;
@@ -423,6 +423,7 @@
 }
 
 .settings-agent-service-main {
+  flex: 1;
   min-width: 0;
   display: grid;
   justify-items: start;
@@ -443,8 +444,15 @@
 
 .settings-agent-service-main span {
   color: #6a6774;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 16px;
+}
+
+.settings-agent-default-badge {
+  margin-left: 8px;
+  color: #686373;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .settings-agent-more {
@@ -565,71 +573,6 @@
   border-bottom: 0;
 }
 
-.settings-agent-rows .qoder-card-summary {
-  min-height: 62px;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 0 18px;
-}
-
-.settings-agent-rows .qoder-card-brand,
-.settings-agent-rows .qoder-card-brand img {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-}
-
-.settings-agent-rows .qoder-card-copy {
-  display: grid;
-  gap: 3px;
-}
-
-.settings-agent-rows .qoder-card-copy strong {
-  color: #34323b;
-  font-size: 13px;
-  font-weight: 550;
-}
-
-.settings-agent-rows .qoder-card-copy small {
-  overflow: hidden;
-  color: #85838e;
-  font-size: 11px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-agent-rows .qoder-card-control {
-  width: auto;
-  min-width: 140px;
-  max-width: 220px;
-  min-height: 34px;
-  display: flex;
-  flex-wrap: wrap;
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.settings-agent-rows .qoder-card-status,
-.settings-agent-rows .qoder-card-error {
-  width: auto;
-}
-
-.settings-agent-rows .qoder-card-control > button {
-  width: auto;
-  min-width: 74px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 8px;
-  font-size: 10px;
-}
-
-.settings-agent-rows .qoder-card-apikey {
-  padding: 0 18px 14px;
-}
-
 .settings-empty-state {
   margin: 0;
   padding: 20px;
@@ -717,18 +660,18 @@
 
 .qoder-card-summary {
   width: 100%;
-  min-height: 74px;
+  min-height: 56px;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 140px;
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
-  gap: 13px;
-  padding: 0 16px;
+  gap: 8px;
+  padding: 12px 16px;
   text-align: left;
 }
 
 .qoder-card-brand {
-  width: 44px;
-  height: 44px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -738,8 +681,8 @@
 }
 
 .qoder-card-brand img {
-  width: 44px;
-  height: 44px;
+  width: 28px;
+  height: 28px;
   object-fit: cover;
   border-radius: 12px;
 }
@@ -760,7 +703,7 @@
 
 .qoder-card-copy strong {
   color: #2c2d35;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 740;
   line-height: 1.25;
 }
@@ -768,33 +711,30 @@
 .qoder-card-copy small {
   display: block;
   margin-top: 4px;
-  overflow: hidden;
-  color: #85838e;
-  font-size: 11px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: #6f6c78;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: normal;
 }
 
 .qoder-card-control {
-  width: 140px;
-  min-height: 46px;
+  grid-column: 1 / -1;
+  width: 100%;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .qoder-card-status {
-  width: 140px;
-  height: 12px;
+  flex: 1 0 100%;
+  min-height: 20px;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 5px;
   color: #807d8c;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 620;
   line-height: 1;
   white-space: nowrap;
@@ -842,19 +782,18 @@
 }
 
 .qoder-card-error {
-  width: 140px;
-  overflow: hidden;
+  width: 100%;
   color: #95534d;
-  font-size: 9px;
-  line-height: 1.3;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.qoder-card-control > button {
-  width: 140px;
-  height: 30px;
+.agent-control-button {
+  width: auto;
+  min-height: 34px;
   flex: none;
   overflow: hidden;
   padding: 0 10px;
@@ -862,25 +801,35 @@
   border-radius: 8px;
   background: var(--indigo);
   color: #fff;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 680;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.qoder-card-control > button:hover:not(:disabled) {
+.agent-control-button:hover:not(:disabled) {
   background: var(--indigo-deep);
 }
 
-.qoder-card-control > button:disabled {
+.agent-control-button:disabled {
   opacity: .58;
   cursor: wait;
 }
 
-.qoder-card-control > button:focus-visible {
+.agent-control-button:focus-visible {
   outline: 2px solid rgb(90 85 223 / 35%);
   outline-offset: 2px;
+}
+
+.agent-control-secondary {
+  border: 1px solid #e3e0eb;
+  background: #fff;
+  color: #514d5c;
+}
+
+.agent-control-secondary:hover:not(:disabled) {
+  background: #f4f3f7;
 }
 
 .qoder-card-control > button[data-kind="api-key"] {
@@ -905,44 +854,64 @@
 }
 
 .qoder-card-connection,
-.qoder-card-token-note {
+.qoder-card-token-note,
+.qoder-card-credential-summary {
   margin: 0;
-  padding: 0 16px 10px 60px;
+  padding: 0 16px 12px;
   overflow-wrap: anywhere;
   color: #6f6c78;
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
 .qoder-card-token-note {
   padding-top: 0;
-  color: #918e99;
+  color: #6f6c78;
 }
+
+.qoder-card-credential-summary {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+:is(.pageroot-availability-card, .qoder-availability-card, .codex-availability-card)[data-surface="settings"] { padding-top: 12px; }
+
+[data-surface="delivery"] .qoder-card-credential-summary {
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+[data-surface="delivery"] .qoder-card-credential-summary button { grid-column: 2; justify-self: start; }
 
 .qoder-card-model-choice {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 240px);
+  grid-template-columns: 72px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  padding: 0 16px 12px 60px;
+  padding: 0 16px 12px;
   color: #6f6c78;
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .qoder-card-model-choice select {
   min-width: 0;
-  height: 30px;
+  height: 34px;
   padding: 0 8px;
   border: 1px solid #e3e0eb;
   border-radius: 8px;
   background: #fff;
   color: #2b2936;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .qoder-card-model-choice select:focus-visible {
   outline: 2px solid rgb(90 85 223 / 35%);
   outline-offset: 1px;
+}
+
+.qoder-card-model-choice > .qoder-card-error {
+  grid-column: 2;
 }
 
 .qoder-card-apikey {
@@ -1010,6 +979,15 @@
   font-size: 12px;
 }
 
+.qoder-card-apikey-remember input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--indigo);
+}
+
 .qoder-card-apikey-vendor {
   height: 30px;
   padding: 0 8px;
@@ -1025,10 +1003,10 @@
   outline-offset: 1px;
 }
 
-.qoder-card-apikey input {
+.qoder-card-apikey input:not([type="checkbox"]) {
   min-width: 0;
   flex: 1;
-  height: 30px;
+  height: 34px;
   padding: 0 10px;
   border: 1px solid #e3e0eb;
   border-radius: 8px;
@@ -1042,26 +1020,20 @@
   outline-offset: 1px;
 }
 
-.qoder-card-apikey button {
-  height: 30px;
-  flex: none;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--indigo);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 680;
-  cursor: pointer;
+.qoder-card-apikey-note { font-size: 12px; }
+
+[data-surface="settings"] .qoder-card-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  padding: 12px 16px;
 }
 
-.qoder-card-apikey button:disabled {
-  opacity: .58;
-  cursor: wait;
-}
+[data-surface="settings"] .qoder-card-control:empty { display: none; }
 
-.settings-agent-rows .qoder-card-apikey {
-  padding: 0 18px 14px;
+[data-surface="settings"] > .agent-control-button {
+  margin: 0 16px 12px;
 }
 
 @media (max-width: 640px) {
@@ -1088,19 +1060,9 @@
     align-items: flex-start;
   }
 
-  .settings-agent-rows .qoder-card-summary {
-    grid-template-columns: 28px minmax(0, 1fr);
-    padding-block: 12px;
-  }
-
-  .settings-agent-rows .qoder-card-control {
-    grid-column: 2;
-    align-items: flex-start;
-  }
-
   .qoder-card-model-choice {
-    grid-template-columns: 1fr;
-    padding-left: 57px;
+    grid-template-columns: 72px minmax(0, 1fr);
+    padding-left: 16px;
   }
 
   .settings-preference-error {

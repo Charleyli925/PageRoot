@@ -18,7 +18,7 @@ import { sha256 } from "../../lifecycle-core.mjs";
 import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
 import { terminateManagedProcess } from "../hosts/execution-host.mjs";
 import { acpProcessEnvironment } from "../runtimes/acp-protocol.mjs";
-import { openVerifiedAgentExecutable } from "../runtimes/acp-verified-javascript.mjs";
+import { openVerifiedAgentExecutable, prepareVerifiedJavaScriptExecution } from "../runtimes/acp-verified-javascript.mjs";
 import {
   AgentProviderError,
   agentProviderError,
@@ -650,10 +650,11 @@ async function readNdjsonResponse(child, requestId, timeoutMs) {
       cleanup();
       reject(cause);
     };
-    const onClose = () => {
+    const onClose = (exitCode) => {
       cleanup();
       reject(Object.assign(new Error("Codex ACP probe exited before the response completed."), {
         code: "CODEX_PREFLIGHT_FAILED",
+        exitCode,
       }));
     };
     child.stdout?.setEncoding("utf8");
@@ -663,30 +664,43 @@ async function readNdjsonResponse(child, requestId, timeoutMs) {
   });
 }
 
-export async function probeCodexAcp(command, environment = process.env) {
-  const processGroup = process.platform !== "win32";
-  const envOverrides = launchEnvironment(command);
-  const childEnvironment = {
-    ...acpProcessEnvironment(envOverrides, environment),
-  };
-  const executableHandle = command.identity
-    ? await openVerifiedAgentExecutable(command.command, {
-      path: command.command,
-      identity: command.identity,
-    })
+function usesJavaScriptRuntime(command) {
+  return Boolean(command.identity && /\.[cm]?js$/u.test(command.command));
+}
+
+async function spawnCodexAdapter(command, environment) {
+  if (usesJavaScriptRuntime(command)) {
+    const prepared = await prepareVerifiedJavaScriptExecution({
+      command: command.command,
+      expectedExecutable: { path: command.command, identity: command.identity },
+      environment: launchEnvironment(command),
+      baseEnvironment: environment,
+    });
+    try {
+      return await prepared.spawn({ args: [], cwd: os.tmpdir(), detached: process.platform !== "win32" });
+    } finally {
+      await prepared.close();
+    }
+  }
+  const handle = command.identity
+    ? await openVerifiedAgentExecutable(command.command, { path: command.command, identity: command.identity })
     : null;
-  let child;
   try {
-    child = spawn(command.command, [], {
+    return spawn(command.command, [], {
       cwd: os.tmpdir(),
-      env: childEnvironment,
-      detached: processGroup,
+      env: acpProcessEnvironment(launchEnvironment(command), environment),
+      detached: process.platform !== "win32",
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
   } finally {
-    await executableHandle?.close().catch(() => {});
+    await handle?.close().catch(() => {});
   }
+}
+
+export async function probeCodexAcp(command, environment = process.env) {
+  const processGroup = process.platform !== "win32";
+  const child = await spawnCodexAdapter(command, environment);
   let stderr = "";
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk) => {
@@ -785,28 +799,7 @@ async function initializeCodexAcpForDiagnosis(command, environment, {
   authenticationVerified = false,
 } = {}) {
   const processGroup = process.platform !== "win32";
-  const envOverrides = launchEnvironment(command);
-  const childEnvironment = {
-    ...acpProcessEnvironment(envOverrides, environment),
-  };
-  const executableHandle = command.identity
-    ? await openVerifiedAgentExecutable(command.command, {
-      path: command.command,
-      identity: command.identity,
-    })
-    : null;
-  let child;
-  try {
-    child = spawn(command.command, [], {
-      cwd: os.tmpdir(),
-      env: childEnvironment,
-      detached: processGroup,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-  } finally {
-    await executableHandle?.close().catch(() => {});
-  }
+  const child = await spawnCodexAdapter(command, environment);
   let stderr = "";
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk) => {
@@ -851,7 +844,9 @@ async function initializeCodexAcpForDiagnosis(command, environment, {
     });
   } catch (cause) {
     if (cause instanceof AgentProviderError) throw cause;
-    fail(classifyCodexAcpFailure({ ...cause, stderr }), "Codex ACP diagnosis failed.", { status: 503 });
+    const error = agentProviderError(classifyCodexAcpFailure({ ...cause, stderr }), "Codex ACP diagnosis failed.", { status: 503 });
+    error.exitCode = cause?.exitCode;
+    throw error;
   } finally {
     child.stdin?.end();
     if (!(await terminateManagedProcess(child, { processGroup }))) {
@@ -860,7 +855,7 @@ async function initializeCodexAcpForDiagnosis(command, environment, {
   }
 }
 
-export async function diagnoseCodexAcp(command, environment = process.env) {
+export async function checkCodexAuthentication(command, environment = process.env) {
   if (typeof command?.nativeCommand === "string" && command.nativeCommand) {
     const executableHandle = command.nativeIdentity
       ? await openVerifiedAgentExecutable(command.nativeCommand, {
@@ -883,11 +878,6 @@ export async function diagnoseCodexAcp(command, environment = process.env) {
       }
       if (!AUTH_SUCCESS_PATTERN.test(output)) {
         fail("CODEX_AUTH_UNVERIFIED", "Codex 登录状态无法确认。", { status: 503 });
-      }
-      if (typeof command?.command === "string" && command.command) {
-        return initializeCodexAcpForDiagnosis(command, environment, {
-          authenticationVerified: true,
-        });
       }
       return Object.freeze({
         readiness: "ready",
@@ -915,7 +905,33 @@ export async function diagnoseCodexAcp(command, environment = process.env) {
       await executableHandle?.close().catch(() => {});
     }
   }
-  return initializeCodexAcpForDiagnosis(command, environment);
+  fail("CODEX_AUTH_UNVERIFIED", "Codex 登录状态尚未确认。", { status: 503 });
+}
+
+export async function diagnoseCodexAcp(command, environment = process.env) {
+  const authenticationVerified = Boolean(command?.nativeCommand);
+  if (authenticationVerified) await checkCodexAuthentication(command, environment);
+  try {
+    if (!command?.command) fail("CODEX_COMMAND_NOT_FOUND", "Codex 连接组件未安装。", { status: 503 });
+    return await initializeCodexAcpForDiagnosis(command, environment, { authenticationVerified });
+  } catch (cause) {
+    if (cause?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED") throw cause;
+    const code = cause instanceof AgentProviderError ? cause.code : classifyCodexAcpFailure(cause);
+    return Object.freeze({
+      readiness: "connection-failed",
+      cause: code,
+      facts: Object.freeze({
+        installation: "ready",
+        authentication: authenticationVerified ? "ready" : "unknown",
+        protocol: "failed",
+        service: "unknown",
+      }),
+      // Internal, bounded diagnosis; never include stderr, paths or credential data.
+      details: Object.freeze({ stage: "protocol", code, version: command.version || null,
+        exitCode: Number.isInteger(cause?.exitCode) ? cause.exitCode : null,
+        reason: codexAcpPreflightFailure(code) }),
+    });
+  }
 }
 
 function resolvedSelection(selection, { evidence } = {}) {
@@ -963,7 +979,7 @@ export async function startCodexLogin(command, {
   onLoginUrl,
   timeoutMs,
   loginRunner = runOfficialAgentLogin,
-  inspectRunner = diagnoseCodexAcp,
+  inspectRunner = checkCodexAuthentication,
 } = {}) {
   const auth = describeCodexAuthSource(command, environment);
   if (auth.authSource !== "environment-token") {
@@ -1016,6 +1032,7 @@ export async function startCodexLogout(command, {
 export function createCodexAcpProvider({
   commandResolver = resolveCodexAcpCommand,
   diagnoseRunner = diagnoseCodexAcp,
+  authenticationRunner = checkCodexAuthentication,
   preflightRunner = probeCodexAcp,
   loginRunner = startCodexLogin,
   policyLoader = loadExecutionPolicy,
@@ -1051,7 +1068,7 @@ export function createCodexAcpProvider({
     preflight: (installation, { environment }) => preflightRunner(installation, environment),
     startLogin: (installation, options) => loginRunner(installation, {
       ...options,
-      inspectRunner: diagnoseRunner,
+      inspectRunner: authenticationRunner,
     }),
     startLogout: (installation, options) => startCodexLogout(installation, options),
     assertInstallationUnchanged: assertCodexAcpInstallationUnchanged,
@@ -1095,7 +1112,7 @@ export function createCodexAcpProvider({
         prompt,
         environment: launchEnvironment(installation),
         baseEnvironment,
-        useVerifiedJavaScriptRuntime: false,
+        useVerifiedJavaScriptRuntime: usesJavaScriptRuntime(installation),
         cancellationSignal,
         expectedAgentName: installation.source === "e2e-override"
           ? /codex|pageroot-e2e/iu

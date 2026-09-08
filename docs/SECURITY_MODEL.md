@@ -354,6 +354,13 @@ hostile-process isolation. Codex runs with the signed-in user's OS identity,
 may read local files that identity can access, and uses the Codex service for
 the user-authorized task; the packaged privacy notices disclose those facts.
 
+Codex JavaScript adapters use the same verified-descriptor host JavaScript
+runtime for diagnosis, formal preflight and execution. A GUI launch does not
+depend on `node` being present in the shell PATH. Executable identity and
+closure checks remain required; native login/status still use the verified
+native executable. Native authentication success is distinct from adapter
+initialization success and never authorizes sending without formal preflight.
+
 Discussion is not an authorized Agent surface. The Bridge has no discussion
 routes, policy, Host, snapshot or session owner, and provider capabilities and
 preflight tickets reject any non-execution purpose. Historical Conversation
@@ -561,7 +568,10 @@ and atomically replaced. Schema v1 is migrated without dropping the guide or
 built-in welcome identity; schema v2 adds only the allowlisted `workspace`
 fields `rememberPanelWidths`, `sidebarWidth`, `inspectorWidth`, `motion`,
 `restoreTabsOnLaunch`, `defaultAgentProviderId` and
-`disabledAgentProviderIds`. Main strictly validates
+`disabledAgentProviderIds`, plus `agentConfigurations` (only the three known
+providers, each with a bounded provider-namespaced `modelId` and requested
+`reasoning`, or null). No API Key, endpoint or installation path is accepted
+in that map. Main strictly validates
 field types, provider identifiers and the 200–420px / 280–520px width ranges;
 damaged values are safely normalized on read and unsafe patches are rejected.
 The renderer receives only trusted `get`/`record` for guide actions or a

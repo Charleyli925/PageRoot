@@ -6,8 +6,10 @@ import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
 
 import type {
   AgentProviderAvailabilitySnapshot,
+  AgentDiagnosticSnapshot,
   AgentProviderGuidanceKind,
 } from "../domain/agent-provider-state.js";
+import { agentSetupRecovery } from "../domain/agent-provider-state.js";
 
 type AgentActionOutcome = Readonly<{
   status: string;
@@ -50,6 +52,7 @@ export type AgentProviderCardPresentation = Readonly<{
 
 export type AgentProviderCardProps = {
   availability: AgentProviderAvailabilitySnapshot;
+  diagnostic?: AgentDiagnosticSnapshot | null;
   installState?: "idle" | "installing" | "failed" | "cancelling";
   activeOperation?: Readonly<{
     kind: string;
@@ -146,6 +149,7 @@ function actionsForAvailability(
 
 export default function AgentProviderCard({
   availability,
+  diagnostic = null,
   installState = "idle",
   activeOperation = null,
   loginUrlPresent = false,
@@ -179,7 +183,7 @@ export default function AgentProviderCard({
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [fieldError, setFieldError] = useState<ApiKeyField | "">("");
+  const [fieldError, setFieldError] = useState<ApiKeyField | "model" | "reasoning" | "">("");
   const [apiKeyOpen, setApiKeyOpen] = useState(initialApiKeyOpen);
   const [apiKey, setApiKey] = useState("");
   const [rememberKey, setRememberKey] = useState(false);
@@ -196,7 +200,8 @@ export default function AgentProviderCard({
     : "";
   const formError = persistReason || actionError;
   const formFieldError = persistFailed ? "form" : fieldError;
-  const presentation = provider.availability(availability);
+  const recovery = provider.credentialKind === "api-token" ? null : agentSetupRecovery(diagnostic, availability);
+  const presentation = recovery || provider.availability(availability);
   const installing = installState === "installing" || installPending;
   const stopUnconfirmed = activeOperation?.state === "stop-unconfirmed";
   const loggingIn = activeOperation?.kind === "login"
@@ -239,7 +244,10 @@ export default function AgentProviderCard({
           }]
           : []),
       ]
-      : actionsForAvailability(availability, provider).filter((action) => !(
+      : (recovery ? [
+        { kind: recovery.action, label: recovery.actionLabel, copiedLabel: recovery.actionLabel },
+        ...(recovery.allowLogin ? [{ kind: "login" as const, label: "重新登录", copiedLabel: "重新登录" }] : []),
+      ] : actionsForAvailability(availability, provider)).filter((action) => !(
         action.kind === "api-key"
         && (
           tokenFormOpen
@@ -260,6 +268,7 @@ export default function AgentProviderCard({
 
   const runAction = async (kind: CardActionKind) => {
     if (disabled) return;
+    setFieldError("");
     if (kind === "cancel-install") {
       if (cancelPending || cancelRequested || typeof onCancelInstall !== "function") return;
       setCancelRequested(true);
@@ -331,11 +340,11 @@ export default function AgentProviderCard({
       const succeeded = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
       if (!succeeded) {
         setActionError(
-          kind === "recheck"
+          outcome?.reason || (kind === "recheck"
               ? "检查没有完成，请重试。"
               : kind === "login"
                 ? "登录没有完成，请重试。"
-                : "指令暂时无法复制，请重试。",
+                : "指令暂时无法复制，请重试。"),
         );
       }
     } catch {
@@ -431,6 +440,7 @@ export default function AgentProviderCard({
   const disconnectApiKey = async () => {
     if (pendingAction || disabled || typeof onDisconnectApiKey !== "function") return;
     setPendingAction("api-key");
+    setFieldError("");
     setActionError("");
     try {
       const outcome = await onDisconnectApiKey();
@@ -451,6 +461,7 @@ export default function AgentProviderCard({
   const selectModel = async (nextModelId: string) => {
     if (pendingAction || disabled || !nextModelId || typeof onSelectModel !== "function") return;
     setPendingAction("model");
+    setFieldError("model");
     setActionError("");
     try {
       const outcome = await onSelectModel(nextModelId);
@@ -467,6 +478,7 @@ export default function AgentProviderCard({
   const selectReasoning = async (nextReasoning: string) => {
     if (pendingAction || disabled || !nextReasoning || typeof onSelectReasoning !== "function") return;
     setPendingAction("reasoning");
+    setFieldError("reasoning");
     setActionError("");
     try {
       const outcome = await onSelectReasoning(nextReasoning);
@@ -488,7 +500,7 @@ export default function AgentProviderCard({
       data-tone={statusPresentation.tone}
       aria-busy={checking || installing || cancelling || Boolean(pendingAction)}
     >
-      <div className="qoder-card-summary">
+      {surface !== "settings" || actions.length > 0 || statusPresentation.detail || (actionError && !fieldError) || loginOpenError ? <div className="qoder-card-summary">
         {surface === "settings" ? null : (
           <span
             className="qoder-card-brand"
@@ -505,20 +517,20 @@ export default function AgentProviderCard({
             )}
           </span>
         )}
-        <span className="qoder-card-copy">
+        {surface !== "settings" || statusPresentation.detail ? <span className="qoder-card-copy">
           {surface === "settings" ? null : <strong>{provider.displayName}</strong>}
-          {presentation.detail ? <small>{presentation.detail}</small> : null}
-        </span>
+          {statusPresentation.detail ? <small>{statusPresentation.detail}</small> : null}
+        </span> : null}
         <span className="qoder-card-control">
-          <span
+          {surface !== "settings" ? <span
             className="qoder-card-status"
             data-tone={statusPresentation.tone}
             aria-live="polite"
             aria-atomic="true"
           >
             <i aria-hidden="true" />
-            {statusPresentation.statusLabel}
-          </span>
+            {statusPresentation.statusLabel.replace(`${provider.displayName} · `, "")}
+          </span> : null}
           {actions.map((action, index) => {
             const copied = action.kind === "login" || action.kind === "install"
               ? availability.guidanceCopied === action.kind
@@ -538,6 +550,7 @@ export default function AgentProviderCard({
                 key={action.kind}
                 ref={index === 0 ? actionButtonRef : undefined}
                 type="button"
+                className="agent-control-button"
                 data-kind={action.kind}
                 {...(index === 0 ? primaryActionData : {})}
                 disabled={actionDisabled}
@@ -568,47 +581,33 @@ export default function AgentProviderCard({
             <button
               type="button"
               data-kind="disconnect"
+              className="agent-control-button agent-control-secondary"
               disabled={Boolean(pendingAction) || disabled}
               onClick={() => void disconnectApiKey()}
             >
               {pendingAction === "api-key" && !apiKeyOpen ? "正在断开…" : "断开连接"}
             </button>
           ) : null}
-          {actionError && !tokenFormOpen ? (
+          {actionError && !tokenFormOpen && !fieldError ? (
             <span className="qoder-card-error" role="alert">{actionError}</span>
           ) : loginOpenError && loggingIn ? (
             <span className="qoder-card-error" role="alert">{loginOpenError}</span>
           ) : null}
         </span>
-      </div>
-      {connection ? (
+      </div> : null}
+      {connection?.vendorId === "custom" && surface !== "settings" ? (
         <p className="qoder-card-connection" data-testid="settings-agent-current-connection">
           当前连接：{connection.vendorDisplayName || connection.vendorId}
           {currentModel ? ` · ${currentModel.displayName}` : ""}
           {connection.vendorId === "custom" && connection.baseUrl ? ` · ${connection.baseUrl}` : ""}
         </p>
       ) : null}
-          {availability.status === "ready"
-        && provider.credentialKind === "api-token"
-        && provider.supportsApiKey
-        && onConnectApiKey ? (
-        <button
-          type="button"
-          data-kind="api-key"
-          disabled={Boolean(pendingAction) || disabled}
-          onClick={() => {
-            setApiKeyOpen((open) => !open);
-            setActionError("");
-          }}
-        >
-          {apiKeyOpen ? "收起配置" : (provider.actions.apiKey?.label || "更换 API Key")}
-        </button>
-      ) : null}
           {availability.status === "ready" && models.length > 1 && onSelectModel ? (
             <label className="qoder-card-model-choice">
               <span>当前模型</span>
           <select
             aria-label="当前模型"
+            aria-invalid={fieldError === "model" && Boolean(actionError) || undefined}
             value={selectedModelId || models[0]?.id || ""}
                     disabled={Boolean(pendingAction) || disabled}
             onChange={(event) => void selectModel(event.target.value)}
@@ -617,15 +616,16 @@ export default function AgentProviderCard({
               <option key={model.id} value={model.id}>{model.displayName || model.id}</option>
             ))}
           </select>
+          {fieldError === "model" && actionError ? <span className="qoder-card-error" role="alert">{actionError}</span> : null}
         </label>
       ) : null}
       {(currentModel?.reasoningChoices?.length || 0) > 1 && onSelectReasoning ? (
-        <details className="qoder-card-advanced">
-          <summary>高级设置</summary>
+        <div className="qoder-card-advanced">
           <label className="qoder-card-model-choice">
             <span>思考深度</span>
             <select
               aria-label="思考深度"
+              aria-invalid={fieldError === "reasoning" && Boolean(actionError) || undefined}
               value={selectedReasoningId || "auto"}
               disabled={Boolean(pendingAction) || disabled}
               onChange={(event) => void selectReasoning(event.target.value)}
@@ -634,8 +634,25 @@ export default function AgentProviderCard({
                 <option key={choice.id} value={choice.id}>{choice.label}</option>
               ))}
             </select>
+            {fieldError === "reasoning" && actionError ? <span className="qoder-card-error" role="alert">{actionError}</span> : null}
           </label>
-        </details>
+        </div>
+      ) : null}
+      {provider.credentialKind === "api-token" && connection ? (
+        <div className="qoder-card-credential-summary" data-testid="agent-credential-summary">
+          <span>API Key</span>
+          <span>{credentialPersist?.status === "saved" ? "已在此 Mac 保存"
+            : credentialPersist?.status === "failed" ? "保存失败，本次仍可使用"
+              : credentialPersist?.status === "pending" ? "正在保存…"
+                : credentialPersist?.status === "skipped" ? "仅本次使用" : "保存状态未确认"}</span>
+          {provider.supportsApiKey && onConnectApiKey ? (
+            <button className="agent-control-button agent-control-secondary" type="button" data-kind="api-key"
+              disabled={Boolean(pendingAction) || disabled}
+              onClick={() => { setApiKeyOpen((open) => !open); setActionError(""); }}>
+              {apiKeyOpen ? "收起配置" : "更换 API Key"}
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {tokenFormOpen ? (
         <form
@@ -669,7 +686,7 @@ export default function AgentProviderCard({
             {onOpenVendorApiKeyPage && selectedVendor?.id && selectedVendor.id !== "custom" ? (
               <button
                 type="button"
-                className="qoder-card-apikey-get"
+                className="qoder-card-apikey-get agent-control-button agent-control-secondary"
                 disabled={Boolean(pendingAction) || disabled}
                 onClick={() => void openVendorKeyPage()}
               >
@@ -762,6 +779,7 @@ export default function AgentProviderCard({
           <p className="qoder-card-apikey-note">连接验证可能产生少量 API 费用。</p>
           <button
             type="submit"
+            className="agent-control-button"
             disabled={Boolean(pendingAction) || disabled || !apiKey.trim()}
           >
             {pendingAction === "api-key" ? "正在连接…" : "连接"}
@@ -770,6 +788,7 @@ export default function AgentProviderCard({
             <button
               type="button"
               data-kind="cancel-validate"
+              className="agent-control-button agent-control-secondary"
               disabled={cancelPending || disabled}
               onClick={() => void cancelConnectApiKey()}
             >
@@ -783,6 +802,7 @@ export default function AgentProviderCard({
             <button
               type="button"
               data-kind="retry-persist"
+              className="agent-control-button"
               disabled={Boolean(pendingAction) || disabled}
               onClick={() => {
                 void (async () => {
@@ -809,7 +829,7 @@ export default function AgentProviderCard({
       ) : null}
       {provider.credentialKind === "api-token" ? (
         <p className="qoder-card-token-note">
-          {`使用时会将任务内容发送给${selectedVendor?.label || "所选厂商"}，API 费用由${selectedVendor?.label || "厂商"}收取。${rememberKey ? "" : "未勾选记住时仅本次使用。"}`}
+          {`任务内容会发送给${selectedVendor?.label || "所选厂商"}，API 费用由厂商收取。`}
         </p>
       ) : null}
     </section>

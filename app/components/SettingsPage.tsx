@@ -22,7 +22,8 @@ import type {
   AgentProviderGuidanceKind,
   AgentSelection,
 } from "../domain/agent-provider-state.js";
-import { BoundAgentSetupPanel } from "./AgentSetupPanel";
+import { BoundAgentSetupPanel, type BoundAgentSetupPanelProps } from "./AgentSetupPanel";
+import { agentSetupRecovery, agentSetupOperationLabel } from "../domain/agent-provider-state.js";
 import type { AgentProviderCardData } from "./agent-provider-card-types";
 import { agentServiceLabel } from "../application/workspace-agent-preference.js";
 import type { ApplicationUpdateResult } from "../workbench/types";
@@ -65,8 +66,8 @@ export type SettingsPageProps = {
   ) => Promise<boolean>;
   onRetryWorkspacePreferences: () => void;
   onSelectAgent: (selection: AgentSelection) => void;
-  onSelectAgentModel: (modelId: string, expectedSelection: AgentSelection) => AgentSelection | null;
-  onSelectAgentReasoning: (reasoning: string, expectedSelection: AgentSelection) => AgentSelection | null;
+  onSelectAgentModel: BoundAgentSetupPanelProps["onSelectAgentModel"];
+  onSelectAgentReasoning: BoundAgentSetupPanelProps["onSelectAgentReasoning"];
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
   onRequestRestart: () => void;
@@ -335,8 +336,8 @@ function AgentSettings({
   onRemoveRememberedKey?(selection: AgentSelection, options?: Readonly<{ stopRun?: boolean }>): Promise<AgentActionOutcome>;
   onReconnectProvider?(selection: AgentSelection): Promise<AgentActionOutcome>;
   onOpenVendorApiKeyPage?(vendorId: string): Promise<AgentActionOutcome>;
-  onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
-  onSelectAgentReasoning(reasoning: string, expectedSelection: AgentSelection): AgentSelection | null;
+  onSelectAgentModel: BoundAgentSetupPanelProps["onSelectAgentModel"];
+  onSelectAgentReasoning: BoundAgentSetupPanelProps["onSelectAgentReasoning"];
   rememberedKey?: boolean;
   providerAccessImpact?: Readonly<Record<string, Readonly<{
     runningCount: number;
@@ -363,11 +364,9 @@ function AgentSettings({
     : null;
   return (
     <div className="settings-page-sections">
-      <SettingsSection title="连接状态">
-        <p className="settings-agent-default-summary">
-          {`下一轮任务使用 ${currentAgentName || "尚未选择"}。已连接的服务可用“设为默认”更换，浏览或展开不会改变默认。`}
-        </p>
+      <section className="settings-agent-section" aria-label="AI 服务配置">
         <div className="settings-agent-toolbar">
+          <span className="settings-agent-default-summary">默认：{currentAgentName || "尚未选择"}</span>
           <button
             className="settings-secondary-action"
             type="button"
@@ -385,7 +384,8 @@ function AgentSettings({
             const id = cardChoiceId(card);
             const isDefault = id === selectedChoiceId;
             const expanded = selectedCard != null && cardChoiceId(selectedCard) === id;
-            const snapshot = card.presentation.availability(card.availability);
+            const recovery = card.presentation.credentialKind === "api-token" ? null : agentSetupRecovery(card.diagnostic, card.availability);
+            const snapshot = recovery || card.presentation.availability(card.availability);
             const disconnected = card.availability.reason === "disabled"
               || card.availability.status === "unavailable" && card.availability.reason === "disabled";
             const needsConnect = disconnected
@@ -395,8 +395,10 @@ function AgentSettings({
               ? "设为默认"
               : disconnected
                 ? "重新连接"
+              : recovery ? recovery.actionLabel
               : needsConnect
-                ? "连接"
+                ? card.availability.status === "not-installed" ? "安装" : card.presentation.credentialKind === "api-token" ? "连接" : "登录"
+                : card.availability.reason === "initial" ? "检查"
                 : "管理";
             const canRemoveKey = card.selection.providerId === "pageroot"
               && Boolean(onRemoveRememberedKey)
@@ -428,16 +430,15 @@ function AgentSettings({
                     aria-expanded={expanded}
                     onClick={() => setExpandedId(expanded ? null : id)}
                   >
-                    <strong>{settingsServiceName(card.selection.providerId, card.presentation.displayName)}</strong>
+                    <strong>{settingsServiceName(card.selection.providerId, card.presentation.displayName)}{isDefault ? <small className="settings-agent-default-badge">默认</small> : null}</strong>
                     <span>
-                      {disconnected
+                      {agentSetupOperationLabel(card.activeOperation, card.installState) || (disconnected
                         ? "已断开"
-                        : isDefault && snapshot.tone === "ready"
-                          ? `${snapshot.statusLabel} · 默认`
-                          : snapshot.statusLabel}
+                        : card.availability.reason === "initial" ? "未检查"
+                        : `${card.connection?.vendorDisplayName ? `${card.connection.vendorDisplayName} · ` : ""}${snapshot.statusLabel.replace(`${card.presentation.displayName} · `, "")}`)}
                     </span>
                   </button>
-                  <button
+                  {!expanded || primaryLabel === "设为默认" ? <button
                     className="settings-secondary-action"
                     type="button"
                     data-testid={`settings-agent-row-action-${card.selection.providerId}`}
@@ -450,11 +451,14 @@ function AgentSettings({
                       if (primaryLabel === "重新连接") {
                         void onReconnectProvider?.(card.selection);
                       }
+                      if (recovery?.action === "install" || primaryLabel === "安装") void onInstall(card.selection);
+                      else if (recovery?.action === "recheck") void onCheckSelection(card.selection);
+                      else if (primaryLabel === "登录") void onStartLogin(card.selection);
                       setExpandedId(id);
                     }}
                   >
                     {primaryLabel}
-                  </button>
+                  </button> : null}
                   {showMore ? (
                     <details className="settings-agent-more">
                       <summary
@@ -694,7 +698,7 @@ function AgentSettings({
             );
           })}
         </div>
-      </SettingsSection>
+      </section>
     </div>
   );
 }
@@ -962,7 +966,7 @@ export default function SettingsPage({
   const pageDescription = category === "general"
     ? "调整工作台布局与启动习惯。"
     : category === "agent"
-      ? "接通内置 AI、Qoder 或 Codex，并在已连接的服务上设为默认。"
+      ? ""
       : "检查、下载并安装源页的正式版本。";
 
   return (
@@ -978,7 +982,7 @@ export default function SettingsPage({
       <div className="settings-page-inner">
         <header className="settings-page-header">
           <h1 ref={headingRef} tabIndex={-1}>{pageTitle}</h1>
-          <p>{pageDescription}</p>
+          {pageDescription ? <p>{pageDescription}</p> : null}
         </header>
         {workspacePreferencesError ? (
           <div className="settings-preference-error" role="alert">

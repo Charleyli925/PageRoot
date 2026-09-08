@@ -7,6 +7,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { normalizeAgentConfigurations, validAgentConfigurations } from "../shared/agent-configuration-preferences.mjs";
 
 export const UI_PREFERENCES_FILE_NAME = "ui-preferences.json";
 export const UI_PREFERENCES_SCHEMA_VERSION = 2;
@@ -20,6 +21,7 @@ export const WORKSPACE_PREFERENCE_DEFAULTS = Object.freeze({
   motion: "system",
   restoreTabsOnLaunch: true,
   defaultAgentProviderId: "qoder",
+  agentConfigurations: Object.freeze({}),
   disabledAgentProviderIds: Object.freeze([]),
 });
 export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
@@ -140,6 +142,7 @@ export function normalizeWorkspacePreferences(value) {
       : WORKSPACE_PREFERENCE_DEFAULTS.restoreTabsOnLaunch,
     defaultAgentProviderId: normalizedAgentProviderId(source.defaultAgentProviderId),
     disabledAgentProviderIds: normalizedDisabledAgentProviderIds(source.disabledAgentProviderIds),
+    agentConfigurations: normalizeAgentConfigurations(source.agentConfigurations),
   });
 }
 
@@ -154,6 +157,11 @@ export function normalizeWorkspacePatch(value) {
   const normalized = {};
   for (const key of keys) {
     const next = value[key];
+    if (key === "agentConfigurations") {
+      if (!validAgentConfigurations(next)) throw new TypeError("服务配置无效。");
+      normalized[key] = normalizeAgentConfigurations(next);
+      continue;
+    }
     if (key === "rememberPanelWidths" || key === "restoreTabsOnLaunch") {
       if (typeof next !== "boolean") throw new TypeError(`${key} 必须是布尔值。`);
       normalized[key] = next;

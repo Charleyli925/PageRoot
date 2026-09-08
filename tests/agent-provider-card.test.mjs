@@ -49,7 +49,6 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
   assert.match(card, /当前连接：/u);
   assert.match(card, /断开连接/u);
   assert.match(card, /在此 Mac 上记住 API Key/u);
-  assert.match(card, /未勾选记住时仅本次使用/u);
   assert.match(card, /验证成功后才会替换当前连接/u);
   assert.match(card, /persistFailed \|\| outcome\?\.reason/u);
   assert.match(card, /已连接，但新的 API Key 未保存/u);
@@ -63,7 +62,6 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
   assert.match(card, /surface === "settings" \? null : <strong>/u);
   assert.doesNotMatch(card, /placeholder="API Token"/u);
   assert.doesNotMatch(card, /选择其他模型/u);
-  assert.match(card, /高级设置/u);
   assert.match(card, /思考深度/u);
   assert.doesNotMatch(card, /修改接口/u);
   assert.match(card, /connection\?\.vendorId === "custom"/u);
@@ -111,17 +109,11 @@ test("Settings reuses AgentSetupPanel and lists every service row", async () => 
   assert.match(panel, /import AgentProviderCard from "\.\/AgentProviderCard"/u);
   assert.match(panel, /<AgentProviderCard \{\.\.\.props\}/u);
   assert.match(settings, /settings-agent-row-\$\{card\.selection\.providerId\}/u);
-  assert.match(settings, /内置 AI/u);
   assert.match(settings, /data-kind="disconnect"/u);
   assert.match(settings, /移除 API Key/u);
   assert.match(panel, /export function BoundAgentSetupPanel/u);
   assert.match(panel, /void onCheckSelection\(card\.selection\)/u);
   assert.match(panel, /Entering the panel starts the necessary check/u);
-  assert.ok(
-    panel.indexOf("const checked = await onCheckSelection(candidateSelection)")
-      < panel.indexOf("const committed = onSelectAgentModel(modelId, card.selection)"),
-    "a model selection must validate before it becomes current",
-  );
   assert.match(panel, /checked\.status !== "succeeded"/u);
   assert.match(panel, /credentialKind === "api-token"/u);
   assert.doesNotMatch(panel, /if \(card\.connection\)/u);

@@ -84,6 +84,26 @@
 
 Rules:
 
+- `AgentCatalogState` owns one configuration per provider in its existing map;
+  the selected default points to that provider's configuration, not to a second
+  independently editable model/reasoning record. Configuration compare-and-set
+  checks the target provider even when another provider is the default. Late
+  preference hydration cannot replace a provider changed since startup.
+  `workspace.agentConfigurations` persists only provider-namespaced model IDs
+  and requested reasoning through the existing Main preferences port. The
+  configuration action awaits its serialized save receipt; a failure appears
+  beside the field and must not claim persistence. There is no source, Request
+  or Candidate drain obligation: these convenience preferences never veto
+  source close. Submitted Main writes retain its atomic queue; an interrupted
+  unacknowledged renderer action can restore the last acknowledged preference.
+  Default-provider and disabled-provider writes remain separate narrow patches.
+- Codex login completion checks native authentication only. The subsequent
+  initialize-only diagnosis independently records protocol readiness and cannot
+  erase confirmed authentication. Provider diagnosis returns bounded internal
+  stage/code/version/exit-code/reason evidence; the public registry strips it
+  along with commands, paths and stderr. Settings and sidebar derive the same
+  recovery action from the existing public four-fact snapshot. No extra
+  persisted login state or renderer diagnostic log is introduced.
 - A consumer never writes another owner's fields directly.
 - Registry membership is distinct from Desktop Recent. The Repository may return a
   registered row as ready, unavailable or invalid without granting a second

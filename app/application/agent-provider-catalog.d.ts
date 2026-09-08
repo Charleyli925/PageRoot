@@ -146,11 +146,15 @@ export class AgentCatalogState {
     clock?: { now(): number };
     providers?: readonly AgentProviderDescriptor[];
     selected?: AgentSelection | null;
+    preferencesPort?: import("./workspace-preferences-session.js").WorkspacePreferencesPort | null;
+    credentialStatusPort?: (() => Promise<{ remembered?: boolean }>) | null;
   });
   getSnapshot(): AgentCatalogSnapshot;
   subscribe(listener: (snapshot: AgentCatalogSnapshot) => void): () => void;
   dispose(): void;
   select(selection: AgentSelection): AgentSelection;
+  configureProvider(selection: AgentSelection): AgentSelection;
+  saveConfiguration(): Promise<void>;
   queuePendingDefault(selection: AgentSelection): AgentSelection;
   pendingDefault(): AgentSelection | null;
   peekPendingDefaultIntent(): Readonly<{

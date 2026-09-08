@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { readUiPreferences, recordUiWorkspacePreferences } from "../desktop/ui-preferences.mjs";
 
 import {
   AgentCatalogState,
@@ -11,10 +15,89 @@ import {
 } from "../app/application/agent-provider-catalog.js";
 import {
   agentPreflightKey,
+  agentDiagnosticSnapshot,
+  agentSetupRecovery,
+  agentSetupOperationLabel,
   freezeAgentSelection,
 } from "../app/domain/agent-provider-state.js";
 
 const TRUST = "trusted-local-agent-v1";
+
+test("Codex recovery distinguishes local authentication from protocol and network failures", () => {
+  const availability = { status: "unavailable", reason: "service-unavailable" };
+  for (const [cause, actionLabel, allowLogin] of [
+    ["CODEX_AUTH_UNVERIFIED", "检测登录", true],
+    ["CODEX_AUTH_REQUIRED", "检测登录", true],
+    ["CODEX_PREFLIGHT_FAILED", "修复连接", undefined],
+    ["CODEX_PROTOCOL_UNSUPPORTED", "更新连接组件", undefined],
+    ["CODEX_CONNECTION_FAILED", "重新检查", undefined],
+    ["AGENT_PREFLIGHT_TIMEOUT", "重新检查", undefined],
+  ]) {
+    const diagnostic = agentDiagnosticSnapshot({ readiness: "connection-failed", cause,
+      facts: { authentication: "ready", protocol: "failed" } });
+    const next = agentSetupRecovery(diagnostic, availability);
+    assert.equal(next.actionLabel, actionLabel, cause);
+    assert.equal(next.allowLogin, allowLogin, cause);
+    if (next.action === "install") assert.match(next.detail, /账号已登录/u);
+    assert.equal(agentSetupRecovery(diagnostic, { status: "auth-required" }), null);
+    assert.equal(agentSetupRecovery(diagnostic, { status: "ready" }), null);
+  }
+  assert.equal(agentSetupRecovery(agentDiagnosticSnapshot({ readiness: "connection-failed", cause: "QODER_PREFLIGHT_FAILED" }), availability).action, "recheck");
+  assert.equal(agentSetupOperationLabel(null, "installing"), "正在安装…");
+  assert.equal(agentSetupOperationLabel({ kind: "login", state: "waiting" }), "请在浏览器完成登录");
+  assert.equal(agentSetupOperationLabel({ kind: "login", state: "cancelling" }), "正在取消…");
+});
+
+test("remembering a credential requires a positive saved receipt, not an empty or partial response", async () => {
+  const catalog = new AgentCatalogState({ bridgeClient: { async preflightAgent() {} } });
+  catalog.holdRememberedCredential("pageroot", { apiKey: "synthetic-key" });
+  for (const receipt of [undefined, {}, { ok: true, remembered: false }]) {
+    await catalog.retryRememberedCredential("pageroot", async () => receipt);
+    assert.equal(catalog.credentialPersist("pageroot").status, "failed");
+  }
+  await catalog.retryRememberedCredential("pageroot", async () => ({ ok: true, remembered: true }));
+  assert.equal(catalog.credentialPersist("pageroot").status, "saved");
+  catalog.dispose();
+});
+
+test("non-default DeepSeek configuration survives restart and is frozen into the next actual send", async (t) => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-provider-preferences-"));
+  t.after(() => rm(userDataPath, { recursive: true, force: true }));
+  const preferencesPort = {
+    get: () => readUiPreferences({ userDataPath }),
+    record: ({ workspace }) => recordUiWorkspacePreferences({ userDataPath, workspace }),
+  };
+  await preferencesPort.record({ workspace: { defaultAgentProviderId: "codex" } });
+  const sent = [];
+  const options = {
+    preferencesPort,
+    selected: CODEX_AGENT_PROVIDER.selection,
+    bridgeClient: {
+      async preflightAgent(body) {
+        sent.push(body.selection);
+        return { status: "ready", preflightId: "configuration-ticket", selection: body.selection,
+          expiresAt: new Date(Date.now() + 60_000).toISOString() };
+      },
+    },
+  };
+  const first = new AgentCatalogState(options);
+  const deepseek = first.freezeProviderSelection("pageroot");
+  first.selectReasoning("high", deepseek);
+  await first.saveConfiguration();
+  assert.equal(first.freezeSelected().providerId, "codex");
+  assert.equal((await preferencesPort.get()).workspace.defaultAgentProviderId, "codex");
+  first.dispose();
+  const reopened = new AgentCatalogState(options);
+  await reopened.saveConfiguration();
+  const card = agentProviderCardsFromCatalog(reopened.getSnapshot()).find((item) => item.selection.providerId === "pageroot");
+  assert.equal(card.selection.reasoning.requested, "high");
+  assert.equal(reopened.freezeSelected().providerId, "codex");
+  reopened.select(card.selection);
+  const ticket = await reopened.spendTicket(reopened.freezeSelected(), { purpose: "execution" });
+  assert.equal(ticket.selection.reasoning.requested, "high");
+  assert.equal(sent.at(-1).reasoning.requested, "high");
+  reopened.dispose();
+});
 
 test("the shared Agent chooser exposes 源页 Agent plus both ACP providers without unverified built-ins", () => {
   assert.deepEqual(
@@ -830,7 +913,7 @@ test("selectReasoning changes only PageRoot thinking depth", () => {
   assert.equal(catalog.freezeSelected().reasoning.requested, "low");
 });
 
-test("late model and reasoning commits cannot mutate a newly selected provider", () => {
+test("configuration targets its provider even after a default switch, and rejects stale per-provider writes", () => {
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() {
@@ -843,7 +926,7 @@ test("late model and reasoning commits cannot mutate a newly selected provider",
   const expectedQoder = catalog.freezeSelected();
   const selectedCodex = catalog.select(CODEX_AGENT_PROVIDER.selection);
 
-  assert.equal(catalog.selectModel("qoder:late-model", expectedQoder), null);
+  assert.equal(catalog.selectModel("qoder:late-model", expectedQoder).requestedModelId, "qoder:late-model");
   assert.equal(catalog.selectReasoning("high", expectedQoder), null);
   assert.deepEqual(catalog.freezeSelected(), selectedCodex);
   assert.equal(catalog.selectModel("qoder:cross-provider", selectedCodex), null);
@@ -1484,4 +1567,3 @@ test("an in-flight install does not hide the previous login result", async () =>
   assert.equal(catalog.provider(selected).lastOperation?.kind, "login");
   assert.equal(catalog.provider(selected).lastOperation?.state, "succeeded");
 });
-

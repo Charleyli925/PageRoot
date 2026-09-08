@@ -649,7 +649,7 @@ export default function AiConversationSidebar({
           })
         )}
 
-        {runSummary ? (
+        {runSummary && deliveryMode !== "managed-agent" ? (
           <section
             className={`${styles.message} ${styles.runSummary}`}
             data-actor="pageroot"
@@ -657,7 +657,7 @@ export default function AiConversationSidebar({
             aria-label="本轮任务摘要"
           >
             <PageRootAvatar />
-            <span className={styles.actor}>PageRoot</span>
+            <span className={styles.actor}>源页</span>
             <p className={styles.text}>{runSummary.title}</p>
             {runSummary.detail ? <small className={styles.runSummaryDetail}>{runSummary.detail}</small> : null}
           </section>
@@ -675,15 +675,16 @@ export default function AiConversationSidebar({
             data-actor="pageroot"
             data-tone={runProgress?.tone || "quiet"}
             data-testid="ai-conversation-run-progress"
+            data-execution={executionStatus ? "true" : undefined}
             aria-label="本轮进度"
           >
-            <PageRootAvatar />
+            {executionStatus ? null : <PageRootAvatar />}
             {/*
               * PageRoot states the stages from the run's durable status (ADR 0037 §4).
               * Signing them with an Agent name made the Agent look like the author of
               * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
             */}
-            <span className={styles.actor}>PageRoot</span>
+            {executionStatus ? null : <span className={styles.actor}>源页</span>}
             <p
               className={`${styles.text} ${styles.liveStatus}`}
               role="status"
@@ -693,12 +694,30 @@ export default function AiConversationSidebar({
               {executionStatus?.title || runProgress?.liveLabel || runProgress?.headline}
             </p>
             {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}</small> : null}
+            {executionStatus ? (
+              <>
+                <small className={styles.runSummaryDetail}>{resolvedFileName}</small>
+                <details className={styles.executionDetails}>
+                  <summary>详情</summary>
+                  <span>已接收 {Math.ceil(agentReceivedBytes / 1024)} KB</span>
+                </details>
+                <div className={styles.actions}>
+                  {actionBar?.actions.map((action) => (
+                    <button key={action.id} type="button" className={styles.action}
+                      data-action-id={action.id} data-tone="quiet" disabled={action.disabled === true}
+                      onClick={() => onAction?.(action.id)}>
+                      {action.id === "cancel" && !action.disabled ? "停止" : action.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
           </section>
         ) : null}
 
         {/* Public Agent narration grows in one stable article. It is presentation
             evidence only and never changes Candidate authority. */}
-        {runProgress?.narrationUpdates || agentWorking ? (
+        {runProgress?.narrationUpdates ? (
           <article
             ref={liveMessageRef}
             className={styles.message}
@@ -727,7 +746,7 @@ export default function AiConversationSidebar({
                 aria-label={`${resolvedAgentActionName} 正在思考和处理`}
                 data-testid="ai-conversation-thinking"
               >
-                <span aria-hidden="true">Thinking</span>
+                <span aria-hidden="true">正在生成</span>
                 <span className={styles.thinkingDots} aria-hidden="true">
                   <i />
                   <i />
@@ -762,7 +781,7 @@ export default function AiConversationSidebar({
           * three separate regions, so a single round was read in three places with
           * an empty gap between them.
           */}
-        {actionBar ? (
+        {actionBar && !executionStatus && !setupCard ? (
           <section
             className={`${styles.message} ${styles.actionBar}`}
             data-actor="pageroot"
@@ -771,7 +790,7 @@ export default function AiConversationSidebar({
             aria-label="当前待决定"
           >
             <PageRootAvatar />
-            <span className={styles.actor}>PageRoot</span>
+            <span className={styles.actor}>源页</span>
             {actionBar.title ? (
               <strong
                 {...(actionBar.kind === "decision"
@@ -793,11 +812,12 @@ export default function AiConversationSidebar({
                     data-action-id={action.id}
                     disabled={action.disabled === true}
                     onClick={() => {
-                      if (action.id === "replace-api-key" && agentAccess) {
+                      if (["replace-api-key", "reauthenticate-agent", "repair-agent-installation"].includes(action.id) && agentAccess) {
                         const providerId = agentPresentation?.providerId
                           || agentAccess.cards[0]?.selection.providerId
                           || "";
-                        agentAccess.onBeginAccessRepair?.("apiKey");
+                        agentAccess.onBeginAccessRepair?.(action.id === "replace-api-key" ? "apiKey"
+                          : action.id === "reauthenticate-agent" ? "login" : "install");
                         setSetupProviderId(providerId);
                         setOpenChoice(null);
                         return;
@@ -1018,7 +1038,7 @@ export default function AiConversationSidebar({
             </div>
           </div> : null}
 
-          {(state === "preview-ready" || state === "no-change") ? (
+          {!setupCard && (state === "preview-ready" || state === "no-change") ? (
           <div className={styles.deliveryActions}>
             {activeIntent === "modify" && onCopyTask ? (
               <button
@@ -1098,6 +1118,8 @@ export default function AiConversationSidebar({
               initialApiKeyOpen={recovery?.field === "apiKey"}
               {...agentAccess.bindings}
             />
+            <button type="button" className={styles.action} data-tone="quiet"
+              onClick={() => setSetupProviderId(null)}>返回任务</button>
           </div>
         ) : null}
       </div>

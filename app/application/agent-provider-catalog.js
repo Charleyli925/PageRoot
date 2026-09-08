@@ -506,9 +506,8 @@ export function agentProviderCardsFromCatalog(snapshot) {
     .map((provider) => {
       const availability = agentProviderDisplayAvailability(provider);
       return Object.freeze({
-      // Preflight may resolve a provider default model. Keep that resolved
-      // selection for the selected card; other cards remain descriptor-backed
-      // until the user selects them.
+      // The map retains each service's live configuration, including services
+      // that are not the default. Preflight may resolve the default's model.
       selection: selected
         && selected.providerId === provider.providerId
         && selected.runtimeId === provider.runtimeId
@@ -658,6 +657,9 @@ export class AgentCatalogState {
   #pendingDefault = null;
   #pendingDefaultSeq = 0;
   #heldCredentials = new Map();
+  #preferencesPort;
+  #preferencesLoaded;
+  #configurationWrite = Promise.resolve();
 
   constructor({
     bridgeClient,
@@ -665,6 +667,8 @@ export class AgentCatalogState {
     clock = Date,
     providers = defaultAgentProviders(),
     selected = null,
+    preferencesPort = null,
+    credentialStatusPort = null,
   } = {}) {
     if (!bridgeClient || typeof bridgeClient.preflightAgent !== "function") {
       throw new TypeError("AgentCatalogState requires an Agent bridge client.");
@@ -675,6 +679,7 @@ export class AgentCatalogState {
     this.#bridgeClient = bridgeClient;
     this.#handoffPort = handoffPort;
     this.#clock = clock;
+    this.#preferencesPort = preferencesPort;
     for (const descriptor of providers) {
       if (!descriptor?.providerId || !descriptor?.runtimeId || !descriptor?.selection) {
         throw new TypeError("Agent provider descriptor is invalid.");
@@ -702,6 +707,35 @@ export class AgentCatalogState {
       || providers[0]?.selection
       || null;
     this.#selected = initial ? freezeAgentSelection(initial) : null;
+    if (this.#selected) {
+      const entry = this.#providers.get(this.#selected.providerId);
+      if (entry) this.#providers.set(entry.providerId, Object.freeze({ ...entry, selection: this.#selected }));
+    }
+    const initialConfigurations = new Map([...this.#providers].map(([id, entry]) => [id, agentPreflightKey(entry.selection)]));
+    if (credentialStatusPort) {
+      void credentialStatusPort().then((status) => {
+        if (!this.#disposed && this.#providers.has("pageroot") && !this.credentialPersist("pageroot")) {
+          this.noteCredentialPersist("pageroot", { status: status?.remembered === true ? "saved" : "skipped" });
+        }
+      }).catch(() => {});
+    }
+    this.#preferencesLoaded = preferencesPort
+      ? preferencesPort.get().then((value) => {
+        if (this.#disposed) return;
+        for (const [id, choice] of Object.entries(value?.workspace?.agentConfigurations || {})) {
+          const provider = this.#providers.get(id);
+          if (!provider || agentPreflightKey(provider.selection) !== initialConfigurations.get(id)) continue;
+          this.configureProvider({
+            ...provider.selection,
+            requestedModelId: choice.modelId,
+            resolvedModelId: choice.modelId,
+            reasoning: choice.reasoning
+              ? { requested: choice.reasoning, applied: choice.reasoning, resolution: "exact" }
+              : { requested: null, applied: null, resolution: "provider-default" },
+          });
+        }
+      }).catch(() => {})
+      : Promise.resolve();
   }
 
   applyDisabledProviderIds(ids = []) {
@@ -767,6 +801,7 @@ export class AgentCatalogState {
       });
     }
     this.#selected = frozen;
+    this.#providers.set(frozen.providerId, Object.freeze({ ...provider, selection: frozen }));
     this.#generationByProvider.set(
       frozen.providerId,
       (this.#generationByProvider.get(frozen.providerId) || 0) + 1,
@@ -904,10 +939,10 @@ export class AgentCatalogState {
       });
     }
     const persisted = await persist(held);
-    if (persisted && persisted.ok === false) {
+    if (persisted?.ok !== true || persisted.remembered !== true) {
       this.noteCredentialPersist(id, {
         status: "failed",
-        reason: persisted.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
+        reason: persisted?.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
           ? "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。"
           : "已连接，但新的 API Key 未保存。",
       });
@@ -936,9 +971,7 @@ export class AgentCatalogState {
   freezeProviderSelection(providerId) {
     const provider = this.#providers.get(String(providerId || ""));
     if (!provider) return null;
-    return this.#selected?.providerId === provider.providerId
-      ? freezeAgentSelection(this.#selected)
-      : freezeAgentSelection(provider.selection);
+    return freezeAgentSelection(provider.selection);
   }
 
   provider(selection = this.#selected) {
@@ -1227,6 +1260,7 @@ export class AgentCatalogState {
           if (current) {
             this.#providers.set(frozen.providerId, Object.freeze({
               ...current,
+              selection: returnedSelection,
               models: publicModels(result.models),
             }));
           }
@@ -1799,14 +1833,15 @@ export class AgentCatalogState {
   }
 
   selectModel(modelId, expectedSelection = this.#selected) {
-    if (!this.#selected || !expectedSelection) return null;
+    if (!expectedSelection) return null;
     const expected = freezeAgentSelection(expectedSelection);
-    if (agentPreflightKey(this.#selected) !== agentPreflightKey(expected)) return null;
+    const current = this.freezeProviderSelection(expected.providerId);
+    if (!current || agentPreflightKey(current) !== agentPreflightKey(expected)) return null;
     const id = typeof modelId === "string" && modelId.trim()
       ? modelId.trim().slice(0, 80)
       : null;
     if (id && !id.startsWith(`${expected.providerId}:`)) return null;
-    return this.select({
+    return this.configureProvider({
       ...expected,
       requestedModelId: id,
       resolvedModelId: id,
@@ -1818,12 +1853,37 @@ export class AgentCatalogState {
     });
   }
 
+  configureProvider(selection) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    this.#invalidateProvider(frozen.providerId);
+    this.#providers.set(frozen.providerId, Object.freeze({ ...provider, selection: frozen }));
+    if (this.#selected?.providerId === frozen.providerId) this.#selected = frozen;
+    this.#publish();
+    return frozen;
+  }
+
+  async saveConfiguration() {
+    await this.#preferencesLoaded;
+    if (!this.#preferencesPort) return;
+    const agentConfigurations = Object.fromEntries([...this.#providers].map(([id, provider]) => [id, {
+      modelId: provider.selection.requestedModelId,
+      reasoning: provider.selection.reasoning.requested,
+    }]));
+    const write = this.#configurationWrite.catch(() => {}).then(() =>
+      this.#preferencesPort.record({ workspace: { agentConfigurations } }));
+    this.#configurationWrite = write;
+    await write;
+  }
+
   selectReasoning(reasoning, expectedSelection = this.#selected) {
-    if (!this.#selected || !expectedSelection) return null;
+    if (!expectedSelection) return null;
     const expected = freezeAgentSelection(expectedSelection);
-    if (agentPreflightKey(this.#selected) !== agentPreflightKey(expected)) return null;
+    const current = this.freezeProviderSelection(expected.providerId);
+    if (!current || agentPreflightKey(current) !== agentPreflightKey(expected)) return null;
     if (String(reasoning || "") === DEFAULT_OPENAI_COMPATIBLE_REASONING) {
-      return this.select({
+      return this.configureProvider({
         ...expected,
         reasoning: {
           requested: null,
@@ -1834,7 +1894,7 @@ export class AgentCatalogState {
     }
     const requested = normalizeOpenAiCompatibleReasoning(reasoning);
     if (!requested) return expected;
-    return this.select({
+    return this.configureProvider({
       ...expected,
       reasoning: {
         requested,
@@ -1887,13 +1947,19 @@ export class AgentCatalogState {
       }),
     });
     const manualModelId = String(extras.modelId || "").trim().slice(0, 80);
+    const nextModelId = manualModelId
+      ? `${frozen.providerId}:${manualModelId.replace(/^pageroot:/u, "")}`
+      : frozen.requestedModelId || frozen.resolvedModelId;
+    const changedModel = Boolean(manualModelId && nextModelId !== (frozen.requestedModelId || frozen.resolvedModelId));
+    const changedVendor = Boolean(provider.connection?.vendorId && extras.vendorId
+      && provider.connection.vendorId !== extras.vendorId);
     const requestedSelection = freezeAgentSelection({
       ...frozen,
-      requestedModelId: manualModelId
-        ? `${frozen.providerId}:${manualModelId.replace(/^pageroot:/u, "")}`
-        : null,
+      requestedModelId: changedVendor && !manualModelId ? null : nextModelId,
       resolvedModelId: null,
-      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      reasoning: changedModel || changedVendor
+        ? { requested: null, applied: null, resolution: "provider-default" }
+        : frozen.reasoning,
     });
     let result;
     try {
@@ -1964,8 +2030,10 @@ export class AgentCatalogState {
     }, checkedAt, next?.diagnostic);
     this.#providers.set(frozen.providerId, Object.freeze({
       ...next,
+      selection: returnedSelection,
       models: publicModels(result.models),
       credentialConfigured: true,
+      ...(apiKey ? { credentialPersist: Object.freeze({ status: "skipped", reason: null }) } : {}),
       connection: Object.freeze({
         vendorId: String(result.vendorId || extras.vendorId || ""),
         vendorDisplayName: String(result.vendorDisplayName || extras.vendorId || ""),
@@ -1978,6 +2046,7 @@ export class AgentCatalogState {
     }));
     this.bindPendingDefaultSelection(returnedSelection);
     this.#publish();
+    await this.saveConfiguration();
     return result;
   }
 
@@ -1997,11 +2066,12 @@ export class AgentCatalogState {
       disconnect: true,
     });
     this.#invalidateProvider(frozen.providerId);
-    const resetSelection = freezeAgentSelection(provider.selection);
+    const resetSelection = freezeAgentSelection({ ...provider.selection, resolvedModelId: null });
     if (this.#selected?.providerId === frozen.providerId) this.#selected = resetSelection;
     const checkedAt = validDate(this.#clock);
     this.#providers.set(frozen.providerId, Object.freeze({
       ...provider,
+      selection: resetSelection,
       models: Object.freeze([]),
       credentialConfigured: false,
       connection: null,

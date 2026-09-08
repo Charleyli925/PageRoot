@@ -919,6 +919,7 @@ export default function Workbench() {
         rebindTargetsPreservingGlobal,
       }),
       ports: {
+        agentCredentialStatus: () => window.htmlAIIntegrations?.sessionCredentialStatus?.() ?? Promise.resolve({}),
         hash: { sha256: browserSha256 },
         canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
         ...(window.htmlAIWorkbenchTabs ? {
@@ -4933,8 +4934,8 @@ export default function Workbench() {
           baseUrl: extras.baseUrl,
           modelId: extras.modelId,
         });
-        if (persisted && persisted.ok === false) {
-          const reason = persisted.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
+        if (persisted?.ok !== true || persisted.remembered !== true) {
+          const reason = persisted?.code === "AGENT_CREDENTIAL_STORE_UNAVAILABLE"
             ? "已连接，但无法安全保存 API Key。本次仍可使用，可稍后重试记住。"
             : "已连接，但新的 API Key 未保存。";
           workspaceController?.noteAgentCredentialPersist?.(selection, {
