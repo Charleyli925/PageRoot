@@ -1002,7 +1002,10 @@ test("the review projection annotates a dense report cleanly and accurately", as
     expect(
       edgeBox.left + edgeBox.width,
       `right-edge structural footprint must clamp to the authored edge: ${JSON.stringify({ edgeBox, edgeElementGeometry })}`,
-    ).toBeCloseTo(edgeProjection.authoredDocumentWidth, 5);
+    ).toBeLessThanOrEqual(edgeProjection.authoredDocumentWidth);
+    // Classic scrollbars consume layout width on CI; the outline must reach
+    // the actual element edge without assuming overlay-scrollbar geometry.
+    expect(edgeBox.left + edgeBox.width).toBeGreaterThanOrEqual(edgeElementGeometry.right);
     await launched.page.screenshot({
       path: path.join(captureDirectory, "review-focus-one-sided.png"),
       animations: "disabled",
