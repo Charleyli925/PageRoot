@@ -28,6 +28,7 @@ test("AI smoke configuration selects review activation and broad-edit regression
     "a safe simple CSS selector creates one position-bound element change",
     "source Review preserves multi-host text evidence and hidden changes without visual confirmation",
     "accepting a Version shows static Active and unlocks editing before Runtime is granted",
+    "two lost committed adoption replies stay pending and recover one decision through restart",
   ]);
   for (const source of sources) {
     assert.doesNotMatch(
