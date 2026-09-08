@@ -303,8 +303,6 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     if (args[0] === "html-ui-preferences:get") {
       return success({
         schemaVersion: 2,
-        firstRealHtmlEditGuide: { status: "pending", generation: 1 },
-        builtInWelcomeProjectId: null,
         workspace: {
           rememberPanelWidths: true,
           sidebarWidth: 264,
@@ -317,8 +315,6 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     }
     return success({
       schemaVersion: 2,
-      firstRealHtmlEditGuide: { status: "dismissed", generation: 1 },
-      builtInWelcomeProjectId: null,
       workspace: {
         rememberPanelWidths: true,
         sidebarWidth: 320,
@@ -332,8 +328,6 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
 
   assert.deepEqual(await uiPreferences.get(), {
     schemaVersion: 2,
-    firstRealHtmlEditGuide: { status: "pending", generation: 1 },
-    builtInWelcomeProjectId: null,
     workspace: {
       rememberPanelWidths: true,
       sidebarWidth: 264,
@@ -344,10 +338,8 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     },
   });
   assert.deepEqual(calls[0], ["html-ui-preferences:get"]);
-  assert.deepEqual(await uiPreferences.record({ action: "dismissed" }), {
+  assert.deepEqual(await uiPreferences.record({ workspace: { sidebarWidth: 320 } }), {
     schemaVersion: 2,
-    firstRealHtmlEditGuide: { status: "dismissed", generation: 1 },
-    builtInWelcomeProjectId: null,
     workspace: {
       rememberPanelWidths: true,
       sidebarWidth: 320,
@@ -358,10 +350,10 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     },
   });
   assert.equal(calls[1][0], "html-ui-preferences:record");
-  assert.equal(calls[1][1].action, "dismissed");
+  assert.equal(calls[1][1].workspace.sidebarWidth, 320);
   await assert.rejects(
-    () => uiPreferences.record({ action: "pending" }),
-    /引导记录无效/u,
+    () => uiPreferences.record({ action: "dismissed" }),
+    /工作台偏好记录无效/u,
   );
   await assert.rejects(
     () => uiPreferences.record({ workspace: { sidebarWidth: 999 } }),
@@ -395,20 +387,9 @@ test("preload exposes runtime commit hooks only for explicit E2E launches", asyn
   assert.equal(hooked.runtime.diagnostics.e2eRuntimeCommitHooks, true);
 });
 
-test("preload hides the UI-preferences port during ordinary E2E launches", async () => {
+test("preload exposes the UI-preferences port during E2E launches", async () => {
   const { uiPreferences } = await loadPreloadApis(async () => success({}), {
     env: { PAGEROOT_E2E: "1" },
-  });
-  assert.equal(uiPreferences, undefined);
-});
-
-test("preload keeps the UI-preferences port when an E2E launch opts into the guide", async () => {
-  const { uiPreferences } = await loadPreloadApis(async () => success({
-    schemaVersion: 1,
-    firstRealHtmlEditGuide: { status: "pending", generation: 2 },
-    builtInWelcomeProjectId: null,
-  }), {
-    env: { PAGEROOT_E2E: "1", PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1" },
   });
   assert.equal(typeof uiPreferences.get, "function");
   assert.equal(typeof uiPreferences.record, "function");

@@ -20,7 +20,6 @@ import {
 } from "../../browser/pageroot-driver.mjs";
 import {
   seedActiveDiskProject,
-  seedDismissedFirstEditGuide,
 } from "./electron-project-fixture.mjs";
 import { stopPageRoot } from "./electron-safe-cleanup.mjs";
 
@@ -644,7 +643,6 @@ export async function launchPageRoot({
   isolatedUserData: existingUserData = null,
   injectedEnv = {},
   userDataPrefix = DEFAULT_USER_DATA_PREFIX,
-  firstEditGuide = false,
   electronLauncher = (options) => electron.launch(options),
   shutdown = stopPageRoot,
   firstWindowTimeout = DEFAULT_MAIN_WINDOW_TIMEOUT,
@@ -664,7 +662,6 @@ export async function launchPageRoot({
   );
   mkdirSync(isolatedUserData, { recursive: true });
   const workspace = path.join(isolatedUserData, "workspace");
-  if (!firstEditGuide) seedDismissedFirstEditGuide(isolatedUserData);
   if (activeSourcePath) {
     seedActiveDiskProject(isolatedUserData, activeSourcePath, recentSourcePaths);
   }
@@ -677,7 +674,6 @@ export async function launchPageRoot({
     env: {
       ...process.env,
           PAGEROOT_E2E: "1",
-          ...(firstEditGuide ? { PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1" } : {}),
           PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
           HTML_AI_WORKSPACE: workspace,
           // New project-file imports deliberately live outside the legacy

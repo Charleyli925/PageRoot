@@ -18,11 +18,7 @@ import type {
 } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
 import type { EditAuthorRuntimePort } from "./edit-author-runtime-session.js";
-import type {
-  FirstEditGuideEligibilityInput,
-  FirstEditGuidePort,
-  FirstEditGuideSnapshot,
-} from "./first-edit-guide-session.js";
+import type { WorkspacePreferencesPort } from "./workspace-preferences-session.js";
 import type {
   ProjectContext,
   ProjectSession,
@@ -247,7 +243,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     canvas?: CanvasAuthorityPort;
     projectSource?: ProjectSourceActivationPort;
     editRuntime?: EditAuthorRuntimePort;
-    uiPreferences?: FirstEditGuidePort;
+    uiPreferences?: WorkspacePreferencesPort;
     agentCredentialStatus?: () => Promise<{ remembered?: boolean }>;
     workbenchTabs?: Readonly<{
       get(): Promise<unknown>;
@@ -459,8 +455,6 @@ export class WorkspaceController {
     preserveLastKnownGood: boolean;
   }): boolean;
   retryEditAuthorRuntime(): boolean;
-  evaluateFirstEditGuide(input: FirstEditGuideEligibilityInput): FirstEditGuideSnapshot | null;
-  dismissFirstEditGuide(): Promise<FirstEditGuideSnapshot | null>;
   getCurrentProjectContext(): ProjectContext | null;
   matchesCurrentProjectContext(context: ProjectContext): boolean;
   reloadDocumentCanvas(): DocumentSessionSnapshot;

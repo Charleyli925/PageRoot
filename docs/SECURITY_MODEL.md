@@ -564,27 +564,22 @@ so already-published clients can find that migration release without restoring
 the retired client code to the current application.
 
 Install-level UI preferences (`ui-preferences.json`) are Main-owned, bounded
-and atomically replaced. Schema v1 is migrated without dropping the guide or
-built-in welcome identity; schema v2 adds only the allowlisted `workspace`
-fields `rememberPanelWidths`, `sidebarWidth`, `inspectorWidth`, `motion`,
-`restoreTabsOnLaunch`, `defaultAgentProviderId` and
+and atomically replaced. Schema v1 is migrated to schema v2, whose allowlisted
+`workspace` fields are `rememberPanelWidths`, `sidebarWidth`, `inspectorWidth`,
+`motion`, `restoreTabsOnLaunch`, `defaultAgentProviderId` and
 `disabledAgentProviderIds`, plus `agentConfigurations` (only the three known
 providers, each with a bounded provider-namespaced `modelId` and requested
 `reasoning`, or null). No API Key, endpoint or installation path is accepted
-in that map. Main strictly validates
-field types, provider identifiers and the 200–420px / 280–520px width ranges;
-damaged values are safely normalized on read and unsafe patches are rejected.
-The renderer receives only trusted `get`/`record` for guide actions or a
-narrow workspace patch. A queued read-modify-write and atomic replacement
-prevents guide and Settings updates from clobbering one another. The file
-must not contain HTML, paths, comments, credentials or localStorage state.
+in that map. Main strictly validates field types, provider identifiers and the
+200–420px / 280–520px width ranges; damaged values are safely normalized on
+read and unsafe patches are rejected. The renderer receives only trusted
+`get`/`record` for a narrow workspace patch. A queued read-modify-write and
+atomic replacement prevents Settings and Agent updates from clobbering one
+another. The file must not contain HTML, paths, comments, credentials or
+localStorage state.
 Preference errors remain a Settings-page retry state; bounded close flushing
 is best effort and cannot block a source HTML close that already completed its
-own safety boundary. Ordinary `PAGEROOT_E2E=1` launches do not expose the
-renderer preference port, so automated profiles skip preference IPC during
-hydration; tests needing it opt into `PAGEROOT_E2E_FIRST_EDIT_GUIDE=1`. The
-built-in welcome `projectId` is recorded after welcome registration so that
-page never shows the first-real-HTML card.
+own safety boundary.
 
 The renderer may name only a provider selection. It cannot provide executable
 commands, paths, permissions or a security profile. Preflight resolves the

@@ -24,8 +24,6 @@ import {
   setTextSelection,
   withBomAndCrLf,
 } from "../browser/pageroot-driver.mjs";
-import { seedDismissedFirstEditGuide } from "./helpers/pageroot-app-fixture.mjs";
-
 const packageVersion = JSON.parse(
   readFileSync(path.join(productRoot, "package.json"), "utf8"),
 ).version;
@@ -157,7 +155,6 @@ test("packaged PageRoot imports pre-v4 shell state as V1 and reconciles draft re
   writeFileSync(sourcePathAlias, original);
   const externalSourcePath = realpathSync(sourcePathAlias);
   seedActiveDiskProject(isolatedUserData, externalSourcePath);
-  seedDismissedFirstEditGuide(isolatedUserData);
   let sourcePath = "";
   let electronApp = null;
   try {

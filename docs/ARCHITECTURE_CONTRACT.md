@@ -501,17 +501,8 @@ the non-interactive loading surface; only that presentation acknowledgement
 starts the narrow prepare port, so a fast grant cannot promote a static iframe
 that has already mounted.
 
-The install-level first-real-HTML guide is a separate Session fact.
-`FirstEditGuideSession`, composed only by `WorkspaceController`, owns
-visibility and the 800ms present-dwell timer. Durable `pending` /
-`presented` / `dismissed` status and the built-in welcome `projectId` live in
-Main `ui-preferences.json`. Workbench may pass a narrow get/record port at
-composition time and dispatch `evaluateFirstEditGuide` / `dismissFirstEditGuide`;
-it must not call UI-preference IPC itself. Workbench mounts `FirstEditGuideCard`
-as a `position: fixed` portal on `document.body`, not as a grid child of the
-workbench or canvas; `HtmlCanvasEditor` must not mount or dismiss the card.
-Send that enters waiting writes `dismissed`; Escape does not. Hover captions
-are disposable Canvas presentation and must not change the click selection path.
+Hover captions are disposable Canvas presentation and must not change the click
+selection path.
 
 The direct path accepts a bounded supported executable `script` program. Main
 re-reads the active persisted HTML, verifies exact Hash and Canvas generation,

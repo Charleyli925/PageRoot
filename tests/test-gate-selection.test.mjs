@@ -56,7 +56,6 @@ const TASK_OWNER_CASES = [
     unrelatedOwners: [
       "tests/editable-island.test.mjs",
       "tests/html-preview-sandbox.test.mjs",
-      "tests/first-edit-guide-session.test.mjs",
     ],
   },
   {
@@ -70,7 +69,6 @@ const TASK_OWNER_CASES = [
     unrelatedOwners: [
       "tests/editable-island.test.mjs",
       "tests/html-preview-sandbox.test.mjs",
-      "tests/first-edit-guide-session.test.mjs",
     ],
   },
   {
@@ -92,7 +90,6 @@ const TASK_OWNER_CASES = [
     directOwners: ["tests/html-canvas-native-commands.test.mjs"],
     unrelatedOwners: [
       "tests/html-preview-sandbox.test.mjs",
-      "tests/first-edit-guide-session.test.mjs",
     ],
   },
   {
@@ -599,14 +596,12 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "tests/edit-runtime-library-store.test.mjs",
     "tests/edit-runtime-preparation-fence.test.mjs",
     "tests/edit-runtime-protocol.test.mjs",
-    "tests/first-edit-guide-session.test.mjs",
     "tests/html-canvas-frame.test.mjs",
     "tests/html-canvas-runtime-startup.test.mjs",
     "tests/html-preview-sandbox.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
     "tests/source-rename.test.mjs",
-    "tests/ui-preferences.test.mjs",
     "tests/workspace-controller.test.mjs",
   ]);
   assert.deepEqual(suiteIds(workbench), [

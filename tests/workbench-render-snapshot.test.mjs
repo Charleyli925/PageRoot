@@ -24,7 +24,6 @@ function snapshot(overrides = {}) {
     runSession: stable,
     versionSession: stable,
     editRuntime: stable,
-    firstEditGuide: stable,
     comment: {
       attachmentUploadCount: 0,
       draft: { revision: 1, pending: false, writing: false, error: null },

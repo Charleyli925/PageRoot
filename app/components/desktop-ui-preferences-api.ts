@@ -12,11 +12,6 @@ export type WorkspacePreferences = {
 
 export type UiPreferencesSnapshot = {
   schemaVersion?: number;
-  firstRealHtmlEditGuide?: {
-    status?: "pending" | "presented" | "dismissed";
-    generation?: number;
-  };
-  builtInWelcomeProjectId?: string | null;
   workspace?: Partial<WorkspacePreferences>;
 };
 
@@ -26,8 +21,6 @@ export type UiWorkspacePreferencePatch = Partial<WorkspacePreferences>;
 export type DesktopUiPreferencesApi = {
   get(): Promise<UiPreferencesSnapshot | null | undefined>;
   record(input: {
-    action: "presented" | "dismissed";
-  } | {
     workspace: UiWorkspacePreferencePatch;
   }): Promise<UiPreferencesSnapshot | null | undefined>;
 };

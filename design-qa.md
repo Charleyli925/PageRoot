@@ -2026,8 +2026,8 @@ lift, inset top highlight) and records it in DESIGN_LANGUAGE.md §3.
   the existing overlay transition. The lightbox keeps its dark room and only
   tightens to blur(12px).
 - Canvas floating tools (lock notice, editing toolbar, capability hint,
-  edit-status pill, history banner, comment rail header, notice bar,
-  first-edit guide card) now share the same glass family at 78–88 % opacity
+  edit-status pill, history banner, comment rail header, notice bar) now share
+  the same glass family at 78–88 % opacity
   with `saturate(140–180%)`; the source-conflict banner stays fully opaque
   because a red alert must read as a fact, not a material.
 - The shell and workbench base layers carry a 3.5 % alpha SVG `feTurbulence`

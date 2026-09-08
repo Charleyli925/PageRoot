@@ -45,7 +45,6 @@ const RUNTIME_OWNERS = new Set([
   "ExternalFileOpenSession",
   "ProjectApplicationSession",
   "EditAuthorRuntimeSession",
-  "FirstEditGuideSession",
   "WorkbenchTabsSession",
   "WorkbenchNavigationSession",
   "WorkbenchTabsPersistenceCoordinator",
