@@ -249,7 +249,13 @@ async function run() {
     while (Date.now() < completionDeadline) {
       const status = await requestJson(statusPath);
       assert.equal(status.response.status, 200, JSON.stringify(status.body));
-      if (status.body.status === "ready-to-open") {
+      // Finalizer readiness can precede provider cleanup and history flushing.
+      // The packaged artifact must settle both authoritative facts before the
+      // loop exits, so the assertion below covers a settled session, not a race.
+      if (
+        status.body.status === "ready-to-open"
+        && status.body.agentSession?.state === "completed"
+      ) {
         ready = status.body;
         break;
       }

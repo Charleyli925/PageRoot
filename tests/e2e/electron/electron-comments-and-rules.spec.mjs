@@ -351,7 +351,7 @@ test("Electron preview mounts the modification-only AI sidebar across reopen", a
     await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
     await expect(sidebar.getByTestId("ai-conversation-intent")).toHaveCount(0);
     await expect(sidebar.getByTestId("ai-conversation-context-summary"))
-      .toContainText("1 条评论");
+      .toContainText("1 条修改意见");
 
     // Collapsing and reopening keeps the same single-purpose product surface.
     await openToggle.click();
@@ -474,6 +474,10 @@ test("orphaned comments stay card-local and block send without a relink flow", a
 
     await activeLaunch.page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
+    // The settled AI history stays visible until the user returns to comments;
+    // the orphaned cards and their focus state live in the comments rail.
+    await activeLaunch.page.getByRole("button", { name: "AI 助手", exact: true }).click();
+    await expect(activeLaunch.page.locator(".comment-rail")).toBeVisible();
     await expect(activeLaunch.page.locator(".comment-rail .rail-relink-status"))
       .toHaveCount(0);
     await expect(activeLaunch.page.getByText(/评论需要重新定位/u)).toHaveCount(0);
