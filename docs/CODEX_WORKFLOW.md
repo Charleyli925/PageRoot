@@ -147,11 +147,31 @@ stash.
 
 ## Branch and Pull Request flow
 
+### Mandatory P0/P1 scope-stop rule
+
+Unless the developer explicitly requests exhaustive polish, zero remaining
+findings, or a wider scope, only verified P0/P1 findings may expand a change
+after the requested outcome is implemented and its applicable deterministic
+gates pass. Record P2/P3 and unclassified minor findings in the Draft PR body,
+review thread, or a follow-up item. Do not fix them in the current delivery, add
+a new commit for them, return a PR to Draft, rerun a Ready gate, delay packaging,
+or delay an otherwise authorized merge. Once no P0/P1 remains, continue the
+authorized delivery lifecycle instead of starting another remaining-review
+repair loop.
+
+Classify by verified impact, not only by a review label. Data loss, wrong-file
+or wrong-version writes, security or privacy boundary violations, irreversible
+errors, untraceable source or installer provenance, and required deterministic
+gate failures are P0/P1 blockers. This rule never grants authorization for an
+external action and never bypasses exact head/base evidence, required gates,
+source composition, release eligibility, or the separate authorization needed
+for Ready, packaging, installation, merge, and publication.
+
 1. Use a short-lived branch with an approved prefix.
 2. Keep one coherent outcome per PR.
 3. Open every PR as Draft. Draft opens, pushes and reopens run impact-selected `pr-feedback` (`gate:draft`: Node plus the selected capability canary) inside `ci.yml`.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
-5. Keep the PR Draft while implementation and focused feedback converge. Batch accepted P0/P1 product fixes before promotion. Codex findings are informational: they never block merge, and P2/P3 comments do not require a new SHA.
+5. Keep the PR Draft while implementation and focused feedback converge. Batch accepted P0/P1 product fixes before promotion. Codex findings are informational: they never block merge. Apply the mandatory scope-stop rule above; P2/P3 and unclassified minor findings do not require a new SHA or another repair cycle unless the developer explicitly escalates them.
 6. When the head is ready, update it onto current `main` and mark the PR Ready once. That starts the complete source matrix. A PR opened already Ready also takes this path because `draft == false`. Codex review is requested automatically for that head, shown on the PR, and never included in `release-gate`.
 7. Wait for the required `release-gate` and review the final GitHub diff, not only the local working diff. Do not restart already-green source lanes merely because `github.run_attempt` changed. A failed product suite on the same SHA cannot be washed green by rerunning; classify a true `ci_environment` failure first.
 8. After explicit merge authorization, enable GitHub native Auto-merge for the exact head instead of polling and issuing a later manual merge. GitHub deletes the remote task branch after the squash merge; then audit and explicitly retire the local task before fast-forwarding primary `main`.
