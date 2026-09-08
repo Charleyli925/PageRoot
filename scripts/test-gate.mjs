@@ -21,7 +21,14 @@ import {
   loadCapabilityContextMap,
   selectCapabilityContext,
 } from "./capability-context.mjs";
-import { CAPABILITY_SMOKE_SUITES, CHANGED_SPEC_SUITES, countTagOccurrences } from "./gate-smoke-suites.mjs";
+import {
+  CAPABILITY_SMOKE_SUITES,
+  CHANGED_SPEC_SUITES,
+  RUNTIME_SELECTION_CONFIGS,
+  countTagOccurrences,
+  isRuntimeCanarySuite,
+  runtimeOfSuite,
+} from "./gate-smoke-suites.mjs";
 import {
   assertResumeCompatible,
   assertReusableBuildArtifacts,
@@ -39,8 +46,6 @@ import {
   resolveDeveloperPreviewIdentity,
   writeDeveloperPreviewAttestation,
 } from "./developer-preview.mjs";
-import { candidateAppReleaseDirectory } from "./release-app-stage.mjs";
-import { expectedArtifactLayout } from "./verify-packaged-artifact.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -89,6 +94,7 @@ export function parseArguments(argv) {
     forLane: null,
     runtimes: [],
     githubOutput: null,
+    plannedSelection: null,
     contextDomains: [],
     contextFiles: [],
   };
@@ -108,6 +114,7 @@ export function parseArguments(argv) {
         .filter(Boolean);
     }
     else if (argument === "--github-output") options.githubOutput = argv.shift() || null;
+    else if (argument === "--planned-selection") options.plannedSelection = argv.shift() || null;
     else if (argument === "--context-domain") options.contextDomains.push(...splitCsv(argv.shift() || ""));
     else if (argument === "--context-file") options.contextFiles.push(...splitCsv(argv.shift() || ""));
     else throw new Error(`Unknown argument: ${argument}`);
@@ -130,6 +137,9 @@ export function parseArguments(argv) {
   }
   if (options.resume && options.lane !== "task") {
     throw new Error("--resume is only supported for the task gate.");
+  }
+  if (options.plannedSelection && options.lane !== "draft") {
+    throw new Error("--planned-selection is only supported for the draft gate.");
   }
   const contextQuery = options.contextDomains.length > 0 || options.contextFiles.length > 0;
   if (contextQuery && options.lane !== "plan") {
@@ -219,7 +229,79 @@ function shellDisplay(command, args) {
     : JSON.stringify(part))).join(" ");
 }
 
-function commandForSuite(suiteId, context) {
+export function coalesceRuntimeSuites(suites, plan, reportDirectory) {
+  const execution = [];
+  const byRuntime = new Map();
+  for (const suite of suites) {
+    if (!isRuntimeCanarySuite(suite.id)) {
+      execution.push(suite);
+      continue;
+    }
+    const runtime = runtimeOfSuite(suite.id);
+    let batch = byRuntime.get(runtime);
+    if (!batch) {
+      const id = `${runtime}-selected-tests`;
+      batch = {
+        id,
+        description: `Deduplicated ${runtime} Playwright selection.`,
+        reasons: [],
+        origins: [],
+        sourceSuites: [],
+        runtimeSelection: {
+          runtime,
+          config: RUNTIME_SELECTION_CONFIGS[runtime],
+          tags: [],
+          files: [],
+          testList: path.join(reportDirectory, `${id}.txt`),
+          reconciliation: path.join(reportDirectory, `${id}-reconciliation.json`),
+          report: path.join(productRoot, "output/playwright", id, "results.json"),
+        },
+      };
+      byRuntime.set(runtime, batch);
+      execution.push(batch);
+    }
+    batch.sourceSuites.push(suite.id);
+    batch.reasons.push(...(suite.reasons || []));
+    batch.origins.push(...(suite.origins || []));
+    const tag = CAPABILITY_SMOKE_SUITES[suite.id]?.tag;
+    if (tag && !batch.runtimeSelection.tags.includes(tag)) batch.runtimeSelection.tags.push(tag);
+    for (const file of plan.selectedChangedSpecs?.[suite.id] || []) {
+      if (!batch.runtimeSelection.files.includes(file)) batch.runtimeSelection.files.push(file);
+    }
+  }
+  for (const batch of byRuntime.values()) {
+    batch.sourceSuites = [...new Set(batch.sourceSuites)];
+    batch.reasons = [...new Set(batch.reasons)];
+    batch.origins = batch.origins.filter((origin, index, entries) => (
+      entries.findIndex((entry) => entry.file === origin.file && entry.owner === origin.owner) === index
+    ));
+    batch.runtimeSelection.tags.sort();
+    batch.runtimeSelection.files.sort();
+  }
+  return execution;
+}
+
+function commandForSuite(suite, context) {
+  const suiteId = typeof suite === "string" ? suite : suite.id;
+  if (typeof suite !== "string" && suite.runtimeSelection) {
+    const selection = suite.runtimeSelection;
+    return {
+      command: process.execPath,
+      args: [
+        path.join(productRoot, "scripts/run-playwright-selection.mjs"),
+        "--config",
+        selection.config,
+        "--test-list",
+        selection.testList,
+        "--reconciliation",
+        selection.reconciliation,
+        "--report",
+        selection.report,
+        ...selection.tags.flatMap((tag) => ["--tag", tag]),
+        ...selection.files.flatMap((file) => ["--file", file]),
+      ],
+    };
+  }
   const smoke = CAPABILITY_SMOKE_SUITES[suiteId];
   if (smoke) {
     return {
@@ -492,35 +574,62 @@ async function main() {
       `${options.lane} gates require a clean Git worktree. Commit every source change first.`,
     );
   }
-  const inventory = await inventoryFiles();
-  const tagCounts = await smokeTagCounts(inventory);
-  const assembled = assembleGateCapabilityPlan({
-    changedFiles: files,
-    contextDomains: options.contextDomains,
-    contextFiles: options.contextFiles,
-    impactMap: map,
-    capabilityMap: loadCapabilityContextMap(),
-    productRoot,
-    lane: selectionLane,
-  });
-  let plan = {
-    ...annotateGatePlan(
-      omitMissingNodeTests(
-        assertFullyAutomatedPlan(assembled.testPlan),
-        (file) => {
-          const absolute = path.resolve(productRoot, file);
-          return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
-        },
+  const repository = await repositoryEvidence(files);
+  let plan;
+  if (options.plannedSelection) {
+    let envelope;
+    try {
+      envelope = JSON.parse(Buffer.from(options.plannedSelection, "base64").toString("utf8"));
+    } catch {
+      throw new Error("--planned-selection is not valid base64-encoded JSON.");
+    }
+    if (envelope.schemaVersion !== 1 || !envelope.plan) {
+      throw new Error("--planned-selection has an unsupported schema.");
+    }
+    if (envelope.head !== repository.head || envelope.base !== options.base) {
+      throw new Error("--planned-selection does not match the current head and base.");
+    }
+    if (JSON.stringify(envelope.plan.changedFiles) !== JSON.stringify(files)) {
+      throw new Error("--planned-selection changed files do not match the current checkout.");
+    }
+    if (envelope.plan.lane !== selectionLane) {
+      throw new Error("--planned-selection was created for a different gate lane.");
+    }
+    for (const suite of envelope.plan.suites || []) {
+      if (!map.suites[suite.id]) throw new Error(`--planned-selection references unknown suite ${suite.id}.`);
+    }
+    plan = assertFullyAutomatedPlan(envelope.plan);
+  } else {
+    const inventory = await inventoryFiles();
+    const tagCounts = await smokeTagCounts(inventory);
+    const assembled = assembleGateCapabilityPlan({
+      changedFiles: files,
+      contextDomains: options.contextDomains,
+      contextFiles: options.contextFiles,
+      impactMap: map,
+      capabilityMap: loadCapabilityContextMap(),
+      productRoot,
+      lane: selectionLane,
+    });
+    plan = {
+      ...annotateGatePlan(
+        omitMissingNodeTests(
+          assertFullyAutomatedPlan(assembled.testPlan),
+          (file) => {
+            const absolute = path.resolve(productRoot, file);
+            return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
+          },
+        ),
+        { map, inventoryFiles: inventory, tagCounts },
       ),
-      { map, inventoryFiles: inventory, tagCounts },
-    ),
-    capabilityContext: assembled.capabilityContext,
-  };
+      capabilityContext: assembled.capabilityContext,
+    };
+  }
   assertGateWidthPolicy(plan);
   if (options.githubOutput) {
     await appendFile(
       options.githubOutput,
-      Object.entries(draftCiOutputs(plan)).flatMap(([key, value]) => (
+      Object.entries(draftCiOutputs(plan, { head: repository.head, base: options.base })).flatMap(([key, value]) => (
         String(value).includes("\n")
           ? [`${key}<<EOF`, value, "EOF"]
           : [`${key}=${value}`]
@@ -539,7 +648,6 @@ async function main() {
       },
     ];
   }
-  const repository = await repositoryEvidence(files);
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
   const developerPreviewIdentity = options.lane === "developer-package"
     ? resolveDeveloperPreviewIdentity({ productRoot, packageJson })
@@ -560,19 +668,24 @@ async function main() {
       );
     }
   }
-  const artifact = expectedArtifactLayout({
-    productRoot,
-    packageJson: packagedPackageJson,
-    arch: options.arch,
-    releaseDirectory: options.lane === "developer-package"
+  let artifact = {};
+  if (!planningLane) {
+    const { expectedArtifactLayout } = await import("./verify-packaged-artifact.mjs");
+    const releaseDirectory = options.lane === "developer-package"
       ? developerPreviewReleaseDirectory(productRoot)
       : options.lane === "candidate-app"
-        ? candidateAppReleaseDirectory(productRoot)
+        ? (await import("./release-app-stage.mjs")).candidateAppReleaseDirectory(productRoot)
+        : undefined;
+    artifact = expectedArtifactLayout({
+      productRoot,
+      packageJson: packagedPackageJson,
+      arch: options.arch,
+      releaseDirectory,
+      artifactName: options.lane === "developer-package"
+        ? DEVELOPER_PREVIEW_ARTIFACT_PATTERN
         : undefined,
-    artifactName: options.lane === "developer-package"
-      ? DEVELOPER_PREVIEW_ARTIFACT_PATTERN
-      : undefined,
-  });
+    });
+  }
   const startedAt = new Date();
   const previousRun = options.resume ? await loadPreviousRun(options.resume) : null;
   const runId = previousRun?.selection.runId || `${startedAt.toISOString().replace(/[:.]/gu, "-")}-${options.lane}`;
@@ -585,8 +698,8 @@ async function main() {
     artifact,
     developerPreviewIdentity,
   };
-  const selectedSuites = plan.suites.map((suite) => {
-    const command = commandForSuite(suite.id, context);
+  const selectedSuites = coalesceRuntimeSuites(plan.suites, plan, reportDirectory).map((suite) => {
+    const command = commandForSuite(suite, context);
     return { ...suite, command: shellDisplay(command.command, command.args) };
   });
   const selection = {
@@ -606,6 +719,7 @@ async function main() {
     estimatedFanout: plan.estimatedFanout,
     runtimeCanaries: plan.runtimeCanaries,
     selectedNodeTests: plan.selectedNodeTests,
+    logicalSuites: plan.suites,
     suites: selectedSuites,
     compact: compactGatePlan(plan),
     options: {
@@ -613,6 +727,7 @@ async function main() {
       base: options.base,
       realHtmlPath: options.realHtmlPath,
       resume: options.resume,
+      plannedSelection: Boolean(options.plannedSelection),
     },
   };
   await writeJson(path.join(reportDirectory, "selection.json"), selection);
@@ -669,12 +784,12 @@ async function main() {
       if (cleanSourceLane) {
         await assertReleaseRepositoryStable(repository);
       }
-      const command = commandForSuite(suite.id, context);
+      const command = commandForSuite(suite, context);
       const suiteStartedAt = new Date();
       console.log(`\n[${suite.id}] ${shellDisplay(command.command, command.args)}`);
       const env = {
         ...process.env,
-        ...(CAPABILITY_SMOKE_SUITES[suite.id] ? { PAGEROOT_SMOKE_SUITE: suite.id } : {}),
+        ...(suite.runtimeSelection ? { PAGEROOT_SMOKE_SUITE: suite.id } : {}),
         ...(options.realHtmlPath && suite.id === "real-html"
           ? { PAGEROOT_REAL_HTML_PATH: options.realHtmlPath }
           : {}),
@@ -708,6 +823,7 @@ async function main() {
         completedAt: suiteCompletedAt.toISOString(),
         durationMs: suiteCompletedAt.getTime() - suiteStartedAt.getTime(),
         command: shellDisplay(command.command, command.args),
+        sourceSuites: suite.sourceSuites || null,
         outputHash: outputRelative
           ? (await collectBuildArtifactHashes(productRoot, [suite.id]))[outputRelative]
           : null,

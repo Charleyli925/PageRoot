@@ -5,8 +5,8 @@ on:
     branches: [main]
   pull_request:
     # Draft opens/pushes run impact-selected feedback only. A non-draft PR
-    # (Ready transition, opened already Ready, or `full-gate` label) runs the
-    # complete source matrix. Returning to Draft starts no full gate.
+    # (Ready transition or opened already Ready) runs the complete source
+    # matrix. Returning to Draft starts no full gate.
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
@@ -27,17 +27,50 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  pr-feedback-linux:
-    name: pr-feedback-linux
+  pr-feedback-plan:
+    name: pr-feedback-plan
     if: >-
       github.event_name == 'pull_request'
       && github.event.pull_request.draft == true
-      && !contains(github.event.pull_request.labels.*.name, 'full-gate')
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 5
     outputs:
       has_browser: ${{ steps.plan.outputs.has_browser }}
       has_desktop: ${{ steps.plan.outputs.has_desktop }}
+      planned_selection: ${{ steps.plan.outputs.planned_selection }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
+        with:
+          node-version: 22.13.0
+      - name: Enforce PageRoot branch naming
+        timeout-minutes: 2
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+        run: npm run task:policy -- "$BRANCH_NAME"
+      - name: Freeze the Draft test plan
+        id: plan
+        timeout-minutes: 2
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          node scripts/test-gate.mjs plan
+          --base "$PR_BASE_SHA"
+          --for draft
+          --github-output "$GITHUB_OUTPUT"
+
+  pr-feedback-linux:
+    name: pr-feedback-linux
+    needs: pr-feedback-plan
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.draft == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -49,23 +82,8 @@ jobs:
         with:
           skip-electron: "true"
           install-mode: populate
-      - name: Enforce PageRoot branch naming
-        timeout-minutes: 2
-        env:
-          BRANCH_NAME: ${{ github.head_ref }}
-        run: npm run task:policy -- "$BRANCH_NAME"
-      - name: Plan Draft canaries
-        id: plan
-        timeout-minutes: 5
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: >-
-          node scripts/test-gate.mjs plan
-          --base "$PR_BASE_SHA"
-          --for draft
-          --github-output "$GITHUB_OUTPUT"
       - name: Restore Playwright Chromium
-        if: steps.plan.outputs.has_browser == 'true'
+        if: needs.pr-feedback-plan.outputs.has_browser == 'true'
         id: playwright-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         timeout-minutes: 5
@@ -74,18 +92,20 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright Chromium
         timeout-minutes: 5
-        if: steps.plan.outputs.has_browser == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
+        if: needs.pr-feedback-plan.outputs.has_browser == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
       - name: Run Draft Node and Browser canaries
         timeout-minutes: 15
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DRAFT_PLANNED_SELECTION: ${{ needs.pr-feedback-plan.outputs.planned_selection }}
         run: >-
           node scripts/ci-evidence.mjs run
           --suite pr-feedback
           --stage pr-feedback
           --
           npm run gate:draft -- --base "$PR_BASE_SHA" --runtime node,browser
+          --planned-selection "$DRAFT_PLANNED_SELECTION"
       - name: Upload Linux feedback evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -97,16 +117,24 @@ jobs:
             output/test-runs
           if-no-files-found: warn
           retention-days: 14
+      - name: Upload Linux Playwright diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-pr-feedback-linux-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/playwright
+          if-no-files-found: warn
+          retention-days: 14
 
   pr-feedback-desktop:
     name: pr-feedback-desktop
     needs:
-      - pr-feedback-linux
+      - pr-feedback-plan
     if: >-
       github.event_name == 'pull_request'
       && github.event.pull_request.draft == true
-      && !contains(github.event.pull_request.labels.*.name, 'full-gate')
-      && needs.pr-feedback-linux.outputs.has_desktop == 'true'
+      && needs.pr-feedback-plan.outputs.has_desktop == 'true'
     runs-on: macos-14
     timeout-minutes: 25
     steps:
@@ -132,12 +160,14 @@ jobs:
         timeout-minutes: 20
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DRAFT_PLANNED_SELECTION: ${{ needs.pr-feedback-plan.outputs.planned_selection }}
         run: >-
           node scripts/ci-evidence.mjs run
           --suite pr-feedback-desktop
           --stage pr-feedback
           --
           npm run gate:draft -- --base "$PR_BASE_SHA" --runtime electron,ai
+          --planned-selection "$DRAFT_PLANNED_SELECTION"
       - name: Upload desktop feedback evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -149,17 +179,26 @@ jobs:
             output/test-runs
           if-no-files-found: warn
           retention-days: 14
+      - name: Upload desktop Playwright diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
+        with:
+          name: PageRoot-pr-feedback-desktop-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/playwright
+          if-no-files-found: warn
+          retention-days: 14
 
   pr-feedback:
     name: pr-feedback
     needs:
+      - pr-feedback-plan
       - pr-feedback-linux
       - pr-feedback-desktop
     if: >-
       ${{ !cancelled()
       && github.event_name == 'pull_request'
-      && github.event.pull_request.draft == true
-      && !contains(github.event.pull_request.labels.*.name, 'full-gate') }}
+      && github.event.pull_request.draft == true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -168,7 +207,7 @@ jobs:
         env:
           LINUX_RESULT: ${{ needs.pr-feedback-linux.result }}
           DESKTOP_RESULT: ${{ needs.pr-feedback-desktop.result }}
-          HAS_DESKTOP: ${{ needs.pr-feedback-linux.outputs.has_desktop }}
+          HAS_DESKTOP: ${{ needs.pr-feedback-plan.outputs.has_desktop }}
         run: |
           test "$LINUX_RESULT" = "success"
           if test "$HAS_DESKTOP" = "true"; then
@@ -181,10 +220,7 @@ jobs:
     name: codex-review
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true
@@ -228,10 +264,7 @@ jobs:
     name: branch-policy
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -251,10 +284,7 @@ jobs:
     name: candidate-context
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -287,10 +317,7 @@ jobs:
     needs: candidate-context
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
       && needs.candidate-context.outputs.packaging_required == 'true'
     uses: ./.github/workflows/release-dry-run.yml
     with:
@@ -301,10 +328,7 @@ jobs:
     name: baseline-policy
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     needs:
       - branch-policy
     runs-on: ubuntu-24.04
@@ -334,10 +358,7 @@ jobs:
     name: linux-deps
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     needs:
       - baseline-policy
     runs-on: ubuntu-24.04
@@ -356,10 +377,7 @@ jobs:
     name: macos-deps
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     needs:
       - baseline-policy
     runs-on: macos-14
@@ -386,10 +404,7 @@ jobs:
     name: source-build
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     needs:
       - baseline-policy
       - linux-deps
@@ -439,10 +454,7 @@ jobs:
     name: source-node
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     needs:
       - source-build
       - linux-deps
@@ -487,10 +499,7 @@ jobs:
     name: browser-${{ matrix.label }}
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     needs:
       - source-build
       - linux-deps
@@ -602,10 +611,7 @@ jobs:
     name: electron-native-${{ matrix.label }}
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     needs:
       - baseline-policy
       - macos-deps
@@ -703,10 +709,7 @@ jobs:
     name: electron-ai
     if: >-
       github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      )
+      && github.event.pull_request.draft == false
     needs:
       - baseline-policy
       - macos-deps
@@ -789,10 +792,7 @@ jobs:
     if: >-
       ${{ !cancelled()
       && github.event_name == 'pull_request'
-      && (
-        github.event.pull_request.draft == false
-        || contains(github.event.pull_request.labels.*.name, 'full-gate')
-      ) }}
+      && github.event.pull_request.draft == false }}
     needs:
       - baseline-policy
       - branch-policy

@@ -88,6 +88,12 @@ export const CHANGED_SPEC_SUITES = {
   },
 };
 
+export const RUNTIME_SELECTION_CONFIGS = Object.freeze({
+  browser: "tests/e2e/browser/playwright.smoke.config.mjs",
+  electron: "tests/e2e/electron/playwright.smoke.config.mjs",
+  ai: "tests/e2e/electron/playwright.ai-smoke.config.mjs",
+});
+
 export function classifyPlaywrightSpec(file) {
   const normalized = String(file).replaceAll("\\", "/");
   if (!normalized.endsWith(".spec.mjs")) return null;

@@ -475,6 +475,17 @@
       ]
     },
     {
+      "id": "playwright-selection",
+      "patterns": [
+        "^scripts/run-playwright-selection\\.mjs$",
+        "^tests/playwright-selection\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/playwright-selection.test.mjs"
+      ]
+    },
+    {
       "id": "source-gate-provenance",
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",

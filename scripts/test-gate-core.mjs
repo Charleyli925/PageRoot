@@ -207,7 +207,7 @@ export function selectGatePlan({ map, lane, changedFiles = [] }) {
         fallbackReasons.push(`unmapped code fallback: ${file}`);
       }
     }
-    if (selectedNodeTests.size === 0 && fallbackReasons.length > 0) {
+    if (fallbackReasons.length > 0) {
       for (const suiteId of map.fallback?.suites || []) {
         if (!allowed.has(suiteId)) continue;
         for (const reason of fallbackReasons) addSuite(suiteId, reason);
@@ -368,7 +368,7 @@ export function assertGateWidthPolicy(plan) {
   );
 }
 
-export function draftCiOutputs(plan) {
+export function draftCiOutputs(plan, metadata = {}) {
   const suiteIds = (plan.suites || []).map((suite) => suite.id);
   const browserSuites = suiteIds.filter((id) => runtimeOfSuite(id) === "browser" || id === "real-html");
   const desktopSuites = suiteIds.filter((id) => runtimeOfSuite(id) === "electron" || runtimeOfSuite(id) === "ai");
@@ -377,6 +377,12 @@ export function draftCiOutputs(plan) {
     has_desktop: desktopSuites.length > 0 ? "true" : "false",
     browser_canaries: browserSuites.join("\n"),
     desktop_canaries: desktopSuites.join("\n"),
+    planned_selection: Buffer.from(JSON.stringify({
+      schemaVersion: 1,
+      head: metadata.head || null,
+      base: metadata.base || null,
+      plan,
+    })).toString("base64"),
   };
 }
 

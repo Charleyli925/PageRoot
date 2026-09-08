@@ -35,13 +35,11 @@ test("Playwright inventory stays aligned with the repository and E2E README", as
   assert.ok(inventory.specFiles.includes("tests/e2e/electron/electron-runtime-continuity.spec.mjs"));
   assert.ok(inventory.specFiles.includes("tests/e2e/electron/electron-seeded-faults.spec.mjs"));
   assert.ok(inventory.gateFiles.includes("tests/e2e/browser/real-complex-html.gate.mjs"));
-  assert.ok(
-    inventory.execution.filesByStage["ready-full"].includes(
-      "tests/e2e/electron/review-annotation-clarity.spec.mjs",
-    ),
-  );
+  assert.ok(inventory.execution.filesByStage["on-demand"].includes(
+    "tests/e2e/electron/review-annotation-clarity.spec.mjs",
+  ));
   assert.equal(
-    inventory.execution.lanes.find((lane) => lane.id === "electron-native").files.includes(
+    inventory.execution.lanes.find((lane) => lane.id === "electron-ai").files.includes(
       "tests/e2e/electron/review-annotation-clarity.spec.mjs",
     ),
     false,
@@ -59,7 +57,7 @@ test("every Playwright spec has a risk ledger owner, oracle and stage", () => {
     assert.ok(entry.riskId, file);
     assert.ok(ownerIds.has(entry.primaryOwner), `${file} owner ${entry.primaryOwner}`);
     assert.ok(entry.oracle, file);
-    assert.match(String(entry.stage), /^(?:edit|draft-canary|ready-full|release)$/u, file);
+    assert.match(String(entry.stage), /^(?:edit|draft-canary|ready-full|release|on-demand)$/u, file);
     if (entry.seededFault) {
       assert.ok(seededFaultIds.has(entry.seededFault), `${file} seededFault ${entry.seededFault}`);
     }

@@ -115,7 +115,9 @@ test("a persisted global comment stays exact after restart and sends directly", 
     await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
     await firstLaunch.page.keyboard.insertText("重启兼容测试");
     await expect.poll(
-      () => readFileSync(managedSourcePath, "utf8"),
+      () => existsSync(managedSourcePath)
+        ? readFileSync(managedSourcePath, "utf8")
+        : "",
       { timeout: 20_000 },
     ).toContain("重启兼容测试");
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);

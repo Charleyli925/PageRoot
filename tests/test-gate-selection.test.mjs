@@ -22,6 +22,7 @@ import {
 } from "../scripts/capability-context.mjs";
 import {
   assembleGateCapabilityPlan,
+  coalesceRuntimeSuites,
   parseArguments as parseGateArguments,
 } from "../scripts/test-gate.mjs";
 import { CI_HEALTH_WORKFLOW_INPUTS } from "../scripts/ci-health-report.mjs";
@@ -401,6 +402,24 @@ test("unmapped code still falls back to the core Node group", () => {
   assert.deepEqual(plan.selectedNodeTests, []);
 });
 
+test("unmapped production code keeps fallback coverage beside mapped owners", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: [
+      "app/lib/source-patch-engine.js",
+      "app/unmapped-owner.ts",
+    ],
+  });
+  assert.deepEqual(suiteIds(plan), ["typecheck", "node-targeted", "node-core"]);
+  assert.ok(plan.selectedNodeTests.includes("tests/source-patch-engine.test.mjs"));
+  assert.ok(
+    plan.suites.find(({ id }) => id === "node-core")?.reasons.includes(
+      "unmapped code fallback: app/unmapped-owner.ts",
+    ),
+  );
+});
+
 test("Draft runs HtmlCanvasEditor canaries while edit stays Node-only", () => {
   const edit = selectGatePlan({
     map,
@@ -439,6 +458,31 @@ test("a changed Playwright spec selects itself on Draft", () => {
   assert.deepEqual(plan.selectedChangedSpecs["browser-changed-specs"], [
     "tests/e2e/browser/native-dom-boundaries.spec.mjs",
   ]);
+});
+
+test("Draft runtime suites coalesce tags and changed specs into one execution", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "draft",
+    changedFiles: [
+      "app/components/HtmlCanvasEditor.tsx",
+      "tests/e2e/electron/electron-workbench-tabs.spec.mjs",
+    ],
+  });
+  const execution = coalesceRuntimeSuites(plan.suites, plan, "/tmp/pageroot-test-plan");
+  const electron = execution.find(({ id }) => id === "electron-selected-tests");
+  assert.ok(electron);
+  assert.ok(electron.sourceSuites.includes("electron-editing-smoke"));
+  assert.ok(electron.sourceSuites.includes("electron-smoke"));
+  assert.ok(electron.sourceSuites.includes("electron-changed-specs"));
+  assert.deepEqual(electron.runtimeSelection.tags, [
+    "@gate-smoke",
+    "@smoke-editing",
+  ]);
+  assert.deepEqual(electron.runtimeSelection.files, [
+    "tests/e2e/electron/electron-workbench-tabs.spec.mjs",
+  ]);
+  assert.equal(execution.filter(({ id }) => id.startsWith("electron-")).length, 1);
 });
 
 test("version workflow changes retain candidate, history, Canvas and AI coverage", () => {
