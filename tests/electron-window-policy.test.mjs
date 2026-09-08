@@ -172,6 +172,22 @@ test("a recovery journal initialization failure degrades before the main window 
   );
 });
 
+test("runtime directory initialization is strict only for Developer Preview", async () => {
+  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  const initialization = mainProcess.slice(
+    mainProcess.indexOf("async function initializeRuntimeEnvironment()"),
+    mainProcess.indexOf("function ensurePreviewProtocolController()"),
+  );
+  assert.match(
+    initialization,
+    /if \(runtimeEnvironment\.channel !== "preview"\)[\s\S]*?Promise\.all\(requiredPaths\)\.catch\(\(\) => \{\}\)[\s\S]*?return;/u,
+  );
+  assert.match(
+    initialization,
+    /runtimeEnvironment\.channel === "preview"|channel !== "preview"[\s\S]*?requiredPaths\.push\([\s\S]*?recoveryJournalPath/u,
+  );
+});
+
 test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {
   const [mainProcess, windowIpc, projectIpc] = await Promise.all([
     readFile(sourceUrl("../desktop/main.mjs"), "utf8"),

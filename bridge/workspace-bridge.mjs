@@ -3010,23 +3010,36 @@ server.on("error", (error) => {
   process.exitCode = 1;
 });
 
-// Initialize every configured root before reporting readiness. A missing or
-// unwritable runtime root is a startup failure; Bridge must never continue on
-// an implicit legacy PageRoot directory.
-try {
-  await Promise.all([
-    ensureDirectory(WORKSPACE_ROOT),
-    projectFileRepository.initialize(),
-  ]);
-} catch (cause) {
-  process.stderr.write(`${JSON.stringify({
-    type: "fatal",
-    error: {
-      code: cause?.code || "PROJECT_REPOSITORY_INITIALIZATION_FAILED",
+if (RUNTIME_CHANNEL === "preview") {
+  // Preview is a fully isolated environment. Its project repository and
+  // workspace root must be ready before the Bridge advertises readiness; a
+  // failure must not fall back to the formal PageRoot directory.
+  try {
+    await Promise.all([
+      ensureDirectory(WORKSPACE_ROOT),
+      projectFileRepository.initialize(),
+    ]);
+  } catch (cause) {
+    process.stderr.write(`${JSON.stringify({
+      type: "fatal",
+      error: {
+        code: cause?.code || "PROJECT_REPOSITORY_INITIALIZATION_FAILED",
+        message: cause instanceof Error ? cause.message : "Project initialization failed.",
+      },
+    })}\n`);
+    process.exit(1);
+  }
+} else {
+  // Stable, source and test callers retain the pre-isolation behavior: the
+  // Bridge can report readiness while an unavailable project repository is
+  // recorded as a warning and handled by its existing request-time guards.
+  void projectFileRepository.initialize().catch((cause) => {
+    process.stderr.write(`${JSON.stringify({
+      type: "warning",
+      code: "PROJECT_REPOSITORY_INITIALIZATION_FAILED",
       message: cause instanceof Error ? cause.message : "Project initialization failed.",
-    },
-  })}\n`);
-  process.exit(1);
+    })}\n`);
+  });
 }
 
 server.listen(PORT, HOST, () => {

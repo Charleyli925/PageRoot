@@ -45,6 +45,40 @@ test("runtime environment keeps stable and preview roots separate", () => {
   assert.notEqual(stable.projectFilesRoot, preview.projectFilesRoot);
 });
 
+test("stable preserves legacy project and workspace path overrides", () => {
+  const customProjectsRoot = `${homePath}/Custom PageRoot/项目`;
+  const customWorkspaceRoot = `${homePath}/Custom PageRoot/项目记录`;
+  const stable = createRuntimeEnvironment({
+    channel: "stable",
+    environment: {
+      HTML_AI_PROJECT_FILES_ROOT: customProjectsRoot,
+      HTML_AI_WORKSPACE: customWorkspaceRoot,
+    },
+    homePath,
+    appDataPath,
+    documentsPath,
+    logsBasePath,
+  });
+  assert.equal(stable.projectFilesRoot, customProjectsRoot);
+  assert.equal(stable.workspacePath, customWorkspaceRoot);
+});
+
+test("preview ignores stable project and workspace path overrides", () => {
+  const preview = createRuntimeEnvironment({
+    channel: "preview",
+    environment: {
+      HTML_AI_PROJECT_FILES_ROOT: `${homePath}/PageRoot/项目`,
+      HTML_AI_WORKSPACE: `${homePath}/PageRoot/项目记录`,
+    },
+    homePath,
+    appDataPath,
+    documentsPath,
+    logsBasePath,
+  });
+  assert.equal(preview.projectFilesRoot, `${documentsPath}/PageRoot Developer Preview/项目`);
+  assert.equal(preview.workspacePath, `${documentsPath}/PageRoot Developer Preview/项目记录`);
+});
+
 test("E2E runtime roots stay under the explicitly isolated test directory", () => {
   const isolatedRoot = "/private/tmp/pageroot-native-e2e-example";
   const environment = createRuntimeEnvironment({

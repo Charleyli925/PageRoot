@@ -123,6 +123,13 @@ function configuredPath(environment, name, fallback, { basePath, label }) {
   return resolved;
 }
 
+function configuredStablePath(environment, name, fallback) {
+  const value = String(environment?.[name] ?? "").trim();
+  // Stable keeps the pre-isolation behavior: an explicit path wins and is
+  // resolved exactly as Main used to resolve it, including relative values.
+  return value ? path.resolve(value) : fallback;
+}
+
 function isInside(candidate, root) {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return relative === "" || (
@@ -194,6 +201,14 @@ export function createRuntimeEnvironment({
       : "PageRoot";
   const userDataPath = path.join(appDataRoot, directoryName);
   const documentsPathForChannel = path.join(documentsRoot, directoryName);
+  const defaultProjectFilesRoot = path.join(documentsPathForChannel, "项目");
+  const defaultWorkspacePath = path.join(documentsPathForChannel, "项目记录");
+  const projectFilesRoot = normalizedChannel === "stable"
+    ? configuredStablePath(environment, "HTML_AI_PROJECT_FILES_ROOT", defaultProjectFilesRoot)
+    : defaultProjectFilesRoot;
+  const workspacePath = normalizedChannel === "stable"
+    ? configuredStablePath(environment, "HTML_AI_WORKSPACE", defaultWorkspacePath)
+    : defaultWorkspacePath;
   return Object.freeze({
     channel: normalizedChannel,
     applicationName: normalizedChannel === "preview"
@@ -208,8 +223,8 @@ export function createRuntimeEnvironment({
     sessionDataPath: normalizedChannel === "preview"
       ? path.join(userDataPath, "chromium")
       : userDataPath,
-    projectFilesRoot: path.join(documentsPathForChannel, "项目"),
-    workspacePath: path.join(documentsPathForChannel, "项目记录"),
+    projectFilesRoot,
+    workspacePath,
     agentsRoot: path.join(userDataPath, "agents"),
     recoveryJournalPath: path.join(userDataPath, "recovery-journals-v1"),
     logsPath: path.join(logsRoot, directoryName),

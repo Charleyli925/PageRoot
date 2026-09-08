@@ -539,15 +539,18 @@ async function initializeRuntimeEnvironment() {
     mkdir(runtimeEnvironment.agentsRoot, { recursive: true, mode: 0o700 }),
     mkdir(runtimeEnvironment.logsPath, { recursive: true, mode: 0o700 }),
   ];
-  // Recovery journals retain the existing optional-degradation contract for
-  // the formal app, source development, and E2E fixtures. A Preview build is
-  // the only channel whose complete isolated environment is a hard startup
-  // requirement; it must never silently continue with a missing root.
-  if (runtimeEnvironment.channel === "preview") {
-    requiredPaths.push(
-      mkdir(runtimeEnvironment.recoveryJournalPath, { recursive: true, mode: 0o700 }),
-    );
+  if (runtimeEnvironment.channel !== "preview") {
+    // Stable, source and E2E retain the pre-isolation best-effort startup
+    // contract. Their explicit roots are still passed to Bridge, but a
+    // temporarily unavailable optional directory must not block the window.
+    await Promise.all(requiredPaths).catch(() => {});
+    return;
   }
+  // Preview is the only channel whose complete isolated environment is a hard
+  // startup requirement; it must never silently continue with a missing root.
+  requiredPaths.push(
+    mkdir(runtimeEnvironment.recoveryJournalPath, { recursive: true, mode: 0o700 }),
+  );
   await Promise.all(requiredPaths);
 }
 
