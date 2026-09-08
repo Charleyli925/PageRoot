@@ -182,3 +182,48 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
+
+test("known incompatible Codex offers other AI without reinstalling the same component", async () => {
+  const fixture = createSourceFixture("codex-incompatible-component.html");
+  const command = createCodexAcpE2ECommand(fixture.sourceDirectory);
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath, injectedEnv: {
+    PAGEROOT_CODEX_ACP_ALLOW_TEST_COMMAND: "1", PAGEROOT_CODEX_ACP_COMMAND: command,
+  } });
+  let installs = 0;
+  try {
+    await launched.page.route("**/agent/diagnose?*", async (route) => {
+      const selection = JSON.parse(new URL(route.request().url()).searchParams.get("selection") || "{}");
+      if (selection.providerId !== "codex") return route.continue();
+      return route.fulfill({ json: { status: "unavailable", diagnostic: {
+        readiness: "connection-failed", cause: "CODEX_EXECUTION_CONTRACT_UNSUPPORTED", operation: "diagnose",
+        facts: { installation: "ready", authentication: "ready", protocol: "failed", service: "unknown" },
+      } } });
+    });
+    await launched.page.route("**/agent/install", async (route) => { installs += 1; await route.abort(); });
+    await addComment(launched.page, fixture.sourcePath, "调整标题。");
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    const settings = await openAgentSettingsPage(launched.page);
+    await expandSettingsAgent(settings, "codex");
+    const row = settings.getByTestId("settings-agent-row-codex");
+    await expect(row).toContainText("当前 Codex 组件暂不支持完成修改");
+    await expect(row).toContainText("账号已登录。");
+    await expect(row.getByRole("button", { name: /更新连接组件|修复连接/u })).toHaveCount(0);
+    await launched.page.screenshot({ path: path.join(screenshots, "codex-execution-unsupported-settings.png"), animations: "disabled" });
+    await row.getByRole("button", { name: "使用其他 AI", exact: true }).click();
+    await expect(row).not.toHaveAttribute("data-expanded", "true");
+    await launched.page.getByRole("button", { name: "返回工作台" }).click();
+    const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-codex").click();
+    const panel = sidebar.getByTestId("ai-conversation-setup-panel");
+    await expect(panel).toContainText("当前组件缺少所需的受限执行能力。");
+    await expect(panel.getByRole("button", { name: "重新检查", exact: true })).toBeVisible();
+    await launched.page.screenshot({ path: path.join(screenshots, "codex-execution-unsupported-sidebar.png"), animations: "disabled" });
+    await panel.getByRole("button", { name: "使用其他 AI", exact: true }).click();
+    await expect(sidebar.getByTestId("ai-conversation-service-pageroot")).toBeVisible();
+    expect(installs).toBe(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});

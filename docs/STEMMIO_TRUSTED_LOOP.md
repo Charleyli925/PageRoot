@@ -63,5 +63,7 @@ PR-1：新增诊断编号、失败阶段、配置代次与操作回执；检查�
 
 PR-7 implementation: Candidate-specific Review → adopt/discard, source-hash and decision identity validation, pre-adoption Draft drain, transactional preservation of later comments, and completed-Promotion history replay. Focused repository, workflow and Electron checks are recorded in the PR; real accounts remain PR-8.
 
-PR-8 最终集成基线：主线 7fdfab1f，包括 #473 运行隔离与 #480 Stable ID 自动纠错。保留本轮真实进度事件及模型绑定；共享运行时冲突已逐项合并并纳入最终门禁。
+PR-8 最终集成基线：主线 589c8954，包括 #473 运行隔离、#480 Stable ID 自动纠错、#474 契约与 #484 收敛规则。保留本轮真实进度事件及模型绑定；共享运行时冲突已逐项合并并纳入最终门禁。
 PR-2 归属：#476 保持服务选择与计时修复的独立交付入口。PR-6 已纳入其同一分支祖先；本次整合无功能净差异，避免把它们视为两份独立功能。后续获准合并时先处理 #476，再处理依赖它的 PR-6；当前全部后续 PR 保持 Draft，不合并。
+
+本次评审补修与验收边界详见 `STEMMIO_TRUSTED_LOOP_QA.md`。PR-3/4 的提前退出与全局容量、PR-5/6 的安全公开摘要与折叠历史、PR-7 的连续未知采用恢复已分配给各自前置 PR；PR-8 只集成并补证据。其余 PR 保持 Draft，不合并。
