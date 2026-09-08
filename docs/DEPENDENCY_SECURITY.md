@@ -18,6 +18,15 @@ reachability.
 
 ## Reviewed fixes
 
+The 2026-09-09 merge gate remediation updates the single hoisted `js-yaml`
+closure from 4.3.1 to 4.3.2 and applies a patch-level `sharp` 0.35.4 override
+for both Next and Miniflare. This removes
+[GHSA-2883-xcg3-v3hh](https://github.com/advisories/GHSA-2883-xcg3-v3hh)
+and [GHSA-rgj7-g3m4-5g8c](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c)
+without a new exception. Sharp's matching platform/libvips packages update
+together; the packaged updater continues to use one hoisted js-yaml/argparse
+closure, and Sharp remains outside the packaged runtime allowlist.
+
 The 2026-08-21 Qoder ACP Agent Bridge pins the official
 `@agentclientprotocol/sdk` 1.3.0 and its direct `zod` 4.4.3 peer as production
 dependencies. Electron Builder copies exactly those two packages into the
