@@ -104,6 +104,12 @@
       "oracle": "Candidate HTML + Version identity + Review projection",
       "stage": "ready-full"
     },
+    "tests/e2e/electron/ai-agent-setup-journeys.spec.mjs": {
+      "riskId": "ai-agent-setup-journeys",
+      "primaryOwner": "agent-provider-registry",
+      "oracle": "persisted service settings + diagnosis repair + Candidate and Version identity",
+      "stage": "ready-full"
+    },
     "tests/e2e/electron/ai-provider-availability.spec.mjs": {
       "riskId": "ai-provider-availability",
       "primaryOwner": "agent-provider-registry",

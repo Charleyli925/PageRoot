@@ -66,6 +66,7 @@ export const APP_SOURCE_FILES = [
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/agent-login-url.mjs",
   "shared/agent-vendor-key-url.mjs",
+  "shared/agent-configuration-preferences.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/index.html",
@@ -494,6 +495,11 @@ export async function createSyntheticAppBundle(t, {
       productRoot,
       "shared/agent-vendor-key-url.mjs",
       "export const AGENT_VENDOR_KEY_VENDOR_IDS = Object.freeze([]);\nexport const publicAgentVendorKeyUrl = () => null;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/agent-configuration-preferences.mjs",
+      "export const fixtureAgentConfigurationPreferences = true;\n",
     ),
     writeFixtureFile(
       productRoot,

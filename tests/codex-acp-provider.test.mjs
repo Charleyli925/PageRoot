@@ -347,7 +347,7 @@ test("login completion accepts verified local authentication even when the ACP a
   const native = path.join(root, "codex-native");
   const adapter = path.join(root, "broken-adapter");
   await writeFile(native, "#!/bin/sh\necho Logged in\n", { mode: 0o755 });
-  await writeFile(adapter, "#!/bin/sh\nexit 7\n", { mode: 0o755 });
+  await writeFile(adapter, "#!/bin/sh\nexec 0<&-\nsleep 0.05\nexit 7\n", { mode: 0o755 });
   let loginCount = 0;
   const command = { nativeCommand: native, command: adapter, version: "1.7.0" };
   await startCodexLogin(command, { environment: {}, loginRunner: async () => { loginCount += 1; } });
