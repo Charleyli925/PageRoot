@@ -3,9 +3,17 @@ import test from "node:test";
 
 import {
   collectPlaywrightReportTests,
+  parsePlaywrightJsonOutput,
   reconcilePlaywrightTests,
   selectPlaywrightTests,
 } from "../scripts/run-playwright-selection.mjs";
+
+test("Playwright discovery ignores runtime download notices before JSON", () => {
+  assert.deepEqual(
+    parsePlaywrightJsonOutput("Downloading Electron...\n{\"suites\":[]}\n"),
+    { suites: [] },
+  );
+});
 
 function report() {
   return {

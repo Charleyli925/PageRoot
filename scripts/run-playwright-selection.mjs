@@ -19,6 +19,13 @@ function testKey(test) {
   return JSON.stringify([test.project, test.file, test.titlePath]);
 }
 
+export function parsePlaywrightJsonOutput(output) {
+  const lines = String(output || "").split(/\r?\n/u);
+  const start = lines.findIndex((line) => line.trimStart().startsWith("{"));
+  if (start === -1) throw new Error("Playwright JSON reporter produced no JSON object.");
+  return JSON.parse(lines.slice(start).join("\n"));
+}
+
 export function collectPlaywrightReportTests(report, root = productRoot) {
   const tests = [];
   const rootDir = report?.config?.rootDir || root;
@@ -147,7 +154,7 @@ async function runInherited(args) {
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
-  const discovery = JSON.parse(await runCapture([
+  const discovery = parsePlaywrightJsonOutput(await runCapture([
     "test",
     "--config",
     options.config,
