@@ -511,7 +511,10 @@ test("the review projection annotates a dense report cleanly and accurately", as
       await expect.poll(() => afterFrame.locator(
         `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
       ).evaluate((box) => {
-        const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+        const scroller = document.scrollingElement || document.documentElement;
+        const maximum = Math.max(0,
+          Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)
+          - scroller.clientHeight);
         const target = Math.max(0, Math.min(maximum,
           Number(box.getAttribute("data-top")) - Math.max(18, innerHeight * .12)));
         return Math.abs(scrollY - target);
