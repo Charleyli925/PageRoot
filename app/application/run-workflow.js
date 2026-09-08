@@ -1684,7 +1684,8 @@ export class RunWorkflow {
       : null;
     try {
       if (run.sourcePath !== "preview://welcome") {
-        await this.#bridgeClient.cancelActiveRun({
+        const cancellation = await this.#bridgeClient.cancelActiveRun({
+          intent: run.status === "ready-to-open" ? "discard" : "stop",
           projectId: run.projectId,
           documentId: run.documentId,
           sourcePath: run.sourcePath,
@@ -1694,6 +1695,12 @@ export class RunWorkflow {
             ? "cancelled-by-user-after-agent-handoff"
             : "cancelled-by-user"),
         });
+        if (cancellation?.status === "result-ready") {
+          const payload = await this.#bridgeClient.status(run.sourcePath, run.requestId, run.attemptId);
+          if (!context || !this.#isCurrentContext(context)) return stale(run);
+          this.#processStatus(run, payload);
+          return succeeded({ run, resultReady: true });
+        }
       }
       const tracked = this.#runSession.hasRun(run);
       const current = Boolean(tracked && context && this.#isCurrentContext(context));

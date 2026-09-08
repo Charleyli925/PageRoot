@@ -1,6 +1,7 @@
 // Preflight submission receipts are not Requests and grant no execution authority.
 // ProjectFileRepository invokes these helpers under its existing serial writer.
 import path from "node:path";
+import { safePublicAgentSummary } from "../agent/agent-session-projector.mjs";
 import { readFile } from "node:fs/promises";
 import { ensureCurrentConversation, rotateConversationAtLimit, readConversation, mutateConversation } from "../conversation-repository.mjs";
 import { appendConversationContext, startConversationTurn, appendConversationTurnMessage, sealConversationTurn } from "../../shared/conversation.mjs";
@@ -141,9 +142,16 @@ export async function projectSubmissionReceipt(loaded, receipt) {
     }
     for (const input of receipt.events || []) {
       const event = submissionExecutionFact(input);
+      const messageId = `message_${event.eventId}`;
+      const messageKind = event.kind === "public-summary" ? "result-summary"
+        : ["promoted", "rejected"].includes(event.kind) ? "decision-outcome"
+        : ["candidate-ready", "no-change", "cancelled", "error", "failed", "interrupted", "stop-confirmed"].includes(event.kind) ? "result-summary" : "progress";
       next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
-        messageId: `message_${event.eventId}`, actor: "pageroot", kind: "text", status: "completed",
-        text: EXECUTION_FACTS[event.kind], createdAt: event.timestamp, completedAt: event.timestamp,
+        messageId, actor: event.kind === "public-summary" && receipt.snapshot.agentDelivery.selection?.providerId ? "agent" : "pageroot",
+        ...(event.kind === "public-summary" && receipt.snapshot.agentDelivery.selection?.providerId
+          ? { providerId: receipt.snapshot.agentDelivery.selection.providerId } : {}),
+        kind: next.messages.find((message) => message.messageId === messageId)?.kind || messageKind, status: "completed",
+        text: event.kind === "public-summary" ? event.publicSummary : EXECUTION_FACTS[event.kind], createdAt: event.timestamp, completedAt: event.timestamp,
         requestId: receipt.requestId, attemptId: receipt.attemptId, candidateId: event.candidateId,
       } }, { now: () => event.timestamp });
       const currentTurn = next.turns.find((value) => value.turnId === receipt.turnId);
@@ -159,10 +167,13 @@ export async function projectSubmissionReceipt(loaded, receipt) {
 }
 
 const EXECUTION_FACTS = Object.freeze({
+  "public-summary": "",
   started: "已开始执行本轮修改。",
   "starting-session": "正在建立执行会话。",
   "sending-task": "已发出本轮修改要求。",
+  "receiving-response": "已收到服务响应。",
   "generating-modification": "正在生成修改。",
+  "response-received": "本轮结果接收结束。",
   "reading-task": "正在读取本轮资料。",
   "writing-candidate": "正在写入修改结果。",
   finalizing: "正在核对修改结果。",
@@ -181,12 +192,13 @@ const EXECUTION_FACTS = Object.freeze({
   promoted: "已采用本次修改。",
 });
 
-export function submissionExecutionFact({ eventId, kind, timestamp, candidateId = null }) {
+export function submissionExecutionFact({ eventId, kind, timestamp, candidateId = null, publicSummary = null }) {
   if (!Object.hasOwn(EXECUTION_FACTS, kind) || !/^[A-Za-z0-9_-]{1,180}$/u.test(eventId)
     || !Number.isFinite(Date.parse(timestamp))) {
     throw new ProjectFileRepositoryError("SUBMISSION_EVENT_INVALID", "Execution fact is invalid.");
   }
   return { eventId, kind, timestamp,
+    ...(kind === "public-summary" ? { publicSummary: safePublicAgentSummary(publicSummary) } : {}),
     ...(candidateId && /^candidate_[A-Za-z0-9_-]{1,160}$/u.test(candidateId) ? { candidateId } : {}) };
 }
 

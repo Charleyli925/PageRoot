@@ -125,6 +125,32 @@ test("crash after authoritative outcome write replays history without repeating 
   assert.equal(conversation.messages.filter((message) => message.text.startsWith("本轮没有产生修改")).length, 1);
 });
 
+
+test("accepted stop fences late output while confirmed cancellation remains separate", async (t) => {
+  const value = await setup(t);
+  const receipt = await prepareRecordedRequest(value);
+  await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId,
+    attemptId: receipt.attemptId, event: { eventId: "event_stop_1", kind: "stop-requested", timestamp: new Date().toISOString() } });
+  await assert.rejects(value.repository.completeRequest({ target: value.target, requestId: receipt.requestId,
+    attemptId: receipt.attemptId, html: await readFile(value.target.exactSourcePath, "utf8") }), { code: "AGENT_STOP_PENDING" });
+  const record = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".pageroot", "requests", receipt.requestId, "request.json"), "utf8"));
+  assert.equal(record.status, "processing");
+  const cancelled = await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId });
+  assert.equal(cancelled.status, "cancelled");
+});
+
+test("a candidate that won before stop is retained until an explicit discard", async (t) => {
+  const value = await setup(t);
+  const receipt = await prepareRecordedRequest(value);
+  const html = (await readFile(value.target.exactSourcePath, "utf8")).replaceAll(">V1<", ">V2<");
+  const ready = await value.repository.completeRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId, html });
+  assert.equal(ready.status, "candidate-ready");
+  const stopped = await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId });
+  assert.equal(stopped.status, "result-ready");
+  assert.equal(stopped.candidateId, ready.candidate.candidateId);
+  const discarded = await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId, discardCandidate: true });
+  assert.equal(discarded.status, "cancelled");
+});
 for (const boundary of ["messages", "contexts", "bytes"]) {
   test(`submission reserves terminal capacity near conversation ${boundary} limit`, async (t) => {
     const { appendConversationContext, startConversationTurn, sealConversationTurn } = await import("../shared/conversation.mjs");
@@ -169,3 +195,29 @@ for (const boundary of ["messages", "contexts", "bytes"]) {
       input: { ...value.input, expectedSourceSha256: adopted.target.sourceSha256 } });
   });
 }
+
+test("sealed public summary is sanitized, bounded and restored once after failure and restart", async (t) => {
+  const value = await setup(t);
+  value.input.agentDelivery = { ...defaultManagedAgentDelivery(), configuration: {
+    providerId: "qoder", runtimeId: "acp", modelId: null, reasoning: "auto",
+    configurationDigest: `sha256:${"a".repeat(64)}` } };
+  const receipt = await prepareRecordedRequest(value);
+  const event = { eventId: "event_public_summary_0001", kind: "public-summary",
+    timestamp: "2026-09-08T00:00:00.000Z",
+    publicSummary: "已检查标题。Bearer sk-synthetic-secret /tmp/private-source.txt " + "公开说明。".repeat(2000),
+    reasoning: "hidden-synthetic-thought", toolOutput: "raw-synthetic-command" };
+  await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId,
+    attemptId: receipt.attemptId, event });
+  await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId });
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  await restarted.initialize();
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const summaries = conversation.messages.filter((message) => message.messageId === "message_event_public_summary_0001");
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].actor, "agent");
+  assert.equal(summaries[0].kind, "result-summary");
+  assert.ok(summaries[0].text.startsWith("已检查标题。"));
+  assert.ok(summaries[0].text.length <= 4096);
+  assert.doesNotMatch(JSON.stringify(conversation), /sk-synthetic|private-source|hidden-synthetic|raw-synthetic/);
+});

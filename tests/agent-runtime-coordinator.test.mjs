@@ -5,6 +5,7 @@ import { createAgentEventReducer } from "../bridge/agent/agent-events.mjs";
 import {
   executionPhaseForEvent,
   publicVisibleTextUpdates,
+  safePublicAgentText,
 } from "../bridge/agent/agent-session-projector.mjs";
 import {
   AgentRuntimeCoordinator,
@@ -521,7 +522,9 @@ test("explicit public paragraphs remain separate without terminal punctuation", 
 
 test("execution status projects only public Agent text with frozen provider identity", async () => {
   const finish = deferred();
+  const persistedFacts = [];
   const coordinator = new AgentRuntimeCoordinator({
+    recordExecutionFact: async (_identity, event) => persistedFacts.push(event),
     providerRegistry: registry({
       run: async (_ticket, { onEvent }) => {
         onEvent({ kind: "initialized", agentName: "Synthetic Agent", agentVersion: "1.0.0" });
@@ -571,6 +574,10 @@ test("execution status projects only public Agent text with frozen provider iden
   finish.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(coordinator.executionStatus(IDENTITY).state, "completed");
+  const summaries = persistedFacts.filter((event) => event.kind === "public-summary");
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].publicSummary, "正在读取冻结任务。正在写入 Candidate。");
+  assert.equal(JSON.stringify(persistedFacts).includes("隐藏推理"), false);
   await coordinator.shutdown();
 });
 
@@ -723,4 +730,18 @@ test("execution persistence failure before launch never invokes the provider", a
   assert.equal(starts, 0);
   assert.equal(releases, 1);
   await coordinator.shutdown();
+});
+
+
+test("public text redacts assembled credentials, paths and generated markup", () => {
+  const updates = publicVisibleTextUpdates([
+    { kind: "visible-text", eventId: "event_1", sequence: 1, messageId: "msg_1", text: "Bearer sk-" },
+    { kind: "visible-text", eventId: "event_2", sequence: 2, messageId: "msg_1", text: "synthetic-secret /Users/测试/secret.txt" },
+    { kind: "tool-call", arguments: "password=private", text: "raw prompt" },
+  ]);
+  assert.equal(updates.length, 1);
+  assert.doesNotMatch(updates[0].text, /synthetic-secret|Users|secret.txt|password|raw prompt/);
+  assert.doesNotMatch(safePublicAgentText("<h1>unvalidated output</h1>"), /<h1>|unvalidated/);
+  assert.doesNotMatch(safePublicAgentText("https://service.invalid?api_key=private"), /private|service.invalid/);
+  assert.ok(publicVisibleTextUpdates([{ kind: "visible-text", text: "a".repeat(100000) }])[0].text.length <= 65536);
 });

@@ -10,6 +10,7 @@ import {
   executionPhaseForEvent,
   publicExecutionSession,
   publicVisibleTextUpdates,
+  safePublicAgentSummary,
 } from "./agent-session-projector.mjs";
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
 import {
@@ -296,10 +297,11 @@ export class AgentRuntimeCoordinator {
     return pending;
   }
 
-  #queueExecutionFact(entry, kind) {
+  #queueExecutionFact(entry, kind, publicSummary = null) {
     if (!this.#recordExecutionFact) return Promise.resolve();
     const event = { eventId: `event_${randomUUID().replaceAll("-", "")}`, kind,
-      timestamp: nowIso(this.#clock) };
+      timestamp: nowIso(this.#clock),
+      ...(kind === "public-summary" ? { publicSummary: safePublicAgentSummary(publicSummary) } : {}) };
     entry.factWrites = (entry.factWrites || Promise.resolve()).then(async () => {
       if (entry.historyFailure) return;
       try { await this.#recordExecutionFact(entry.identity, event); }
@@ -724,7 +726,10 @@ export class AgentRuntimeCoordinator {
     if (LIVE_STATES.has(entry.state)) {
       const previousPhase = entry.phase;
       entry.phase = phaseForEvent(reduced.event, entry.phase);
-      if (entry.phase !== previousPhase && entry.phase !== "cancelling") void this.#queueExecutionFact(entry, entry.phase);
+      if (entry.phase !== "cancelling" && (entry.phase !== previousPhase
+        || ["file-read", "file-written", "terminal-created"].includes(reduced.event.kind))) {
+        void this.#queueExecutionFact(entry, entry.phase);
+      }
     }
     if (textField) {
       entry[textField] = reduced.projection.visibleText;
@@ -1023,6 +1028,8 @@ export class AgentRuntimeCoordinator {
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
     }).finally(async () => {
+      const summary = safePublicAgentSummary(entry.visibleText);
+      if (summary) await this.#queueExecutionFact(entry, "public-summary", summary);
       await this.#queueExecutionFact(entry, entry.state === "failed" ? "failed" : "execution-ended");
       if (entry.historyFailure) {
         entry.state = "interrupted";

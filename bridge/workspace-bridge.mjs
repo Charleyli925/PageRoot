@@ -1595,6 +1595,7 @@ async function cancelProjectFileRequest(body) {
       },
       cancelRequest: () => projectFileRepository.cancelRequest({
         target,
+        discardCandidate: body.intent === "discard",
         requestId: body.requestId,
         attemptId: body.attemptId || "attempt_001",
       }),

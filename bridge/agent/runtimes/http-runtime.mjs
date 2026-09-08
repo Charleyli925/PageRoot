@@ -746,7 +746,7 @@ export function createHttpRuntime({
       const context = await readHttpAgentContext(policy);
       const budget = assertCompleteHtmlBudget(context, launch.modelBudget);
       onEvent({ kind: "request-sent" });
-      onEvent({ kind: "generation-started" });
+      let receivedFirstContent = false;
       const baseFile = policy.readableFiles.find((file) => file.role === "base-html");
       const baseRead = await readVerifiedRegularFile(baseFile.path, policy.requestRoot, "frozen base");
       if (sha256(baseRead.bytes) !== baseFile.sha256) throw policyError("FROZEN_INPUT_HASH_MISMATCH", "Frozen base changed.");
@@ -764,7 +764,14 @@ export function createHttpRuntime({
             )
           : undefined,
         signal,
-        onEvent,
+        onEvent: (event) => {
+          if (!receivedFirstContent && event.kind === "activity" && event.channel === "html" && event.byteDelta > 0) {
+            receivedFirstContent = true;
+            onEvent({ kind: "response-started" });
+            onEvent({ kind: "generation-started" });
+          }
+          onEvent(event);
+        },
         inactivityTimeoutMs: positiveTimeout(
           launch.inactivityTimeoutMs ?? launch.turnTimeoutMs,
           runtimeInactivityTimeoutMs,
@@ -806,6 +813,7 @@ export function createHttpRuntime({
       });
       signal?.throwIfAborted();
       await assertRuntimeProcessingAuthority(policy);
+      onEvent({ kind: "response-ended" });
       onEvent({ kind: "html-validation-completed" });
       onEvent({ kind: "review-preparation-started" });
       await verifiedOutputParent(policy.outputPath, policy.requestRoot);
