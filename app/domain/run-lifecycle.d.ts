@@ -147,6 +147,7 @@ export function validationReviewFromRecord(
 ): ValidationReview | null;
 
 export type ActiveRun = {
+  adoptionPhase?: "applying" | "unknown";
   projectId: string;
   documentId: string;
   requestId: string;

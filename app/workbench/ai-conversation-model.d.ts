@@ -6,6 +6,7 @@ export type SidebarState =
   | "ready-to-open"
   | "review-view"
   | "promoting"
+  | "adoption-unknown"
   | "run-error"
   | "no-change";
 

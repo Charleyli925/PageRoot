@@ -1066,3 +1066,14 @@ test("the conversation sidebar reuses AgentSetupPanel and can replace an API Key
   assert.match(source, /onBeginAccessRepair/u);
   assert.doesNotMatch(source, /useState<null \| Readonly<\{\s*documentId: string;/u);
 });
+
+test("adoption uncertainty takes precedence over Review and exposes no opposite decision", () => {
+  for (const adoptionPhase of ["applying", "unknown"]) {
+    const state = sidebarStateFromRun({ activeRun: { status: "ready-to-open", adoptionPhase }, reviewing: true });
+    assert.equal(state, adoptionPhase === "unknown" ? "adoption-unknown" : "promoting");
+    const bar = sidebarActionBar({ state });
+    assert.deepEqual(bar.actions, []);
+    assert.equal(sidebarSendState({ state }).canSend, false);
+    if (adoptionPhase === "unknown") assert.equal(bar.title, "采用结果待确认");
+  }
+});

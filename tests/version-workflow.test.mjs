@@ -1383,3 +1383,33 @@ test("adoption refuses mutation when newer draft comments cannot drain", async (
   assert.equal(harness.calls.activate, 0);
   assert.equal(harness.runSession.activeRun.status, "ready-to-open");
 });
+
+test("two lost adoption replies retain one decision and automatically reconcile without a second user action", async (t) => {
+  let replies = 0;
+  const harness = createHarness({ activation: async (input) => {
+    replies += 1;
+    if (replies <= 2) throw new BridgeRequestError("lost committed reply", { outcome: "unknown" });
+    const version = versionRecord({ id: input.versionId });
+    return { projectId: input.projectId, documentId: input.documentId,
+      requestId: input.requestId, attemptId: input.attemptId, versionId: input.versionId,
+      contentSha256: version.contentSha256, sourceSha256: version.contentSha256,
+      currentHtmlSha256: version.contentSha256, candidateDisplayVersionLabel: "版本 2", version };
+  } });
+  t.after(() => harness.workflow.dispose());
+  const run = readyRun({ candidateId: "candidate_adoption_recovery" });
+  harness.runSession.trackRun(run, { activate: "always" });
+  const outcome = await harness.workflow.activateReadyVersion({ run });
+  assert.equal(outcome.status, "unknown");
+  assert.equal(harness.runSession.activeRun.adoptionPhase, "unknown");
+  assert.equal(harness.runSession.isOperationBusy("activate", operationKey(run)), true);
+  assert.equal(harness.workflow.getSnapshot().navigation.phase, "idle");
+  assert.equal((await harness.workflow.activateReadyVersion({ run })).code, "VERSION_ACTIVATION_BUSY");
+  assert.equal(harness.calls.activate, 2);
+  await new Promise((resolve) => setTimeout(resolve, 1150));
+  assert.equal(harness.runSession.activeRun.status, "complete");
+  assert.equal(harness.calls.activate, 3);
+  assert.deepEqual(harness.calls.activateInputs, Array(3).fill(harness.calls.activateInputs[0]));
+  assert.equal(harness.calls.activateInputs[0].decisionOperationId, "promote_candidate_adoption_recovery");
+  assert.equal(harness.calls.commit.length, 1);
+  assert.equal(harness.runSession.isOperationBusy("activate", operationKey(run)), false);
+});

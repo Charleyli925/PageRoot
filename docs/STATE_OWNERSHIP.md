@@ -595,3 +595,15 @@ ConversationWorkflow owns a bounded single-flight read refresh while the sidebar
 ### Trusted modification adoption
 
 VersionWorkflow drains current source and Draft before adoption. The decision carries the reviewed Candidate ID, original source hash and existing `promote_<candidateId>` transaction identity. Promotion freezes comments whose content/revision differs from the submission and publishes them with the next Working Copy; unchanged submitted comments alone are consumed. Completed Promotion is the authority for an idempotent adopted Conversation fact. Unknown or failed delivery never implies adoption. The sidebar opens Review first; adopt and explicit discard remain separate decisions.
+
+### Adoption receipt reconciliation
+
+VersionWorkflow owns an ephemeral pending-activation projection keyed by the existing
+Run operation identity. It retains the original Promotion decision payload and
+replays that same idempotent decision after unknown Bridge receipts; the persisted
+Promotion transaction remains the only adoption authority. Two lost replies show
+`adoptionPhase: unknown`, retain the per-Run activation lock, and release navigation.
+Reconciliation backs off to 30 seconds, pauses publication away from the original
+Run, and stops on disposal. Review cannot override this projection and RunWorkflow
+refuses an opposite cancellation while the decision remains unresolved. Restart
+reconstructs the outcome from the persisted Promotion transaction, never a new AI run.

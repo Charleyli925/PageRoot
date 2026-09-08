@@ -22,6 +22,7 @@ const SIDEBAR_STATES = new Set([
   "ready-to-open",
   "review-view",
   "promoting",
+  "adoption-unknown",
   "run-error",
 ]);
 
@@ -66,6 +67,7 @@ const MODE_PRESENTATION = Object.freeze({
   "review-view": {
     label: "审阅中",
   },
+  "adoption-unknown": { label: "采用结果待确认" },
   promoting: {
     label: "采用中",
   },
@@ -107,6 +109,8 @@ export function sidebarStateFromRun({
   submissionPending = false,
   reviewing = false,
 } = {}) {
+  if (activeRun?.adoptionPhase === "unknown") return "adoption-unknown";
+  if (activeRun?.adoptionPhase === "applying") return "promoting";
   if (reviewing) return "review-view";
   const mapped = RUN_STATUS_TO_SIDEBAR_STATE[String(activeRun?.status || "")];
   const handoffMatchesRun = Boolean(
@@ -163,6 +167,7 @@ const RUN_PROGRESS_STATES = Object.freeze([
   "processing",
   "validating",
   "promoting",
+  "adoption-unknown",
   // The result states keep the record on screen. The process drawer used to be the
   // only place the round's stages existed, so once it is gone the thread has to
   // hold them — a user deciding whether to adopt still wants to see what happened.
@@ -721,11 +726,11 @@ export function sidebarActionBar({
       actions: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
     };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return {
       kind: "progress",
-      title: "正在采用候选版本",
-      detail: "采用完成后会切换到新页面。",
+      title: state === "adoption-unknown" ? "采用结果待确认" : "正在采用候选版本",
+      detail: state === "adoption-unknown" ? "正在自动核对已提交的采用决定，确认后会切换到新页面。" : "采用完成后会切换到新页面。",
       actions: [],
     };
   }
@@ -806,7 +811,7 @@ export function sidebarSendState({
       reason: `${boundedAgentName} 完成本轮后可发送`,
     };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return {
       kind: "send",
       canSend: false,
@@ -966,7 +971,7 @@ export function sidebarCopyTaskState({
   if (state === "processing" || state === "validating") {
     return { canCopy: false, reason: `${boundedAgentName} 完成本轮后可发送` };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return { canCopy: false, reason: "正在采用候选版本" };
   }
   if (queued) {
