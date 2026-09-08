@@ -126,6 +126,8 @@ function createHarness({
   activation = null,
   createHistory = null,
   queryCreation = null,
+  workspaceRead = null,
+  confirmCreation = async () => ({}),
   continueHistory = null,
   confirmHistory = null,
   verifyRendered = null,
@@ -181,6 +183,8 @@ function createHarness({
     order: [],
   };
   const bridgeClient = {
+    workspace: (path) => workspaceRead(path),
+    confirmHistoryCreationOpened: confirmCreation,
     async createVersionFromHistory(input) {
       calls.createHistory.push(input);
       return createHistory(input);
@@ -1201,7 +1205,7 @@ test("a late historical read cannot publish into another project", async () => {
 function historyCreatedResult(operationId) {
   return { status: "created", operationId, projectId: "project_a", documentId: "document_a",
     versionId: "ver_0002", versionOrdinal: 2, workingCopyId: "work_ver_0002", basedOnVersionId: "ver_0001",
-    previousVersionId: "ver_0001", contentSha256: sha256(HISTORY_HTML), sourcePath: HISTORY_WORKING_COPY_PATH, openedAt: null };
+    previousVersionId: "ver_0001", contentSha256: sha256(HISTORY_HTML), sourcePath: HISTORY_WORKING_COPY_PATH, openedAt: null, recoveryState: "pending" };
 }
 
 test("manual creation reconciles a lost receipt without repeating the command or publishing Document", async () => {
@@ -1247,4 +1251,124 @@ test("a delayed operation query cannot overwrite the next operation result", asy
   delayed.resolve(historyCreatedResult("history_old_0001"));
   await old;
   assert.equal(harness.workflow.getSnapshot().creation.operationId, "history_new_0001");
+});
+
+function createdWorkspace() {
+  return { ok: true, projectId: "project_a", documentId: "document_a", sourcePath: HISTORY_WORKING_COPY_PATH,
+    content: HISTORY_HTML, currentHtmlSha256: sha256(HISTORY_HTML), latestVersionId: "ver_0002",
+    currentBasedOnVersionId: "ver_0002", currentExactVersionId: "ver_0002", restoredFromVersionId: null,
+    versions: [versionRecord({ id: "ver_0001", content: HISTORY_HTML }), {
+      ...versionRecord({ id: "ver_0002", content: HISTORY_HTML }), sourceType: "history-copy",
+      sourceOperationId: "history_open_0001", sourceRequestId: null, sourceCandidateId: null,
+      basedOnVersionId: "ver_0001", previousVersionId: "ver_0001", baseSnapshotSha256: sha256(HISTORY_HTML),
+    }], activeDraft: { draftRevision: 0, comments: [], changeEvents: [] },
+    openTarget: { targetKind: "working-copy", projectId: "project_a", documentId: "document_a",
+      projectRootPath: "/tmp/project-a", versionId: "ver_0002", workingCopyId: "work_ver_0002",
+      exactSourcePath: HISTORY_WORKING_COPY_PATH, sourceSha256: sha256(HISTORY_HTML) } };
+}
+
+test("created history opens through verified workspace and lost opened acknowledgement cannot recreate", async () => {
+  const operationId = "history_open_0001";
+  const harness = createHarness({ queryCreation: async () => historyCreatedResult(operationId),
+    workspaceRead: async () => createdWorkspace(), confirmCreation: async () => { throw new Error("lost acknowledgement"); } });
+  const outcome = await harness.workflow.openCreatedHistoryVersion({ operationId, context: harness.context });
+  assert.equal(outcome.status, "succeeded", outcome.reason);
+  assert.equal(harness.documentSession.html, HISTORY_HTML);
+  assert.equal(harness.versionSession.snapshot.currentBasedOnVersionId, "ver_0002");
+  assert.equal(harness.versionSession.snapshot.viewMode, "current");
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "opened");
+  assert.equal(harness.calls.createHistory.length, 0);
+  assert.equal(harness.calls.continueHistory.length, 0);
+});
+
+test("created history workspace failure keeps history usable and retries only opening", async () => {
+  const operationId = "history_open_0001";
+  let fail = true;
+  const harness = createHarness({ queryCreation: async () => historyCreatedResult(operationId), workspaceRead: async () => {
+    if (fail) throw new Error("load failed");
+    return createdWorkspace();
+  } });
+  await harness.workflow.viewHistory({ version: { id: "ver_0001" }, context: harness.context });
+  const before = harness.documentSession.snapshot;
+  assert.equal((await harness.workflow.openCreatedHistoryVersion({ operationId, context: harness.context })).status, "rejected");
+  assert.deepEqual(harness.documentSession.snapshot, before);
+  assert.equal(harness.versionSession.snapshot.viewMode, "history");
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "open-failed");
+  assert.equal((await harness.workflow.createVersionFromHistory({ operationId: "history_duplicate_0001", context: harness.context })).status, "blocked");
+  fail = false;
+  assert.equal((await harness.workflow.openCreatedHistoryVersion({ operationId, context: harness.context })).status, "succeeded");
+  assert.equal(harness.calls.createHistory.length, 0);
+});
+
+test("created history late workspace never publishes across a project switch", async () => {
+  const delayed = deferred();
+  const harness = createHarness({ queryCreation: async () => historyCreatedResult("history_open_0001"), workspaceRead: () => delayed.promise });
+  const opening = harness.workflow.openCreatedHistoryVersion({ operationId: "history_open_0001", context: harness.context });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  harness.projectSession.openLocator(SOURCE_B);
+  harness.documentSession.publishAuthority({ html: B_HTML, persistedSourceSha256: sha256(B_HTML) });
+  delayed.resolve(createdWorkspace());
+  assert.equal((await opening).status, "stale");
+  assert.equal(harness.documentSession.html, B_HTML);
+  assert.equal(harness.calls.commit.length, 0);
+});
+
+test("restart restores an unacknowledged creation and leaves acknowledged operation quiet", async () => {
+  let openedAt = null;
+  const harness = createHarness({ queryCreation: async () => ({ ...historyCreatedResult("history_open_0001"), openedAt }) });
+  await harness.workflow.restoreHistoryCreation({ operationId: "history_open_0001", context: harness.context });
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "created");
+  openedAt = "2026-09-08T00:00:00.000Z";
+  await harness.workflow.restoreHistoryCreation({ operationId: "history_open_0001", context: harness.context });
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "opened");
+  assert.equal(harness.calls.createHistory.length, 0);
+});
+
+test("return-current reconciles committed creation rather than re-exposing the old working file", async () => {
+  const operationId = "history_open_0001";
+  const harness = createHarness({ queryCreation: async () => historyCreatedResult(operationId), workspaceRead: async () => createdWorkspace() });
+  await harness.workflow.viewHistory({ version: { id: "ver_0001" }, context: harness.context });
+  await harness.workflow.queryHistoryCreation({ operationId, context: harness.context });
+  assert.equal((await harness.workflow.returnToCurrent({ context: harness.context })).status, "succeeded");
+  assert.equal(harness.projectSession.sourcePath, HISTORY_WORKING_COPY_PATH);
+  assert.equal(harness.calls.createHistory.length, 0);
+});
+
+
+test("a lost opened acknowledgement followed by a later Version cannot resurrect the old recovery action", async () => {
+  const operationId = "history_open_0001";
+  let workspaceReads = 0;
+  const harness = createHarness({ queryCreation: async () => ({ ...historyCreatedResult(operationId), recoveryState: "superseded" }),
+    workspaceRead: async () => { workspaceReads += 1; return createdWorkspace(); } });
+  await harness.workflow.restoreHistoryCreation({ operationId, context: harness.context });
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "superseded");
+  assert.equal((await harness.workflow.openCreatedHistoryVersion({ operationId, context: harness.context })).code, "HISTORY_CREATION_SUPERSEDED");
+  assert.equal(workspaceReads, 0);
+  assert.equal(harness.calls.commit.length, 0);
+  assert.equal(harness.documentSession.html, BASE_HTML);
+});
+
+test("later iteration while reading the created workspace stops publication", async () => {
+  let queries = 0;
+  const harness = createHarness({ queryCreation: async () => ({ ...historyCreatedResult("history_open_0001"),
+    recoveryState: ++queries > 1 ? "superseded" : "pending" }), workspaceRead: async () => createdWorkspace() });
+  assert.equal((await harness.workflow.openCreatedHistoryVersion({ operationId: "history_open_0001", context: harness.context })).code, "HISTORY_CREATION_SUPERSEDED");
+  assert.equal(harness.calls.prepare.length, 0);
+  assert.equal(harness.calls.commit.length, 0);
+});
+
+
+test("repairing an opened acknowledgement verifies current Canvas without reopening its workspace", async () => {
+  let reads = 0;
+  let acknowledgements = 0;
+  const harness = createHarness({ queryCreation: async () => historyCreatedResult("history_open_0001"),
+    workspaceRead: async () => { reads += 1; return createdWorkspace(); },
+    confirmCreation: async () => { acknowledgements += 1; throw new Error("lost acknowledgement"); } });
+  assert.equal((await harness.workflow.openCreatedHistoryVersion({ operationId: "history_open_0001", context: harness.context })).status, "succeeded");
+  const commits = harness.calls.commit.length;
+  await harness.workflow.restoreHistoryCreation({ operationId: "history_open_0001", context: harness.projectSession.context });
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "opened");
+  assert.equal(reads, 1);
+  assert.equal(harness.calls.commit.length, commits);
+  assert.equal(acknowledgements, 2);
 });

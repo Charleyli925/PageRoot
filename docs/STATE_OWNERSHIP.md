@@ -520,9 +520,14 @@ manifest commit. Existing Repository serialization and Registry write locking
 cover create/replay/recovery; there is no second queue or persistence store.
 VersionWorkflow owns the in-memory creation result and query generation; it
 exposes creation and same-operation reconciliation without publishing Document
-authority. E does not wire a user entry. F opens an already-created result through
+authority. F wires the confirmation UI and opens an already-created result through
 the existing managed-source transition. Source ownership changes only at that
 validated opening boundary, regardless of creation receipt delivery.
+
+HistoryCreationDialog owns only the confirmation target, scoped by project,
+document and version. Transaction phases and receipts remain in VersionWorkflow.
+Restoration queries the operation locator from the existing project hydration
+event; no component cache or second mutable transaction store is introduced.
 
 Creation receipts prove immutable project/document/version/operation and source
 lineage facts. Their source path comes from current registered Working Copy
@@ -530,3 +535,15 @@ metadata, not the creation filename. `recoveryState` separately reports pending,
 opened or superseded using the current manifest/runtime. Prepared recovery uses
 fresh prepared/private-anchor/visible object evidence and the sealed hash; stored
 physical observations are diagnostics, not persistent write authorization.
+
+A creation receipt is permanent evidence, not a permanent recovery task.
+VersionWorkflow suppresses superseded receipts and checks again before opening.
+If hydration has already opened the matching current Working Copy, it verifies
+that Canvas and repairs openedAt without another workspace load or publication.
+
+Legacy activation seam: no production Workbench/UI caller uses
+`continueEditingHistoryVersion`. The Controller forwarding method and workflow
+remain deprecated compatibility surfaces exercised by the legacy activation
+protocol tests (`tests/version-workflow.test.mjs`); Repository recovery of old
+`historyActivation` journals remains separate. New UI commands must use create,
+query and openCreatedHistoryVersion. This batch does not remove the disk protocol.
