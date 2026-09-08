@@ -1912,6 +1912,14 @@ export class WorkspaceController {
     return this.#requireVersionWorkflow().returnToCurrent(input);
   }
 
+  createVersionFromHistory(input) {
+    return this.#requireVersionWorkflow().createVersionFromHistory(input);
+  }
+
+  queryHistoryCreation(input) {
+    return this.#requireVersionWorkflow().queryHistoryCreation(input);
+  }
+
   continueEditingHistoryVersion(input) {
     return this.#requireVersionWorkflow().continueEditingHistoryVersion(input);
   }

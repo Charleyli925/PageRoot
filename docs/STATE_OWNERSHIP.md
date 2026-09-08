@@ -512,3 +512,21 @@ projection; HtmlInteractionPreview displays it without acknowledging or replacin
 the current editor authority. Returning clears that projection and restores the
 working display mode. External-file observation can report a conflict but cannot
 replace protected working bytes. A failed history read leaves the prior view intact.
+
+### Manual history creation (E)
+
+ProjectFileRepository owns the durable `history_<operationId>` journal and
+manifest commit. Existing Repository serialization and Registry write locking
+cover create/replay/recovery; there is no second queue or persistence store.
+VersionWorkflow owns the in-memory creation result and query generation; it
+exposes creation and same-operation reconciliation without publishing Document
+authority. E does not wire a user entry. F opens an already-created result through
+the existing managed-source transition. Source ownership changes only at that
+validated opening boundary, regardless of creation receipt delivery.
+
+Creation receipts prove immutable project/document/version/operation and source
+lineage facts. Their source path comes from current registered Working Copy
+metadata, not the creation filename. `recoveryState` separately reports pending,
+opened or superseded using the current manifest/runtime. Prepared recovery uses
+fresh prepared/private-anchor/visible object evidence and the sealed hash; stored
+physical observations are diagnostics, not persistent write authorization.

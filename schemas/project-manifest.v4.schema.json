@@ -33,6 +33,7 @@
           "sourceCandidateId",
           "createdAt"
         ],
+        "allOf": [{"if": {"required": ["sourceType"], "properties": {"sourceType": {"const": "history-copy"}}}, "then": {"required": ["sourceOperationId"], "properties": {"ordinal": {"type": "integer", "minimum": 2}, "basedOnVersionId": {"type": "string"}, "previousVersionId": {"type": "string"}, "sourceRequestId": {"type": "null"}, "sourceCandidateId": {"type": "null"}}}}],
         "properties": {
           "versionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
           "ordinal": { "type": "integer", "minimum": 1 },
@@ -40,6 +41,8 @@
           "previousVersionId": { "type": ["string", "null"], "pattern": "^ver_\\d{4,}$" },
           "contentSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
           "snapshotRelativePath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+" },
+          "sourceType": { "enum": ["initial", "internal-ai", "history-copy"] },
+          "sourceOperationId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,160}$" },
           "sourceRequestId": { "type": ["string", "null"] },
           "sourceCandidateId": { "type": ["string", "null"] },
           "createdAt": { "type": "string", "format": "date-time" }

@@ -2123,7 +2123,7 @@
         "^tests/project-file-(?:finalizer|bridge|schema)\\.test\\.mjs$",
         "^tests/project-file-repository(?:-harness|\\.integration\\.test)\\.mjs$",
         "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$",
-        "^tests/(?:workspace-performance-timing|durable-working-copy-binding)\\.test\\.mjs$"
+        "^tests/(?:history-creation|workspace-performance-timing|durable-working-copy-binding)\\.test\\.mjs$"
       ],
       "suites": [
         "ai-review-smoke"
@@ -2142,8 +2142,18 @@
         "tests/workspace-performance-timing.test.mjs",
         "tests/source-element-identity-migration.test.mjs",
         "tests/durable-working-copy-binding.test.mjs",
-        "tests/project-catalog-readonly.test.mjs"
+        "tests/project-catalog-readonly.test.mjs",
+        "tests/history-creation.test.mjs"
       ]
+    },
+    {
+      "id": "portable-manifest-contract",
+      "patterns": [
+        "^schemas/project-manifest\\.v4\\.schema\\.json$",
+        "^tests/portable-project-record\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/portable-project-record.test.mjs"]
     },
     {
       "id": "project-runtime-state-v4-candidate-seals",

@@ -124,6 +124,8 @@ function createHarness({
   versionRead = null,
   sourceRead = null,
   activation = null,
+  createHistory = null,
+  queryCreation = null,
   continueHistory = null,
   confirmHistory = null,
   verifyRendered = null,
@@ -155,6 +157,8 @@ function createHarness({
   const runSession = new RunSession({ sourcePath: SOURCE_A });
   const commentSession = new CommentSession();
   const calls = {
+    createHistory: [],
+    queryCreation: [],
     activate: 0,
     activateInputs: [],
     continueHistory: [],
@@ -177,6 +181,14 @@ function createHarness({
     order: [],
   };
   const bridgeClient = {
+    async createVersionFromHistory(input) {
+      calls.createHistory.push(input);
+      return createHistory(input);
+    },
+    async queryHistoryCreation(input) {
+      calls.queryCreation.push(input);
+      return queryCreation(input);
+    },
     async versionFile(sourcePath, versionId) {
       calls.versionFile.push([sourcePath, versionId]);
       if (versionRead) return versionRead(sourcePath, versionId);
@@ -1184,4 +1196,55 @@ test("a late historical read cannot publish into another project", async () => {
   assert.equal((await pending).status, "stale");
   assert.equal(harness.documentSession.html, B_HTML);
   assert.equal(harness.versionSession.snapshot.historyPreview, null);
+});
+
+function historyCreatedResult(operationId) {
+  return { status: "created", operationId, projectId: "project_a", documentId: "document_a",
+    versionId: "ver_0002", versionOrdinal: 2, workingCopyId: "work_ver_0002", basedOnVersionId: "ver_0001",
+    previousVersionId: "ver_0001", contentSha256: sha256(HISTORY_HTML), sourcePath: HISTORY_WORKING_COPY_PATH, openedAt: null };
+}
+
+test("manual creation reconciles a lost receipt without repeating the command or publishing Document", async () => {
+  const operationId = "history_create_lost_0001";
+  const harness = createHarness({ createHistory: async () => { throw new Error("lost receipt"); },
+    queryCreation: async () => historyCreatedResult(operationId) });
+  await harness.workflow.viewHistory({ version: { id: "ver_0001" }, context: harness.context });
+  const before = harness.documentSession.snapshot;
+  const result = await harness.workflow.createVersionFromHistory({ operationId, context: harness.context });
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.value.versionId, "ver_0002");
+  assert.equal(harness.calls.createHistory.length, 1);
+  assert.equal(harness.calls.queryCreation.length, 1);
+  assert.equal(harness.calls.queryCreation[0].operationId, operationId);
+  assert.deepEqual(harness.documentSession.snapshot, before);
+  assert.equal(harness.versionSession.snapshot.viewMode, "history");
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "created");
+});
+
+test("unknown manual creation stays queryable with the same operation", async () => {
+  const operationId = "history_create_unknown_0001";
+  let available = false;
+  const harness = createHarness({ createHistory: async () => { throw new Error("timeout"); }, queryCreation: async () => {
+    if (!available) throw new Error("offline");
+    return historyCreatedResult(operationId);
+  } });
+  await harness.workflow.viewHistory({ version: { id: "ver_0001" }, context: harness.context });
+  const result = await harness.workflow.createVersionFromHistory({ operationId, context: harness.context });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.operationId, operationId);
+  available = true;
+  const queried = await harness.workflow.queryHistoryCreation({ operationId, context: harness.context });
+  assert.equal(queried.status, "succeeded");
+  assert.equal(harness.calls.createHistory.length, 1);
+});
+
+test("a delayed operation query cannot overwrite the next operation result", async () => {
+  const delayed = deferred();
+  const harness = createHarness({ queryCreation: ({ operationId }) => operationId === "history_old_0001"
+    ? delayed.promise : Promise.resolve(historyCreatedResult(operationId)) });
+  const old = harness.workflow.queryHistoryCreation({ operationId: "history_old_0001", context: harness.context });
+  await harness.workflow.queryHistoryCreation({ operationId: "history_new_0001", context: harness.context });
+  delayed.resolve(historyCreatedResult("history_old_0001"));
+  await old;
+  assert.equal(harness.workflow.getSnapshot().creation.operationId, "history_new_0001");
 });

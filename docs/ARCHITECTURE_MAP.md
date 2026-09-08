@@ -294,3 +294,9 @@ sidebar selection and toolbar permissions/reasons. This is a pure view projectio
 it cannot change history locks, canvas mode or file-operation authority.
 `project-version-tree.tsx` renders an ordinal list; `version-graph.ts` now retains
 only entry-title projection, with lane layout and connector algorithms removed.
+
+Historical creation (E): `ProjectFileRepository.createVersionFromHistory` owns
+the manual Version transaction and idempotent recovery; Bridge exposes
+`/history-version/create`, `/result`, `/opened`. VersionWorkflow and the existing
+Controller expose create/query outcomes. The UI cut-over is F. See the unique
+contract in `VERSION_AND_PROJECT_FILES_PRD.md`.

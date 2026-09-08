@@ -381,6 +381,9 @@ export function createBridgeClient({
       "最新版暂时无法打开。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
+    createVersionFromHistory: (body) => command("/history-version/create", body, "新版本的创建结果暂时无法确认。", DEFAULT_REQUEST_TIMEOUT_MS),
+    queryHistoryCreation: (body) => command("/history-version/result", body, "暂时无法确认新版本的创建结果。"),
+    confirmHistoryCreationOpened: (body) => command("/history-version/opened", body, "新版本打开确认暂时没有响应。"),
     continueEditingHistoryVersion: (body) => command(
       "/history-version/continue",
       body,

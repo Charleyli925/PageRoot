@@ -122,6 +122,7 @@ function isRecord(value) {
 
 
 export class VersionWorkflow {
+  #creationGeneration = 0;
   #bridgeClient;
   #projectSession;
   #documentSession;
@@ -633,6 +634,96 @@ export class VersionWorkflow {
     this.#emitEvent({ type: "version-current-returned", ...value });
     void this.#documentWorkflow.observeExternalSourceChange({ sourcePath: current.sourcePath });
     return succeeded(value);
+  }
+
+  #setHistoryCreation(value, generation) {
+    if (generation !== this.#creationGeneration) return;
+    this.#snapshot = Object.freeze({ ...this.#snapshot, creation: Object.freeze(value) });
+    this.#publishSnapshot();
+  }
+
+  #validateHistoryCreation(payload, context, operationId, versionId = null, snapshotSha256 = null) {
+    if (!isRecord(payload) || payload.operationId !== operationId
+      || payload.projectId !== context.projectId || payload.documentId !== context.documentId
+      || !["created", "not-created"].includes(payload.status)) {
+      throw new Error("新版本操作回执身份不一致。");
+    }
+    if (payload.status === "created" && (
+      !Number.isSafeInteger(payload.versionOrdinal) || payload.versionOrdinal < 2
+      || payload.versionId !== `ver_${String(payload.versionOrdinal).padStart(4, "0")}`
+      || !String(payload.sourcePath || "") || !SHA256.test(String(payload.contentSha256 || ""))
+      || payload.workingCopyId !== `work_${payload.versionId}`
+      || payload.previousVersionId !== `ver_${String(payload.versionOrdinal - 1).padStart(4, "0")}`
+      || !/^ver_\d{4,}$/.test(String(payload.basedOnVersionId || ""))
+      || (payload.openedAt !== null && (typeof payload.openedAt !== "string" || Number.isNaN(Date.parse(payload.openedAt))))
+      || (versionId && payload.basedOnVersionId !== versionId)
+      || (snapshotSha256 && payload.contentSha256 !== snapshotSha256)
+    )) throw new Error("新版本操作回执内容不一致。");
+    return Object.freeze({ ...payload });
+  }
+
+  async createVersionFromHistory({ operationId, context = this.#projectSession.context } = {}) {
+    const current = copyContext(context);
+    if (this.#disposed) return blocked("VERSION_WORKFLOW_DISPOSED", "版本工作流已经停止。");
+    if (!current || !this.#projectSession.matches(current)) return stale(current || {});
+    const preview = this.#versionSession.snapshot.historyPreview;
+    if (!preview || preview.projectId !== current.projectId || preview.documentId !== current.documentId
+      || preview.sourcePath !== current.sourcePath || !/^[A-Za-z0-9_-]{8,160}$/.test(String(operationId || ""))) {
+      return blocked("HISTORY_CREATION_PRECONDITION", "请先打开要作为来源的历史版本。");
+    }
+    if (this.#runSession.activeLocked) return blocked("HISTORY_CREATION_RUN_LOCKED", "请先完成当前 AI 任务或候选的处理。");
+    const operation = this.#beginNavigation("creating", current);
+    if (!operation) return blocked("VERSION_NAVIGATION_BUSY", "版本操作正在进行。");
+    const creationGeneration = ++this.#creationGeneration;
+    this.#setHistoryCreation({ phase: "creating", operationId, context: current }, creationGeneration);
+    let attempted = false;
+    try {
+      const drained = await this.#projectWorkflow.drain("history", { deadlineAt: this.#clock.now() + 15_000 });
+      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      if (!drained.ok) return blocked("HISTORY_CREATION_DRAIN", drained.reason || "当前修改尚未保存。");
+      attempted = true;
+      const payload = await this.#bridgeClient.createVersionFromHistory({
+        target: current, operationId, versionId: preview.versionId,
+        expectedSourceSha256: this.#documentSession.persistedSourceSha256,
+        expectedSnapshotSha256: preview.sha256,
+      });
+      const result = this.#validateHistoryCreation(payload, current, operationId, preview.versionId, preview.sha256);
+      if (result.status !== "created") throw new Error("创建操作没有返回已创建版本。");
+      this.#setHistoryCreation({ phase: "created", operationId, context: current, result }, creationGeneration);
+      return succeeded(result);
+    } catch (cause) {
+      if (attempted) {
+        try {
+          const result = this.#validateHistoryCreation(await this.#bridgeClient.queryHistoryCreation({ target: current, operationId }),
+            current, operationId, preview.versionId, preview.sha256);
+          this.#setHistoryCreation({ phase: result.status === "created" ? "created" : "not-created", operationId, context: current, result }, creationGeneration);
+          if (result.status === "created") return succeeded(result);
+          return rejected(errorCode(cause, "HISTORY_CREATION_NOT_CREATED"), this.#codecs.errorMessage(cause, "尚未创建新版本，可以重试。"));
+        } catch {
+          this.#setHistoryCreation({ phase: "unknown", operationId, context: current }, creationGeneration);
+          return unknown(operationId, "创建结果暂时未知，请查询此操作的结果，不要重新创建。");
+        }
+      }
+      this.#setHistoryCreation({ phase: "not-created", operationId, context: current }, creationGeneration);
+      return rejected(errorCode(cause, "HISTORY_CREATION_NOT_CREATED"), this.#codecs.errorMessage(cause, "尚未创建新版本。"));
+    } finally {
+      if (this.#snapshot.creation?.phase === "creating") this.#setHistoryCreation({ phase: "not-created", operationId, context: current }, creationGeneration);
+      this.#finishNavigation(operation);
+    }
+  }
+
+  async queryHistoryCreation({ operationId, context = this.#projectSession.context } = {}) {
+    const current = copyContext(context);
+    if (!current || this.#disposed) return blocked("HISTORY_CREATION_CONTEXT", "项目身份不可用。");
+    const creationGeneration = ++this.#creationGeneration;
+    try {
+      const result = this.#validateHistoryCreation(await this.#bridgeClient.queryHistoryCreation({ target: current, operationId }), current, operationId);
+      this.#setHistoryCreation({ phase: result.status === "created" ? "created" : "not-created", operationId, context: current, result }, creationGeneration);
+      return succeeded(result);
+    } catch {
+      this.#setHistoryCreation({ phase: "unknown", operationId, context: current }, creationGeneration);
+      return unknown(operationId, "暂时无法确认创建结果，请稍后查询同一操作。");
+    }
   }
 
   async continueEditingHistoryVersion({

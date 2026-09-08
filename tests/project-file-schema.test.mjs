@@ -284,3 +284,20 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   futureFileIdentity.workingCopies[0].fileIdentity.futureIdentity = "next";
   assert.equal(check(futureFileIdentity), false);
 });
+
+test("v4 schemas validate manual historical provenance without rewriting legacy Versions", async (t) => {
+  const { fixture, importSource } = await import("./project-file-repository-harness.mjs");
+  const value = await fixture(t);
+  const { target } = await importSource(value);
+  const created = await value.repository.createVersionFromHistory({ target, versionId: "ver_0001", operationId: "history_schema_0001",
+    expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 });
+  const workspace = await value.repository.workspace({ sourcePath: created.sourcePath });
+  await validate("project-manifest.v4.schema.json", workspace.manifest);
+  await validate("project-runtime-state.v4.schema.json", workspace.runtime);
+  const missingOrigin = structuredClone(workspace.manifest);
+  delete missingOrigin.versions[1].sourceOperationId;
+  await validateRejects("project-manifest.v4.schema.json", missingOrigin);
+  const fakeAi = structuredClone(workspace.manifest);
+  fakeAi.versions[1].sourceRequestId = "req_fake_ai";
+  await validateRejects("project-manifest.v4.schema.json", fakeAi);
+});

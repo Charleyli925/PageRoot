@@ -1141,3 +1141,28 @@ test("open-classification is read-only and returns A/B/C without source keys or 
   assert.equal(knownAfterEdit.body.openTarget.workingCopyId, "work_ver_0001");
   assert.deepEqual(await readFile(registryFile), registryBefore);
 });
+
+test("Bridge creates and queries a manual historical Version with a distinct source type", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, { prefix: "stemmio-history-create-" });
+  const sourcePath = await environment.createSource("manual.html", html("initial"));
+  const bridge = await environment.start({ HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files") });
+  const preview = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(sourcePath)}`);
+  const ensured = await postJson(bridge, "/project/ensure", { sourcePath, expectedSourceSha256: preview.body.currentHtmlSha256, projectStorageVersion: "4.0.0" });
+  assert.equal(ensured.response.status, 200);
+  const request = { target: ensured.body.openTarget, versionId: "ver_0001", operationId: "history_bridge_create_0001",
+    expectedSourceSha256: ensured.body.sourceSha256, expectedSnapshotSha256: ensured.body.versions[0].contentSha256 };
+  const created = await postJson(bridge, "/history-version/create", request);
+  assert.equal(created.response.status, 200, JSON.stringify(created.body));
+  assert.equal(created.body.versionId, "ver_0002");
+  const replayed = await postJson(bridge, "/history-version/create", request);
+  assert.deepEqual(replayed.body, created.body);
+  const queried = await postJson(bridge, "/history-version/result", { target: request.target, operationId: request.operationId });
+  assert.equal(queried.body.versionId, "ver_0002");
+  const workspace = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(created.body.sourcePath)}`);
+  assert.equal(workspace.body.versions.length, 2);
+  assert.equal(workspace.body.versions[1].sourceType, "history-copy");
+  assert.equal(workspace.body.versions[1].sourceRequestId, null);
+  const { loadWorkbenchModel } = await import("./helpers/workbench-model-loader.mjs");
+  const { versionsFromWorkspace } = await loadWorkbenchModel("version-model");
+  assert.equal(versionsFromWorkspace(workspace.body).find((version) => version.id === "ver_0002").source, "历史创建");
+});
