@@ -33,7 +33,7 @@ State, persistence and lifecycle changes must follow
 mutation outcomes, reuse the shared drain boundaries and remove any workaround
 the new invariant supersedes. `npm run architecture:check` is mandatory.
 
-Push the branch and open a Draft Pull Request. The PR must explain the problem, the chosen boundary, verification performed and any user-visible impact. Keep changes coherent, but PR size is advisory rather than a hard repository limit: split only when review, rollback or product boundaries are genuinely separate. Moving the frozen head to Ready starts the complete source matrix; Codex review is requested automatically, shown on the PR, and never blocks merge. Batch verified P0/P1 product fixes before marking the final head Ready.
+Push the branch and open a Draft Pull Request. The PR must explain the problem, the chosen boundary, verification performed and any user-visible impact. Keep changes coherent, but PR size is advisory rather than a hard repository limit: split only when review, rollback or product boundaries are genuinely separate. Moving the frozen head to Ready starts the complete source matrix; Codex review is requested automatically and shown on the PR. Its service status and unverified comments do not block merge; verified P0/P1 defects block delivery under `docs/CODEX_WORKFLOW.md`. Batch verified P0/P1 product fixes before marking the final head Ready.
 
 GitHub removes the remote task branch after squash merge. Maintainers use the
 read-only `npm run task:audit` report and an explicit
@@ -44,7 +44,7 @@ implicitly.
 ## Pull Request requirements
 
 - CI passes the required `release-gate` check.
-- Codex review comments are informational; they do not block merge.
+- Codex review service status and unverified comments are informational; verified P0/P1 defects block delivery, even with a green `release-gate`.
 - No secrets, personal data, user HTML, generated output or release binary is committed.
 - Protocol or schema changes include fixtures, migration/compatibility notes and tests.
 - UI changes include a concise description or screenshot when it materially helps review.

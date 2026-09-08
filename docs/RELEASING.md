@@ -142,7 +142,7 @@ succeeded technically but installer handoff is incomplete.
    section becomes the published Release notes and the in-app “查看更新内容”
    destination, so write it for users; `npm run release:notes` renders exactly
    what they will read and fails when the section is missing or empty.
-3. Open a draft Pull Request while iterating. Every ordinary Draft update runs impact-selected `pr-feedback` only. Batch accepted P0/P1 product corrections before promotion; Codex comments are informational and do not block merge.
+3. Open a draft Pull Request while iterating. Every ordinary Draft update runs impact-selected `pr-feedback` only. Batch accepted P0/P1 product corrections before promotion; review service status and unverified comments are informational. Verified P0/P1 defects block delivery under `docs/CODEX_WORKFLOW.md`, even with a green `release-gate`.
 4. Update the final head onto current `main` and mark it Ready once, or add the `full-gate` label. That starts the complete source matrix. A PR opened already Ready also takes this path. Codex review is requested automatically for the current head and never blocks `release-gate`.
 5. Wait for the complete source lanes, any relevant candidate-only dry run and required `release-gate`. The final gate refreshes the same dependency/runtime-closure audit before attestation. A later commit on a Ready PR reruns the complete matrix for the new head.
 6. Merge only with authorization, then confirm `main-integrity` accepts the exact merge Tree/version/PR attestation without rerunning source tests.
