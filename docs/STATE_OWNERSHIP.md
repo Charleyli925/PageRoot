@@ -591,3 +591,7 @@ Main `ui-preferences` is the only durable writer of bounded `documentAgentSelect
 ### Conversation read refresh
 
 ConversationWorkflow owns a bounded single-flight read refresh while the sidebar is open. It preserves local draft state, fences document/load generations, and stops when closed. The Renderer writes no history facts. Sidebar groups retain stable Turn keys when execution changes to history; header, scrolling facts, current actions and submission controls are separate regions. Current actions derive only from the live Run projection.
+
+### Trusted modification adoption
+
+VersionWorkflow drains current source and Draft before adoption. The decision carries the reviewed Candidate ID, original source hash and existing `promote_<candidateId>` transaction identity. Promotion freezes comments whose content/revision differs from the submission and publishes them with the next Working Copy; unchanged submitted comments alone are consumed. Completed Promotion is the authority for an idempotent adopted Conversation fact. Unknown or failed delivery never implies adoption. The sidebar opens Review first; adopt and explicit discard remain separate decisions.

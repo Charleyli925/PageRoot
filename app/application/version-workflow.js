@@ -433,10 +433,18 @@ export class VersionWorkflow {
     }
     this.#runSession.setActiveRun({ ...ready, error: undefined });
     try {
+      const drained = await this.#projectWorkflow.drain("history", { deadlineAt: this.#clock.now() + 15_000 });
+      if (!this.#isNavigationCurrent(operation) || !this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
+      if (!drained.ok) return blocked("ADOPTION_DRAFT_NOT_SAVED", drained.reason || "当前修改意见尚未保存，本次修改尚未采用。");
       const readyTarget = this.#readyOpenTarget(ready);
       perfMark("pageroot:accept:promote-start");
       const activatedPayload = await this.#bridgeClient.activateReadyVersion({
         ...readyTarget,
+        candidateId: ready.readyPayload?.candidate?.candidateId || ready.candidateId || null,
+        ...(ready.readyPayload?.candidate?.candidateId || ready.candidateId ? {
+          decisionOperationId: `promote_${ready.readyPayload?.candidate?.candidateId || ready.candidateId}`,
+        } : {}),
+        expectedSourceSha256: readyTarget.sourceSha256,
         sourcePath: ready.sourcePath,
         projectId: ready.projectId,
         documentId: ready.documentId,
@@ -468,7 +476,9 @@ export class VersionWorkflow {
       this.#emitEvent({ type: "version-activated", ...value });
       return succeeded(value);
     } catch (cause) {
-      const reason = this.#codecs.errorMessage(cause, "最新版暂时无法打开。");
+      const reason = ["SOURCE_HASH_CONFLICT", "CANDIDATE_SOURCE_CHANGED", "CANDIDATE_SOURCE_CONFLICT"].includes(errorCode(cause, ""))
+        ? "页面已发生变化，本次修改尚未应用。"
+        : this.#codecs.errorMessage(cause, "最新版暂时无法打开。");
       if (this.#runMatches(this.#runSession.activeRun, ready)) {
         this.#runSession.trackRun({
           ...ready,
@@ -1174,8 +1184,12 @@ export class VersionWorkflow {
       sourceSha256,
       publishSessions: (publishedContext) => {
         this.#versionSession.adoptCommitted(completion.versionId);
-        this.#draftSession.replaceAuthority(publishedContext, 0, emptyDraftAuthority());
+        const retained = payload.retainedDraft;
+        this.#draftSession.replaceAuthority(publishedContext, Number(retained?.draftRevision || 0), retained || emptyDraftAuthority());
         this.#commentSession.reset();
+        if (retained?.comments?.length) this.#commentSession.update({
+          comments: this.#codecs.commentsFromRecords(retained.comments), changeEvents: [],
+        });
       },
     });
     if (!context || !this.#projectSession.matches(context)) return stale(this.#runIdentity(run));

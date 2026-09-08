@@ -885,7 +885,7 @@ export async function loadedDiskFrame(
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   await expect(page.getByRole("button", { name: "项目", exact: true }))
     .toHaveCount(0);
-  if (editable) {
+  if (editable && !await page.getByTestId("ai-conversation-sidebar").isVisible()) {
     const globalCommentButton = page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true });
     await expect(globalCommentButton).toBeVisible({ timeout });

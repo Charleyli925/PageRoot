@@ -84,7 +84,7 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     expect(readFileSync(workingPath).equals(original)).toBe(true);
     await launched.page.screenshot({ path: path.join(screenshots, "narrow-sidebar-generating.png"), animations: "disabled" });
     finish();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("等待你的决定", { timeout: 60_000 });
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     await expect(sidebar.getByTestId("ai-conversation-run-summary")).toHaveCount(0);
     const active = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
     const candidates = candidateHtmlFiles(launched.workspace, active.projectId);
@@ -92,7 +92,7 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     expect(candidates.some((file) => readFileSync(file, "utf8").includes('data-pageroot-http-reasoning="high"'))).toBe(true);
     expect(readFileSync(workingPath).equals(original)).toBe(true);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
-    await sidebar.getByRole("button", { name: "审阅对比" }).click();
+    await sidebar.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
     await launched.page.screenshot({ path: path.join(screenshots, "review-result.png"), animations: "disabled" });
   } finally {
@@ -162,9 +162,9 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     expect(installs).toBe(0);
     await panel.getByRole("button", { name: "返回任务", exact: true }).click();
     await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("等待你的决定", { timeout: 60_000 });
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     expect(readFileSync(workingPath, "utf8")).not.toContain('data-pageroot-codex-acp="e2e"');
-    await sidebar.getByRole("button", { name: "审阅对比" }).click();
+    await sidebar.getByRole("button", { name: "查看修改" }).click();
     await launched.page.getByRole("button", { name: "采纳修改", exact: true }).click();
     await launched.page.getByRole("button", { name: "确认并采纳", exact: true }).click();
     await expect.poll(async () => (await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject()))?.sourcePath)
@@ -174,7 +174,7 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     await addComment(launched.page, first.sourcePath, "继续调整标题。");
     if (!await sidebar.isVisible()) await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("等待你的决定", { timeout: 60_000 });
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     await launched.page.screenshot({ path: path.join(screenshots, "codex-second-round.png"), animations: "disabled" });
   } finally {

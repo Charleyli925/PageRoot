@@ -382,7 +382,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     // The result is reported in the conversation; the process panel is out of the flow.
     const readyDecision = launched.page.getByTestId("ai-conversation-action-bar");
     await expect(readyDecision).toBeVisible({ timeout: 30_000 });
-    await expect(readyDecision).toContainText("等待你的决定");
+    await expect(readyDecision).toContainText("修改已准备好，尚未采用");
     await expect(runProgress).toHaveCount(0);
     const candidateRecord = JSON.parse(readFileSync(
       path.join(request.requestRoot, "candidate.json"),
@@ -413,7 +413,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     ));
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     const reviewWorkspace = launched.page.getByTestId("ai-review-workspace");
     await expect(reviewWorkspace).toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("group", { name: "工作模式", exact: true }))
@@ -432,12 +432,11 @@ ${REVIEW_MASK_UNION_BEFORE}
       String(reviewReloadRevision + 1),
     );
     const reviewSidebar = reviewWorkspace.getByTestId("ai-conversation-sidebar");
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
     const reviewAiEntry = launched.page.getByRole("button", { name: "AI 助手" });
-    await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "false");
+    await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "true");
     await expect(launched.page.getByTestId("review-show-conversation")).toHaveCount(0);
     await expect(reviewAiEntry).toHaveCount(1);
-    await reviewAiEntry.click();
     await expect(reviewSidebar).toBeVisible();
     await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "true");
     await expect(launched.page.locator(".toast")).toHaveCount(0);
@@ -2330,7 +2329,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     runOfficialFinalizer(firstRequest.requestRoot, firstRequest.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
     await adoptReadyResult(launched.page);
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
@@ -2357,7 +2356,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     runOfficialFinalizer(secondRequest.requestRoot, secondRequest.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
     await adoptReadyResult(launched.page);
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
@@ -2434,7 +2433,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     );
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
     const candidateFiles = candidateHtmlFiles(
       launched.workspace,
       request.changeRequest.projectId,
@@ -2442,7 +2441,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     expect(candidateFiles).toHaveLength(1);
     expect(readFileSync(candidateFiles[0], "utf8")).toContain(UPDATED_TEXT);
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", { name: "返回修改前" }).click();
@@ -2490,6 +2489,8 @@ test("returning from review restores the editable pre-AI version and preserves t
       request.changeRequest.projectId,
     );
     await loadedDiskFrame(launched.page, workingCopyPath);
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     await expect(launched.page.locator(".comment-card").filter({ hasText: commentText }))
       .toHaveCount(1);
     const restored = await launched.page.evaluate(
@@ -2542,7 +2543,7 @@ test("a broad but related AI return is accepted without a target-scope error", {
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
     await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true }))
       .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "采用这些额外变化" }))
@@ -2579,7 +2580,7 @@ test("a committed version that the desktop cannot activate stays visibly blocked
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
     await adoptReadyResult(launched.page);
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
       .filter({ visible: true }).first())
@@ -2695,9 +2696,9 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
@@ -2852,9 +2853,9 @@ test("a rewrite outside <main> is still reviewed", {
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     const beforeReviewFrame = launched.page.frameLocator('iframe[title^="修改前"]');
@@ -2916,9 +2917,9 @@ test("Review keeps Candidate scope diagnostics out of the comparison canvas", {
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByTestId("review-impact-summary")).toHaveCount(0);
@@ -2951,9 +2952,9 @@ test("CSS and Script comment-only changes stay out of Review", {
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0);
     await expect(launched.page.locator(".toast"))
       .toContainText("这次没有产生有效变化", { timeout: 30_000 });
@@ -2994,9 +2995,9 @@ test("a safe simple CSS selector creates one position-bound element change", {
     ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
@@ -3045,8 +3046,8 @@ test("source Review preserves multi-host text evidence and hidden changes withou
       .replace("隐藏旧文字", "隐藏新文字"));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
 
@@ -3247,7 +3248,7 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
 
     await launched.page.evaluate(() => {
       const button = document.querySelector(
@@ -3272,6 +3273,8 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     });
     await holdEditRuntimePrepare(launched.electronApp);
     await adoptReadyResult(launched.page);
+    // Return to the comments rail explicitly; adoption retains AI history.
+    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     await launched.page.getByRole("button", { name: "确认并采纳" })
       .click({ timeout: 5_000 })
       .catch(() => undefined);

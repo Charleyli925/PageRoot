@@ -52,9 +52,9 @@ test("a pre-load review navigation falls back without trusting the replacement p
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     const beforeReviewFrame = launched.page.frameLocator('iframe[title^="修改前"]');

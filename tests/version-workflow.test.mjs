@@ -1372,3 +1372,14 @@ test("repairing an opened acknowledgement verifies current Canvas without reopen
   assert.equal(harness.calls.commit.length, commits);
   assert.equal(acknowledgements, 2);
 });
+
+
+test("adoption refuses mutation when newer draft comments cannot drain", async () => {
+  const harness = createHarness({ onDrain: async () => ({ ok: false, reason: "Draft save failed" }) });
+  const run = readyRun();
+  harness.runSession.trackRun(run, { activate: "always" });
+  const outcome = await harness.workflow.activateReadyVersion({ run });
+  assert.equal(outcome.code, "ADOPTION_DRAFT_NOT_SAVED");
+  assert.equal(harness.calls.activate, 0);
+  assert.equal(harness.runSession.activeRun.status, "ready-to-open");
+});

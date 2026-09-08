@@ -445,7 +445,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await addReportComment(launched.page, fixture.sourcePath);
     const request = await submitToAi(launched.page, launched.electronApp);
     writeCandidate(request.requestRoot, request.changeRequest);
-    const openReviewButton = launched.page.getByRole("button", { name: "审阅对比" });
+    const openReviewButton = launched.page.getByRole("button", { name: "查看修改" });
     await expect(openReviewButton).toBeVisible({ timeout: 30_000 });
     await openReviewButton.click();
     await expect(launched.page.getByTestId("ai-review-workspace"))

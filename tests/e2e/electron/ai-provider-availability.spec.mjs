@@ -113,7 +113,7 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       .toHaveCount(0);
 
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 60_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     await expect(launched.page.getByTestId("ai-conversation-thinking")).toHaveCount(0);
     await expect.poll(() => launched.page.getByTestId("ai-conversation-stream").evaluate(
       (stream) => Math.round(stream.scrollHeight - stream.clientHeight - stream.scrollTop),
@@ -187,7 +187,7 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     expect(qoderCandidate).toContain('data-pageroot-qoder-acp="e2e"');
     expect(qoderCandidate).toContain("Qoder \u5df2\u66f4\u65b0\uff1a\u771f\u5b9e");
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
@@ -271,11 +271,11 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
     await expect(narration.getByTestId("ai-conversation-narration").locator("p"))
       .toHaveCount(3);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 60_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     const decisionAnnouncement = launched.page
       .getByTestId("ai-conversation-action-bar")
       .getByRole("status");
-    await expect(decisionAnnouncement).toHaveText(/版本 2 等待你的决定/u);
+    await expect(decisionAnnouncement).toHaveText(/修改已准备好，尚未采用/u);
     await expect(decisionAnnouncement).toHaveAttribute("aria-live", "polite");
     await expect(launched.page.getByTestId("ai-conversation-thinking")).toHaveCount(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -302,7 +302,7 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
     expect(codexCandidate).toContain('data-pageroot-codex-acp="e2e"');
     expect(codexCandidate).toContain("Codex \u5df2\u66f4\u65b0\uff1a\u771f\u5b9e");
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
   } finally {
@@ -439,7 +439,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     releaseStream();
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 60_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     const readyGeometry = await launched.page.evaluate(() => {
       const sidebarNode = document.querySelector('[data-testid="ai-conversation-sidebar"]');
       const composer = document.querySelector('[data-testid="ai-conversation-composer"]');
@@ -493,7 +493,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     expect(pagerootCandidate).toContain('data-pageroot-http-agent="e2e"');
     expect(pagerootCandidate).toContain('data-pageroot-http-reasoning="auto"');
     expect(pagerootCandidate).toContain("源页已更新：真实");
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
@@ -910,6 +910,8 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", {
       return (await roundStopButton.count()) === 0 ? "ended" : "";
     }, { timeout: 45_000 }).not.toBe("");
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     await expect(launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true }))
       .toBeEnabled({ timeout: 45_000 });

@@ -1551,12 +1551,15 @@ async function activateProjectFileCandidate(body) {
       // label select a different Candidate (or turn a valid adoption into an
       // invalid-id error).
       candidateId: body.candidateId || null,
+      expectedSourceSha256: body.expectedSourceSha256,
+      decisionOperationId: body.decisionOperationId,
     });
     const workspace = await projectFileWorkspaceForSource(promoted.target.exactSourcePath);
     const source = workspace.content;
     return {
       ok: true,
       status: "version-activated",
+      retainedDraft: workspace.draft || null,
       projectId: workspace.project.projectId,
       documentId: workspace.project.documentId,
       versionId: promoted.version.versionId,
