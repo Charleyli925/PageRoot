@@ -2055,6 +2055,12 @@ function reviewBootstrap(
   ) => {
     revealTarget(target, panelPath);
     requestAnimationFrame(() => {
+      if (focusGroupId) {
+        // Navigation and its geometry must refer to the same selected group.
+        // The normal overlay RAF can run later than this focus command.
+        if (currentState.activeFocusGroupId !== focusGroupId) return;
+        renderReviewOverlays();
+      }
       const reportHorizontalFootprint = (rect, documentSpace = false) => {
         if (!rect) return;
         const left = Number(rect.left) + (documentSpace ? 0 : scrollX);
@@ -2090,6 +2096,8 @@ function reviewBootstrap(
         }, true);
         if (scrollToReviewRect(visibleBox.getBoundingClientRect(), behavior)) return;
       }
+      // An explicit region must never fall back to its entire semantic owner.
+      if (regionId) return;
       const anchors = [...document.querySelectorAll(
         '[data-pageroot-review-anchor-change="' + changeId + '"]',
       )];
@@ -3368,6 +3376,7 @@ function reviewBootstrap(
           ? document.querySelector('[data-pageroot-review-id="' + changeId + '"]')
           : null;
       if ((focusGroupId || regionId) && (!focusRegion || !target)) return;
+      if (focusPlan) applyState({ focus: changeId, activeFocusGroupId: focusPlan.id });
       focusChangeTarget(
         changeId,
         target,

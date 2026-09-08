@@ -5,8 +5,8 @@
 ## 代码与自动化
 
 - PR-0–PR-6 已作为 Draft #474、#475、#476、#477、#478、#479、#481 提交；PR-2 净变更已集成进 PR-6。
-- PR-7 Draft #482（功能 07308273；CI 滚动条与聚焦位置断言修正 f4f871ba）覆盖 Candidate 专属审阅/采用/不用、采用前 Draft drain、后续评论修订保留、Promotion 幂等和重启历史；完整交付结果见 PR。
-- PR-8 对接主线 Developer Preview 隔离改动，并补充丢提交回执、丢采用回执、进度容量、拖动中刷新、长历史滚动、200% 缩放和启动取消竞争。
+- PR-7 Draft #482（提交索引以 PR 最新 head 为准）覆盖 Candidate 专属审阅/采用/不用、采用前 Draft drain、后续评论修订保留、Promotion 幂等和重启历史；完整交付结果见 PR。
+- PR-8 集成 Review 聚焦与新标注渲染的时序修复，避免显式段落定位回退到整个区块而把目标移出窄画布；验证从顶部区域选择两段后，内外画布中的标注都可见。PR-8 对接主线 Developer Preview 隔离改动，并补充丢提交回执、丢采用回执、进度容量、拖动中刷新、长历史滚动、200% 缩放和启动取消竞争。
 - `tests/submission-receipt.test.mjs`：保存与重复请求、预检失败、重启事实投影、后续评论保留、结果/停止竞争、进度上限与可见截断。
 - `tests/run-workflow.test.mjs`：持久化失败不外发、相同操作丢回执核对、服务冻结、未知结果不盲重跑。
 - `tests/version-workflow.test.mjs`：源与候选身份、采用前 drain、丢采用回执重用同一决策 ID。
@@ -50,7 +50,7 @@ PR-8 最终集成基线：主线 7fdfab1f，包括 #473 运行隔离与 #480 Sta
 | PR-4 | `feature/stemmio-trusted-loop-pr4` | `317eed77` | [#478](https://github.com/Charleyli925/PageRoot/pull/478) |
 | PR-5 | `feature/stemmio-trusted-loop-pr5` | `a5ad5ccd` | [#479](https://github.com/Charleyli925/PageRoot/pull/479) |
 | PR-6 | `feature/stemmio-trusted-loop-pr6` | `016231d9` | [#481](https://github.com/Charleyli925/PageRoot/pull/481) |
-| PR-7 | `feature/stemmio-trusted-loop-pr7` | `f4f871ba` | [#482](https://github.com/Charleyli925/PageRoot/pull/482) |
+| PR-7 | `feature/stemmio-trusted-loop-pr7` | `2e5840e8` | [#482](https://github.com/Charleyli925/PageRoot/pull/482) |
 
 PR-8 分支为 `feature/stemmio-trusted-loop-pr8`；完整门禁后提交，真实验收阻断仍保留。
 
