@@ -280,6 +280,7 @@ export class WorkspacePreferencesSession {
 
   async #pump() {
     let successful = true;
+    let retried = false;
     try {
       while (!this.#disposed && this.#pendingPatch) {
         const patch = this.#pendingPatch;
@@ -298,6 +299,13 @@ export class WorkspacePreferencesSession {
           });
         } catch (cause) {
           this.#pendingPatch = { ...patch, ...(this.#pendingPatch || {}) };
+          // Preferences are reversible. Re-read the disk receipt and retry once;
+          // keep pending changes for the next update if storage remains unavailable.
+          if (!retried && !this.#disposed) {
+            retried = true;
+            await this.#port.get().catch(() => {});
+            continue;
+          }
           successful = false;
           this.#publish({
             ...this.#snapshot,

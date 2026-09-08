@@ -87,3 +87,26 @@ changed native execution authority. Until then the real Codex closure is a
 release blocker; synthetic provider fixtures cannot clear it.
 
 已对经受管包校验的已知不兼容 1.7.0 版本增加预检阻断：`CODEX_EXECUTION_CONTRACT_UNSUPPORTED`，不再重复产生服务用量；要求记录仍保留。该阻断是诚实的兼容性状态，不代表 Codex 完整闭环已经修复。
+
+## 2026-09-09 client-tool execution adapter
+
+The app now supplies `codex-client-tools.mjs` inside the shared ACP runtime.
+Discovery, installation, native identity verification, login and model catalog
+still use the managed Codex closure. Execution uses its verified native binary's
+stdio App Server transport behind an in-process ACP adapter; this does not
+register a second runtime or restore the retired App Server provider.
+
+The adapter starts an ephemeral read-only thread, refuses native approvals,
+disables native environment access, inherited MCP servers, apps/plugins and
+multi-agent/image-generation tools, and supplies three dynamic client
+tools: frozen input reads, complete Candidate submission and frozen finalization.
+Each maps to the existing ACP execution host. The adapter accepts neither a
+writable output path nor a shell command from the model. Session/turn checks,
+one-write policy, Stable ID validation and repairs, finalizer evidence, and
+Repository adoption authority remain mandatory. Missing finalizer evidence still
+fails the turn. The process supervisor owns cancellation and group cleanup.
+
+This supersedes the unconditional 1.7.0 preflight block above: native tool
+incompatibility is addressed by the restricted adapter, not by accepting native
+writes or trusting the agent's completion text. The protocol remains experimental;
+a real-account Candidate round is separate from deterministic fixtures.

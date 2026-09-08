@@ -1055,10 +1055,11 @@ test("every speaker has an avatar mark, so the thread reads as a chat", () => {
   assert.equal(sidebarActorInitial("someone-else"), "P");
 });
 
-test("the conversation sidebar reuses AgentSetupPanel and can replace an API Key in place", async () => {
+test("the conversation sidebar routes access repair to Settings", async () => {
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(new URL("../app/workbench/AiConversationSidebar.tsx", import.meta.url), "utf8");
-  assert.match(source, /BoundAgentSetupPanel/u);
+  assert.doesNotMatch(source, /<BoundAgentSetupPanel|ai-conversation-setup-panel/u);
+  assert.match(source, /onOpenAgentSettings/u);
   assert.match(source, /ai-conversation-service-choices/u);
   assert.match(source, /replace-api-key/u);
   assert.match(source, /不会对当前文件发送/u);

@@ -1085,3 +1085,23 @@
 .agent-diagnostic-details summary { cursor: pointer; }
 .agent-diagnostic-details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; }
 .agent-diagnostic-details dd { margin: 0; }
+
+/* AI connections: quiet overview, one expanded service, details at the end. */
+.settings-ai-sections { max-width: 780px; margin-top: 24px; }
+.settings-agent-service-list { gap: 12px; }
+.settings-agent-service-row { min-height: 76px; padding: 14px 18px; gap: 14px; }
+.settings-agent-logo { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border: 1px solid #eeedf2; border-radius: 11px; background: #faf9fc; color: #464150; }
+.settings-agent-logo img { width: 23px; height: 23px; object-fit: contain; }
+.settings-agent-service-main { gap: 5px; }
+.settings-agent-service-main strong { font-weight: 600; }
+.settings-agent-service-main span { line-height: 19px; }
+.settings-agent-default-badge { padding: 2px 6px; border-radius: 4px; background: #f3f1fa; color: #655aa3; font-size: 10px; }
+.settings-agent-service [data-surface="settings"] { padding: 8px 4px; background: #fdfcfe; border-radius: 0 0 12px 12px; }
+[data-surface="settings"] .qoder-card-summary { gap: 10px; }
+[data-surface="settings"] .qoder-card-copy small { font-size: 13px; line-height: 1.6; }
+[data-surface="settings"] .agent-control-button { font-size: 12px; font-weight: 550; }
+[data-surface="settings"] .agent-control-secondary { border: 1px solid #e3e0eb; background: white; color: #5d5768; }
+[data-surface="settings"] .agent-control-secondary:hover:not(:disabled) { background: #f5f3f8; }
+[data-surface="settings"] .agent-diagnostic-details { margin: 10px 16px 8px; border-top: 1px solid #eeecf2; padding-top: 12px; font-size: 11px; }
+[data-surface="settings"] .agent-diagnostic-details summary { color: #85808f; }
+[data-surface="settings"] .agent-diagnostic-details dl { grid-template-columns: 64px minmax(0, 1fr); gap: 7px 12px; line-height: 1.5; padding: 10px 0 0; }

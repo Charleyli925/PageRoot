@@ -129,14 +129,14 @@ test("built-in vendors use one fixed, versioned support table and never expose r
   assert.match(SUPPORTED_AGENT_MODELS_REVISION, /^\d{4}-\d{2}-\d{2}\./u);
   for (const vendorId of ["deepseek", "zhipu", "dashscope", "openai"]) {
     const models = SUPPORTED_AGENT_MODELS.filter((entry) => entry.vendorId === vendorId);
-    assert.ok(models.length >= 1 && models.length <= 2);
+    assert.ok(models.length >= 1 && models.length <= (vendorId === "deepseek" ? 3 : 2));
     assert.equal(models.filter((entry) => entry.recommended).length, 1);
     for (const model of models) {
       if (vendorId === "deepseek" && model.recommended) {
         assert.equal(model.releaseChannel, "stable");
         assert.equal(model.smokeVersion, "2026-09-06.1");
       } else {
-        assert.equal(model.releaseChannel, "beta");
+        assert.equal(model.releaseChannel, vendorId === "deepseek" ? "stable" : "beta");
         assert.equal(model.smokeVersion, null);
       }
       assert.ok(model.contextWindow > 0);
@@ -150,10 +150,13 @@ test("built-in vendors use one fixed, versioned support table and never expose r
 test("built-in catalogs contain only fixed models and are gated until real smoke promotion", () => {
   assert.deepEqual(publicModelsForVendor("deepseek", {}).map((model) => model.id), [
     "pageroot:deepseek-v4-pro",
+    "pageroot:deepseek-v4-flash",
+    "pageroot:deepseek-v4-flash-vision-exp",
   ]);
   assert.deepEqual(publicModelsForVendor("deepseek", { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" }).map((model) => model.id), [
     "pageroot:deepseek-v4-pro",
     "pageroot:deepseek-v4-flash",
+    "pageroot:deepseek-v4-flash-vision-exp",
   ]);
   assert.deepEqual(publicModelsForVendor("zhipu", {}).map((model) => model.id), []);
 });
@@ -214,7 +217,7 @@ test("preflight validates the selected fixed model with chat/completions and nev
   };
   const installation = provider.resolveInstallation({ environment });
   const evidence = await provider.preflight(installation, { environment, selection: selection() });
-  assert.deepEqual(evidence.models.map(({ id }) => id), ["pageroot:deepseek-v4-pro", "pageroot:deepseek-v4-flash"]);
+  assert.deepEqual(evidence.models.map(({ id }) => id), ["pageroot:deepseek-v4-pro", "pageroot:deepseek-v4-flash", "pageroot:deepseek-v4-flash-vision-exp"]);
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /\/chat\/completions$/u);
   assert.doesNotMatch(calls[0].url, /\/models$/u);

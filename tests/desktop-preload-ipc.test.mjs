@@ -1375,3 +1375,17 @@ test("preload redacts raw Electron IPC rejections and malformed responses", asyn
     },
   );
 });
+
+
+test("document AI choices cross preload without poisoning subsequent preference saves", async () => {
+  const calls = [];
+  const { uiPreferences } = await loadPreloadApis(async (...args) => { calls.push(args); return success({}); });
+  const documentId = "doc_" + "a".repeat(32);
+  await uiPreferences.record({ workspace: { documentAgentSelections: { [documentId]: "codex" }, defaultAgentProviderId: "codex" } });
+  await uiPreferences.record({ workspace: { sidebarWidth: 280 } });
+  assert.equal(calls.length, 2);
+  for (const choices of [{ invalid: "codex" }, { [documentId]: "other" }, Array(129).fill("codex")]) {
+    await assert.rejects(uiPreferences.record({ workspace: { documentAgentSelections: choices } }));
+  }
+  assert.equal(calls.length, 2);
+});

@@ -321,6 +321,10 @@
         "to": "bridge/agent/runtimes/acp-protocol.mjs"
       },
       {
+        "from": "bridge/agent/runtimes/codex-client-tools.mjs",
+        "to": "bridge/agent/runtimes/codex-client-tools.mjs"
+      },
+      {
         "from": "bridge/agent/runtimes/acp-process.mjs",
         "to": "bridge/agent/runtimes/acp-process.mjs"
       },

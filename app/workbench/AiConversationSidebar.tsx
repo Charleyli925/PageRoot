@@ -28,7 +28,7 @@ import {
   type SidebarHistoryGroup,
 } from "./ai-conversation-model.js";
 import type { AgentSelection } from "../domain/agent-provider-state.js";
-import { BoundAgentSetupPanel, type BoundAgentSetupPanelProps } from "../components/AgentSetupPanel";
+import { type BoundAgentSetupPanelProps } from "../components/AgentSetupPanel";
 import type { AgentProviderCardData } from "../components/agent-provider-card-types";
 import { agentServiceLabel } from "../application/workspace-agent-preference.js";
 import { copyText } from "./browser-io";
@@ -258,7 +258,7 @@ export default function AiConversationSidebar({
   handoffStatus = null,
 }: AiConversationSidebarProps) {
   const [openChoice, setOpenChoice] = useState<null | "model" | "reasoning" | "service">(null);
-  const [setupProviderId, setSetupProviderId] = useState<string | null>(null);
+
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
   const [clockNow, setClockNow] = useState(0);
@@ -270,7 +270,6 @@ export default function AiConversationSidebar({
   const agentSelectorRef = useRef<HTMLDivElement | null>(null);
   const serviceSelectorRef = useRef<HTMLDivElement | null>(null);
   const serviceSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
-  const [selectionError, setSelectionError] = useState("");
   const agentSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const reasoningSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const followingRef = useRef(true);
@@ -371,11 +370,10 @@ export default function AiConversationSidebar({
   const schemeName = (typeof agentDisplayName === "string" && agentDisplayName.trim())
     || resolvedAgentActionName;
   const recovery = agentAccess?.recovery || null;
-  const setupCard = agentAccess?.cards.find((card) => card.selection.providerId === setupProviderId) || null;
   const currentProviderId = agentPresentation?.providerId
     || "";
   const currentCard = agentAccess?.cards.find((card) => card.selection.providerId === currentProviderId)
-    || setupCard;
+    || null;
   const canChooseModel = currentCard?.presentation?.supportsSelectableModels === true
     || currentCard?.presentation?.credentialKind === "api-token";
   const serviceTriggerLabel = (() => {
@@ -395,13 +393,11 @@ export default function AiConversationSidebar({
   const recoveredOnOrigin = Boolean(
     recovery
     && catalogStatus === "ready"
-    && !setupProviderId
     && recovery.documentId === (agentAccess?.documentId || ""),
   );
   const recoveredElsewhere = Boolean(
     recovery
     && catalogStatus === "ready"
-    && !setupProviderId
     && recovery.documentId
     && recovery.documentId !== (agentAccess?.documentId || ""),
   );
@@ -565,9 +561,7 @@ export default function AiConversationSidebar({
     return () => observer.disconnect();
   }, [contentKey, scheduleFollow]);
 
-  if (recovery && setupProviderId && setupCard?.availability.status === "ready") {
-    setSetupProviderId(null);
-  }
+
 
   return (
     <aside
@@ -808,7 +802,7 @@ export default function AiConversationSidebar({
       </div>
 
       <div className={styles.currentActions} data-testid="ai-conversation-current-actions">
-        {actionBar && !setupCard ? (
+        {actionBar ? (
           <section
             className={`${styles.message} ${styles.actionBar}`}
             data-actor="pageroot"
@@ -840,12 +834,9 @@ export default function AiConversationSidebar({
                     disabled={action.disabled === true}
                     onClick={() => {
                       if (["replace-api-key", "reauthenticate-agent", "repair-agent-installation"].includes(action.id) && agentAccess) {
-                        const providerId = agentPresentation?.providerId
-                          || agentAccess.cards[0]?.selection.providerId
-                          || "";
                         agentAccess.onBeginAccessRepair?.(action.id === "replace-api-key" ? "apiKey"
                           : action.id === "reauthenticate-agent" ? "login" : "install");
-                        setSetupProviderId(providerId);
+                        onOpenAgentSettings?.();
                         setOpenChoice(null);
                         return;
                       }
@@ -904,7 +895,6 @@ export default function AiConversationSidebar({
                 <span>{serviceTriggerLabel}</span>
                 <span className={styles.agentChevron} aria-hidden="true">▾</span>
               </button>
-              {selectionError ? <span role="alert">{selectionError}</span> : null}
               {openChoice === "service" && agentAccess?.cards.length ? (
                 <div
                   id="ai-conversation-service-choices"
@@ -916,11 +906,8 @@ export default function AiConversationSidebar({
                     const snapshot = card.presentation.availability(card.availability);
                     const disconnected = card.availability.reason === "disabled";
                     const chooseService = () => {
-                      setSelectionError("");
-                      void Promise.resolve(agentAccess.onSelect(card.selection)).then((saved) => {
-                        if (saved === false) setSelectionError("服务已切换，但选择未保存，请重新选择。 ");
-                      }, () => setSelectionError("服务选择未保存，请重新选择。"));
-                      setSetupProviderId(card.availability.status === "ready" ? null : card.selection.providerId);
+                      void Promise.resolve(agentAccess.onSelect(card.selection)).catch(() => {});
+                      if (card.availability.status !== "ready") onOpenAgentSettings?.();
                       setOpenChoice(null);
                       serviceSelectorButtonRef.current?.focus();
                     };
@@ -1049,7 +1036,7 @@ export default function AiConversationSidebar({
             </div>
           </div> : null}
 
-          {!setupCard && (state === "preview-ready" || state === "no-change") ? (
+          {(state === "preview-ready" || state === "no-change") ? (
           <div className={styles.deliveryActions}>
             {activeIntent === "modify" && onCopyTask ? (
               <button
@@ -1080,14 +1067,6 @@ export default function AiConversationSidebar({
                 disabled={send.kind === "send" && !send.canSend}
                 onClick={() => {
                   if (send.kind === "open-agent-settings") {
-                    if (agentAccess?.cards.length) {
-                      const providerId = agentPresentation?.providerId
-                        || agentAccess.cards[0]?.selection.providerId
-                        || "";
-                      setSetupProviderId(providerId);
-                      setOpenChoice(null);
-                      return;
-                    }
                     onOpenAgentSettings?.();
                     return;
                   }
@@ -1120,20 +1099,7 @@ export default function AiConversationSidebar({
             )}
           </p>
         ) : null}
-        {setupCard && agentAccess ? (
-          <div className={styles.setupPanel} data-testid="ai-conversation-setup-panel">
-            <BoundAgentSetupPanel
-              card={setupCard}
-              surface="delivery"
-              hideDisconnectAction
-              initialApiKeyOpen={recovery?.field === "apiKey"}
-              {...agentAccess.bindings}
-              onUseOtherProvider={() => { setSetupProviderId(null); setOpenChoice("service"); }}
-            />
-            <button type="button" className={styles.action} data-tone="quiet"
-              onClick={() => setSetupProviderId(null)}>返回任务</button>
-          </div>
-        ) : null}
+
       </div>
     </aside>
   );

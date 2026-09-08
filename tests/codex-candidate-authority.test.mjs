@@ -17,16 +17,20 @@ const acpFixture = fileURLToPath(new URL(
   import.meta.url,
 ));
 
-async function createSyntheticCodexInstallation(root) {
+async function createSyntheticCodexInstallation(root, nativeMode = null) {
   const command = path.join(root, "codex-acp-synthetic");
   await writeFile(
     command,
     `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(acpFixture)} "$@"\n`,
     { mode: 0o755 },
   );
+  if (nativeMode) {
+    const nativeFixture = fileURLToPath(new URL("./fixtures/codex-client-tools-server.mjs", import.meta.url));
+    await writeFile(command, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(nativeFixture)} --mode=${nativeMode} "$@"\n`, { mode: 0o755 });
+  }
   const executable = await realpath(command);
   const information = await lstat(executable);
-  return Object.freeze({
+  const result = {
     command: executable,
     version: "1.7.0",
     identity: Object.freeze({
@@ -37,10 +41,11 @@ async function createSyntheticCodexInstallation(root) {
       mtimeMs: information.mtimeMs,
       sha256: sha256(await readFile(command)),
     }),
-    source: "e2e-override",
+    source: nativeMode ? "verified-npm-package" : "e2e-override",
     nodeModulesRoot: null,
     nativeIdentity: null,
-  });
+  };
+  return Object.freeze(nativeMode ? { ...result, nativeCommand: executable, nativeIdentity: result.identity } : result);
 }
 
 function finalizerPrompt(policy) {
@@ -62,7 +67,7 @@ function finalizerPrompt(policy) {
   ].join("\n");
 }
 
-test("Codex completion reaches only a sealed Candidate and never adopts the Working Copy", async (t) => {
+for (const nativeMode of [null, "complete", "missing-finalizer"]) test(`Codex ${nativeMode || "upstream ACP"} preserves Candidate authority and the Working Copy`, async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-candidate-authority-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sourceRoot = path.join(root, "sources");
@@ -130,7 +135,7 @@ test("Codex completion reaches only a sealed Candidate and never adopts the Work
     outputPath,
     completionPath: path.join(requestRoot, "attempts", request.attemptId, "completion.json"),
   });
-  const installation = await createSyntheticCodexInstallation(root);
+  const installation = await createSyntheticCodexInstallation(root, nativeMode);
   const registry = createDefaultProviderRegistry({
     codexCommandResolver: async () => installation,
     codexPreflightRunner: async () => Object.freeze({
@@ -151,12 +156,20 @@ test("Codex completion reaches only a sealed Candidate and never adopts the Work
   const ticket = await registry.preflightForSelection(selection, "execution", {
     environment: {},
   });
-  const result = await registry.run(ticket, {
+  const run = registry.run(ticket, {
     policy,
     prompt: finalizerPrompt(policy),
     baseEnvironment: process.env,
     onEvent() {},
   });
+  if (nativeMode === "missing-finalizer") {
+    await assert.rejects(run, /finalizer|finaliz|completion/i);
+    const failed = await repository.requestStatus({ target: imported.target, requestId: request.requestId, attemptId: request.attemptId });
+    assert.notEqual(failed.status, "candidate-ready");
+    assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), managedSourceBefore);
+    return;
+  }
+  const result = await run;
   assert.equal(result.stopReason, "end_turn");
   const status = await repository.requestStatus({
     target: imported.target,

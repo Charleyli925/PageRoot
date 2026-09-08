@@ -732,12 +732,6 @@ function sendNdjsonRequestAndReadResponse(child, request, timeoutMs) {
 }
 
 export async function probeCodexAcp(command, environment = process.env) {
-  // Real-account QA verified that the pinned upstream 1.7.0 native tool adapter
-  // does not expose client terminal/create. Never spend on a known-incompatible
-  // execution contract or weaken the restricted host to manufacture success.
-  if (command?.source === "verified-npm-package" && command.version === "1.7.0") {
-    fail("CODEX_EXECUTION_CONTRACT_UNSUPPORTED", codexAcpPreflightFailure("CODEX_EXECUTION_CONTRACT_UNSUPPORTED"), { status: 503 });
-  }
   const processGroup = process.platform !== "win32";
   const child = await spawnCodexAdapter(command, environment);
   let stderr = "";
@@ -1140,23 +1134,26 @@ export function createCodexAcpProvider({
       inactivityTimeoutMs,
     }) {
       const installation = ticket.installation;
+      const clientTools = installation.source === "verified-npm-package"
+        && Boolean(installation.nativeCommand && installation.nativeIdentity);
       const selected = ticket.evidence?.models?.find((model) => model.id === ticket.selection?.resolvedModelId);
       const effort = ticket.selection?.reasoning?.applied || selected?.defaultReasoningEffort;
       const baseModelId = ticket.selection?.resolvedModelId?.replace(/^codex:/u, "");
       return Object.freeze({
         ...(baseModelId ? { sessionModelId: effort ? `${baseModelId}[${effort}]` : baseModelId } : {}),
         securityProfile: "client-mediated",
-        command: installation.command,
+        command: clientTools ? installation.nativeCommand : installation.command,
         expectedExecutable: {
-          path: installation.command,
-          identity: installation.identity,
+          path: clientTools ? installation.nativeCommand : installation.command,
+          identity: clientTools ? installation.nativeIdentity : installation.identity,
         },
-        args: [],
+        codexClientTools: clientTools,
+        args: clientTools ? ["app-server"] : [],
         policy,
         prompt,
         environment: launchEnvironment(installation),
         baseEnvironment,
-        useVerifiedJavaScriptRuntime: usesJavaScriptRuntime(installation),
+        useVerifiedJavaScriptRuntime: !clientTools && usesJavaScriptRuntime(installation),
         cancellationSignal,
         expectedAgentName: installation.source === "e2e-override"
           ? /codex|pageroot-e2e/iu

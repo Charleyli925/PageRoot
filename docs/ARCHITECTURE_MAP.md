@@ -307,3 +307,8 @@ VersionWorkflow create/query/openCreatedHistoryVersion. Opening validates a full
 workspace through injected codecs before managed-source transition; rendering
 acknowledgement is separate from Repository commit. Project hydration forwards
 the durable history operation locator to the same workflow for recovery.
+
+Codex execution transport: `bridge/agent/runtimes/codex-client-tools.mjs` adapts
+verified native client tools into the shared ACP host; lifecycle remains in
+`acp-process.mjs`, authority in `hosts/execution-host.mjs`. See ADR 0053's
+2026-09-09 client-tool execution section.

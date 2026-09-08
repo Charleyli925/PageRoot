@@ -15,6 +15,8 @@ import { CloudArrowUpIcon } from "@phosphor-icons/react/dist/csr/CloudArrowUp";
 import { DesktopIcon } from "@phosphor-icons/react/dist/csr/Desktop";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
+import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
+import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 
@@ -344,8 +346,7 @@ function AgentSettings({
     documentCount: number;
   }>>>;
 }) {
-  const [expandedId, setExpandedId] = useState<string | null>(selectedChoiceId);
-  const [followedChoiceId, setFollowedChoiceId] = useState(selectedChoiceId);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<null | Readonly<{
     kind: "disconnect" | "remove-key" | "logout";
     card: AgentProviderCardData;
@@ -355,10 +356,6 @@ function AgentSettings({
   }>>(null);
   const [confirmPending, setConfirmPending] = useState(false);
   const [confirmError, setConfirmError] = useState("");
-  if (followedChoiceId !== selectedChoiceId) {
-    setFollowedChoiceId(selectedChoiceId);
-    setExpandedId(selectedChoiceId);
-  }
   const showOtherProvider = (excludedId: string) => {
     const other = cards.find((card) => cardChoiceId(card) !== excludedId && card.availability.status === "ready")
       || cards.find((card) => cardChoiceId(card) !== excludedId);
@@ -368,10 +365,10 @@ function AgentSettings({
     ? cards.find((card) => cardChoiceId(card) === expandedId) || null
     : null;
   return (
-    <div className="settings-page-sections">
-      <section className="settings-agent-section" aria-label="AI 服务配置">
+    <div className="settings-page-sections settings-ai-sections">
+      <section className="settings-agent-section" aria-label={`AI 服务配置，默认 ${currentAgentName || "尚未选择"}`}>
         <div className="settings-agent-toolbar">
-          <span className="settings-agent-default-summary">默认：{currentAgentName || "尚未选择"}</span>
+          <span className="settings-agent-default-summary">连接 AI 后，即可用评论修改页面。</span>
           <button
             className="settings-secondary-action"
             type="button"
@@ -434,6 +431,10 @@ function AgentSettings({
                 data-testid={`settings-agent-row-${card.selection.providerId}`}
               >
                 <div className="settings-agent-service-row">
+                  <span className="settings-agent-logo" aria-hidden="true">
+                    {card.presentation.logoSrc ? <img src={card.presentation.logoSrc} alt="" />
+                      : card.selection.providerId === "codex" ? <OpenAiLogoIcon size={23} /> : <CodeIcon size={22} />}
+                  </span>
                   <button
                     type="button"
                     className="settings-agent-service-main"
@@ -841,11 +842,9 @@ export default function SettingsPage({
   releaseNotesOpenFailed,
   workspacePreferences,
   workspacePreferencesSaving,
-  workspacePreferencesError,
   selectedAgentChoiceId,
   agentCards,
   onUpdateWorkspacePreference,
-  onRetryWorkspacePreferences,
   onSelectAgent,
   onSelectAgentModel,
   onSelectAgentReasoning,
@@ -998,12 +997,7 @@ export default function SettingsPage({
           <h1 ref={headingRef} tabIndex={-1}>{pageTitle}</h1>
           {pageDescription ? <p>{pageDescription}</p> : null}
         </header>
-        {workspacePreferencesError ? (
-          <div className="settings-preference-error" role="alert">
-            <span>设置暂未保存：{workspacePreferencesError}</span>
-            <button type="button" onClick={onRetryWorkspacePreferences}>重试保存</button>
-          </div>
-        ) : null}
+
 
         {category === "general" ? (
           <GeneralSettings

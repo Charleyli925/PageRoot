@@ -70,6 +70,7 @@ const REQUIRED_BRIDGE_FILES = [
   "agent/runtimes/acp-runtime.mjs",
   "agent/runtimes/acp-protocol.mjs",
   "agent/runtimes/acp-process.mjs",
+  "agent/runtimes/codex-client-tools.mjs",
   "agent/runtimes/acp-verified-javascript.mjs",
   "agent/runtimes/http-runtime.mjs",
   "agent/policies/execution-policy.mjs",
