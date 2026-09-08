@@ -1074,12 +1074,33 @@ test("the review projection annotates a dense report cleanly and accurately", as
       details: [...document.querySelectorAll("details")]
         .map((details) => details.open),
     }));
+    // A prior focus action can still be scrolling after its overlay is ready.
+    // Capture the baseline only after that action settles; keep exact equality
+    // for the new activation, including after its own animation has finished.
+    const settleReviewScroll = () => Promise.all([beforeFrame, afterFrame].map((frame) => (
+      frame.locator("html").evaluate(() => new Promise((resolve, reject) => {
+        let position = `${scrollX},${scrollY}`;
+        let changedAt = performance.now();
+        const startedAt = changedAt;
+        const sample = () => {
+          const now = performance.now();
+          const next = `${scrollX},${scrollY}`;
+          if (next !== position) { position = next; changedAt = now; }
+          if (now - changedAt >= 250) return resolve();
+          if (now - startedAt >= 5_000) return reject(new Error("Review scroll did not settle"));
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }))
+    )));
+    await settleReviewScroll();
     const missingSideBeforeActivation = await missingSideState();
     await afterFrame.locator(
       `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
     ).first().evaluate((bar) => bar.click());
     await expect.poll(() => outerViewports.before.evaluate((element) => element.scrollLeft))
       .toBe(0);
+    await settleReviewScroll();
     await expect.poll(missingSideState).toEqual(missingSideBeforeActivation);
     await expect.poll(() => activeFootprintVisibleInOuterViewport(
       launched.page,

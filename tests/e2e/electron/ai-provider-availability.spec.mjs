@@ -265,8 +265,13 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       "data-pageroot-qoder-acp",
     );
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
-    removeSourceFixture(fixture.sourceDirectory);
+    try {
+      // Finish intercepted history reads before shutting down their Bridge.
+      await launched.page.unrouteAll({ behavior: "wait" });
+    } finally {
+      await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+      removeSourceFixture(fixture.sourceDirectory);
+    }
   }
 });
 
