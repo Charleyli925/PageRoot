@@ -370,7 +370,21 @@ async function activateFocusGroup(beforeFrame, afterFrame, group) {
 }
 
 async function captureAuthoredElement(frame, selector) {
-  return frame.locator(selector).screenshot({
+  const target = frame.locator(selector);
+  // Locator screenshots scroll their target. In linked Review panes that also
+  // schedules a follower scroll and a new projection. Sample after presentation
+  // settles, rather than comparing pixels from two navigation instants.
+  await target.scrollIntoViewIfNeeded();
+  await expect(frame.locator("[data-pageroot-review-transition-mask]")).toHaveCount(0);
+  await expect.poll(async () => {
+    const before = await target.boundingBox();
+    await frame.locator("html").evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }));
+    const after = await target.boundingBox();
+    return before && after && ["x", "y", "width", "height"].every((key) => Math.abs(before[key] - after[key]) < .01);
+  }).toBe(true);
+  return target.screenshot({
     animations: "disabled",
     style: `
       [data-pageroot-review-overlay-box],
