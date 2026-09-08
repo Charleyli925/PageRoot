@@ -1,4 +1,4 @@
-import { readSubmissionReceipt, saveSubmissionReceipt, finishSubmissionReceipt } from "./project-file-repository/submission.mjs";
+import { readSubmissionReceipt, saveSubmissionReceipt, finishSubmissionReceipt, appendSubmissionExecutionFact, projectSubmissionReceipt } from "./project-file-repository/submission.mjs";
 // Persistence façade. Internals live in ./project-file-repository/.
 // Callers keep importing this module; the public surface is unchanged.
 import { randomUUID } from "node:crypto";
@@ -327,6 +327,7 @@ export class ProjectFileRepository {
           const initial = await this.#loadRegisteredProject({ projectId });
           await this.#recoverProject(initial.paths.projectRootPath);
           const loaded = await this.#loadRegisteredProject({ projectId });
+          await this.#recoverSubmissionHistory(loaded, { restart: true });
           const bindingIndex = await createSourceBindingIndex(loaded.paths.projectRootPath, loaded.manifest.workingCopies);
           let locatorChanged = false;
           for (const workingCopy of loaded.manifest.workingCopies) {
@@ -548,6 +549,68 @@ export class ProjectFileRepository {
   async finishSubmission({ target, operationId, status, errorCode }) {
     return this.#serial(async () => finishSubmissionReceipt(await this.#resolveMutationTarget(target),
       { operationId, status, errorCode }, nowIso(this.#clock)));
+  }
+
+  async recordExecutionFact({ target, requestId, attemptId, event }) {
+    return this.#serial(async () => {
+      const loaded = await this.#resolveMutationTarget(target);
+      const record = await readJsonFile(path.join(requestRootPath(loaded.paths, requestId), "request.json"), "request.json", { projectRootPath: loaded.paths.projectRootPath });
+      this.#assertRequestRecord(record, loaded, { requestId, attemptId });
+      const operationId = record.request?.submissionOperationId;
+      if (!operationId) return null; // Never invent history for older Requests.
+      return appendSubmissionExecutionFact(loaded, operationId, event);
+    });
+  }
+
+  async #writeRequestWithHistory(loaded, requestPath, record) {
+    const operationId = record.request?.submissionOperationId;
+    if (operationId && ["candidate-ready", "no-change", "cancelled", "error", "rejected"].includes(record.status)) {
+      const eventId = `event_${record.requestId}_${record.attemptId}_${record.status.replaceAll("-", "_")}`;
+      record.conversationEvents = [...(record.conversationEvents || []).filter((event) => event.eventId !== eventId), {
+        eventId, kind: record.status, timestamp: record.cancelledAt || record.completedAt || record.createdAt,
+        ...(record.status === "candidate-ready" ? { candidateId: record.candidateId } : {}),
+      }];
+    }
+    await atomicWriteProjectJson(loaded.paths.projectRootPath, requestPath, record, "request.json");
+    if (operationId) {
+      await this.#hit("request-history-pending", { requestId: record.requestId, status: record.status });
+      // The Request and stable event ids are already durable. Projection failure
+      // cannot turn a completed result into another generation attempt.
+      for (const event of record.conversationEvents || []) {
+        try { await appendSubmissionExecutionFact(loaded, operationId, event); }
+        catch { break; } // Replayed from the same authoritative outbox on recovery.
+      }
+    }
+  }
+
+  async #recoverSubmissionHistory(loaded, { restart = false } = {}) {
+    const submissionsRoot = path.join(loaded.paths.projectRootPath, ".pageroot", "submissions");
+    if (!await directoryInformation(submissionsRoot, "submissions", { projectRootPath: loaded.paths.projectRootPath })) return;
+    const entries = await listProjectDirectory(loaded.paths.projectRootPath, submissionsRoot, "submissions");
+    for (const entry of entries) {
+      if (!entry.isFile() || !/^submission_[a-f0-9]{32}\.json$/u.test(entry.name)) continue;
+      const operationId = entry.name.slice(0, -5);
+      const raw = await readJsonFile(path.join(loaded.paths.projectRootPath, ".pageroot", "submissions", entry.name), "submission", { projectRootPath: loaded.paths.projectRootPath });
+      const workingCopy = loaded.manifest.workingCopies.find((value) => value.workingCopyId === raw?.workingCopyId);
+      if (!workingCopy) continue;
+      const bound = { ...loaded, workingCopy };
+      const receipt = await readSubmissionReceipt(bound, operationId);
+      const record = await readJsonFile(path.join(requestRootPath(loaded.paths, receipt.requestId), "request.json"), "request.json", { projectRootPath: loaded.paths.projectRootPath });
+      if (record) {
+        this.#assertRequestRecord(record, bound, { requestId: receipt.requestId, attemptId: receipt.attemptId });
+        if (record.request?.submissionOperationId !== operationId) throw new ProjectFileRepositoryError("SUBMISSION_IDENTITY_MISMATCH", "Request does not match submission.");
+        await finishSubmissionReceipt(bound, { operationId, status: "request-created" }, record.createdAt);
+        for (const event of record.conversationEvents || []) await appendSubmissionExecutionFact(bound, operationId, event);
+        if (restart && record.status === "processing") {
+          await appendSubmissionExecutionFact(bound, operationId, {
+            eventId: `event_${receipt.requestId}_${receipt.attemptId}_interrupted`, kind: "interrupted",
+            timestamp: receipt.events?.find((event) => event.kind === "interrupted")?.timestamp || nowIso(this.#clock),
+          });
+        }
+      } else if (restart && receipt.status === "accepted") {
+        await finishSubmissionReceipt(bound, { operationId, status: "not-started", errorCode: "SUBMISSION_INTERRUPTED_BEFORE_REQUEST" }, nowIso(this.#clock));
+      } else await projectSubmissionReceipt(bound, receipt);
+    }
   }
 
   async prepareRequest({
@@ -2968,12 +3031,7 @@ export class ProjectFileRepository {
         ? cause.details.issueCodes
         : [],
     };
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      requestPath,
-      record,
-      "request.json",
-    );
+    await this.#writeRequestWithHistory(loaded, requestPath, record);
     loaded.runtime.activeRequest = null;
     loaded.runtime.activeCandidateId = null;
     loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
@@ -3056,12 +3114,7 @@ export class ProjectFileRepository {
         }
         record.status = "candidate-ready";
         record.completedAt = record.completedAt || nowIso(this.#clock);
-        await atomicWriteProjectJson(
-          loaded.paths.projectRootPath,
-          path.join(requestRootPath(loaded.paths, record.requestId), "request.json"),
-          record,
-          "request.json",
-        );
+        await this.#writeRequestWithHistory(loaded, path.join(requestRootPath(loaded.paths, record.requestId), "request.json"), record);
         status = record.status;
       }
     }
@@ -3297,12 +3350,7 @@ export class ProjectFileRepository {
     }
     record.status = "cancelled";
     record.cancelledAt = nowIso(this.#clock);
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      requestPath,
-      record,
-      "request.json",
-    );
+    await this.#writeRequestWithHistory(loaded, requestPath, record);
     if (activeMatches) {
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
@@ -3751,12 +3799,7 @@ export class ProjectFileRepository {
     if (outputSha256 === record.expectedSourceSha256) {
       record.status = "no-change";
       record.completedAt = nowIso(this.#clock);
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        requestPath,
-        record,
-        "request.json",
-      );
+      await this.#writeRequestWithHistory(loaded, requestPath, record);
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
       loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
@@ -3844,12 +3887,7 @@ export class ProjectFileRepository {
     }
     record.status = "candidate-ready";
     record.completedAt = nowIso(this.#clock);
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      requestPath,
-      record,
-      "request.json",
-    );
+    await this.#writeRequestWithHistory(loaded, requestPath, record);
     await this.#publishAiTaskProjectionIfPossible({
       target,
       requestId: record.requestId,
@@ -5847,12 +5885,7 @@ export class ProjectFileRepository {
     if (request?.candidateId === current.candidate.candidateId) {
       request.status = "rejected";
       request.rejectedAt = nowIso(this.#clock);
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        requestPath,
-        request,
-        "request.json",
-      );
+      await this.#writeRequestWithHistory(loaded, requestPath, request);
     }
     // Record the terminal Request decision before releasing the runtime
     // authority. A crash at either boundary then leaves a Candidate that is
@@ -6997,12 +7030,7 @@ export class ProjectFileRepository {
         request.status = "promoted";
         request.promotedVersionId = committedVersion.versionId;
         request.promotedAt = nowIso(this.#clock);
-        await atomicWriteProjectJson(
-          loaded.paths.projectRootPath,
-          requestPath,
-          request,
-          "request.json",
-        );
+        await this.#writeRequestWithHistory(loaded, requestPath, request);
       }
       loaded.runtime.activeWorkingCopyId = committedWorkingCopy.workingCopyId;
       loaded.runtime.activeRequest = null;
@@ -7529,6 +7557,7 @@ export class ProjectFileRepository {
     // Promotion first, then use Request facts to restore runtime state.
     const requestRuntime = await this.#recoverRequestRuntime(loaded);
     if (requestRuntime) recovered.push(requestRuntime);
+    await this.#recoverSubmissionHistory(loaded);
     return recovered;
   }
 }

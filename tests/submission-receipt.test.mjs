@@ -54,3 +54,73 @@ test("managed submission records selected service before configuration preflight
   const validate = new Ajv2020({ strict: false }).compile(schema);
   assert.equal(validate(receipt), true, JSON.stringify(validate.errors));
 });
+
+async function prepareRecordedRequest(value) {
+  const receipt = await value.repository.recordSubmission({ ...value, operationId });
+  await value.repository.prepareRequest({ target: value.target, requestId: receipt.requestId,
+    expectedSourceSha256: value.input.expectedSourceSha256,
+    request: { ...value.input, submissionOperationId: operationId }, prompt: "Synthetic frozen request" });
+  await value.repository.finishSubmission({ target: value.target, operationId, status: "request-created" });
+  return receipt;
+}
+
+test("new Bridge owner recovers unstarted submission without granting Request authority", async (t) => {
+  const value = await setup(t);
+  const receipt = await value.repository.recordSubmission({ ...value, operationId });
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  const recovered = await restarted.submissionReceipt({ target: value.target, operationId });
+  assert.equal(recovered.status, "not-started");
+  assert.equal(recovered.errorCode, "SUBMISSION_INTERRUPTED_BEFORE_REQUEST");
+  await assert.rejects(readFile(path.join(value.target.projectRootPath, ".pageroot", "requests", receipt.requestId, "request.json")), { code: "ENOENT" });
+});
+
+test("execution facts replay exactly once and restart preserves uncertain Request authority", async (t) => {
+  const value = await setup(t);
+  const receipt = await prepareRecordedRequest(value);
+  const event = { eventId: "event_distinct_start_1", kind: "started", timestamp: new Date().toISOString() };
+  await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId, event });
+  await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId, event });
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  await restarted.initialize();
+  const recovered = await restarted.submissionReceipt({ target: value.target, operationId });
+  assert.equal(recovered.events.filter((fact) => fact.kind === "started").length, 1);
+  assert.equal(recovered.events.filter((fact) => fact.kind === "interrupted").length, 1);
+  const record = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".pageroot", "requests", receipt.requestId, "request.json"), "utf8"));
+  assert.equal(record.status, "processing");
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  assert.equal(conversation.turns.length, 1);
+  assert.equal(conversation.turns[0].status, "interrupted");
+  assert.equal(conversation.messages.filter((message) => message.text === "已开始执行本轮修改。").length, 1);
+});
+
+test("durable no-change outcome ends the Turn and remains stable after restart", async (t) => {
+  const value = await setup(t);
+  const receipt = await prepareRecordedRequest(value);
+  const html = await readFile(value.target.exactSourcePath, "utf8");
+  const ended = await value.repository.completeRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId, html });
+  assert.equal(ended.status, "no-change");
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  assert.equal(conversation.turns[0].status, "completed");
+  assert.equal(conversation.messages.filter((message) => message.text.startsWith("本轮没有产生修改")).length, 1);
+  await restarted.recordSubmission({ ...value, operationId: "submission_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" });
+});
+
+
+test("crash after authoritative outcome write replays history without repeating execution", async (t) => {
+  const value = await setup(t);
+  const receipt = await prepareRecordedRequest(value);
+  const crashing = new ProjectFileRepository({ projectsRoot: value.projects,
+    failpoint(name) { if (name === "request-history-pending") throw new Error("synthetic crash before projection"); } });
+  await assert.rejects(crashing.completeRequest({ target: value.target, requestId: receipt.requestId,
+    attemptId: receipt.attemptId, html: await readFile(value.target.exactSourcePath, "utf8") }), /synthetic crash/);
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  await restarted.initialize();
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  assert.equal(conversation.turns[0].status, "completed");
+  assert.equal(conversation.messages.filter((message) => message.text.startsWith("本轮没有产生修改")).length, 1);
+});

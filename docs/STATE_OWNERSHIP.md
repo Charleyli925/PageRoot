@@ -571,3 +571,9 @@ query and openCreatedHistoryVersion. This batch does not remove the disk protoco
 ## Preflight submission receipts
 
 ProjectFileRepository serializes `submissions/<submissionOperationId>.json` inside the managed control root. The receipt owns only frozen submission requirements, preflight acceptance outcome, and stable Conversation/Request linkage. It is not an execution owner. Request/Attempt and Promotion retain execution and result authority. Receipt write precedes Conversation projection; stable identities allow projection repair without replaying Agent execution.
+
+### Execution history recovery
+
+AgentRuntimeCoordinator emits bounded, fixed-category execution facts through its injected repository writer. The start fact must persist before invoking a provider. Stage facts are serialized independently of Renderer mounts; a persistence failure aborts execution and disallows automatic retry. Raw provider text, arguments and output do not enter this history path.
+
+ProjectFileRepository writes terminal Request state and stable Conversation event IDs together in request.json, then projects those facts through the submission receipt into the fixed Conversation. A crash between these files replays the same event IDs; it never restarts generation. initialize() reconciles only submissions created by this flow: accepted without a Request becomes not-started, and processing Requests receive an interrupted fact while retaining existing Request/lease authority. Missing older submissions never cause invented history. Promotion confirmation remains owned by the completed Promotion transaction.

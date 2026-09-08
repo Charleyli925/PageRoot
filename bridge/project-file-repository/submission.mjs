@@ -122,6 +122,75 @@ export async function projectSubmissionReceipt(loaded, receipt) {
         text: "本次未开始，修改要求已保留。请修复服务后重新尝试。", errorCode: receipt.errorCode,
       }] }, { now: () => receipt.completedAt });
     }
+    for (const input of receipt.events || []) {
+      const event = submissionExecutionFact(input);
+      next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
+        messageId: `message_${event.eventId}`, actor: "pageroot", kind: "text", status: "completed",
+        text: EXECUTION_FACTS[event.kind], createdAt: event.timestamp, completedAt: event.timestamp,
+        requestId: receipt.requestId, attemptId: receipt.attemptId, candidateId: event.candidateId,
+      } }, { now: () => event.timestamp });
+      const currentTurn = next.turns.find((value) => value.turnId === receipt.turnId);
+      const terminal = { "candidate-ready": "completed", "no-change": "completed", cancelled: "cancelled", error: "failed", interrupted: "interrupted" }[event.kind];
+      if (terminal && ["queued", "running"].includes(currentTurn.status)) {
+        next = sealConversationTurn(next, { turnId: receipt.turnId, status: terminal,
+          requestId: receipt.requestId, attemptId: receipt.attemptId, candidateId: event.candidateId,
+        }, { now: () => event.timestamp });
+      }
+    }
     return next;
   });
+}
+
+const EXECUTION_FACTS = Object.freeze({
+  started: "已开始执行本轮修改。",
+  "starting-session": "正在建立执行会话。",
+  "sending-task": "已发出本轮修改要求。",
+  "generating-modification": "正在生成修改。",
+  "reading-task": "正在读取本轮资料。",
+  "writing-candidate": "正在写入修改结果。",
+  finalizing: "正在核对修改结果。",
+  "validating-html": "正在校验修改结果。",
+  "preparing-review": "正在准备审阅。",
+  "stop-requested": "已请求停止，正在等待确认。",
+  "stop-confirmed": "执行已停止，修改要求已保留。",
+  failed: "执行未能完成，修改要求已保留。",
+  "execution-ended": "执行已结束，结果仍需校验。",
+  interrupted: "执行连接已中断，结果需要核对；部分过程可能未保存。",
+  "candidate-ready": "修改已准备好，尚未采用。",
+  "no-change": "本轮没有产生修改，修改要求已保留。",
+  cancelled: "本轮已停止，修改要求已保留。",
+  error: "修改结果未通过校验，页面尚未修改。",
+  rejected: "未采用本次修改，修改要求与历史已保留。",
+  promoted: "已采用本次修改。",
+});
+
+export function submissionExecutionFact({ eventId, kind, timestamp, candidateId = null }) {
+  if (!Object.hasOwn(EXECUTION_FACTS, kind) || !/^[A-Za-z0-9_-]{1,180}$/u.test(eventId)
+    || !Number.isFinite(Date.parse(timestamp))) {
+    throw new ProjectFileRepositoryError("SUBMISSION_EVENT_INVALID", "Execution fact is invalid.");
+  }
+  return { eventId, kind, timestamp,
+    ...(candidateId && /^candidate_[A-Za-z0-9_-]{1,160}$/u.test(candidateId) ? { candidateId } : {}) };
+}
+
+export async function appendSubmissionExecutionFact(loaded, operationId, input) {
+  const current = await readSubmissionReceipt(loaded, operationId);
+  if (!current) throw new ProjectFileRepositoryError("SUBMISSION_MISSING", "Submission receipt is missing.");
+  const event = submissionExecutionFact(input);
+  const events = current.events || [];
+  const existing = events.find((value) => value.eventId === event.eventId);
+  if (existing && JSON.stringify(existing) !== JSON.stringify(event)) {
+    throw new ProjectFileRepositoryError("SUBMISSION_EVENT_COLLISION", "Execution fact cannot be replaced.");
+  }
+  let receipt = current;
+  if (!existing) {
+    // Stage entries are bounded; terminal outcomes must always remain durable.
+    const retained = events.length >= 128
+      ? events.filter((value) => !["starting-session", "sending-task", "reading-task", "writing-candidate", "generating-modification"].includes(value.kind)).slice(-120)
+      : events;
+    receipt = { ...current, events: [...retained, event], eventsTruncated: current.eventsTruncated === true || retained.length !== events.length };
+    await atomicWriteProjectJson(loaded.paths.projectRootPath, receiptPath(loaded, operationId), receipt, "submission");
+  }
+  await projectSubmissionReceipt(loaded, receipt);
+  return receipt;
 }

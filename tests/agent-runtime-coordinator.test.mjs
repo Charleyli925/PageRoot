@@ -706,3 +706,21 @@ test("current execution binds by selection and rejects a leftover driver-only st
   assert.equal(redeemed.selection.providerId, "synthetic-provider");
   await coordinator.shutdown();
 });
+
+test("execution persistence failure before launch never invokes the provider", async () => {
+  let starts = 0;
+  let releases = 0;
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({ run: async () => { starts += 1; } }),
+    resolveTask: async () => executionAuthority(CONFIGURATION),
+    recordExecutionFact: async () => { throw new Error("synthetic history write failure"); },
+    leaseStore: { acquire: async () => ({ key: "synthetic" }), release: async () => { releases += 1; return true; } },
+  });
+  const ticket = await ready(coordinator);
+  await assert.rejects(coordinator.submit({ ...IDENTITY, selection: ticket.selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION, preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest }), /synthetic history write failure/);
+  assert.equal(starts, 0);
+  assert.equal(releases, 1);
+  await coordinator.shutdown();
+});
