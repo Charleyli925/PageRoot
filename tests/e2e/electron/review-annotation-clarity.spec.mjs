@@ -487,7 +487,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       { type: "text" },
     );
     expect(paragraphOneGroup.id).not.toBe(paragraphTwoGroup.id);
-    const paragraphScrollTops = [];
+    const paragraphFocusTops = [];
     for (const [index, group] of [paragraphOneGroup, paragraphTwoGroup].entries()) {
       await activateFocusGroup(beforeFrame, afterFrame, group);
       for (const frame of [beforeFrame, afterFrame]) {
@@ -506,13 +506,25 @@ test("the review projection annotates a dense report cleanly and accurately", as
         const rect = element.getBoundingClientRect();
         return rect.bottom > 0 && rect.top < innerHeight;
       })).toBe(true);
-      paragraphScrollTops.push(await afterFrame.locator("html").evaluate(() => scrollY));
+      // Focus attributes publish before the animation-frame scroll command. Both
+      // paragraphs can already intersect the viewport, so visibility is insufficient.
+      await expect.poll(() => afterFrame.locator(
+        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
+      ).evaluate((box) => {
+        const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+        const target = Math.max(0, Math.min(maximum,
+          Number(box.getAttribute("data-top")) - Math.max(18, innerHeight * .12)));
+        return Math.abs(scrollY - target);
+      })).toBeLessThanOrEqual(2);
+      paragraphFocusTops.push(await afterFrame.locator(
+        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
+      ).evaluate((box) => Number(box.getAttribute("data-top"))));
       await launched.page.screenshot({
         path: path.join(captureDirectory, `review-focus-paragraph-${index + 1}.png`),
         animations: "disabled",
       });
     }
-    expect(paragraphScrollTops[1] - paragraphScrollTops[0]).toBeGreaterThan(100);
+    expect(paragraphFocusTops[1] - paragraphFocusTops[0]).toBeGreaterThan(100);
     await launched.page.evaluate(() => {
       for (const [id, value] of [
         ["review-bare-editable", ""],
