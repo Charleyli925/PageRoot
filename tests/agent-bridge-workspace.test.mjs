@@ -242,6 +242,8 @@ test("workspace Agent Bridge completes Qoder ACP into pending review without ado
     + `&attemptId=${encodeURIComponent(value.request.attemptId)}`;
   const ready = await waitForStatus(
     () => value.bridge.requestJson(statusPath),
+    // Finalizer readiness can precede provider cleanup and history flushing.
+    // This assertion covers both facts, so wait for both authoritative states.
     (result) => result.response.status === 200 && result.body.status === "ready-to-open"
       && result.body.agentSession?.state === "completed",
   );
