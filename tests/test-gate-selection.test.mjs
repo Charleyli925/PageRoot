@@ -1338,3 +1338,11 @@ test("Version ingress changes select production decoder coverage", () => {
   const plan = selectGatePlan({ lane: "edit", changedFiles: ["app/workbench/version-model.ts"], map });
   assert.ok(plan.selectedNodeTests.includes("tests/workspace-ingress.test.mjs"));
 });
+
+
+test("changed review annotation is discovered through the AI selection runtime", () => {
+  const file = "tests/e2e/electron/review-annotation-clarity.spec.mjs";
+  const plan = selectGatePlan({ map, lane: "task", changedFiles: [file] });
+  assert.deepEqual(plan.selectedChangedSpecs["ai-changed-specs"], [file]);
+  assert.equal(plan.selectedChangedSpecs["electron-changed-specs"], undefined);
+});

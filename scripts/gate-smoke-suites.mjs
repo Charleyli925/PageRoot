@@ -100,7 +100,8 @@ export function classifyPlaywrightSpec(file) {
   if (normalized.startsWith("tests/e2e/browser/")) {
     return { suiteId: "browser-changed-specs", file: normalized };
   }
-  if (normalized.startsWith("tests/e2e/electron/ai-")) {
+  if (normalized.startsWith("tests/e2e/electron/ai-")
+    || normalized === "tests/e2e/electron/review-annotation-clarity.spec.mjs") {
     return { suiteId: "ai-changed-specs", file: normalized };
   }
   if (

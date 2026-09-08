@@ -28,8 +28,8 @@
 | B | PR-3 | 预检前提交、冻结要求、防重、复制 | Draft #477，完整 task:finish 通过 |
 | B | PR-4 | 事实投影、持久执行、重启恢复 | Draft #478，完整 task:finish 通过 |
 | C | PR-5 | 安全进度、停止竞争 | Draft #479，完整 task:finish 通过 |
-| C | PR-6 | 四区域侧栏、原地修复、阅读行为 | 实施中：已整合 PR-2；92 项专项与三宽度 Electron 场景通过 |
-| C | PR-7 | 审阅、采用、不用、评论修订 | 待实施 |
+| C | PR-6 | 四区域侧栏、原地修复、阅读行为 | Draft #481，完整 task:finish 通过；已整合 PR-2 |
+| C | PR-7 | 审阅、采用、不用、评论修订 | 已实现；完整 task:finish 通过（49 桌面 + 38 AI 场景），Draft 待创建 |
 | D | PR-8 | 故障注入、真实桌面、视觉与无障碍 | 待实施 |
 
 PR-0 先行；PR-3 → PR-4 → PR-5；PR-6 接入 PR-1/2/4/5；PR-7 接入历史与审阅；PR-8 汇总。每个 PR 为 Draft，独立说明行为、持久化变化、测试、未覆盖项与回退边界。合并与发布须另行授权。
@@ -60,3 +60,5 @@ PR-0 先行；PR-3 → PR-4 → PR-5；PR-6 接入 PR-1/2/4/5；PR-7 接入历�
 视觉证据覆盖八种关键状态、340/400/480px、200% 缩放、长文本/历史；键盘焦点与滚动锚点稳定，读屏不逐秒播报。真实账号测试尚未执行。
 
 PR-1：新增诊断编号、失败阶段、配置代次与操作回执；检查未就绪返回 rejected。连接失败保留分项事实。真实 Codex 初始化故障与桌面截图仍待真实环境验收，不声明根因已修复。
+
+PR-7 implementation: Candidate-specific Review → adopt/discard, source-hash and decision identity validation, pre-adoption Draft drain, transactional preservation of later comments, and completed-Promotion history replay. Focused repository, workflow and Electron checks are recorded in the PR; real accounts remain PR-8.

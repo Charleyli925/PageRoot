@@ -221,3 +221,31 @@ test("sealed public summary is sanitized, bounded and restored once after failur
   assert.ok(summaries[0].text.length <= 4096);
   assert.doesNotMatch(JSON.stringify(conversation), /sk-synthetic|private-source|hidden-synthetic|raw-synthetic/);
 });
+
+test("adoption consumes only unchanged submitted comments and replays its decision once", async (t) => {
+  const value = await setup(t);
+  const unchanged = { ...value.input.comments[0], commentId: "comment_unchanged" };
+  value.input.comments.push(unchanged);
+  const receipt = await prepareRecordedRequest(value);
+  const edited = { ...value.input.comments[0], text: "Keep my later edit", updatedAt: "2026-09-08T10:00:00.000Z" };
+  const added = { ...unchanged, commentId: "comment_added", text: "Next round" };
+  await value.repository.saveDraft({ target: value.target, operationId: "draftop_retention_00001",
+    expectedDraftRevision: 0, comments: [edited, unchanged, added], changeEvents: [] });
+  const html = (await readFile(value.target.exactSourcePath, "utf8")).replaceAll(">V1<", ">V2<");
+  const ready = await value.repository.completeRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId, html });
+  const candidateId = ready.candidate.candidateId;
+  await assert.rejects(value.repository.promoteCandidate({ target: value.target, candidateId, decisionOperationId: "promote_other" }), { code: "DECISION_IDENTITY_MISMATCH" });
+  await assert.rejects(value.repository.promoteCandidate({ target: value.target, candidateId, expectedSourceSha256: "0".repeat(64) }), { code: "SOURCE_HASH_CONFLICT" });
+  const input = { target: value.target, candidateId, decisionOperationId: `promote_${candidateId}`, expectedSourceSha256: value.target.sourceSha256 };
+  const result = await value.repository.promoteCandidate(input);
+  const replayed = await value.repository.promoteCandidate(input);
+  assert.equal(replayed.version.versionId, result.version.versionId);
+  const workspace = await value.repository.workspace({ sourcePath: result.target.exactSourcePath });
+  assert.deepEqual(workspace.draft.comments.map((comment) => comment.commentId), [edited.commentId, added.commentId]);
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  assert.equal(conversation.messages.filter((message) => message.text === "已采用本次修改。").length, 1);
+  const restored = await restarted.workspace({ sourcePath: result.target.exactSourcePath });
+  assert.deepEqual(restored.draft.comments, workspace.draft.comments);
+});

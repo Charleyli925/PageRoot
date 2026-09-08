@@ -80,9 +80,9 @@ test("the action bar is derived from product state, never from a message", () =>
     candidateStatus: "ready",
   });
   assert.equal(pending.kind, "decision");
-  assert.equal(pending.title, "候选版本 5 等待你的决定");
-  assert.equal(pending.detail, "你可以先看变化，也可以直接采用。");
-  assert.deepEqual(pending.actions.map((action) => action.id), ["review", "adopt"]);
+  assert.equal(pending.title, "修改已准备好，尚未采用");
+  assert.equal(pending.detail, "查看本次修改，再决定是否采用。");
+  assert.deepEqual(pending.actions.map((action) => action.id), ["review"]);
 
   const running = sidebarActionBar({ state: "processing" });
   assert.equal(running.kind, "progress");
@@ -107,13 +107,13 @@ test("an attention candidate is not offered for blind adoption", () => {
   assert.match(unseen.detail, /变化较大/u);
 
   // While comparing, the user is looking at it, so adopting is legitimate — and
-  // pointing at 「审阅对比」 would point at the screen they are already on.
+  // pointing at 「查看修改」 would point at the screen they are already on.
   const comparing = sidebarActionBar({
     state: "review-view",
     candidateVersionLabel: "候选版本 7",
     candidateStatus: "attention",
   });
-  assert.deepEqual(comparing.actions.map((action) => action.id), ["adopt"]);
+  assert.deepEqual(comparing.actions.map((action) => action.id), ["adopt", "discard"]);
   assert.match(comparing.detail, /变化较大/u);
 });
 
@@ -130,7 +130,7 @@ test("a blocked candidate offers recovery instead of adoption", () => {
 
 test("an adoption failure stays on the existing decision bar", () => {
   const bar = sidebarActionBar({
-    state: "ready-to-open",
+    state: "review-view",
     failureMessage: "最新版暂时无法打开。",
   });
   assert.equal(bar.kind, "decision");
@@ -957,8 +957,8 @@ test("the clipboard round says what is actually happening and keeps the task rea
       deliveryMode: mode,
       candidateVersionLabel: "版本 2",
     });
-    assert.equal(decision.title, "版本 2 等待你的决定");
-    assert.deepEqual(decision.actions.map((action) => action.id), ["review", "adopt"]);
+    assert.equal(decision.title, "修改已准备好，尚未采用");
+    assert.deepEqual(decision.actions.map((action) => action.id), ["review"]);
   }
 });
 
@@ -1065,4 +1065,15 @@ test("the conversation sidebar reuses AgentSetupPanel and can replace an API Key
   assert.match(source, /onQueueDefault/u);
   assert.match(source, /onBeginAccessRepair/u);
   assert.doesNotMatch(source, /useState<null \| Readonly<\{\s*documentId: string;/u);
+});
+
+test("adoption uncertainty takes precedence over Review and exposes no opposite decision", () => {
+  for (const adoptionPhase of ["applying", "unknown"]) {
+    const state = sidebarStateFromRun({ activeRun: { status: "ready-to-open", adoptionPhase }, reviewing: true });
+    assert.equal(state, adoptionPhase === "unknown" ? "adoption-unknown" : "promoting");
+    const bar = sidebarActionBar({ state });
+    assert.deepEqual(bar.actions, []);
+    assert.equal(sidebarSendState({ state }).canSend, false);
+    if (adoptionPhase === "unknown") assert.equal(bar.title, "采用结果待确认");
+  }
 });

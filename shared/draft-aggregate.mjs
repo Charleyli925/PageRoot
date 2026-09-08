@@ -108,3 +108,21 @@ export function operationWasApplied(authoritativeValue, operationId) {
     .appliedOperationIds
     .includes(operationId);
 }
+
+// Adoption resolves only the exact submitted comment revision. A later edit,
+// attachment change or new comment remains a requirement for the next round.
+export function commentsRemainingAfterAdoption(currentComments, submittedComments) {
+  const signature = (comment) => JSON.stringify({
+    text: comment.text ?? comment.content ?? "",
+    revision: comment.revision ?? null,
+    updatedAt: comment.updatedAt ?? comment.createdAt ?? null,
+    target: comment.target ?? comment.targetRef ?? null,
+    attachments: (comment.attachments || []).map((attachment) => ({
+      attachmentId: attachment.attachmentId ?? attachment.id,
+      sha256: attachment.sha256 ?? attachment.contentSha256,
+      name: attachment.name, size: attachment.size,
+    })),
+  });
+  const submitted = new Map((submittedComments || []).map((comment) => [comment.commentId, signature(comment)]));
+  return (currentComments || []).filter((comment) => submitted.get(comment.commentId) !== signature(comment));
+}

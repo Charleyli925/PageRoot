@@ -813,6 +813,7 @@ export default function Workbench() {
     // Review is the same workbench with a different Canvas: the thread stays
     // docked and read-only instead of disappearing and coming back.
     reviewing: Boolean(readyReviewSession),
+    commentComposerOpen: commentCanvasPort.getSnapshot().composerOpen,
     canvasMode,
     projectId: projectId ?? "",
     documentId: documentId ?? "",
@@ -831,7 +832,6 @@ export default function Workbench() {
     onOpenAgentSettings: openAgentSettings,
   });
   const revealAiConversation = aiConversation.reveal;
-  const hideAiConversation = aiConversation.hide;
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const {
     runtimePhase: editRuntimePhase,
@@ -5054,7 +5054,7 @@ export default function Workbench() {
         });
       performance.mark("pageroot:accept:activated");
       if (outcome.status !== "succeeded") {
-        if (outcome.status !== "stale") {
+        if (outcome.status !== "stale" && outcome.status !== "unknown") {
           const published = readyVersionPublicationMatches(workspaceController, run);
           if (!published) {
             setCanvasMode("preview");
@@ -5237,7 +5237,7 @@ export default function Workbench() {
         setInterruption({ kind: "review-no-visible-change" });
         return;
       }
-      hideAiConversation();
+      revealAiConversation();
       setInterruption(null);
       setReadyReviewSession({
         operationKey,
@@ -5265,7 +5265,7 @@ export default function Workbench() {
     currentCommentSessionSnapshot,
     currentRunSessionSnapshot,
     fenceAndFreezeCurrentCanvas,
-    hideAiConversation,
+    revealAiConversation,
     isCurrentProjectContext,
     reviewAnalysisSession,
     reviewPreparing,
@@ -5805,7 +5805,17 @@ export default function Workbench() {
       return;
     }
     if (actionId === "review") { void reviewReadyResult(); return; }
-    if (actionId === "adopt") { void activateReadyResult(); return; }
+    if (actionId === "adopt") { void activateReadyResult({ reviewed: Boolean(readyReviewSession) }); return; }
+    if (actionId === "discard") {
+      void cancelActiveRun().then((succeeded) => {
+        if (!succeeded) return;
+        setReadyReviewSession(null);
+        reviewAnalysisSession.clear();
+        setCanvasMode("edit");
+        editorRef.current?.unlockNow?.();
+      });
+      return;
+    }
     if (actionId === "adopt-ai" || actionId === "keep-external") {
       void resolveAiConflict(actionId);
       return;
@@ -5838,6 +5848,8 @@ export default function Workbench() {
     if (actionId === "cancel") requestActiveRunEnd();
   }, [
     activateReadyResult,
+    readyReviewSession,
+    reviewAnalysisSession,
     activeRun,
     cancelActiveRun,
     openAgentSettings,
@@ -5964,7 +5976,7 @@ export default function Workbench() {
     <WorkbenchReviewOverlay
       session={readyReviewSession}
       fileName={localFileNameFromSourcePath(readyReviewSession.sourcePath) || currentSourceFileName}
-      accepting={openingReadyVersion}
+      accepting={openingReadyVersion || Boolean(activeRun?.adoptionPhase)}
       activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
       onAbout={openAboutPageRoot}
       onCancelBefore={cancelActiveRun}

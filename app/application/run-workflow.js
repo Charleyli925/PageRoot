@@ -1659,6 +1659,9 @@ export class RunWorkflow {
       return blocked("RUN_CANCEL_UNAVAILABLE", "当前 Request 尚未形成可取消的身份。");
     }
     const operationKey = this.#codecs.operationKey(run);
+    if (this.#runSession.isOperationBusy("activate", operationKey) || run.adoptionPhase) {
+      return blocked("RUN_ADOPTION_PENDING", "采用结果正在确认，暂时不能结束本轮。");
+    }
     if (!this.#runSession.beginOperation("cancel", operationKey)) {
       return blocked("RUN_CANCEL_BUSY", "本轮结束操作正在进行。");
     }

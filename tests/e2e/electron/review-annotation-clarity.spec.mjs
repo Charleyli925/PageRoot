@@ -445,7 +445,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await addReportComment(launched.page, fixture.sourcePath);
     const request = await submitToAi(launched.page, launched.electronApp);
     writeCandidate(request.requestRoot, request.changeRequest);
-    const openReviewButton = launched.page.getByRole("button", { name: "审阅对比" });
+    const openReviewButton = launched.page.getByRole("button", { name: "查看修改" });
     await expect(openReviewButton).toBeVisible({ timeout: 30_000 });
     await openReviewButton.click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
@@ -487,8 +487,13 @@ test("the review projection annotates a dense report cleanly and accurately", as
       { type: "text" },
     );
     expect(paragraphOneGroup.id).not.toBe(paragraphTwoGroup.id);
-    const paragraphScrollTops = [];
+    const paragraphFocusTops = [];
     for (const [index, group] of [paragraphOneGroup, paragraphTwoGroup].entries()) {
+      // Start at the top so selecting the second paragraph must reveal it.
+      for (const frame of [beforeFrame, afterFrame]) {
+        await frame.locator("html").evaluate(() => scrollTo({ top: 0, behavior: "instant" }));
+      }
+      await expect.poll(() => afterFrame.locator("html").evaluate(() => scrollY)).toBeLessThan(100);
       await activateFocusGroup(beforeFrame, afterFrame, group);
       for (const frame of [beforeFrame, afterFrame]) {
         const boxes = frame.locator(
@@ -506,13 +511,23 @@ test("the review projection annotates a dense report cleanly and accurately", as
         const rect = element.getBoundingClientRect();
         return rect.bottom > 0 && rect.top < innerHeight;
       })).toBe(true);
-      paragraphScrollTops.push(await afterFrame.locator("html").evaluate(() => scrollY));
+      // Verify the visible focus, including the outer canvas viewport. Exact
+      // scroll offsets are clamped and synchronized across unequal page extents.
+      await expect.poll(() => activeFootprintVisibleInOuterViewport(
+        launched.page, afterFrame, "after",
+      )).toBe(true);
+      await expect.poll(() => activeFootprintVisibleInOuterViewport(
+        launched.page, beforeFrame, "before",
+      )).toBe(true);
+      paragraphFocusTops.push(await afterFrame.locator(
+        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
+      ).evaluate((box) => Number(box.getAttribute("data-top"))));
       await launched.page.screenshot({
         path: path.join(captureDirectory, `review-focus-paragraph-${index + 1}.png`),
         animations: "disabled",
       });
     }
-    expect(paragraphScrollTops[1] - paragraphScrollTops[0]).toBeGreaterThan(100);
+    expect(paragraphFocusTops[1] - paragraphFocusTops[0]).toBeGreaterThan(100);
     await launched.page.evaluate(() => {
       for (const [id, value] of [
         ["review-bare-editable", ""],
@@ -1002,7 +1017,10 @@ test("the review projection annotates a dense report cleanly and accurately", as
     expect(
       edgeBox.left + edgeBox.width,
       `right-edge structural footprint must clamp to the authored edge: ${JSON.stringify({ edgeBox, edgeElementGeometry })}`,
-    ).toBeCloseTo(edgeProjection.authoredDocumentWidth, 5);
+    ).toBeLessThanOrEqual(edgeProjection.authoredDocumentWidth);
+    // Classic scrollbars consume layout width on CI; the outline must reach
+    // the actual element edge without assuming overlay-scrollbar geometry.
+    expect(edgeBox.left + edgeBox.width).toBeGreaterThanOrEqual(edgeElementGeometry.right);
     await launched.page.screenshot({
       path: path.join(captureDirectory, "review-focus-one-sided.png"),
       animations: "disabled",
