@@ -2906,3 +2906,11 @@ Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, a
 - Inspected `output/design-qa/ai-assistant-redesign/trusted-loop-pr6-ready-340.png`; summary, result and disclosure are readable, with existing typography, tokens and controls. The existing processing capture and `trusted-loop-process-expanded.png` preserve the before/expanded context. Native disclosure provides keyboard focus and activation without new motion.
 - CI desktop feedback and formal AI evidence now upload `output/design-qa` on success as well as failure. Generated screenshots remain outside source control. Long-history/200% and adoption uncertainty evidence are integrated in PR-8; this entry does not certify real accounts.
 - final result: passed (focused compact history and three supported widths).
+
+## 2026-09-08 — Trusted loop revision: truthful pending adoption
+
+- Visual truth: existing Review and fixed sidebar actions, with the reviewed “正在采用 / 采用结果待确认” distinction above Review's normal decision state.
+- A rebuilt Electron scenario commits the real synthetic Candidate, holds the first reply, loses two replies, and later restores transport. Inspected `trusted-loop-adoption-unknown.png`: the pending status is visible and no opposite action is offered; the adopted history fact is supplied by the actual persisted Promotion, not a guessed frontend success.
+- The scenario verifies the same decision payload on every reconciliation, one successful source publication, and exactly one adopted history result after restarting the application. Screenshots: `output/design-qa/ai-assistant-redesign/trusted-loop-{adopting,adoption-unknown,adopted-restarted}.png`; CI uploads the synthetic captures.
+- Existing typography, neutral colors, Review controls and focus treatment are retained. Native disabled controls prevent double submission; transient status is not a new durable authority.
+- final result: passed (actual backend receipt-loss and restart scenario).
