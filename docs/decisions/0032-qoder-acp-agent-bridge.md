@@ -144,3 +144,12 @@ boundary: every Agent result is a separate Candidate until the user reviews and
 adopts it. Other Agents continue to work through the clipboard driver. ACP or
 native drivers may be added later behind the same Agent Bridge contract without
 moving task-state ownership into a provider integration.
+
+## Identity repair before output commit
+
+The shared ACP host validates source identities before accepting its one committed output write.
+Rejected identity writes carry validation evidence back to the Agent and leave no output or completion.
+Up to two corrections are permitted; the driver resumes the same session if the Agent stops after rejection.
+Cancellation and runtime authority are checked on every mutation. Once a valid output is committed,
+existing no-overwrite and one-finalizer rules remain unchanged. The finalizer independently validates
+identities before sealing completion, including manual Agent invocations.

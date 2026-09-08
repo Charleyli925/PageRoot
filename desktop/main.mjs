@@ -85,6 +85,11 @@ import {
 import { registerAgentIpc, unregisterAgentIpc } from "./ipc/agent-ipc.mjs";
 import { publicAgentVendorKeyUrl } from "../shared/agent-vendor-key-url.mjs";
 import { createAgentSessionCredentialStore } from "./agent-session-credential-store.mjs";
+import {
+  assertRuntimeEnvironment,
+  createRuntimeEnvironment,
+  resolveRuntimeChannel,
+} from "./runtime-environment.mjs";
 import { registerUpdateIpc, unregisterUpdateIpc } from "./ipc/update-ipc.mjs";
 import { registerWindowIpc, unregisterWindowIpc } from "./ipc/window-ipc.mjs";
 import { createWindowLifecycle } from "./app-lifecycle.mjs";
@@ -214,11 +219,34 @@ if (process.env.PAGEROOT_E2E === "1") {
     e2eEditRuntimePrepareGate.held = null;
   };
 }
-const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRoot");
-app.setPath("userData", productUserDataPath);
+const runtimeChannel = resolveRuntimeChannel({
+  environment: process.env.PAGEROOT_E2E === "1"
+    ? { ...process.env, PAGEROOT_RUNTIME_CHANNEL: "e2e" }
+    : process.env,
+  resourcesPath: process.resourcesPath || path.resolve(directory, "..", "resources"),
+  defaultApp: process.defaultApp === true,
+  // A packaged app must obey the marker embedded by its build. E2E is the
+  // sole intentional packaged override so its disposable root cannot touch a
+  // signed build's real user data.
+  allowEnvironmentOverride: process.env.PAGEROOT_E2E === "1" || process.defaultApp === true,
+});
+const runtimeEnvironment = assertRuntimeEnvironment(createRuntimeEnvironment({
+  channel: runtimeChannel,
+  environment: process.env,
+  appDataPath: app.getPath("appData"),
+  documentsPath: app.getPath("documents"),
+  logsBasePath: path.join(app.getPath("appData"), "..", "Logs"),
+  e2eUserDataPath,
+}));
+app.setPath("userData", runtimeEnvironment.userDataPath);
+app.setPath("sessionData", runtimeEnvironment.sessionDataPath);
+if (typeof app.setAppLogsPath === "function") app.setAppLogsPath(runtimeEnvironment.logsPath);
+// Preserve Electron's packaged identity contract: the formal app and a
+// packaged Preview launched under E2E must report the executable's product
+// name, while source development keeps the localized runtime name.
 const applicationName = app.isPackaged
   ? path.basename(process.execPath, path.extname(process.execPath))
-  : "源页";
+  : runtimeEnvironment.applicationName;
 app.setName(applicationName);
 // 后台 E2E 保留常规激活策略：窗口本身仍不显示、不抢焦点，但 macOS Dock
 // 里保留应用图标，开发者可以主动点击图标把窗口调出来查看测试进度，
@@ -382,7 +410,10 @@ const desktopRuntime = {
   e2eWindowForeground,
   e2eWindowRunsInBackground,
   directory,
+  applicationName,
   bridgeAuthToken,
+  runtimeEnvironment,
+  runtimeChannel,
   APP_CHANNELS,
   markStartupStage: (stage) => startupPerformanceTimeline.mark(stage),
   startupTimingSnapshot: () => startupPerformanceTimeline.snapshot(),
@@ -478,14 +509,16 @@ const externalOpenFailureMailbox = createExternalOpenFailureMailbox();
 const externalFileOpenDelivery = createExternalFileOpenDeliveryCoordinator();
 const preparedHtmlOpenStore = createPreparedHtmlOpenStore();
 const recoveryJournalStore = createRecoveryJournalStore({
-  rootPath: path.join(app.getPath("userData"), "recovery-journals-v1"),
+  rootPath: runtimeEnvironment.recoveryJournalPath,
 });
 const agentSessionCredentialStore = createAgentSessionCredentialStore({
-  userDataPath: app.getPath("userData"),
+  userDataPath: runtimeEnvironment.userDataPath,
   encryptString: (value) => safeStorage.encryptString(value),
   decryptString: (buffer) => safeStorage.decryptString(buffer),
   isEncryptionAvailable: () => safeStorage.isEncryptionAvailable() === true,
 });
+let rememberedCredentialRestoreFailure = null;
+let rememberedCredentialRestorePromise = Promise.resolve();
 let recoveryJournalAvailable = true;
 let recoveryJournalUnavailableReason = "";
 
@@ -498,9 +531,33 @@ function requireRecoveryJournal() {
   throw error;
 }
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
-  handoffPath: path.join(app.getPath("userData"), "external-open-handoff.json"),
+  handoffPath: path.join(runtimeEnvironment.userDataPath, "external-open-handoff.json"),
 });
 const projectOpenQueue = createProjectOpenQueue();
+
+async function initializeRuntimeEnvironment() {
+  const requiredPaths = [
+    mkdir(runtimeEnvironment.userDataPath, { recursive: true, mode: 0o700 }),
+    mkdir(runtimeEnvironment.sessionDataPath, { recursive: true, mode: 0o700 }),
+    mkdir(runtimeEnvironment.projectFilesRoot, { recursive: true, mode: 0o700 }),
+    mkdir(runtimeEnvironment.workspacePath, { recursive: true, mode: 0o700 }),
+    mkdir(runtimeEnvironment.agentsRoot, { recursive: true, mode: 0o700 }),
+    mkdir(runtimeEnvironment.logsPath, { recursive: true, mode: 0o700 }),
+  ];
+  if (runtimeEnvironment.channel !== "preview") {
+    // Stable, source and E2E retain the pre-isolation best-effort startup
+    // contract. Their explicit roots are still passed to Bridge, but a
+    // temporarily unavailable optional directory must not block the window.
+    await Promise.all(requiredPaths).catch(() => {});
+    return;
+  }
+  // Preview is the only channel whose complete isolated environment is a hard
+  // startup requirement; it must never silently continue with a missing root.
+  requiredPaths.push(
+    mkdir(runtimeEnvironment.recoveryJournalPath, { recursive: true, mode: 0o700 }),
+  );
+  await Promise.all(requiredPaths);
+}
 
 function ensurePreviewProtocolController() {
   if (!previewProtocolController) {
@@ -1151,10 +1208,7 @@ function taggedConfirmation(descriptor) {
 }
 
 function projectsRootPath() {
-  if (process.env.HTML_AI_PROJECT_FILES_ROOT) {
-    return path.resolve(process.env.HTML_AI_PROJECT_FILES_ROOT);
-  }
-  return path.join(app.getPath("documents"), "PageRoot", "项目");
+  return runtimeEnvironment.projectFilesRoot;
 }
 
 function isInsideDirectory(filePath, directoryPath) {
@@ -1665,7 +1719,7 @@ async function openHtml() {
     // 始终交出一个 defaultPath：macOS 只有在缺省时才沿用上次选择过的目录。
     const defaultPath = await resolveOpenDialogDefaultPath({
       projectsRoot: projectsRootPath(),
-      documentsRoot: app.getPath("documents"),
+      documentsRoot: path.dirname(projectsRootPath()),
       lstat,
     });
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -3151,9 +3205,9 @@ async function exportHtmlCopy(payload) {
   const activePath = await currentActivePath();
   const defaultDirectory = sourcePath
     ? path.dirname(sourcePath)
-    : activePath
-      ? path.dirname(activePath)
-      : app.getPath("documents");
+      : activePath
+        ? path.dirname(activePath)
+        : path.dirname(projectsRootPath());
   const requestedName = suggestedName
     || (sourcePath ? path.basename(sourcePath) : null)
     || (activePath ? path.basename(activePath) : null)
@@ -3398,8 +3452,31 @@ async function restoreRememberedAgentCredential() {
     if (preferences.workspace.disabledAgentProviderIds.includes("pageroot")) {
       return Object.freeze({ ok: true, restored: false });
     }
-    const credential = await agentSessionCredentialStore.load();
-    if (!credential?.apiKey) return Object.freeze({ ok: true, restored: false });
+    const loaded = typeof agentSessionCredentialStore.loadResult === "function"
+      ? await agentSessionCredentialStore.loadResult()
+      : Object.freeze({
+        status: "loaded",
+        credential: await agentSessionCredentialStore.load(),
+      });
+    if (loaded.status === "missing") {
+      rememberedCredentialRestoreFailure = null;
+      return Object.freeze({ ok: true, restored: false });
+    }
+    if (loaded.status !== "loaded" || !loaded.credential?.apiKey) {
+      rememberedCredentialRestoreFailure = Object.freeze({
+        code: loaded.reason || "AGENT_CREDENTIAL_STORE_UNAVAILABLE",
+        reason: "无法读取已保存的连接凭证。你仍可编辑项目。",
+        reconnectRequired: true,
+      });
+      return Object.freeze({
+        ok: false,
+        restored: false,
+        code: rememberedCredentialRestoreFailure.code,
+        reason: rememberedCredentialRestoreFailure.reason,
+        reconnectRequired: true,
+      });
+    }
+    const credential = loaded.credential;
     await fetchBridgePost("/agent/session-credential", {
       providerId: credential.providerId,
       apiKey: credential.apiKey,
@@ -3407,11 +3484,34 @@ async function restoreRememberedAgentCredential() {
       baseUrl: credential.baseUrl,
       ...(credential.modelId ? { modelId: credential.modelId } : {}),
     });
+    rememberedCredentialRestoreFailure = null;
     return Object.freeze({ ok: true, restored: true });
   } catch {
     // Remembered Key restore is best-effort; the user can reconnect this session.
-    return Object.freeze({ ok: false, restored: false });
+    rememberedCredentialRestoreFailure = Object.freeze({
+      code: "AGENT_CREDENTIAL_RESTORE_FAILED",
+      reason: "无法读取已保存的连接凭证。你仍可编辑项目。",
+      reconnectRequired: true,
+    });
+    return Object.freeze({
+      ok: false,
+      restored: false,
+      code: rememberedCredentialRestoreFailure.code,
+      reason: rememberedCredentialRestoreFailure.reason,
+      reconnectRequired: true,
+    });
   }
+}
+
+async function sessionCredentialStatus() {
+  // Startup restore is deliberately best-effort, but wait for its one attempt
+  // before reporting the remembered state so a keychain denial is visible to
+  // the renderer instead of being mistaken for a healthy saved credential.
+  await rememberedCredentialRestorePromise.catch(() => {});
+  const status = await agentSessionCredentialStore.publicStatus();
+  return rememberedCredentialRestoreFailure
+    ? Object.freeze({ ...status, ...rememberedCredentialRestoreFailure, unreadable: true })
+    : status;
 }
 
 async function restoreRegisteredWorkingCopy(projectIdInput) {
@@ -3618,7 +3718,8 @@ function ensureApplicationUpdateController() {
     currentVersion: app.getVersion(),
     architecture: process.arch,
     enabled: (
-      app.isPackaged
+      runtimeChannel === "stable"
+      && app.isPackaged
       && process.platform === "darwin"
       && process.env.PAGEROOT_E2E !== "1"
     ),
@@ -3761,9 +3862,17 @@ function registerProjectIpc() {
       await shell.openExternal(keyUrl);
       return Object.freeze({ opened: true });
     },
-    persistSessionCredential: (payload) => agentSessionCredentialStore.persist(payload),
-    clearSessionCredential: () => agentSessionCredentialStore.clear(),
-    sessionCredentialStatus: () => agentSessionCredentialStore.publicStatus(),
+    persistSessionCredential: async (payload) => {
+      const result = await agentSessionCredentialStore.persist(payload);
+      if (result?.ok === true) rememberedCredentialRestoreFailure = null;
+      return result;
+    },
+    clearSessionCredential: async () => {
+      const result = await agentSessionCredentialStore.clear();
+      rememberedCredentialRestoreFailure = null;
+      return result;
+    },
+    sessionCredentialStatus,
     restoreSessionCredential: () => restoreRememberedAgentCredential(),
   });
   registerUpdateIpc({
@@ -4254,12 +4363,7 @@ async function showWorkspaceUnavailableRecovery() {
 }
 
 async function workspacePath() {
-  const explicitWorkspace = process.env.HTML_AI_WORKSPACE?.trim();
-  if (explicitWorkspace) {
-    return path.resolve(explicitWorkspace);
-  }
-
-  return path.join(app.getPath("documents"), "PageRoot", "项目记录");
+  return runtimeEnvironment.workspacePath;
 }
 
 // The device identity is read once per launch and reused by every Bridge
@@ -4287,8 +4391,14 @@ async function launchBridge() {
       HTML_AI_BRIDGE_AUTH_TOKEN: bridgeAuthToken,
       HTML_AI_BRIDGE_PORT: String(port),
       HTML_AI_DEVICE_ID: device.deviceId,
+      HTML_AI_RUNTIME_CHANNEL: runtimeChannel,
+      HTML_AI_USER_DATA_ROOT: runtimeEnvironment.userDataPath,
+      HTML_AI_SESSION_DATA_ROOT: runtimeEnvironment.sessionDataPath,
+      HTML_AI_PROJECT_FILES_ROOT: runtimeEnvironment.projectFilesRoot,
       HTML_AI_WORKSPACE: workspace,
-      HTML_AI_AGENTS_ROOT: path.join(app.getPath("userData"), "agents"),
+      HTML_AI_AGENTS_ROOT: runtimeEnvironment.agentsRoot,
+      HTML_AI_RECOVERY_JOURNALS_ROOT: runtimeEnvironment.recoveryJournalPath,
+      PAGEROOT_LOGS_ROOT: runtimeEnvironment.logsPath,
     },
     serviceName: "HTML AI Workspace Bridge",
     stdio: "pipe",
@@ -4342,7 +4452,8 @@ async function launchBridge() {
     bridgePort = port;
     ready = true;
     startupPerformanceTimeline.mark("bridge-ready");
-    void restoreRememberedAgentCredential();
+    rememberedCredentialRestorePromise = restoreRememberedAgentCredential();
+    void rememberedCredentialRestorePromise;
     return port;
   } catch (error) {
     // If the child is still alive, keep its handle so the coordinated fatal
@@ -4437,6 +4548,7 @@ if (!hasSingleInstanceLock) {
       app.dock.setIcon(path.join(directory, "resources", "icon.png"));
     }
     installApplicationMenu();
+    await initializeRuntimeEnvironment();
     ensureApplicationUpdateController();
     try {
       await recoveryJournalStore.initialize();

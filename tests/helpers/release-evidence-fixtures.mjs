@@ -14,6 +14,7 @@ import {
   expectedApplicationUpdateConfig,
   serializeApplicationUpdateConfig,
 } from "../../scripts/application-update-config.mjs";
+import { runtimeEnvironmentMarker } from "../../desktop/runtime-environment.mjs";
 
 const FIXTURE_COMMIT_SHA = "a".repeat(40);
 const FIXTURE_TREE_SHA = "b".repeat(40);
@@ -57,6 +58,7 @@ export const APP_SOURCE_FILES = [
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
   "desktop/agent-session-credential-store.mjs",
+  "desktop/runtime-environment.mjs",
   "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
@@ -238,6 +240,10 @@ function fixtureExtraResources() {
       from: "output/release-metadata/usage-telemetry-config.json",
       to: "usage-telemetry-config.json",
     },
+    {
+      from: "output/release-metadata/runtime-environment.json",
+      to: "runtime-environment.json",
+    },
     { from: "LICENSE", to: "LICENSE" },
     { from: "NOTICE", to: "NOTICE" },
     { from: "PRIVACY.md", to: "PRIVACY.md" },
@@ -393,6 +399,9 @@ export async function createSyntheticAppBundle(t, {
   const telemetry = fixtureTelemetryConfig(profile, telemetryOverrides);
   const applicationUpdate = expectedApplicationUpdateConfig(packageJson);
   const applicationUpdateContents = serializeApplicationUpdateConfig(packageJson);
+  const runtimeEnvironment = runtimeEnvironmentMarker(
+    profile === "developer" ? "preview" : "stable",
+  );
 
   await writeFixtureFile(
     productRoot,
@@ -663,6 +672,11 @@ export async function createSyntheticAppBundle(t, {
       applicationUpdateContents,
     ),
     writeFixtureFile(
+      productRoot,
+      "output/release-metadata/runtime-environment.json",
+      JSON.stringify(runtimeEnvironment, null, 2) + "\n",
+    ),
+    writeFixtureFile(
       resourcesPath,
       "build-info.json",
       JSON.stringify(effectiveBuildInfo, null, 2) + "\n",
@@ -676,6 +690,11 @@ export async function createSyntheticAppBundle(t, {
       resourcesPath,
       "app-update.yml",
       applicationUpdateContents,
+    ),
+    writeFixtureFile(
+      resourcesPath,
+      "runtime-environment.json",
+      JSON.stringify(runtimeEnvironment, null, 2) + "\n",
     ),
   ]);
 

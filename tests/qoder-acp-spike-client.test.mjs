@@ -333,7 +333,7 @@ test("restricted Qoder ACP host exposes only frozen reads, Candidate write, and 
     (error) => error?.code === "ACP_SESSION_ID_MISMATCH",
   );
 
-  const candidate = "<!doctype html><html><head><title>Candidate</title></head><body><h1>ACP Candidate</h1></body></html>\n";
+  const candidate = identityPreservingCandidate(fixture, "ACP Candidate");
   await link(fixture.options.promptPath, fixture.outputPath);
   await assert.rejects(
     host.writeTextFile({ sessionId, path: fixture.outputPath, content: candidate }),
@@ -439,7 +439,7 @@ test("finalizer spawn failure retains one diagnostic output and forbids replay",
   t.after(() => host.dispose());
   const sessionId = "session_finalizer_spawn_failure";
   host.bindSessionId(sessionId);
-  const candidate = "<!doctype html><html><head><title>Retained</title></head><body>Retained output</body></html>\n";
+  const candidate = identityPreservingCandidate(fixture, "ACP Candidate");
   await host.writeTextFile({
     sessionId,
     path: fixture.outputPath,
@@ -470,7 +470,7 @@ test("restricted Qoder ACP host rejects cancelled and late mutating requests", a
   t.after(() => host.dispose());
   const sessionId = "session_cancel_boundary";
   host.bindSessionId(sessionId);
-  const candidate = "<!doctype html><html><body><h1>Before cancel</h1></body></html>\n";
+  const candidate = identityPreservingCandidate(fixture, "ACP Candidate");
   await host.writeTextFile({
     sessionId,
     path: fixture.outputPath,
@@ -556,7 +556,7 @@ test("Qoder ACP mutation lock closes cancel and finalizer overlap races", async 
   t.after(() => cancelledHost.dispose());
   const cancelledSessionId = "session_cancel_during_rename";
   cancelledHost.bindSessionId(cancelledSessionId);
-  const candidate = "<!doctype html><html><head><title>Atomic Candidate</title></head><body><h1>Atomic Candidate</h1></body></html>\n";
+  const candidate = identityPreservingCandidate(cancelledFixture, "ACP Candidate");
   const cancelledWrite = cancelledHost.writeTextFile({
     sessionId: cancelledSessionId,
     path: cancelledFixture.outputPath,
@@ -601,7 +601,7 @@ test("Qoder ACP mutation lock closes cancel and finalizer overlap races", async 
   const serializedWrite = serializedHost.writeTextFile({
     sessionId: serializedSessionId,
     path: serializedFixture.outputPath,
-    content: candidate,
+    content: identityPreservingCandidate(serializedFixture, "ACP Candidate"),
   });
   await serializedRenameStarted;
   let terminalSettled = false;
@@ -645,7 +645,7 @@ function createSyntheticAgent(fixture, observed) {
         agentCapabilities: { loadSession: false },
         authMethods: [],
         agentInfo: {
-          name: "pageroot-synthetic-agent",
+          name: observed.agentName || "pageroot-synthetic-agent",
           title: "PageRoot Synthetic Agent",
           version: "1.0.0",
         },
@@ -657,6 +657,16 @@ function createSyntheticAgent(fixture, observed) {
     })
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       observed.prompt = params;
+      observed.promptCount = (observed.promptCount || 0) + 1;
+      if (observed.rejectIdentity && (observed.promptCount === 1 || observed.alwaysRejectIdentity)) {
+        const bad = identityPreservingCandidate(fixture, "ACP Candidate").replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(12)}4fff8${"f".repeat(15)}`);
+        await assert.rejects(client.request(acp.methods.client.fs.writeTextFile, {
+          sessionId, path: fixture.outputPath, content: bad,
+        }));
+        await assert.rejects(readFile(fixture.outputPath), { code: "ENOENT" });
+        await assert.rejects(readFile(fixture.completionPath), { code: "ENOENT" });
+        return { stopReason: "end_turn" };
+      }
       for (const text of observed.visibleTextChunks || []) {
         await client.notify(acp.methods.client.session.update, {
           sessionId,
@@ -1586,4 +1596,32 @@ test("external cancellation closes the ACP mutation surface and terminates stdio
     running,
     (error) => error?.code === "ACP_CANCELLED",
   );
+});
+
+for (const provider of ["codex", "qoder"]) {
+  test(`${provider} ACP automatically resumes identity rejection in the same session`, async (t) => {
+    const fixture = await createFixture(t);
+    const observed = { rejectIdentity: true, agentName: provider };
+    const result = await runGenericAcpTask({
+      connection: createSyntheticAgent(fixture, observed), policy: fixture.policy,
+      prompt: "Change text while preserving identities", startupTimeoutMs: 5000, turnTimeoutMs: 5000,
+      expectedAgentName: new RegExp(`^${provider}$`, "u"),
+    });
+    assert.equal(observed.promptCount, 2);
+    assert.equal(result.stopReason, "end_turn");
+    assert.equal(await readFile(fixture.target.exactSourcePath, "utf8"), fixture.managedSourceHtml);
+    assert.match(await readFile(fixture.outputPath, "utf8"), /ACP Candidate/u);
+  });
+}
+
+test("ACP identity repair exhausts three rejected writes without output or completion", async (t) => {
+  const fixture = await createFixture(t);
+  const observed = { rejectIdentity: true, alwaysRejectIdentity: true };
+  await assert.rejects(runGenericAcpTask({
+    connection: createSyntheticAgent(fixture, observed), policy: fixture.policy,
+    prompt: "Change text", startupTimeoutMs: 5000, turnTimeoutMs: 5000,
+  }), { code: "AGENT_OUTPUT_INVALID" });
+  assert.equal(observed.promptCount, 3);
+  await assert.rejects(readFile(fixture.outputPath), { code: "ENOENT" });
+  await assert.rejects(readFile(fixture.completionPath), { code: "ENOENT" });
 });
