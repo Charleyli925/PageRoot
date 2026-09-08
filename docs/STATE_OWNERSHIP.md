@@ -620,3 +620,6 @@ Sidebar Turn presentation keeps submitted requirements, sealed public summaries,
 The history view renders the legacy Candidate-ready fact as “修改已准备好。”;
 its former “尚未采用” wording is not reused as a current adoption assertion.
 Current adoption status comes exclusively from the active operation projection.
+RunSession preserves that transient adoption projection across same-Run hydration
+and navigation; a ready Request reread cannot erase an outstanding decision.
+Explicit reconciliation or a terminal authority can clear it.
