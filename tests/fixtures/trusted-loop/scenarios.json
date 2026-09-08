@@ -1,0 +1,64 @@
+[
+  {
+    "id": "not-authenticated",
+    "run": null,
+    "meaning": "未开始",
+    "primaryAction": "登录"
+  },
+  {
+    "id": "protocol-failed",
+    "run": null,
+    "meaning": "未开始",
+    "primaryAction": "重新检查"
+  },
+  {
+    "id": "user-stopped",
+    "run": {
+      "status": "cancelled",
+      "errorCode": "AGENT_CANCELLED"
+    },
+    "meaning": "已停止",
+    "primaryAction": "重新修改"
+  },
+  {
+    "id": "quota-exhausted",
+    "run": {
+      "status": "error",
+      "errorCode": "AGENT_QUOTA_EXCEEDED"
+    },
+    "meaning": "失败",
+    "primaryAction": "使用其他 AI"
+  },
+  {
+    "id": "adopted",
+    "run": {
+      "status": "complete"
+    },
+    "meaning": "已采用",
+    "primaryAction": "下一轮"
+  },
+  {
+    "id": "no-change",
+    "run": {
+      "status": "no-change"
+    },
+    "meaning": "无变化",
+    "primaryAction": "下一轮"
+  },
+  {
+    "id": "candidate-review",
+    "run": {
+      "status": "ready-to-open"
+    },
+    "meaning": "尚未采用",
+    "primaryAction": "查看修改"
+  },
+  {
+    "id": "application-unknown",
+    "run": {
+      "status": "recovering-transaction"
+    },
+    "meaning": "应用待确认",
+    "primaryAction": "核对"
+  }
+]
