@@ -1264,7 +1264,7 @@ export async function verifyPackagedArtifact({
         appPath: layout.appPath,
         packageJson,
         sourcePackageJson,
-        signaturePolicy: "developer-id",
+        signaturePolicy: "adhoc",
         expectedProvenance: provenance,
         arch,
       }),
@@ -1275,7 +1275,7 @@ export async function verifyPackagedArtifact({
         packageJson,
         sourcePackageJson,
         expectedProvenance: provenance,
-        signaturePolicy: "developer-id",
+        signaturePolicy: "adhoc",
         arch,
       }),
     ]);
