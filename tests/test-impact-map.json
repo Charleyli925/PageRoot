@@ -180,13 +180,13 @@
       ]
     },
     "developer-package-build": {
-      "description": "Build one distinctly named and versioned ad-hoc macOS developer preview DMG from the exact clean tree.",
+      "description": "Build one distinctly named and versioned Developer ID macOS developer preview DMG from the exact clean tree.",
       "prerequisites": [
         "build-desktop"
       ]
     },
     "developer-packaged-verify": {
-      "description": "Verify developer preview identity, app.asar, Bridge resources, schemas, ad-hoc signature and DMG integrity.",
+      "description": "Verify developer preview identity, app.asar, Bridge resources, schemas, Developer ID signature and DMG integrity.",
       "prerequisites": [
         "developer-package-build"
       ]
@@ -1819,7 +1819,7 @@
     {
       "id": "desktop-main-preload",
       "patterns": [
-        "^desktop/(?:main|preload|product-contract|product-links|recovery-journal-store|source-file-watch)\\.mjs$",
+        "^desktop/(?:main|preload|product-contract|product-links|recovery-journal-store|source-file-watch|runtime-environment)\\.mjs$",
         "^desktop/ipc/(?:project|trusted)-ipc\\.mjs$",
         "^tests/source-file-watch\\.test\\.mjs$",
         "^desktop/renderer/(?:index\\.html|main\\.tsx)$",
@@ -1839,7 +1839,8 @@
         "tests/source-file-watch.test.mjs",
         "tests/active-managed-locator.test.mjs",
         "tests/source-rename.test.mjs",
-        "tests/startup-performance-timeline.test.mjs"
+        "tests/startup-performance-timeline.test.mjs",
+        "tests/runtime-environment.test.mjs"
       ]
     },
     {
@@ -2349,6 +2350,7 @@
       "id": "release-app-stage",
       "patterns": [
         "^scripts/(?:build-package|packaged-app-identity|release-app-(?:checkpoint|stage))\\.mjs$",
+        "^desktop/runtime-environment\\.mjs$",
         "^tests/release-app-stage\\.test\\.mjs$",
         "^\\.github/workflows/(?:release-candidate|release-dry-run)\\.yml$"
       ],

@@ -22,7 +22,7 @@
 
 | 里程碑 | PR | 范围 | 状态 |
 | --- | --- | --- | --- |
-| A | PR-0 | ADR、场景和基线 | Draft #474，task:finish 通过 |
+| A | PR-0 | ADR、场景和基线 | 已合并 #474；后续 PR 保持 Draft、不合并 |
 | A | PR-1 | 检查、登录、连接修复 | Draft #475，task:finish 通过 |
 | A | PR-2 | 服务选择与计时 | Draft #476，task:finish 通过（独立分支，PR-6 集成） |
 | B | PR-3 | 预检前提交、冻结要求、防重、复制 | Draft #477，完整 task:finish 通过 |
