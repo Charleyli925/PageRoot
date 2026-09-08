@@ -269,6 +269,7 @@ export type NavigationControllerCapability = CapabilityFacet<
   NavigationControllerCommands
 >;
 export interface ConversationControllerCapability {
+  updateConversationDraftText(text: string): void;
   openConversation(context: ConversationContext | null): Promise<unknown>;
   closeConversation(): void;
 }

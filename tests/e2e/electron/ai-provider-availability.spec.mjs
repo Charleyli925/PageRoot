@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { writeFileSync } from "node:fs";
-import { ensureCurrentConversation, mutateConversation } from "../../../bridge/conversation-repository.mjs";
 import { appendConversationTurnMessage } from "../../../shared/conversation.mjs";
 import {
   QODER_VISUAL_OUTPUT,
@@ -123,13 +122,11 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     )).toBeLessThanOrEqual(1);
     const process = launched.page.getByTestId("ai-turn-process").last();
     await expect(process).toBeVisible();
-    expect(await process.getAttribute("open")).toBeNull();
-    await expect(process.locator("li").first()).not.toBeVisible();
+    await expect(process.locator("summary")).toHaveCount(0);
+    await expect(process).toContainText("Stemmio");
     await expect(launched.page.getByTestId("ai-conversation-message").filter({ hasText: "正在读取冻结任务。正在写入 Candidate。正在等待校验。" })).toHaveCount(1);
-    await process.locator("summary").click();
     await expect(process.locator("li").first()).toBeVisible();
     await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-process-expanded.png"), animations: "disabled" });
-    await process.locator("summary").click();
     const readyGeometry = await launched.page.evaluate(() => {
       const sidebar = document.querySelector('[data-testid="ai-conversation-sidebar"]');
       const composer = document.querySelector('[data-testid="ai-conversation-composer"]');
@@ -195,18 +192,26 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     const zoomCapture = await launched.electronApp.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString("base64"));
     writeFileSync(path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-pr8-zoom-200.png"), zoomCapture, "base64");
     await launched.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
-    const identity = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
-    const conversationContext = { projectRoot: path.join(path.dirname(workingCopyPath), ".pageroot"), projectId: identity.projectId, documentId: identity.documentId };
-    const history = await ensureCurrentConversation(conversationContext);
-    const turnId = history.turns[0].turnId;
-    const appendSyntheticHistory = (count, prefix) => mutateConversation(conversationContext, history.conversationId, (value) => {
-      let next = value;
-      for (let index = 0; index < count; index += 1) next = appendConversationTurnMessage(next, { turnId, message: {
+    // This section exercises history presentation. Inject read responses rather
+    // than adding a second writer to the Bridge-owned conversation files.
+    const syntheticMessages = [];
+    await launched.page.route(/\/conversation(?:\?|$)/u, async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json();
+      let conversation = payload.conversation;
+      const turnId = conversation?.turns[0]?.turnId;
+      if (turnId) for (const message of syntheticMessages) {
+        conversation = appendConversationTurnMessage(conversation, { turnId, message }, { now: () => message.createdAt });
+      }
+      await route.fulfill({ response, json: { ...payload, conversation } });
+    });
+    const appendSyntheticHistory = (count, prefix) => {
+      for (let index = 0; index < count; index += 1) syntheticMessages.push({
         messageId: `message_${prefix}_${index}`, actor: "pageroot", kind: "text", status: "completed",
         text: `长历史验收 ${prefix} ${index}：` + "这是合成测试的公开摘要。".repeat(20),
-      } }, { now: () => new Date().toISOString() });
-      return next;
-    });
+        createdAt: new Date().toISOString(),
+      });
+    };
     await appendSyntheticHistory(20, "long_history_fixture");
     const stream = launched.page.getByTestId("ai-conversation-stream");
     await expect(stream).toContainText("长历史验收 long_history_fixture 19");
@@ -499,7 +504,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     await expect.poll(() => streamingProgress.textContent()).toMatch(
       /正在接收结果 · 已用时 \d{2}:\d{2}/u,
     );
-    await streamingProgress.getByText("详情", { exact: true }).click();
+    await expect(streamingProgress.locator("details")).toHaveCount(0);
     await expect(streamingProgress).toContainText(/已接收 [1-9]\d* KB/u);
     await expect(streamingProgress).not.toContainText("fixture-hidden");
     releaseStream();

@@ -22,19 +22,26 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function sendSse(response, content, delayMs, beforeComplete) {
+async function sendSse(response, content, delayMs, beforeComplete, publicProgress = false) {
   response.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
   const midpoint = Math.max(1, Math.floor(content.length / 2));
+  const record = (type, text) => `${JSON.stringify({ type, text })}\n`;
+  const first = publicProgress
+    ? record("progress", "我会先检查页面结构，再调整标题与配色。") + record("html", content.slice(0, midpoint))
+    : content.slice(0, midpoint);
+  const last = publicProgress
+    ? record("progress", "标题与配色已调整，正在整理完整页面供审阅。") + record("html", content.slice(midpoint))
+    : content.slice(midpoint);
   const frames = [
     ": fixture-heartbeat\n\n",
     `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "fixture-hidden" } }] })}\n\n`,
-    `data: ${JSON.stringify({ choices: [{ delta: { content: content.slice(0, midpoint) } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: first } }] })}\n\n`,
     `data: ${JSON.stringify({ usage: { completion_tokens: 1 } })}\n\n`,
-    `data: ${JSON.stringify({ choices: [{ delta: { content: content.slice(midpoint) } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: last } }] })}\n\n`,
     "data: [DONE]\n\n",
   ];
   for (const frame of frames) {
@@ -145,7 +152,7 @@ export function startOpenAiCompatibleHttpAgent({
             appliedReasoning(payload),
           );
           if (payload.stream === true) {
-            await sendSse(response, candidate, streamDelayMs, isPreflight ? undefined : beforeStreamComplete);
+            await sendSse(response, candidate, streamDelayMs, isPreflight ? undefined : beforeStreamComplete, !isPreflight && raw.includes("Return a JSONL stream"));
           } else {
             sendJson(response, 200, {
               choices: [{ message: { content: candidate } }],

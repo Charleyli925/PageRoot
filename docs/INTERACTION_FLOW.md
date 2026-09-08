@@ -1232,9 +1232,19 @@ diagnose，不建立 preflight ticket 或 Agent session，只在 Bridge 真实�
 成功后显示“已连接”。窗口重新获得焦点时，仅安装中或等待登录
 的临时状态轻量刷新。正式发送才执行 preflight 并冻结 Agent、模型与配置。
 
-执行中用一个连续任务条目显示“Agent 正在生成”、文件名、阶段、已用时和停止操作，
-不再拆成任务交接、空 Thinking 和停止头像消息。已接收字节只放在折叠详情中；隐藏推理和
-半成品 HTML 不显示。HTTP 与 ACP 都只在连续 45 分钟没有有效协议
+执行过程按时间顺序留在对话流中。用户消息使用人物头像及“我”；Stemmio 的阶段事实使用
+品牌头像及名称，连续事实合为紧凑记录，默认展开，不能藏进“查看处理记录”。Agent 面向用户的
+公开说明逐条积累，实时状态位于消息流末尾，已接收字节直接可见。停止操作仍固定在底部。
+审阅侧栏打开时，采用／不用本次只在侧栏行动区显示；侧栏关闭时顶栏提供对应决定入口。
+底部常驻“下一轮草稿”输入框，复用 ConversationSession / ConversationWorkflow 的文档草稿
+保存与切换/关闭 drain；当前阶段仅记事，不发送、不修改冻结 Request、不自动采用 Candidate。
+HTTP runtime 请求 JSONL 内容流：每行仅包含 `type` 与 `text`，`progress` 是面向用户的简短说明，
+`html` 是完整候选的连续片段。模型应在开头及完成实际修改片段时返回说明，不能声称运行了
+未执行的工具或通过了 Stemmio 校验。Bridge 只在整条记录收齐并脱敏后发出 `visible-text`，
+只将 `html` 片段拼为完整 HTML，继续经过原有完整性、Stable ID 修复和 finalizer；旧服务的裸
+HTML 仍可接收，但不得虚构说明。每条说明最多 2048 字符、最多 80 条；无效记录失败关闭。
+这只是 HTTP runtime 的输出封装，不改变 Request/Candidate 协议或赋予说明任何写入权威。
+隐藏推理和半成品 HTML 不显示。HTTP 与 ACP 都只在连续 45 分钟没有有效协议
 数据时中断，持续有 content、reasoning、usage 或 heartbeat 可一直运行。
 Request 仍为 `processing` 但同一 request/attempt 的受管 handoff 失败时，
 侧栏立即以失败投影为准：网络中断/无活动超时显示“重新发送 / 结束本轮”；

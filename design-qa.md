@@ -2930,3 +2930,14 @@ Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, a
 - Fixed DeepSeek model IDs and limits match the vendor's current [Models & Pricing documentation](https://api-docs.deepseek.com/quick_start/pricing/); Vision remains visibly marked experimental. Existing Electron journeys cover switching all three choices, persistence and restart.
 - Evidence applies to the rebuilt test application; no installed application replacement or package release is implied.
 - final result: passed (visual inspection and real Codex Review; deterministic gate evidence is recorded separately).
+
+## 2026-09-09 — Conversation progress feed and next-round draft
+
+- Visual truth: the user's Stemmio sidebar screenshots and Codex conversation reference (private source images excluded from Git). The reference sets reading rhythm, not Codex branding or green accents; existing Stemmio tokens and Phosphor icons remain authoritative.
+- Scope: signed Stemmio progress with default-visible chronological records, right-aligned user message, public Agent updates before the live tail status, one Review decision surface at a time, and a bottom-aligned persistent draft field.
+- Acceptance: 340/400/480px sidebar, no horizontal overflow, no duplicate adoption buttons, visible draft with keyboard focus and native composition, scroll following and user scrollback, readable timestamps, real Electron captures using synthetic files only.
+- Evidence: existing AI setup journey and provider acceptance captures under `output/`; root visual review follows the frozen task gate.
+- Reviewed: Electron captures `output/design-qa/agent-setup-journeys/narrow-sidebar-generating.png` and `output/design-qa/ai-assistant-redesign/trusted-loop-pr6-ready-{340,400,480}.png`; signed/default-visible progress, right-aligned user identity, readable wrapping, focus ring, docked actions/draft, and scrollback affordance match the scoped reference. Existing indigo tokens and Phosphor assets remain consistent.
+- Review full-page capture initially preceded iframe paint; the capture now waits for both synthetic review documents to be visible. The narrow sidebar's behavioral assertions (one adoption button, adjacent action/draft geometry and draft recovery after restart) already passed; final full-scene capture is recorded with the final task gate.
+- Follow-up P2: live elapsed status is still repeated in the bottom Stop area; kept outside this request's button/stream scope. Historical public text is a bounded sealed summary, and legacy HTML-only services cannot supply public narration.
+- final result: passed for the sidebar scope; complete task-gate evidence is required before delivery.

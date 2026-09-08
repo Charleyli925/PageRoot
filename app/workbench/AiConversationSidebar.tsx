@@ -1,5 +1,9 @@
 "use client";
 
+import { UserIcon } from "@phosphor-icons/react/dist/csr/User";
+import { RobotIcon } from "@phosphor-icons/react/dist/csr/Robot";
+import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+
 import { createExecutionClock } from "./execution-clock.js";
 import {
   Fragment,
@@ -14,7 +18,6 @@ import {
   sidebarActionBar,
   sidebarAgentLine,
   sidebarReasoningLine,
-  sidebarActorInitial,
   sidebarMessageStream,
   sidebarTurnPresentation,
   sidebarModePresentation,
@@ -54,6 +57,9 @@ export type AiConversationSidebarProps = {
   state: string;
   title: string;
   messages: readonly unknown[];
+  draftText?: string;
+  draftAvailable?: boolean;
+  onDraftTextChange?: (text: string) => void;
   historyGroups?: readonly SidebarHistoryGroup[];
   catalogStatus?: SidebarCatalogStatus;
   catalogReason?: string | null;
@@ -164,7 +170,7 @@ function AgentAvatar({
 }: {
   presentation: AiConversationSidebarProps["agentPresentation"];
 }) {
-  if (presentation?.logoSrc) {
+  if (presentation?.logoSrc && presentation.providerId !== "pageroot") {
     return (
       <span className={`${styles.avatar} ${styles.agentAvatar}`} aria-hidden="true">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -174,7 +180,7 @@ function AgentAvatar({
   }
   return (
     <span className={`${styles.avatar} ${styles.agentAvatar}`} aria-hidden="true">
-      {presentation?.agentName?.trim().charAt(0).toUpperCase() || sidebarActorInitial("agent")}
+      <RobotIcon size={16} weight="regular" />
     </span>
   );
 }
@@ -209,6 +215,9 @@ export default function AiConversationSidebar({
   state,
   title,
   messages,
+  draftText = "",
+  draftAvailable = false,
+  onDraftTextChange,
   historyGroups = [],
   catalogStatus = "ready",
   catalogReason = null,
@@ -610,7 +619,21 @@ export default function AiConversationSidebar({
           displayedGroups.map((group) => (
             <section key={group.key} className={styles.turnGroup} data-turn-id={group.key} aria-label={group.label || "一轮修改"}>
               {group.label ? <div className={styles.historyGroup} data-kind={group.kind} data-testid="ai-conversation-history-group">{group.label}</div> : null}
-              {group.primary.map((message) => {
+              {group.timeline.map((block) => {
+            if (block.process) return (
+              <article key={block.messages[0].messageId} className={`${styles.message} ${styles.turnProcess}`} data-actor="pageroot" data-testid="ai-turn-process" aria-label="Stemmio 处理记录">
+                <PageRootAvatar />
+                <span className={styles.actor}>Stemmio <span className={styles.actorDetail}>处理记录</span></span>
+                <ol>{block.messages.map((message) => (
+                  <li key={message.messageId}>
+                    <CheckIcon size={13} aria-hidden="true" />
+                    <span>{message.text === "执行已结束，结果仍需校验。" ? "本轮执行已结束。" : message.text}</span>
+                    <time dateTime={message.createdAt}>{sidebarTimestampLabel(message.createdAt)}</time>
+                  </li>
+                ))}</ol>
+              </article>
+            );
+            const message = block.messages[0];
             const timestamp = sidebarTimestampLabel(message.createdAt);
             const copyKey = `message:${message.messageId}`;
             return (
@@ -624,12 +647,10 @@ export default function AiConversationSidebar({
                 >
                   {message.actor === "pageroot" ? (
                     <PageRootAvatar />
-                  ) : (
-                    <span className={styles.avatar} aria-hidden="true">
-                      {sidebarActorInitial(message.actor)}
-                    </span>
-                  )}
-                  <span className={styles.actor}>{message.actorLabel}</span>
+                  ) : message.actor === "user" ? (
+                    <span className={`${styles.avatar} ${styles.userAvatar}`} aria-hidden="true"><UserIcon size={16} weight="regular" /></span>
+                  ) : <AgentAvatar presentation={null} />}
+                  <span className={styles.actor}>{message.actor === "agent" ? message.modelDisplayName || message.actorLabel : message.actorLabel}</span>
                   <p className={styles.text}>{message.text}</p>
                   {timestamp || message.text ? (
                     <div className={styles.messageMeta}>
@@ -651,17 +672,6 @@ export default function AiConversationSidebar({
               </Fragment>
             );
               })}
-              {group.process.length ? (
-                <details className={styles.turnProcess} data-testid="ai-turn-process">
-                  <summary>查看处理记录 · {group.process.length}</summary>
-                  <ol>{group.process.map((message) => (
-                    <li key={message.messageId}>
-                      <span>{message.text}</span>
-                      <time dateTime={message.createdAt}>{sidebarTimestampLabel(message.createdAt)}</time>
-                    </li>
-                  ))}</ol>
-                </details>
-              ) : null}
             </section>
           ))
         )}
@@ -680,48 +690,6 @@ export default function AiConversationSidebar({
           </section>
         ) : null}
 
-        {/*
-          * A round in flight, told inside the thread rather than a
-          * panel of its own. PageRoot states the stage from the run's durable status
-          * (ADR 0037 §4). The selected Agent's public words follow in their
-          * own stable article, so the two speakers never blur together.
-          */}
-        {executionStatus || runProgress?.liveLabel || runProgress?.headline ? (
-          <section
-            className={`${styles.message} ${styles.runActivity}`}
-            data-actor="pageroot"
-            data-tone={runProgress?.tone || "quiet"}
-            data-testid="ai-conversation-run-progress"
-            data-execution={executionStatus ? "true" : undefined}
-            aria-label="本轮进度"
-          >
-            {executionStatus ? null : <PageRootAvatar />}
-            {/*
-              * PageRoot states the stages from the run's durable status (ADR 0037 §4).
-              * Signing them with an Agent name made the Agent look like the author of
-              * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
-            */}
-            {executionStatus ? null : <span className={styles.actor}>Stemmio</span>}
-            <p
-              className={`${styles.text} ${styles.liveStatus}`}
-              aria-live="off"
-            >
-              {executionStatus?.title || runProgress?.liveLabel || runProgress?.headline}
-            </p>
-            {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}{agentLastActivityAt && clockNow - Date.parse(agentLastActivityAt) > 30_000 ? " · 暂未收到新响应" : ""}</small> : null}
-            {executionStatus ? (
-              <>
-                <small className={styles.runSummaryDetail}>{resolvedFileName}</small>
-                <details className={styles.executionDetails}>
-                  <summary>详情</summary>
-                  <span>已接收 {Math.ceil(agentReceivedBytes / 1024)} KB</span>
-                </details>
-
-              </>
-            ) : null}
-          </section>
-        ) : null}
-
         {/* Public Agent narration grows in one stable article. It is presentation
             evidence only and never changes Candidate authority. */}
         {runProgress?.narrationUpdates && !displayedGroups.some((group) => group.kind === "current" && group.primary.some((message) => message.actor === "agent" && message.kind === "result-summary")) ? (
@@ -734,7 +702,7 @@ export default function AiConversationSidebar({
             aria-live="off"
           >
             <AgentAvatar presentation={agentPresentation} />
-            <span className={styles.actor}>{resolvedAgentActionName}</span>
+            <span className={styles.actor}>{executionDisplayName || resolvedAgentActionName}</span>
             {runProgress?.narrationUpdates ? (
               <div
                 className={styles.narrationText}
@@ -780,6 +748,44 @@ export default function AiConversationSidebar({
               <small className={styles.truncated}>部分输出已省略</small>
             ) : null}
           </article>
+        ) : null}
+
+        {/*
+          * A round in flight, told inside the thread rather than a
+          * panel of its own. PageRoot states the stage from the run's durable status
+          * (ADR 0037 §4). The selected Agent's public words follow in their
+          * own stable article, so the two speakers never blur together.
+          */}
+        {executionStatus || runProgress?.liveLabel || runProgress?.headline ? (
+          <section
+            className={`${styles.message} ${styles.runActivity}`}
+            data-actor="pageroot"
+            data-tone={runProgress?.tone || "quiet"}
+            data-testid="ai-conversation-run-progress"
+            data-execution={executionStatus ? "true" : undefined}
+            aria-label="本轮进度"
+          >
+            <PageRootAvatar />
+            {/*
+              * PageRoot states the stages from the run's durable status (ADR 0037 §4).
+              * Signing them with an Agent name made the Agent look like the author of
+              * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
+            */}
+            <span className={styles.actor}>Stemmio</span>
+            <p
+              className={`${styles.text} ${styles.liveStatus}`}
+              aria-live="off"
+            >
+              {executionStatus?.title || runProgress?.liveLabel || runProgress?.headline}
+            </p>
+            {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}{agentLastActivityAt && clockNow - Date.parse(agentLastActivityAt) > 30_000 ? " · 暂未收到新响应" : ""}</small> : null}
+            {executionStatus ? (
+              <>
+                <small className={styles.runSummaryDetail}>已接收 {Math.ceil(agentReceivedBytes / 1024)} KB · 完整结果校验后可查看</small>
+
+              </>
+            ) : null}
+          </section>
         ) : null}
 
         {/*
@@ -853,6 +859,20 @@ export default function AiConversationSidebar({
       </div>
 
       <div className={styles.composer} data-testid="ai-conversation-composer">
+        <label className={styles.draftLabel} htmlFor="ai-conversation-draft">下一轮草稿</label>
+        <textarea
+          id="ai-conversation-draft"
+          className={styles.draftInput}
+          data-testid="ai-conversation-draft"
+          aria-describedby="ai-conversation-draft-hint"
+          placeholder="先记下接下来想调整的内容…"
+          value={draftText}
+          disabled={!draftAvailable}
+          maxLength={8000}
+          rows={3}
+          onChange={(event) => onDraftTextChange?.(event.target.value)}
+        />
+        <p id="ai-conversation-draft-hint" className={styles.draftHint}>草稿随文档保留，暂不发送给 AI。</p>
         {/*
           * The round's context summary belongs to the Composer, not to the fact
           * stream: it changes as the user works and must never be persisted as

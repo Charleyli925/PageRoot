@@ -565,6 +565,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       document.querySelector("#review-bare-editable")?.remove();
       document.querySelector("#review-plaintext-editable")?.remove();
     });
+    await launched.page.getByRole("button", { name: "收起会话面板" }).click();
     await launched.page.getByRole("button", { name: "采纳修改" }).click();
     const confirmationDialog = launched.page.getByRole("dialog");
     await expect(confirmationDialog).toBeVisible();

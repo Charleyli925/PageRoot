@@ -24,7 +24,8 @@ export class ConversationWorkflow {
   ): Promise<unknown>;
   updateDraftText(text: string): void;
   updateDraftIntent(intent: string): void;
-  flushDraft(): Promise<void>;
+  readonly hasPendingDraft: boolean;
+  flushDraft(): Promise<boolean>;
 }
 
 export const DRAFT_AUTOSAVE_DELAY_MS: number;

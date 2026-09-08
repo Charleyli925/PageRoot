@@ -1833,6 +1833,7 @@ export default function AiReviewWorkspace({
               value,
             })}
           />
+          {!sidebar ? <>
           <button
             className="recent-run-button review-return-button"
             type="button"
@@ -1851,6 +1852,7 @@ export default function AiReviewWorkspace({
             <CheckCircleIcon aria-hidden="true" size={14} weight="fill" />
             {accepting ? "正在采纳…" : "采纳修改"}
           </button>
+          </> : null}
         </>
       ), toolbarHost) : null}
 

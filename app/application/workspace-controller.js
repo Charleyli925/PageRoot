@@ -466,6 +466,13 @@ export class WorkspaceController {
         bridgeClient,
         conversationSession,
       });
+      this.#drainCoordinator.replace("conversation-draft", {
+        label: "保存下一轮草稿",
+        inspect: () => this.#conversationWorkflow?.hasPendingDraft
+          ? { state: "pending", reason: "下一轮草稿尚未保存。" }
+          : { state: "resolved" },
+        drain: () => this.#conversationWorkflow?.flushDraft() ?? true,
+      });
       this.#conversationSessionUnsubscribe = conversationSession.subscribe(
         (snapshot) => {
           this.#conversationSnapshot = snapshot;
@@ -967,7 +974,7 @@ export class WorkspaceController {
   }
 
   flushConversationDraft() {
-    return this.#conversationWorkflow?.flushDraft() ?? Promise.resolve();
+    return this.#conversationWorkflow?.flushDraft() ?? Promise.resolve(true);
   }
 
   subscribe(listener) {

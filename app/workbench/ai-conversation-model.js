@@ -42,10 +42,10 @@ const FORBIDDEN_MESSAGE_KEYS = [
 ];
 
 const ACTOR_LABELS = Object.freeze({
-  user: "你",
+  user: "我",
   agent: "AI Agent",
   qoder: "Qoder CLI",
-  pageroot: "PageRoot",
+  pageroot: "Stemmio",
 });
 
 const MODE_PRESENTATION = Object.freeze({
@@ -334,7 +334,9 @@ export function sidebarMessageStream(messages) {
     .map((message) => ({
       messageId: String(message.messageId || ""),
       actor: String(message.actor || "pageroot"),
-      actorLabel: sidebarActorLabel(message.actor),
+      actorLabel: message.actor === "agent"
+        ? ({ qoder: "Qoder", codex: "Codex", pageroot: "Stemmio AI" }[message.providerId] || sidebarActorLabel(message.actor))
+        : sidebarActorLabel(message.actor),
       kind: String(message.kind || "text"),
       status: String(message.status || "completed"),
       text: message.actor === "pageroot" && message.text === "修改已准备好，尚未采用。"
@@ -370,7 +372,14 @@ export function sidebarTurnPresentation(messages = []) {
     : message.actor === "agent" ? 1
     : message.kind === "decision-outcome" || ["已采用本次修改。", "未采用本次修改，修改要求与历史已保留。"].includes(message.text) ? 3 : 2;
   primary.sort((a, b) => order(a) - order(b));
-  return { primary, process };
+  const timeline = [];
+  for (const message of messages) {
+    const isProcess = process.includes(message);
+    const previous = timeline.at(-1);
+    if (isProcess && previous?.process) previous.messages.push(message);
+    else timeline.push({ process: isProcess, messages: [message] });
+  }
+  return { primary, process, timeline };
 }
 
 function historyIdentity(value) {

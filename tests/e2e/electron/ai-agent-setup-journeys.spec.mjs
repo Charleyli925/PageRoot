@@ -85,7 +85,15 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     await expect(progress).toContainText("正在接收结果");
     await expect(sidebar.getByTestId("ai-conversation-action-bar").getByRole("button", { name: "停止", exact: true })).toBeVisible();
     await expect(sidebar.getByTestId("ai-conversation-action-bar")).toHaveCount(1);
-    await expect(sidebar.getByTestId("ai-conversation-narration-message")).toHaveCount(0);
+    const narration = sidebar.getByTestId("ai-conversation-narration-message");
+    await expect(narration).toContainText("我会先检查页面结构");
+    await expect(narration).toContainText("标题与配色已调整");
+    await expect(narration).not.toContainText("fixture-hidden");
+    await expect(narration).not.toContainText("<!DOCTYPE");
+    const draft = sidebar.getByRole("textbox", { name: "下一轮草稿" });
+    await draft.fill("下一轮再调整页脚间距");
+    await expect(draft).toHaveValue("下一轮再调整页脚间距");
+    await expect(sidebar.getByTestId("ai-turn-process").first().locator("li").first()).toBeVisible();
     await expect(sidebar.getByTestId("ai-conversation-run-summary")).toHaveCount(0);
     await expect(sidebar.getByText("Thinking", { exact: true })).toHaveCount(0);
     expect(readFileSync(workingPath).equals(original)).toBe(true);
@@ -101,7 +109,25 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     await sidebar.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "采纳修改", exact: true })).toHaveCount(0);
+    await expect(launched.page.getByRole("button", { name: "采用修改", exact: true })).toHaveCount(1);
+    await expect(draft).toHaveValue("下一轮再调整页脚间距");
+    const layout = await sidebar.evaluate((element) => {
+      const draft = element.querySelector('[data-testid="ai-conversation-composer"]').getBoundingClientRect();
+      const actions = element.querySelector('[data-testid="ai-conversation-current-actions"]').getBoundingClientRect();
+      return { gap: draft.top - actions.bottom, bottom: element.getBoundingClientRect().bottom - draft.bottom };
+    });
+    expect(Math.abs(layout.gap)).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.bottom)).toBeLessThanOrEqual(1);
+    const review = launched.page.getByTestId("ai-review-workspace");
+    for (const index of [0, 1]) {
+      await expect(review.frameLocator("iframe").nth(index).locator("body")).toContainText("真实");
+    }
     await launched.page.screenshot({ path: path.join(screenshots, "review-result.png"), animations: "disabled" });
+    await stopPageRoot(launched.electronApp, profile, { cleanup: false });
+    launched = await launchPageRoot({ isolatedUserData: profile, injectedEnv });
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await expect(launched.page.getByRole("textbox", { name: "下一轮草稿" })).toHaveValue("下一轮再调整页脚间距");
   } finally {
     finish();
     await stopPageRoot(launched.electronApp, profile);
@@ -173,8 +199,7 @@ test("Codex authenticated component failure repairs in Settings, then reviews an
     await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     expect(readFileSync(workingPath, "utf8")).not.toContain('data-pageroot-codex-acp="e2e"');
     await sidebar.getByRole("button", { name: "查看修改" }).click();
-    await launched.page.getByRole("button", { name: "采纳修改", exact: true }).click();
-    await launched.page.getByRole("button", { name: "确认并采纳", exact: true }).click();
+    await sidebar.getByRole("button", { name: "采用修改", exact: true }).click();
     await expect.poll(async () => (await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject()))?.sourcePath)
       .toMatch(/-V2\.html$/u);
     const first = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
