@@ -7,7 +7,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { normalizeAgentConfigurations, validAgentConfigurations } from "../shared/agent-configuration-preferences.mjs";
+import { normalizeAgentConfigurations, validAgentConfigurations, normalizeDocumentAgentSelections, validDocumentAgentSelections } from "../shared/agent-configuration-preferences.mjs";
 
 export const UI_PREFERENCES_FILE_NAME = "ui-preferences.json";
 export const UI_PREFERENCES_SCHEMA_VERSION = 2;
@@ -22,6 +22,7 @@ export const WORKSPACE_PREFERENCE_DEFAULTS = Object.freeze({
   restoreTabsOnLaunch: true,
   defaultAgentProviderId: "qoder",
   agentConfigurations: Object.freeze({}),
+  documentAgentSelections: Object.freeze({}),
   disabledAgentProviderIds: Object.freeze([]),
 });
 export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
@@ -143,6 +144,7 @@ export function normalizeWorkspacePreferences(value) {
     defaultAgentProviderId: normalizedAgentProviderId(source.defaultAgentProviderId),
     disabledAgentProviderIds: normalizedDisabledAgentProviderIds(source.disabledAgentProviderIds),
     agentConfigurations: normalizeAgentConfigurations(source.agentConfigurations),
+    documentAgentSelections: normalizeDocumentAgentSelections(source.documentAgentSelections),
   });
 }
 
@@ -157,6 +159,11 @@ export function normalizeWorkspacePatch(value) {
   const normalized = {};
   for (const key of keys) {
     const next = value[key];
+    if (key === "documentAgentSelections") {
+      if (!validDocumentAgentSelections(next)) throw new TypeError("文档服务选择无效或已达到数量上限。");
+      normalized[key] = normalizeDocumentAgentSelections(next);
+      continue;
+    }
     if (key === "agentConfigurations") {
       if (!validAgentConfigurations(next)) throw new TypeError("服务配置无效。");
       normalized[key] = normalizeAgentConfigurations(next);

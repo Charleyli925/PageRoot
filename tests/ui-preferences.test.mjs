@@ -99,6 +99,7 @@ test("v1 preferences migrate without losing guide or welcome identity", async (t
     defaultAgentProviderId: "qoder",
     disabledAgentProviderIds: [],
     agentConfigurations: {},
+    documentAgentSelections: {},
   });
   assert.equal(JSON.parse(await readFile(
     path.join(userDataPath, "ui-preferences.json"),
@@ -239,4 +240,18 @@ test("guide and workspace writes serialize against the same v2 document", async 
   assert.equal(final.firstRealHtmlEditGuide.status, "dismissed");
   assert.equal(final.workspace.sidebarWidth, 320);
   assert.equal(final.workspace.motion, "reduced");
+});
+
+
+test("document service choice survives reload separately from the default and disabled services", async (t) => {
+  const userDataPath = await temporaryUserData(t);
+  const documentAgentSelections = { doc_aaaaaaaaaaaaaaaa: "qoder", doc_bbbbbbbbbbbbbbbb: "codex" };
+  await recordUiWorkspacePreferences({ userDataPath, workspace: {
+    defaultAgentProviderId: "pageroot", disabledAgentProviderIds: ["qoder"], documentAgentSelections,
+  } });
+  const restored = await readUiPreferences({ userDataPath });
+  assert.deepEqual(restored.workspace.documentAgentSelections, documentAgentSelections);
+  assert.equal(restored.workspace.defaultAgentProviderId, "pageroot");
+  assert.deepEqual(restored.workspace.disabledAgentProviderIds, ["qoder"]);
+  assert.throws(() => normalizeWorkspacePatch({ documentAgentSelections: { "/tmp/private": "codex" } }));
 });

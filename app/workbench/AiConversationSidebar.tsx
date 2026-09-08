@@ -1,5 +1,6 @@
 "use client";
 
+import { createExecutionClock } from "./execution-clock.js";
 import {
   Fragment,
   useCallback,
@@ -107,7 +108,7 @@ export type AiConversationSidebarProps = {
       BoundAgentSetupPanelProps,
       "card" | "surface" | "hideDisconnectAction" | "initialApiKeyOpen" | "actionButtonRef"
     >;
-    onSelect(selection: AgentSelection): void;
+    onSelect(selection: AgentSelection): void | Promise<boolean>;
     onQueueDefault?(selection: AgentSelection): void;
     onReconnect?(selection: AgentSelection): Promise<unknown>;
     onBeginAccessRepair?(field?: "apiKey" | "login" | "install" | "model" | "provider"): void;
@@ -257,10 +258,15 @@ export default function AiConversationSidebar({
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
   const [clockNow, setClockNow] = useState(0);
+  const executionClockRef = useRef<{ key: string; running: boolean; clock: ReturnType<typeof createExecutionClock> } | null>(null);
+  const clockEnabled = agentWorking || handoffStatus === "cancelling";
   const streamRef = useRef<HTMLDivElement | null>(null);
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const liveMessageRef = useRef<HTMLElement | null>(null);
   const agentSelectorRef = useRef<HTMLDivElement | null>(null);
+  const serviceSelectorRef = useRef<HTMLDivElement | null>(null);
+  const serviceSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [selectionError, setSelectionError] = useState("");
   const agentSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const reasoningSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const followingRef = useRef(true);
@@ -374,7 +380,6 @@ export default function AiConversationSidebar({
   const recovery = agentAccess?.recovery || null;
   const setupCard = agentAccess?.cards.find((card) => card.selection.providerId === setupProviderId) || null;
   const currentProviderId = agentPresentation?.providerId
-    || agentAccess?.cards.find((card) => card.availability.status === "ready")?.selection.providerId
     || "";
   const currentCard = agentAccess?.cards.find((card) => card.selection.providerId === currentProviderId)
     || setupCard;
@@ -494,7 +499,8 @@ export default function AiConversationSidebar({
   useEffect(() => {
     if (!openChoice) return undefined;
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!agentSelectorRef.current?.contains(event.target as Node)) {
+      if (!agentSelectorRef.current?.contains(event.target as Node)
+        && !serviceSelectorRef.current?.contains(event.target as Node)) {
         setOpenChoice(null);
       }
     };
@@ -502,7 +508,7 @@ export default function AiConversationSidebar({
       if (event.key !== "Escape") return;
       event.preventDefault();
       setOpenChoice(null);
-      (openChoice === "reasoning" ? reasoningSelectorButtonRef : agentSelectorButtonRef)
+      (openChoice === "service" ? serviceSelectorButtonRef : openChoice === "reasoning" ? reasoningSelectorButtonRef : agentSelectorButtonRef)
         .current?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
@@ -514,10 +520,27 @@ export default function AiConversationSidebar({
   }, [openChoice]);
 
   useEffect(() => {
-    if (!agentWorking && handoffStatus !== "cancelling") return undefined;
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [agentWorking, handoffStatus, agentStartedAt, agentLastActivityAt]);
+    const key = `${runKey || ""}:${agentStartedAt || ""}`;
+    if (!executionClockRef.current || executionClockRef.current.key !== key || (clockEnabled && !executionClockRef.current.running)) {
+      executionClockRef.current = { key, running: clockEnabled, clock: createExecutionClock({ startedAt: agentStartedAt }) };
+    }
+    const clock = executionClockRef.current.clock;
+    if (!clockEnabled) {
+      executionClockRef.current.running = false;
+      setClockNow(clock.stop());
+      return undefined;
+    }
+    setClockNow(clock.sample());
+    const timer = window.setInterval(() => setClockNow(clock.sample()), 1_000);
+    const resume = () => {
+      if (document.visibilityState === "visible") setClockNow(clock.sample({ resume: true }));
+    };
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [clockEnabled, runKey, agentStartedAt]);
 
   useEffect(() => {
     if (runKey && runKey !== runKeyRef.current) {
@@ -693,7 +716,7 @@ export default function AiConversationSidebar({
             >
               {executionStatus?.title || runProgress?.liveLabel || runProgress?.headline}
             </p>
-            {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}</small> : null}
+            {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}{agentLastActivityAt && clockNow - Date.parse(agentLastActivityAt) > 30_000 ? " · 暂未收到新响应" : ""}</small> : null}
             {executionStatus ? (
               <>
                 <small className={styles.runSummaryDetail}>{resolvedFileName}</small>
@@ -867,8 +890,9 @@ export default function AiConversationSidebar({
 
         <div className={styles.composerActions}>
           {showComposerIdentity ? <div className={styles.identityActions}>
-            <div className={styles.agentSelector}>
+            <div className={styles.agentSelector} ref={serviceSelectorRef}>
               <button
+                ref={serviceSelectorButtonRef}
                 type="button"
                 className={styles.schemeTrigger}
                 data-testid="ai-conversation-agent"
@@ -887,6 +911,7 @@ export default function AiConversationSidebar({
                 <span>{serviceTriggerLabel}</span>
                 <span className={styles.agentChevron} aria-hidden="true">▾</span>
               </button>
+              {selectionError ? <span role="alert">{selectionError}</span> : null}
               {openChoice === "service" && agentAccess?.cards.length ? (
                 <div
                   id="ai-conversation-service-choices"
@@ -898,16 +923,13 @@ export default function AiConversationSidebar({
                     const snapshot = card.presentation.availability(card.availability);
                     const disconnected = card.availability.reason === "disabled";
                     const chooseService = () => {
-                      if (card.availability.status === "ready") {
-                        agentAccess.onSelect(card.selection);
-                        setOpenChoice(null);
-                        setSetupProviderId(null);
-                        return;
-                      }
-                      agentAccess.onQueueDefault?.(card.selection);
-                      if (disconnected) void agentAccess.onReconnect?.(card.selection);
-                      setSetupProviderId(card.selection.providerId);
+                      setSelectionError("");
+                      void Promise.resolve(agentAccess.onSelect(card.selection)).then((saved) => {
+                        if (saved === false) setSelectionError("服务已切换，但选择未保存，请重新选择。 ");
+                      }, () => setSelectionError("服务选择未保存，请重新选择。"));
+                      setSetupProviderId(card.availability.status === "ready" ? null : card.selection.providerId);
                       setOpenChoice(null);
+                      serviceSelectorButtonRef.current?.focus();
                     };
                     return (
                       <button
@@ -916,10 +938,6 @@ export default function AiConversationSidebar({
                         aria-pressed={card.selection.providerId === currentProviderId}
                         className={styles.agentChoice}
                         data-testid={`ai-conversation-service-${card.selection.providerId}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          chooseService();
-                        }}
                         onClick={chooseService}
                       >
                         <strong>{agentServiceLabel(card.selection.providerId, card.presentation.displayName)}</strong>

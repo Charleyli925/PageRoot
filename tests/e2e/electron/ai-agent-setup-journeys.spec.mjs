@@ -69,6 +69,8 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     const original = readFileSync(workingPath);
     await sidebar.getByRole("button", { name: /交给.*修改/u }).click();
     const progress = sidebar.getByTestId("ai-conversation-run-progress");
@@ -147,7 +149,8 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     await launched.page.screenshot({ path: path.join(screenshots, "settings-codex-authenticated-repair.png"), animations: "disabled" });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
-    await sidebar.getByRole("button", { name: /设置 Codex/u }).click();
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-codex").click();
     const panel = sidebar.getByTestId("ai-conversation-setup-panel");
     await expect(panel).toContainText("账号已登录，但连接组件未能启动。");
     await expect(sidebar.getByTestId("ai-conversation-send")).toHaveCount(0);

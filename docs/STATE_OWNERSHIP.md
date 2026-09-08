@@ -567,3 +567,7 @@ remain deprecated compatibility surfaces exercised by the legacy activation
 protocol tests (`tests/version-workflow.test.mjs`); Repository recovery of old
 `historyActivation` journals remains separate. New UI commands must use create,
 query and openCreatedHistoryVersion. This batch does not remove the disk protocol.
+
+## Document Agent preference
+
+Main `ui-preferences` is the only durable writer of bounded `documentAgentSelections` (document ID to provider ID). WorkspacePreferencesSession projects it; the sidebar selects the current document, Settings changes only the initial default. Disabled providers remain selectable. Preference failure remains visible; it never silently routes execution to another provider. A submitted Request continues to own its frozen provider/model identity.

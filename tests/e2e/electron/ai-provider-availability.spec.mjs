@@ -232,6 +232,8 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
       animations: "disabled",
     });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-codex").click();
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("Codex", { timeout: 60_000 });
     await expect(sidebar.getByRole("button", { name: /交给 Codex 修改/u }))
@@ -399,6 +401,8 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("DeepSeek", { timeout: 20_000 });
     await expect(sidebar.getByTestId("ai-conversation-model")).toBeVisible();
@@ -520,6 +524,8 @@ test("源页运行时余额失败 offers only provider recovery without a false 
     await setDefaultSettingsAgent(settingsPage, "pageroot");
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
 
     const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
