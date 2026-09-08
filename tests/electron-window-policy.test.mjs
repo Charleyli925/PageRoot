@@ -188,6 +188,14 @@ test("runtime directory initialization is strict only for Developer Preview", as
   );
 });
 
+test("packaged launches preserve the executable product identity under E2E", async () => {
+  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  assert.match(
+    mainProcess,
+    /const applicationName = app\.isPackaged\s*\?\s*path\.basename\(process\.execPath, path\.extname\(process\.execPath\)\)\s*:\s*runtimeEnvironment\.applicationName;/u,
+  );
+});
+
 test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {
   const [mainProcess, windowIpc, projectIpc] = await Promise.all([
     readFile(sourceUrl("../desktop/main.mjs"), "utf8"),

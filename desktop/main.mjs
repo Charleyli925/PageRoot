@@ -241,7 +241,12 @@ const runtimeEnvironment = assertRuntimeEnvironment(createRuntimeEnvironment({
 app.setPath("userData", runtimeEnvironment.userDataPath);
 app.setPath("sessionData", runtimeEnvironment.sessionDataPath);
 if (typeof app.setAppLogsPath === "function") app.setAppLogsPath(runtimeEnvironment.logsPath);
-const applicationName = runtimeEnvironment.applicationName;
+// Preserve Electron's packaged identity contract: the formal app and a
+// packaged Preview launched under E2E must report the executable's product
+// name, while source development keeps the localized runtime name.
+const applicationName = app.isPackaged
+  ? path.basename(process.execPath, path.extname(process.execPath))
+  : runtimeEnvironment.applicationName;
 app.setName(applicationName);
 // 后台 E2E 保留常规激活策略：窗口本身仍不显示、不抢焦点，但 macOS Dock
 // 里保留应用图标，开发者可以主动点击图标把窗口调出来查看测试进度，
