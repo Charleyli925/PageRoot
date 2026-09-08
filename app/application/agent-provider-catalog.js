@@ -715,7 +715,15 @@ export class AgentCatalogState {
     if (credentialStatusPort) {
       void credentialStatusPort().then((status) => {
         if (!this.#disposed && this.#providers.has("pageroot") && !this.credentialPersist("pageroot")) {
-          this.noteCredentialPersist("pageroot", { status: status?.remembered === true ? "saved" : "skipped" });
+          if (status?.unreadable === true || status?.reconnectRequired === true) {
+            this.noteCredentialPersist("pageroot", {
+              status: "failed",
+              reason: status?.reason
+                || "无法读取已保存的连接凭证。你仍可编辑项目。",
+            });
+          } else {
+            this.noteCredentialPersist("pageroot", { status: status?.remembered === true ? "saved" : "skipped" });
+          }
         }
       }).catch(() => {});
     }

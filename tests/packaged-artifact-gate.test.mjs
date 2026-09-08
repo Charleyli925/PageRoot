@@ -151,6 +151,11 @@ test("release commands use one automated artifact lane with full tests and packa
       (entry) => entry.to === "usage-telemetry-config.json",
     ),
   );
+  assert.ok(
+    packageJson.build.extraResources.some(
+      (entry) => entry.to === "runtime-environment.json",
+    ),
+  );
   assert.match(packageJson.scripts["verify:packaged"], /verify-packaged-artifact\.mjs/);
   assert.match(verifier, /codesign/);
   assert.match(verifier, /hdiutil/);
@@ -378,7 +383,7 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   });
   const result = await verifySyntheticAppBundle(fixture);
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 47);
+  assert.equal(result.asarFileCount, 48);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.deepEqual(result.applicationUpdate, {

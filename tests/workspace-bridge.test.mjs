@@ -36,6 +36,43 @@ test("workspace Bridge local imports stay inside the packaged Bridge dependency 
   );
 });
 
+test("stable Bridge preserves readiness when project repository initialization fails", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-bridge-stable-degraded-",
+  });
+  const unavailableProjectsRoot = join(environment.root, "project-root-file");
+  await writeFile(unavailableProjectsRoot, "not-a-directory");
+  const bridge = await environment.start({
+    HTML_AI_RUNTIME_CHANNEL: "stable",
+    HTML_AI_PROJECT_FILES_ROOT: unavailableProjectsRoot,
+    HTML_AI_AGENTS_ROOT: join(environment.root, "agents"),
+  });
+  const health = await bridge.requestJson("/health");
+  assert.equal(health.response.status, 200, JSON.stringify(health.body));
+  assert.equal(health.body.workspace, environment.workspace);
+  assert.equal(bridge.child.exitCode, null);
+});
+
+test("preview Bridge fails before readiness when project repository initialization fails", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-bridge-preview-fatal-",
+  });
+  const unavailableProjectsRoot = join(environment.root, "project-root-file");
+  await writeFile(unavailableProjectsRoot, "not-a-directory");
+  await assert.rejects(
+    environment.start({
+      HTML_AI_RUNTIME_CHANNEL: "preview",
+      HTML_AI_PROJECT_FILES_ROOT: unavailableProjectsRoot,
+      HTML_AI_AGENTS_ROOT: join(environment.root, "agents"),
+    }),
+    (error) => {
+      assert.match(error.message, /fatal/iu);
+      assert.match(error.message, /EEXIST|directory|project/u);
+      return true;
+    },
+  );
+});
+
 test("POST /version remains a 410 tombstone", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-bridge-version-tombstone-",

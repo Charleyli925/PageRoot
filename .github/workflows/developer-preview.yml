@@ -62,9 +62,11 @@ jobs:
             echo "### PageRoot developer preview"
             echo ""
             echo "- Built only because this workflow was dispatched explicitly."
-            echo "- Uses an ad-hoc signature and is not notarized."
+            echo "- Requires a stable Developer ID Application identity already installed on this runner; missing or failed signing stops the job and never falls back to ad-hoc."
+            echo "- Notarization is not required for this personal test package."
             echo "- Is not eligible for a tag, GitHub Release, or updater publication."
             echo "- Uses the distinct PageRoot Developer Preview name and a stable-tag-derived test version."
+            echo "- Starts with the isolated Preview data roots and keeps automatic update checks and installation disabled."
             echo "- Automated scope: latest packaged contents, basic artifact integrity, and one clean startup."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload developer preview

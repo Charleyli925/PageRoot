@@ -88,3 +88,51 @@ test("unavailable encryption refuses to persist and does not fall back to plaint
   assert.equal(persisted.code, "AGENT_CREDENTIAL_STORE_UNAVAILABLE");
   assert.equal(await store.load(), null);
 });
+
+test("missing credential status does not touch macOS safeStorage", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
+  let availabilityChecks = 0;
+  const store = createAgentSessionCredentialStore({
+    userDataPath,
+    encryptString: () => Buffer.from("unused"),
+    decryptString: () => "unused",
+    isEncryptionAvailable: () => {
+      availabilityChecks += 1;
+      return false;
+    },
+  });
+  assert.deepEqual(await store.publicStatus(), {
+    available: true,
+    remembered: false,
+    providerId: "pageroot",
+    vendorId: null,
+  });
+  assert.equal(availabilityChecks, 0);
+  assert.deepEqual(await store.loadResult(), { status: "missing", credential: null });
+  assert.equal(availabilityChecks, 0);
+});
+
+test("unreadable remembered credentials stay on disk and do not trigger retry loops", async () => {
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
+  const credentialPath = path.join(userDataPath, "agent-session-credential.v1.json");
+  const crypto = memorySafeStorage();
+  const store = createAgentSessionCredentialStore({
+    userDataPath,
+    encryptString: (value) => crypto.encryptString(value),
+    decryptString: () => {
+      throw new Error("keychain denied");
+    },
+    isEncryptionAvailable: () => true,
+  });
+  await store.persist({ apiKey: "sk-secret", vendorId: "deepseek" });
+  const before = await readFile(credentialPath, "utf8");
+  const status = await store.publicStatus();
+  assert.equal(status.remembered, true);
+  assert.equal(status.unreadable, undefined);
+  const loaded = await store.loadResult();
+  assert.equal(loaded.status, "unreadable");
+  assert.equal(loaded.reason, "AGENT_CREDENTIAL_DECRYPT_FAILED");
+  assert.equal(await readFile(credentialPath, "utf8"), before);
+  assert.equal(await store.load(), null);
+  assert.equal(await readFile(credentialPath, "utf8"), before);
+});

@@ -12,17 +12,19 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 | Source candidate | Ready or `full-gate` after the dependency baseline | Full Node, three Browser shards, real HTML, three native Electron shards and deterministic AI; exact-tree attestation | Package or publish an installer; wait on Codex review |
 | Release dry run | `candidate-context` identifies packaging/release metadata/Electron/Bridge/Schema/resource risk on a full-gate candidate | Credential-free unsigned App, non-release checkpoint, clean-job renderer/metadata revalidation and startup identity | Read signing/Apple secrets, create distributables or enter Candidate/publication; reject a PR merely because it is large |
 | Main integrity | Source candidate is merged | Match merged PR, Tree Hash, version and fresh PR attestation | Repeat any Node, Browser or Electron source test |
-| Developer preview | Explicit manual request only | Clean Tree, ad-hoc DMG, packaged-content audit, isolated startup and non-release attestation | Sign/notarize, create updater assets, become a prerequisite, tag or publish |
+| Developer preview | Explicit manual request only | Clean Tree, stable Developer ID DMG, packaged-content audit, isolated startup and non-release attestation | Notarize, create updater assets, become a prerequisite, tag or publish; missing/failed signing cannot fall back to ad-hoc |
 | Release candidate | Manual `Release Candidate` dispatch on current `main` | Pre-sign content/runtime proof, signed-App checkpoint, final DMG/ZIP/update checks, release asset hashes and candidate attestation | Rebuild the verified App after checkpoint, create a tag or GitHub Release |
 | Publication | Manual `Release` dispatch for the exact version on current `main` | Fresh matching candidate, downloaded byte hashes and provenance | Rebuild, replace or silently mutate candidate bytes |
 
 The publication workflow creates the annotated tag only after the pre-tag candidate has passed. It publishes the exact downloaded candidate files. A failed candidate therefore does not consume a version tag.
 
-The `Developer Preview` workflow exists only to move cheap package-content and
-startup feedback ahead of an optionally requested installation check. No
-push, Pull Request, schedule, formal candidate or publication event triggers
-it. Its seven-day artifact cannot be promoted; formal release evidence starts
-independently from reviewed `main`.
+The `Developer Preview` workflow exists only for an explicitly requested
+installation check. No push, Pull Request, schedule, formal candidate or
+publication event triggers it. It must run where the stable Developer ID
+Application identity is available (normally the developer's local keychain);
+otherwise it stops rather than producing an ad-hoc package. Its seven-day
+artifact cannot be promoted; formal release evidence starts independently from
+reviewed `main`.
 
 `candidate-context` is a narrow deterministic path classifier. It reports
 packaging risk, changed-file count and advisory scope, but never rejects a Pull

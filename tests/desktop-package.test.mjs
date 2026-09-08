@@ -44,6 +44,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
   "desktop/agent-session-credential-store.mjs",
+  "desktop/runtime-environment.mjs",
   "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
@@ -252,6 +253,7 @@ test("desktop package manifest owns the exact application and Bridge resource cl
       "app-update.yml",
       "build-info.json",
       "usage-telemetry-config.json",
+      "runtime-environment.json",
       ...LEGAL_RESOURCE_FILES,
     ]),
   );

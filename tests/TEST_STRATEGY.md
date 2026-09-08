@@ -47,7 +47,7 @@ turn into a zero-work green result.
 | 一次性晋升 `release-gate` | baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量源码车道汇合后签发 Tree Hash 凭证 | 每个 Ready head 跑一次；后续新 SHA 重新跑完整矩阵 |
 | `Release Dry Run` | `candidate-context` 判定完整矩阵候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 生成 stable `app-update.yml`、组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复精确 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater 制品、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
-| 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
+| 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、稳定 Developer ID DMG、独立运行目录、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 缺少签名身份直接失败；不成为正式门禁、不检查或安装更新 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |
 | `Release` | 候选包通过且不超过 72 小时 | 重新校验候选凭证和每个文件 Hash，创建 tag 并发布原字节 | 发布阶段不重新构建、不悄悄替换文件 |
 
@@ -374,7 +374,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   项目 ID 只以 HMAC 假名出现、编辑聚合、队列上限和失败重试。负向样本
   必须同时注入 HTML、评论、Prompt、附件名、文件路径和原始异常，最终
   批次及本地队列都不得出现这些值；测试永不访问真实 PostHog。
-- 开发者测试包：先证明正式 tag 后的提交序号被确定性映射为独立测试版本（例如 `0.9.5` 后依次为 `0.9.69991`、`0.9.69992`），再对独立名称/Bundle ID 的 ad-hoc `.app` 做 app.asar、Bridge、Schema、资源、版本和 DMG 静态校验，并从真实可执行文件做一次应用名/版本/首窗/Bridge/Workbench/正常退出冒烟；最后把 DMG Hash、tag-to-commit 范围、全部关联 PR 的实时状态/一句话摘要及无 PR 直接提交写入 JSON/Markdown 交付报告。GitHub 元数据缺失时交付失败，但不把可变 PR 状态嵌入 App 或正式字节凭证。
+- 开发者测试包：先证明正式 tag 后的提交序号被确定性映射为独立测试版本（例如 `0.9.5` 后依次为 `0.9.69991`、`0.9.69992`），再对独立名称/Bundle ID 的 Developer ID `.app` 做 app.asar、Bridge、Schema、资源、运行目录标识、版本和 DMG 静态校验，并从真实可执行文件做一次应用名/版本/首窗/Bridge/Workbench/正常退出冒烟；验证首次启动只创建新的 Preview 根目录且不读取旧 PageRoot 根目录，连续安装仍复用新根目录，Preview 更新检查/安装保持关闭；最后把 DMG Hash、tag-to-commit 范围、全部关联 PR 的实时状态/一句话摘要及无 PR 直接提交写入 JSON/Markdown 交付报告。GitHub 元数据缺失时交付失败，但不把可变 PR 状态嵌入 App 或正式字节凭证。
 - 发布 dry-run：只在相关 PR 路径变化时运行。第一台 macOS runner 用固定合成 PostHog 项目 token 生成启用态 telemetry metadata，同时从唯一 stable GitHub publish 契约生成 `app-update.yml`，与 build metadata 一起装入显式未签名（`identity=null`）App，复用正式 verifier 检查 app.asar、Bridge、Schema、资源、更新通道和身份字段，并创建 `releaseEligible: false` 的独立 checkpoint。第二台 clean runner 验证 archive/payload Hash、原样恢复 metadata、重建 `dist-desktop` renderer oracle、再次复用正式 verifier，再从真实可执行文件核对 `app.getName()`、版本和 `CFBundleIdentifier`。workflow 不引用 `secrets.*`，dry-run kind/目录/文件名均不能被正式 signed-App restore 接受。
 - 候选包：先在签名前生成 stable `app-update.yml`，并对 ad-hoc `.app` 校验 app.asar、Bridge、Schema、资源闭包、更新通道，再从真实可执行文件运行完整源码字节 oracle；通过后才做 Developer ID 签名，并在 Apple 请求前做一次 Hardened Runtime 启动。App 公证后冻结包含更新配置的 archive/payload/Tree Hash checkpoint，下一 job 只把同一 App 作为 `--prepackaged` 输入生成 DMG、ZIP、blockmap 和 `latest-mac.yml`，再校验 Team、App/DMG 公证票据、Gatekeeper、只读挂载与 ZIP 解包内容。
   新 job 会先从 checkpoint App 原样恢复 build-info、遥测与应用更新配置作为比较输入，
