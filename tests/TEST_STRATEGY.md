@@ -36,15 +36,15 @@ turn into a zero-work green result.
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:plan -- --base origin/main` | 选择或开始跑门禁前 | 输出紧凑 JSON：改动文件、owner、Node 文件、能力级 canary、预计数量，以及分类后的阅读集 | 不必读取整份 impact map；已有超宽规则在过期日前只告警，新增超宽为硬失败 |
 | `npm run gate:plan -- --context-domain <id>` | 尚未改文件、需要先定位阅读入口时 | 同一份 capability-context 阅读集；可按能力名或 `--context-file` 查询。多域共享同一文档时，整文件要求覆盖章节要求 | 不选择测试，也不改变 `task:finish` 的 `origin/main` 基准 |
-| `npm run gate:draft` | CI Draft，或本地复现 Draft canary | 受影响 Node 文件加上命中的 Browser/Electron/AI canary，以及被修改的 Playwright spec | 本地 `gate:edit` 仍保持 Node-only；Draft 绿灯必须覆盖被修改能力 |
+| `npm run gate:draft` | CI Draft，或本地复现 Draft canary | 受影响 Node 文件加上命中的 Browser/Electron/AI canary，以及被修改的 Playwright spec；同一运行环境按实际用例合并去重 | 本地 `gate:edit` 仍保持 Node-only；Draft 绿灯必须覆盖被修改能力，且计划/发现/执行必须对账 |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关能力级 Browser/Electron/AI 冒烟 | 叶子改动只接通对应 canary；Ready PR 仍跑完整矩阵 |
 | `npm run gate:task -- --resume <run-id>` | 同一源码 Hash 上环境抖动后 | 复用已通过的 typecheck/lint/Node/build，只重跑失败与未执行 suite | 源代码、base、lockfile、Node/平台或 suite 命令变化时拒绝复用 |
-| PR `pr-feedback` | Draft PR 的 `opened/synchronize/reopened`，且无 `full-gate` label | `gate:draft`：Node + 风险对应的能力 Canary；Electron/AI 在 macOS 上按需运行 | 普通 Draft 推送不消费完整矩阵，但热点文件不再是 Node-only 绿灯 |
-| PR 完整矩阵 + `release-gate` | Ready（含直接以 Ready 开 PR）或 `full-gate` label | 全量 Node、三分片 Browser、独立 Native Electron、独立 AI 闭环、真实 HTML、依赖基线、按需 dry run、exact-tree 凭证 | `release-gate` 是唯一合并硬门；Codex 评审只展示、不阻断 |
+| PR `pr-feedback` | Draft PR 的 `opened/synchronize/reopened` | 轻量 Job 冻结一次计划，Linux Node/Browser 与按需 macOS Electron/AI 并行消费 | 普通 Draft 推送不消费完整矩阵；失败或取消保留 Playwright 诊断 |
+| PR 完整矩阵 + `release-gate` | Ready（含直接以 Ready 开 PR） | 全量 Node、三分片 Browser、独立 Native Electron、独立 AI 闭环、真实 HTML、依赖基线、按需 dry run、exact-tree 凭证 | `release-gate` 是唯一合并硬门；Codex 评审只展示、不阻断 |
 | `codex-review` | 与完整矩阵相同的触发条件 | 为当前 head 至多发一条 `@codex review`，并写 informational 线程快照 | `continue-on-error`；不在 `release-gate.needs` 中 |
 | `baseline-policy` | 完整矩阵路径上，分支策略通过后 | 全局依赖 advisory policy 与 packaged-runtime closure，并写下 lockfile 快照 | 基线红时不启动 Linux build、Browser 或 macOS Electron runner；`release-gate` 只核验快照 |
 | `linux-deps` / `macos-deps` | 完整矩阵路径上，基线通过后 | 按 OS + lockfile + 是否包含 Electron 填充一次 `node_modules` 缓存 | 后续分片只恢复缓存，不再各自 `npm ci`；Ubuntu 跳过 Electron 二进制 |
-| 一次性晋升 `release-gate` | baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量源码车道汇合后签发 Tree Hash 凭证 | 每个 Ready/full-gate head 跑一次；后续新 SHA 重新跑完整矩阵 |
+| 一次性晋升 `release-gate` | baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量源码车道汇合后签发 Tree Hash 凭证 | 每个 Ready head 跑一次；后续新 SHA 重新跑完整矩阵 |
 | `Release Dry Run` | `candidate-context` 判定完整矩阵候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 生成 stable `app-update.yml`、组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复精确 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater 制品、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
@@ -63,12 +63,12 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 工作区有未提交修改时，`edit/task` 自动读取 staged、unstaged 和 untracked 文件。任务已经提交后应运行 `npm run gate:task -- --base <基准分支或提交>`；干净工作区又没有 `--base` 时门禁会明确失败，不会把“零测试”伪装成通过。
 
-`npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，不引入新的门禁层。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 primary `main`、远端同步、隔离 worktree 创建、现有分支 attach、脏工作区拒绝、GitHub PR/本地独有提交分类、retire 默认 dry-run、显式放弃围栏和最终差异报告，不会操作开发者的真实分支。
+`npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，也是唯一的任务收尾入口；不要在它之前机械重复运行同一个 `gate:task`。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 primary `main`、远端同步、隔离 worktree 创建、现有分支 attach、脏工作区拒绝、GitHub PR/本地独有提交分类、retire 默认 dry-run、显式放弃围栏和最终差异报告，不会操作开发者的真实分支。
 
 PR 必须从 Draft 开始。普通 Draft 推送由 `ci.yml` 的 `pr-feedback` 汇合
 Ubuntu Node/Browser canary 与按需 macOS Electron/AI canary。本地
-`gate:edit` 仍保持 Node-only。Ready、直接以 Ready 开
-PR，或加上 `full-gate` label 后才跑完整矩阵；`release-gate` 是唯一合
+`gate:edit` 仍保持 Node-only。Ready 或直接以 Ready 开
+PR 后才跑完整矩阵；`release-gate` 是唯一合
 并硬门。同一路径会为当前 head 至多请求一次 Codex 评审并写 informational
 快照，P0/P1 只展示、不阻断。没有 probe marker、没有 30 秒 settle、没
 有 review-gate recovery，也没有 weekly review-debt Issue。

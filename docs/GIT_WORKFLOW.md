@@ -87,19 +87,22 @@ git push -u origin feature/short-name
 Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
 
 Every Pull Request starts as Draft. `opened`, `synchronize` and `reopened`
-on a Draft PR without `full-gate` run impact-selected `pr-feedback`
-(`gate:draft`: Node plus the selected capability canary) inside `ci.yml`. Mark the frozen head Ready once, or add `full-gate`, to
+on a Draft PR run impact-selected `pr-feedback` (`gate:draft`: Node plus the
+selected capability canary) inside `ci.yml`. Mark the frozen head Ready once to
 start the complete source matrix. A PR opened already Ready also takes that
 path. Codex review is requested automatically, shown on the PR, and never
 blocks merge. `release-gate` is the required check. Active P0/P1 comments
 are informational; deterministic dependency, source, security and release
 checks remain hard gates.
 
-`branch-policy` and `baseline-policy` run on the full-gate path, and the
+`branch-policy` and `baseline-policy` run on the Ready path, and the
 complete source matrix starts after the deterministic baseline.
 `release-gate` joins every lane and any relevant candidate-only dry run,
-then attests the tree. The candidate classifier records PR scope and size
-only as advisory information; it never rejects a PR for being large.
+then attests the tree. After explicit merge authorization, enable GitHub native
+Auto-merge for that exact head so the platform merges when review and required
+checks are satisfied; an Agent must not poll and later act as a manual merge
+button. The candidate classifier records PR scope and size only as advisory
+information; it never rejects a PR for being large.
 
 A later commit on a Ready PR cancels the in-flight stale candidate and
 reruns the complete matrix for the new head. Returning to Draft skips the

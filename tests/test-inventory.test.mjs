@@ -41,10 +41,10 @@ test("Playwright inventory stays aligned with the repository and E2E README", as
     ),
   );
   assert.equal(
-    inventory.execution.lanes.find((lane) => lane.id === "electron-native").files.includes(
+    inventory.execution.lanes.find((lane) => lane.id === "electron-ai").files.includes(
       "tests/e2e/electron/review-annotation-clarity.spec.mjs",
     ),
-    false,
+    true,
   );
   assert.ok(inventory.specFiles.includes("tests/e2e/electron/ai-review-adoption.spec.mjs"));
   assert.equal(

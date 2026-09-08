@@ -19,9 +19,9 @@ listed under Progressive disclosure.
 1. Run `npm run task:status` and inspect `git status -sb` before editing.
 2. From the clean primary `main` worktree, run `npm run task:start -- <prefix/short-name>`. It keeps the primary worktree on `main` and creates an isolated checkout under the shared `.codex-worktrees/` directory. Allowed prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `integration/`, `refactor/`, `chore/` and `recovery/`. If the primary checkout is dirty, create an isolated worktree from `origin/main` instead of stashing.
 3. Keep the diff focused. Add tests and documentation in the same change when behavior, contracts, commands or public expectations change.
-4. While editing, use `npm run gate:edit`. Before publishing a branch, run `npm run task:finish`.
+4. While editing, use `npm run gate:edit` as needed. Before publishing a branch, run `npm run task:finish` once; it already owns the end-of-task gate, so do not precede it with a duplicate `gate:task` run.
 5. Review `git diff`, stage only intentional paths, review `git diff --cached`, then commit and push the task branch.
-6. Open every PR as Draft. Ordinary Draft pushes run only impact-selected `pr-feedback`. Ready or the `full-gate` label starts the complete source matrix; `release-gate` is the sole required merge check. Codex review is informational and never blocks merge. Squash-merge only with explicit authorization.
+6. Open every PR as Draft. Ordinary Draft pushes run only impact-selected `pr-feedback`. Moving the frozen head to Ready starts the complete source matrix; `release-gate` is the sole required merge check. Codex review is informational and never blocks merge. After explicit merge authorization, prefer GitHub native Auto-merge over polling and a later manual merge click.
 7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean. After merge, run `npm run task:audit` from the primary worktree and retire only the exact merged task with `task:retire --apply`.
 
 Ordinary development stops at `gate:edit` / `task:finish` and a Draft PR.

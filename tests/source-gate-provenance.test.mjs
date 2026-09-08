@@ -190,6 +190,7 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
     readFile(path.join(productRoot, ".github/actions/setup-pageroot-npm/action.yml"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
+  const prFeedbackPlan = workflowJob(ci, "pr-feedback-plan");
   const prFeedbackLinux = workflowJob(ci, "pr-feedback-linux");
   const prFeedbackDesktop = workflowJob(ci, "pr-feedback-desktop");
   const prFeedback = workflowJob(ci, "pr-feedback");
@@ -210,16 +211,23 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.doesNotMatch(ci, /contents: write|issues: write/u);
   assert.match(ci, /pull-requests: write/u);
   assert.doesNotMatch(ci, /gh pr merge|mergePullRequest/u);
+  assert.doesNotMatch(ci, /full-gate/u);
   assert.match(ci, /name: pr-feedback/u);
+  assert.match(prFeedbackPlan, /--for draft/u);
+  assert.match(prFeedbackPlan, /planned_selection/u);
+  assert.doesNotMatch(prFeedbackPlan, /setup-pageroot-npm/u);
   assert.match(prFeedbackLinux, /github\.event\.pull_request\.draft == true/u);
-  assert.match(prFeedbackLinux, /--for draft/u);
-  assert.match(prFeedbackLinux, /npm run gate:draft -- --base "\$PR_BASE_SHA" --runtime node,browser/u);
+  assert.match(prFeedbackLinux, /needs: pr-feedback-plan/u);
+  assert.match(prFeedbackLinux, /npm run gate:draft -- --base "\$PR_BASE_SHA" --runtime node,browser[\s\S]*--planned-selection/u);
   assert.match(prFeedbackLinux, /--stage pr-feedback/u);
   assert.match(prFeedbackLinux, /skip-electron: "true"/u);
+  assert.match(prFeedbackLinux, /Upload Linux Playwright diagnostics[\s\S]*if: failure\(\) \|\| cancelled\(\)[\s\S]*path: output\/playwright/u);
   assert.doesNotMatch(prFeedbackLinux, /Restore Electron download cache/u);
-  assert.match(prFeedbackDesktop, /needs\.pr-feedback-linux\.outputs\.has_desktop == 'true'/u);
-  assert.match(prFeedbackDesktop, /npm run gate:draft -- --base "\$PR_BASE_SHA" --runtime electron,ai/u);
-  assert.match(prFeedback, /HAS_DESKTOP: \$\{\{ needs\.pr-feedback-linux\.outputs\.has_desktop \}\}/u);
+  assert.match(prFeedbackDesktop, /needs\.pr-feedback-plan\.outputs\.has_desktop == 'true'/u);
+  assert.doesNotMatch(prFeedbackDesktop, /needs:[\s\S]*pr-feedback-linux/u);
+  assert.match(prFeedbackDesktop, /npm run gate:draft -- --base "\$PR_BASE_SHA" --runtime electron,ai[\s\S]*--planned-selection/u);
+  assert.match(prFeedbackDesktop, /Upload desktop Playwright diagnostics[\s\S]*if: failure\(\) \|\| cancelled\(\)[\s\S]*path: output\/playwright/u);
+  assert.match(prFeedback, /HAS_DESKTOP: \$\{\{ needs\.pr-feedback-plan\.outputs\.has_desktop \}\}/u);
   assert.match(codexReview, /continue-on-error: true/u);
   assert.match(codexReview, /request-codex-review\.mjs/u);
   assert.match(codexReview, /check-pr-review-policy\.mjs/u);
