@@ -1066,3 +1066,16 @@ test("the conversation sidebar reuses AgentSetupPanel and can replace an API Key
   assert.match(source, /onBeginAccessRepair/u);
   assert.doesNotMatch(source, /useState<null \| Readonly<\{\s*documentId: string;/u);
 });
+
+test("turn presentation prioritizes requirements, sealed public summary, result and decision with folded progress", async () => {
+  const { sidebarTurnPresentation } = await import("../app/workbench/ai-conversation-model.js");
+  const requirements = factMessage({ actor: "user", text: "调整标题" });
+  const progress = factMessage({ kind: "progress", text: "正在生成修改。" });
+  const legacy = factMessage({ actor: "pageroot", kind: "text", text: "已发出本轮修改要求。" });
+  const result = factMessage({ kind: "result-summary", text: "修改已准备好，尚未采用。" });
+  const summary = factMessage({ actor: "agent", kind: "result-summary", text: "标题已缩短。" });
+  const decision = factMessage({ kind: "decision-outcome", text: "已采用本次修改。" });
+  const presentation = sidebarTurnPresentation([requirements, progress, legacy, result, summary, decision]);
+  assert.deepEqual(presentation.primary, [requirements, summary, result, decision]);
+  assert.deepEqual(presentation.process, [progress, legacy]);
+});

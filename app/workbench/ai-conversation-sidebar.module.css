@@ -795,3 +795,15 @@
 
 .turnGroup .message[data-actor="pageroot"] .messageMeta { display: none; }
 .turnGroup .message[data-actor="pageroot"] { font-weight: 400; }
+
+.turnProcess {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 4px 0 8px;
+}
+.turnProcess summary { cursor: pointer; width: fit-content; }
+.turnProcess summary:focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; }
+.turnProcess ol { margin: 8px 0 0; padding-left: 18px; }
+.turnProcess li { padding: 3px 0; overflow-wrap: anywhere; }
+.turnProcess time { margin-left: 8px; color: var(--faint); white-space: nowrap; }
