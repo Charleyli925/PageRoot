@@ -583,3 +583,11 @@ ProjectFileRepository writes terminal Request state and stable Conversation even
 The public projector bounds assembled text to 64 KiB, redacts credentials/paths/URLs and suppresses generated markup. Hidden reasoning and raw tool arguments never enter the public event allowlist. Tool activity is translated from known event categories to fixed labels, with a distinct event identity for each occurrence. HTTP starts generation progress only after actual content arrives, separately reporting response receipt and validation.
 
 For submissions, the durable stop-requested fact fences late completion inside the repository serial writer while cleanup is unconfirmed. A Candidate already authoritative before stop remains available; only an explicit discard intent rejects it. Renderer cancellation reconciles a result-ready receipt instead of clearing that result. The stop-requested fact is not a cancelled result.
+
+## Document Agent preference
+
+Main `ui-preferences` is the only durable writer of bounded `documentAgentSelections` (document ID to provider ID). WorkspacePreferencesSession projects it; the sidebar selects the current document, Settings changes only the initial default. Disabled providers remain selectable. Preference failure remains visible; it never silently routes execution to another provider. A submitted Request continues to own its frozen provider/model identity.
+
+### Conversation read refresh
+
+ConversationWorkflow owns a bounded single-flight read refresh while the sidebar is open. It preserves local draft state, fences document/load generations, and stops when closed. The Renderer writes no history facts. Sidebar groups retain stable Turn keys when execution changes to history; header, scrolling facts, current actions and submission controls are separate regions. Current actions derive only from the live Run projection.

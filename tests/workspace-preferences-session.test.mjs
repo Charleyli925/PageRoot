@@ -146,3 +146,15 @@ test("a disabled default Agent stays preferred and is not persisted as another p
   }), false);
   assert.equal(agentServiceLabel("pageroot"), "内置 AI");
 });
+
+
+test("failed document selection persistence returns a visible failure without changing the default", async () => {
+  const session = new WorkspacePreferencesSession({ port: {
+    async get() { return persisted; }, async record() { throw new Error("disk unavailable"); },
+  } });
+  await session.load();
+  assert.equal(await session.update({ documentAgentSelections: { doc_aaaaaaaaaaaaaaaa: "qoder" } }), false);
+  assert.ok(session.snapshot.error);
+  assert.equal(session.snapshot.workspace.defaultAgentProviderId, "codex");
+  session.dispose();
+});

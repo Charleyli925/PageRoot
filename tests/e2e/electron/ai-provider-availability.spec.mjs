@@ -80,7 +80,7 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     await expect(deliveryDialog.getByTestId("ai-conversation-agent"))
       .toContainText("Qoder");
     await expect(deliveryDialog.getByTestId("ai-conversation-context-summary"))
-      .toContainText("1 条评论 · 当前 HTML · 项目规则");
+      .toContainText("1 条修改意见");
     await expect(deliveryDialog.getByText("AGENT BRIDGE", { exact: true })).toHaveCount(0);
     await expect(deliveryDialog.getByText("可信本机 Agent 提示", { exact: true }))
       .toHaveCount(0);
@@ -142,6 +142,16 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       const selectorCenter = readyGeometry.selector.top + readyGeometry.selector.height / 2;
       const actionsCenter = readyGeometry.actions.top + readyGeometry.actions.height / 2;
       expect(Math.abs(selectorCenter - actionsCenter)).toBeLessThanOrEqual(1);
+    }
+    // The current decision must remain outside history at every supported width.
+    for (const width of [340, 400, 480]) {
+      const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
+      await sidebar.evaluate((element, targetWidth) => element.closest(".workbench").style.setProperty("--workbench-inspector-width", `${targetWidth}px`), width);
+      const action = launched.page.getByTestId("ai-conversation-action-bar");
+      await expect(action).toBeVisible();
+      expect(await action.evaluate((element) => element.closest('[data-testid="ai-conversation-stream"]') === null)).toBe(true);
+      await expect.poll(async () => Math.abs((await sidebar.boundingBox()).width - width)).toBeLessThanOrEqual(2);
+      await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, `trusted-loop-pr6-ready-${width}.png`), animations: "disabled" });
     }
     await launched.page.screenshot({
       path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "qoder-result-ready.png"),
@@ -232,6 +242,8 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
       animations: "disabled",
     });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-codex").click();
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("Codex", { timeout: 60_000 });
     await expect(sidebar.getByRole("button", { name: /交给 Codex 修改/u }))
@@ -399,6 +411,8 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("DeepSeek", { timeout: 20_000 });
     await expect(sidebar.getByTestId("ai-conversation-model")).toBeVisible();
@@ -520,6 +534,8 @@ test("源页运行时余额失败 offers only provider recovery without a false 
     await setDefaultSettingsAgent(settingsPage, "pageroot");
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
 
     const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
@@ -703,7 +719,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const deliveryDialog = await openQoderAvailability(launched.page);
     const qoderCard = deliveryDialog;
-    await expect(qoderCard.getByText("未安装", { exact: true })).toBeVisible();
+    await expect(qoderCard.locator(".settings-agent-service-main").getByText("未安装", { exact: true })).toBeVisible();
     await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeVisible();
     expect(requestPosts).toBe(0);
 
@@ -750,7 +766,7 @@ test("Qoder managed install can be cancelled while the install request is pendin
     });
 
     const qoderCard = await openQoderAvailability(launched.page);
-    await expect(qoderCard.getByText("未安装", { exact: true }))
+    await expect(qoderCard.locator(".settings-agent-service-main").getByText("未安装", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     await qoderCard.getByRole("button", { name: "安装 Qoder CLI" }).click();
 
@@ -762,7 +778,7 @@ test("Qoder managed install can be cancelled while the install request is pendin
 
     await cancelButton.click();
     await expect.poll(() => cancelPosts).toBe(1);
-    await expect(qoderCard.getByText("未安装", { exact: true }))
+    await expect(qoderCard.locator(".settings-agent-service-main").getByText("未安装", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeEnabled();
     expect(requestPosts).toBe(0);

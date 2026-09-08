@@ -1,5 +1,6 @@
 "use client";
 
+import { createExecutionClock } from "./execution-clock.js";
 import {
   Fragment,
   useCallback,
@@ -48,6 +49,7 @@ import styles from "./ai-conversation-sidebar.module.css";
 // Bridge; the workflow layer supplies data and receives intents.
 
 export type AiConversationSidebarProps = {
+  documentKey?: string;
   state: string;
   title: string;
   messages: readonly unknown[];
@@ -107,7 +109,7 @@ export type AiConversationSidebarProps = {
       BoundAgentSetupPanelProps,
       "card" | "surface" | "hideDisconnectAction" | "initialApiKeyOpen" | "actionButtonRef"
     >;
-    onSelect(selection: AgentSelection): void;
+    onSelect(selection: AgentSelection): void | Promise<boolean>;
     onQueueDefault?(selection: AgentSelection): void;
     onReconnect?(selection: AgentSelection): Promise<unknown>;
     onBeginAccessRepair?(field?: "apiKey" | "login" | "install" | "model" | "provider"): void;
@@ -257,10 +259,15 @@ export default function AiConversationSidebar({
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
   const [clockNow, setClockNow] = useState(0);
+  const executionClockRef = useRef<{ key: string; running: boolean; clock: ReturnType<typeof createExecutionClock> } | null>(null);
+  const clockEnabled = agentWorking || handoffStatus === "cancelling";
   const streamRef = useRef<HTMLDivElement | null>(null);
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const liveMessageRef = useRef<HTMLElement | null>(null);
   const agentSelectorRef = useRef<HTMLDivElement | null>(null);
+  const serviceSelectorRef = useRef<HTMLDivElement | null>(null);
+  const serviceSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [selectionError, setSelectionError] = useState("");
   const agentSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const reasoningSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const followingRef = useRef(true);
@@ -272,20 +279,9 @@ export default function AiConversationSidebar({
     || "Agent";
   const resolvedAgentSettingsName = agentSettingsName || resolvedAgentActionName;
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
-  const historyBoundaryByIndex = useMemo(() => {
-    const boundaries = new Map<number, { label: string; first: boolean; kind: string }>();
-    for (const group of historyGroups) {
-      const firstIndex = group.messageIndices[0];
-      for (const messageIndex of group.messageIndices) {
-        boundaries.set(messageIndex, {
-          label: group.label,
-          first: messageIndex === firstIndex,
-          kind: group.kind,
-        });
-      }
-    }
-    return boundaries;
-  }, [historyGroups]);
+  const displayedGroups = useMemo(() => (historyGroups.length ? historyGroups : [{
+    key: "messages", label: "", kind: "history", messageIndices: stream.map((_message, index) => index),
+  }]).map((group) => ({ ...group, messages: stream.filter((_message, index) => group.messageIndices.includes(index)) })), [historyGroups, stream]);
   const activeIntent = sidebarResolvedIntent(state);
   // Product state alone determines the one available action and mode copy.
   const mode = sidebarModePresentation(state);
@@ -374,7 +370,6 @@ export default function AiConversationSidebar({
   const recovery = agentAccess?.recovery || null;
   const setupCard = agentAccess?.cards.find((card) => card.selection.providerId === setupProviderId) || null;
   const currentProviderId = agentPresentation?.providerId
-    || agentAccess?.cards.find((card) => card.availability.status === "ready")?.selection.providerId
     || "";
   const currentCard = agentAccess?.cards.find((card) => card.selection.providerId === currentProviderId)
     || setupCard;
@@ -494,7 +489,8 @@ export default function AiConversationSidebar({
   useEffect(() => {
     if (!openChoice) return undefined;
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!agentSelectorRef.current?.contains(event.target as Node)) {
+      if (!agentSelectorRef.current?.contains(event.target as Node)
+        && !serviceSelectorRef.current?.contains(event.target as Node)) {
         setOpenChoice(null);
       }
     };
@@ -502,7 +498,7 @@ export default function AiConversationSidebar({
       if (event.key !== "Escape") return;
       event.preventDefault();
       setOpenChoice(null);
-      (openChoice === "reasoning" ? reasoningSelectorButtonRef : agentSelectorButtonRef)
+      (openChoice === "service" ? serviceSelectorButtonRef : openChoice === "reasoning" ? reasoningSelectorButtonRef : agentSelectorButtonRef)
         .current?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
@@ -514,10 +510,27 @@ export default function AiConversationSidebar({
   }, [openChoice]);
 
   useEffect(() => {
-    if (!agentWorking && handoffStatus !== "cancelling") return undefined;
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [agentWorking, handoffStatus, agentStartedAt, agentLastActivityAt]);
+    const key = `${runKey || ""}:${agentStartedAt || ""}`;
+    if (!executionClockRef.current || executionClockRef.current.key !== key || (clockEnabled && !executionClockRef.current.running)) {
+      executionClockRef.current = { key, running: clockEnabled, clock: createExecutionClock({ startedAt: agentStartedAt }) };
+    }
+    const clock = executionClockRef.current.clock;
+    if (!clockEnabled) {
+      executionClockRef.current.running = false;
+      setClockNow(clock.stop());
+      return undefined;
+    }
+    setClockNow(clock.sample());
+    const timer = window.setInterval(() => setClockNow(clock.sample()), 1_000);
+    const resume = () => {
+      if (document.visibilityState === "visible") setClockNow(clock.sample({ resume: true }));
+    };
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [clockEnabled, runKey, agentStartedAt]);
 
   useEffect(() => {
     if (runKey && runKey !== runKeyRef.current) {
@@ -596,21 +609,14 @@ export default function AiConversationSidebar({
             还没有修改记录。先在页面上写评论，再交给 AI 修改。
           </p>
         ) : (
-          stream.map((message, messageIndex) => {
+          displayedGroups.map((group) => (
+            <section key={group.key} className={styles.turnGroup} data-turn-id={group.key} aria-label={group.label || "一轮修改"}>
+              {group.label ? <div className={styles.historyGroup} data-kind={group.kind} data-testid="ai-conversation-history-group">{group.label}</div> : null}
+              {group.messages.map((message) => {
             const timestamp = sidebarTimestampLabel(message.createdAt);
             const copyKey = `message:${message.messageId}`;
-            const historyBoundary = historyBoundaryByIndex.get(messageIndex);
             return (
-              <Fragment key={`${message.messageId || "message"}:${messageIndex}`}>
-                {historyBoundary?.first ? (
-                  <div
-                    className={styles.historyGroup}
-                    data-kind={historyBoundary.kind}
-                    data-testid="ai-conversation-history-group"
-                  >
-                    {historyBoundary.label}
-                  </div>
-                ) : null}
+              <Fragment key={message.messageId || String(message.sequence)}>
                 <article
                   className={styles.message}
                   data-actor={message.actor}
@@ -646,7 +652,9 @@ export default function AiConversationSidebar({
                 </article>
               </Fragment>
             );
-          })
+              })}
+            </section>
+          ))
         )}
 
         {runSummary && deliveryMode !== "managed-agent" ? (
@@ -657,7 +665,7 @@ export default function AiConversationSidebar({
             aria-label="本轮任务摘要"
           >
             <PageRootAvatar />
-            <span className={styles.actor}>源页</span>
+            <span className={styles.actor}>Stemmio</span>
             <p className={styles.text}>{runSummary.title}</p>
             {runSummary.detail ? <small className={styles.runSummaryDetail}>{runSummary.detail}</small> : null}
           </section>
@@ -684,16 +692,14 @@ export default function AiConversationSidebar({
               * Signing them with an Agent name made the Agent look like the author of
               * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
             */}
-            {executionStatus ? null : <span className={styles.actor}>源页</span>}
+            {executionStatus ? null : <span className={styles.actor}>Stemmio</span>}
             <p
               className={`${styles.text} ${styles.liveStatus}`}
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
+              aria-live="off"
             >
               {executionStatus?.title || runProgress?.liveLabel || runProgress?.headline}
             </p>
-            {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}</small> : null}
+            {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}{agentLastActivityAt && clockNow - Date.parse(agentLastActivityAt) > 30_000 ? " · 暂未收到新响应" : ""}</small> : null}
             {executionStatus ? (
               <>
                 <small className={styles.runSummaryDetail}>{resolvedFileName}</small>
@@ -701,15 +707,7 @@ export default function AiConversationSidebar({
                   <summary>详情</summary>
                   <span>已接收 {Math.ceil(agentReceivedBytes / 1024)} KB</span>
                 </details>
-                <div className={styles.actions}>
-                  {actionBar?.actions.map((action) => (
-                    <button key={action.id} type="button" className={styles.action}
-                      data-action-id={action.id} data-tone="quiet" disabled={action.disabled === true}
-                      onClick={() => onAction?.(action.id)}>
-                      {action.id === "cancel" && !action.disabled ? "停止" : action.label}
-                    </button>
-                  ))}
-                </div>
+
               </>
             ) : null}
           </section>
@@ -781,7 +779,21 @@ export default function AiConversationSidebar({
           * three separate regions, so a single round was read in three places with
           * an empty gap between them.
           */}
-        {actionBar && !executionStatus && !setupCard ? (
+        {hasUnseenContent ? (
+          <button
+            className={styles.unseenContent}
+            type="button"
+            data-testid="ai-conversation-unseen-content"
+            onClick={revealLatest}
+          >
+            有新进展
+          </button>
+        ) : null}
+        <div ref={bottomSentinelRef} className={styles.bottomSentinel} aria-hidden="true" />
+      </div>
+
+      <div className={styles.currentActions} data-testid="ai-conversation-current-actions">
+        {actionBar && !setupCard ? (
           <section
             className={`${styles.message} ${styles.actionBar}`}
             data-actor="pageroot"
@@ -790,17 +802,17 @@ export default function AiConversationSidebar({
             aria-label="当前待决定"
           >
             <PageRootAvatar />
-            <span className={styles.actor}>源页</span>
+            <span className={styles.actor}>Stemmio</span>
             {actionBar.title ? (
               <strong
                 {...(actionBar.kind === "decision"
                   ? { role: "status", "aria-live": "polite", "aria-atomic": "true" }
                   : {})}
               >
-                {actionBar.title}
+                {executionStatus?.title || actionBar.title}
               </strong>
             ) : null}
-            {actionBar.detail ? <p>{actionBar.detail}</p> : null}
+            {executionStatus?.detail || actionBar.detail ? <p>{executionStatus?.detail || actionBar.detail}</p> : null}
             {actionBar.actions.length > 0 ? (
               <div className={styles.actions}>
                 {actionBar.actions.map((action) => (
@@ -825,24 +837,13 @@ export default function AiConversationSidebar({
                       onAction?.(action.id);
                     }}
                   >
-                    {action.label}
+                    {executionStatus && action.id === "cancel" && !action.disabled ? "停止" : action.label}
                   </button>
                 ))}
               </div>
             ) : null}
           </section>
         ) : null}
-        {hasUnseenContent ? (
-          <button
-            className={styles.unseenContent}
-            type="button"
-            data-testid="ai-conversation-unseen-content"
-            onClick={revealLatest}
-          >
-            有新进展
-          </button>
-        ) : null}
-        <div ref={bottomSentinelRef} className={styles.bottomSentinel} aria-hidden="true" />
       </div>
 
       <div className={styles.composer} data-testid="ai-conversation-composer">
@@ -856,7 +857,7 @@ export default function AiConversationSidebar({
             className={styles.contextSummary}
             data-testid="ai-conversation-context-summary"
           >
-            {`将发送：${pendingCommentCount} 条评论 · 当前 HTML · 项目规则`}
+            {`${pendingCommentCount} 条修改意见`}
           </p>
         ) : null}
         {(state === "preview-ready" || state === "no-change") && send.reason ? (
@@ -867,8 +868,9 @@ export default function AiConversationSidebar({
 
         <div className={styles.composerActions}>
           {showComposerIdentity ? <div className={styles.identityActions}>
-            <div className={styles.agentSelector}>
+            <div className={styles.agentSelector} ref={serviceSelectorRef}>
               <button
+                ref={serviceSelectorButtonRef}
                 type="button"
                 className={styles.schemeTrigger}
                 data-testid="ai-conversation-agent"
@@ -887,6 +889,7 @@ export default function AiConversationSidebar({
                 <span>{serviceTriggerLabel}</span>
                 <span className={styles.agentChevron} aria-hidden="true">▾</span>
               </button>
+              {selectionError ? <span role="alert">{selectionError}</span> : null}
               {openChoice === "service" && agentAccess?.cards.length ? (
                 <div
                   id="ai-conversation-service-choices"
@@ -898,16 +901,13 @@ export default function AiConversationSidebar({
                     const snapshot = card.presentation.availability(card.availability);
                     const disconnected = card.availability.reason === "disabled";
                     const chooseService = () => {
-                      if (card.availability.status === "ready") {
-                        agentAccess.onSelect(card.selection);
-                        setOpenChoice(null);
-                        setSetupProviderId(null);
-                        return;
-                      }
-                      agentAccess.onQueueDefault?.(card.selection);
-                      if (disconnected) void agentAccess.onReconnect?.(card.selection);
-                      setSetupProviderId(card.selection.providerId);
+                      setSelectionError("");
+                      void Promise.resolve(agentAccess.onSelect(card.selection)).then((saved) => {
+                        if (saved === false) setSelectionError("服务已切换，但选择未保存，请重新选择。 ");
+                      }, () => setSelectionError("服务选择未保存，请重新选择。"));
+                      setSetupProviderId(card.availability.status === "ready" ? null : card.selection.providerId);
                       setOpenChoice(null);
+                      serviceSelectorButtonRef.current?.focus();
                     };
                     return (
                       <button
@@ -916,10 +916,6 @@ export default function AiConversationSidebar({
                         aria-pressed={card.selection.providerId === currentProviderId}
                         className={styles.agentChoice}
                         data-testid={`ai-conversation-service-${card.selection.providerId}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          chooseService();
-                        }}
                         onClick={chooseService}
                       >
                         <strong>{agentServiceLabel(card.selection.providerId, card.presentation.displayName)}</strong>

@@ -28,7 +28,11 @@ export function agentSetupRecovery(diagnostic, availability) {
     return { statusLabel: "当前组件无法使用", detail: auth === "ready" ? "账号已登录，需要更新连接组件。" : "需要更新受验证的连接组件。", tone: "attention",
       action: "install", actionLabel: "更新连接组件" };
   }
-  if (protocol === "failed" && auth === "ready" || availability.reason === "invalid-installation") {
+  if (protocol === "failed" && auth === "ready" && availability.reason !== "invalid-installation") {
+    return { statusLabel: "暂时无法使用", detail: "账号已登录，但连接检查没有通过。", tone: "attention",
+      action: "recheck", actionLabel: "重新检查" };
+  }
+  if (availability.reason === "invalid-installation") {
     return { statusLabel: "连接需要修复", detail: auth === "ready" ? "账号已登录，但连接组件未能启动。" : "连接组件未能启动。", tone: "attention",
       action: "install", actionLabel: "修复连接" };
   }

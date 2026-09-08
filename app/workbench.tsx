@@ -745,15 +745,12 @@ export default function Workbench() {
       selection: provider.selection,
     }),
   );
-  const selectedAgentChoiceId = frozenAgentSelection
-    ? `${frozenAgentSelection.providerId}:${frozenAgentSelection.runtimeId}`
-    : null;
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
   const agentCards = agentProviderCardsFromCatalog(agentCatalogSnapshot);
   const workspacePreferencesController = useWorkspacePreferences(
     desktopUiPreferencesApi,
-    { workspaceController, agentCatalogSnapshot },
+    { workspaceController, agentCatalogSnapshot, documentId: documentId ?? "" },
   );
   const workspacePreferencesSnapshot = workspacePreferencesController.snapshot;
   const workspacePreferences = workspacePreferencesSnapshot.workspace;
@@ -5897,22 +5894,23 @@ export default function Workbench() {
   // new path while this overlay is still visible; the live path would rebuild
   // both preview sessions (and retitle the header) mid-accept for nothing.
   const selectDefaultAgent = (selection: AgentSelection) => {
+    workspaceController?.clearPendingDefaultAgent?.();
+    void workspacePreferencesController.update({
+      defaultAgentProviderId: selection.providerId as WorkspacePreferences["defaultAgentProviderId"],
+    });
+  };
+  const selectDocumentAgent = async (selection: AgentSelection) => {
     try {
-      workspaceController?.clearPendingDefaultAgent?.();
       const selected = workspaceController?.selectAgent(selection);
-      if (selected) {
-        void workspacePreferencesController.update({
-          defaultAgentProviderId: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
-        });
-      }
-    } catch (cause) {
-      reportInternalFailure({
-        area: "settings",
-        operation: "select-agent",
-        code: "default-agent-selection-failed",
-        recovered: false,
-        cause,
+      if (!selected || !documentId) return false;
+      return await workspacePreferencesController.update({
+        documentAgentSelections: {
+          ...workspacePreferencesController.snapshot.workspace.documentAgentSelections,
+          [documentId]: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
+        },
       });
+    } catch {
+      return false;
     }
   };
   const agentAccess = {
@@ -5947,7 +5945,7 @@ export default function Workbench() {
       onSelectAgentModel: selectSettingsAgentModel,
       onSelectAgentReasoning: selectSettingsAgentReasoning,
     },
-    onSelect: selectDefaultAgent,
+    onSelect: selectDocumentAgent,
     onQueueDefault: (selection: AgentSelection) => {
       workspaceController?.queuePendingDefaultAgent(selection);
     },
@@ -6466,7 +6464,7 @@ export default function Workbench() {
           workspacePreferencesSaving={workspacePreferencesSnapshot.saving}
           workspacePreferencesError={workspacePreferencesSnapshot.error}
           agentChoices={agentProviderChoices}
-          selectedAgentChoiceId={selectedAgentChoiceId}
+          selectedAgentChoiceId={agentProviderChoices.find((choice) => choice.selection.providerId === workspacePreferences.defaultAgentProviderId)?.id ?? null}
           agentCards={agentCards}
           onUpdateWorkspacePreference={workspacePreferencesController.update}
           onRetryWorkspacePreferences={() => {
