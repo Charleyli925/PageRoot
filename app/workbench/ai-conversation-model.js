@@ -337,7 +337,8 @@ export function sidebarMessageStream(messages) {
       actorLabel: sidebarActorLabel(message.actor),
       kind: String(message.kind || "text"),
       status: String(message.status || "completed"),
-      text: String(message.text || ""),
+      text: message.actor === "pageroot" && message.text === "修改已准备好，尚未采用。"
+        ? "修改已准备好。" : String(message.text || ""),
       truncated: message.truncated === true,
       sequence: Number(message.sequence) || 0,
       createdAt: String(message.createdAt || ""),

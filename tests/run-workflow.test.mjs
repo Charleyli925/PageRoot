@@ -2543,3 +2543,15 @@ for (const delayedMethod of ["recordSubmission", "preflightAgent"]) {
     harness.workflow.dispose();
   });
 }
+
+test("an unresolved adoption blocks an opposite end decision before contacting Bridge", async () => {
+  let cancelled = 0;
+  const harness = createHarness({ bridge: { async cancelActiveRun() { cancelled += 1; return {}; } } });
+  const run = runRecord({ status: "ready-to-open", adoptionPhase: "unknown" });
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.runSession.beginOperation("activate", operationKey(run));
+  assert.equal((await harness.workflow.cancel({ run })).code, "RUN_ADOPTION_PENDING");
+  assert.equal(cancelled, 0);
+  assert.equal(harness.runSession.activeRun.adoptionPhase, "unknown");
+  harness.workflow.dispose();
+});

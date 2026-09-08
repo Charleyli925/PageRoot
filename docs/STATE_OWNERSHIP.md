@@ -611,3 +611,7 @@ Before accepting a submission, Conversation Repository reserves 128 messages, tw
 Every RunWorkflow submit exit before a known Request settles the original submission identity in finally, including stale navigation after receipt or ticket arrival. A dispatched unknown Request is excluded and stays with existing reconciliation. The in-memory pending run is removed only after this pre-Request settlement path; navigation never changes its target.
 
 Sidebar Turn presentation keeps submitted requirements, sealed public summaries, results and decisions in reading order. Typed progress and legacy fixed-stage facts are default-collapsed under a keyboard-accessible native details element; expanding history never exposes an executable decision. Successful CI desktop/AI evidence includes synthetic visual captures from output/design-qa.
+
+The history view renders the legacy Candidate-ready fact as “修改已准备好。”;
+its former “尚未采用” wording is not reused as a current adoption assertion.
+Current adoption status comes exclusively from the active operation projection.
