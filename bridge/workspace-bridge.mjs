@@ -94,6 +94,12 @@ function e2eAgentInstallFetch(_url, { signal } = {}) {
 
 const agentBridgeService = new AgentBridgeService({
   resolveTask: resolveAgentBridgeTask,
+  recordExecutionFact: async (identity, event) => {
+    const target = await projectFileTargetForBody(identity);
+    if (!target) throw projectNotFoundError();
+    await projectFileRepository.recordExecutionFact({ target, requestId: identity.requestId,
+      attemptId: identity.attemptId, event });
+  },
   ...(process.env.PAGEROOT_E2E === "1" && process.env.PAGEROOT_AGENT_INSTALL_STUB_FETCH
     ? {
       installerOptions: {

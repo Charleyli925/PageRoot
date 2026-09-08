@@ -2,13 +2,18 @@
 // ProjectFileRepository invokes these helpers under its existing serial writer.
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { ensureCurrentConversation, readConversation, mutateConversation } from "../conversation-repository.mjs";
+import { ensureCurrentConversation, rotateConversationAtLimit, readConversation, mutateConversation } from "../conversation-repository.mjs";
 import { appendConversationContext, startConversationTurn, appendConversationTurnMessage, sealConversationTurn } from "../../shared/conversation.mjs";
 import { sha256 } from "../lifecycle-core.mjs";
 import { normalizeAgentDelivery } from "../../shared/agent-delivery.mjs";
 import { compileTaskSpec } from "../../shared/task-spec.mjs";
 import { atomicWriteProjectJson, readJsonFile } from "./path-safety.mjs";
 import { ProjectFileRepositoryError } from "./errors.mjs";
+
+function submissionRequirementText(snapshot) {
+  return snapshot.comments.map((comment) => String(comment.text || comment.content || "")).join("\n\n")
+    || snapshot.taskSpec.objective;
+}
 
 function receiptPath(loaded, operationId) {
   if (!/^submission_[a-f0-9]{32}$/u.test(String(operationId || ""))) {
@@ -47,6 +52,11 @@ export async function saveSubmissionReceipt(loaded, { operationId, input, projec
   if (snapshot.sourceSha256 !== loaded.source.sha256) {
     throw new ProjectFileRepositoryError("SOURCE_HASH_CONFLICT", "Source changed before submission was recorded.");
   }
+  // Reject oversized requirements before accepting a durable Turn. The draft
+  // remains editable; no provider has been contacted and nothing is truncated.
+  if (Buffer.byteLength(JSON.stringify(submissionRequirementText(snapshot)), "utf8") > 1024 * 1024) {
+    throw new ProjectFileRepositoryError("SUBMISSION_REQUIREMENTS_TOO_LARGE", "本轮要求过长，请拆分后提交；尚未发送。");
+  }
   const snapshotSha256 = sha256(JSON.stringify(snapshot));
   const existing = await readSubmissionReceipt(loaded, operationId);
   if (existing) {
@@ -57,10 +67,14 @@ export async function saveSubmissionReceipt(loaded, { operationId, input, projec
     return existing;
   }
   const suffix = operationId.slice("submission_".length);
+  const conversationContext = { projectRoot: path.join(loaded.paths.projectRootPath, ".pageroot"),
+    projectId: loaded.project.projectId, documentId: loaded.project.documentId };
+  const conversation = await rotateConversationAtLimit(conversationContext,
+    await ensureCurrentConversation(conversationContext),
+    { reserve: { messages: 128, contexts: 2, turns: 1, bytes: 2 * 1024 * 1024 } });
   const receipt = {
     schemaVersion: "1.0.0", operationId,
-    conversationId: (await ensureCurrentConversation({ projectRoot: path.join(loaded.paths.projectRootPath, ".pageroot"),
-      projectId: loaded.project.projectId, documentId: loaded.project.documentId })).conversationId,
+    conversationId: conversation.conversationId,
     projectId: loaded.project.projectId, documentId: loaded.project.documentId,
     workingCopyId: loaded.workingCopy.workingCopyId,
     turnId: `turn_${suffix}`, requestId: `req_${suffix}`, attemptId: "attempt_001",
@@ -110,11 +124,14 @@ export async function projectSubmissionReceipt(loaded, receipt) {
         startedAt: receipt.createdAt, submissionOperationId: receipt.operationId,
       }, { now });
     }
-    next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
-      messageId: `message_${suffix}_submitted`, actor: "user", kind: "text", status: "completed",
-      text: receipt.snapshot.comments.map((comment) => String(comment.text || comment.content || "")).join("\n\n")
-        || receipt.snapshot.taskSpec.objective,
-    } }, { now });
+    const requirement = submissionRequirementText(receipt.snapshot);
+    for (let offset = 0; offset < requirement.length; offset += 100000) {
+      next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
+        messageId: `message_${suffix}_submitted${offset ? `_${offset}` : ""}`,
+        actor: "user", kind: "text", status: "completed",
+        text: requirement.slice(offset, offset + 100000),
+      } }, { now });
+    }
     const turn = next.turns.find((entry) => entry.turnId === receipt.turnId);
     if (receipt.status === "not-started" && ["queued", "running"].includes(turn.status)) {
       next = sealConversationTurn(next, { turnId: receipt.turnId, status: "failed", messages: [{
@@ -122,6 +139,77 @@ export async function projectSubmissionReceipt(loaded, receipt) {
         text: "本次未开始，修改要求已保留。请修复服务后重新尝试。", errorCode: receipt.errorCode,
       }] }, { now: () => receipt.completedAt });
     }
+    for (const input of receipt.events || []) {
+      const event = submissionExecutionFact(input);
+      next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
+        messageId: `message_${event.eventId}`, actor: "pageroot", kind: "text", status: "completed",
+        text: EXECUTION_FACTS[event.kind], createdAt: event.timestamp, completedAt: event.timestamp,
+        requestId: receipt.requestId, attemptId: receipt.attemptId, candidateId: event.candidateId,
+      } }, { now: () => event.timestamp });
+      const currentTurn = next.turns.find((value) => value.turnId === receipt.turnId);
+      const terminal = { "candidate-ready": "completed", "no-change": "completed", cancelled: "cancelled", error: "failed", interrupted: "interrupted" }[event.kind];
+      if (terminal && ["queued", "running"].includes(currentTurn.status)) {
+        next = sealConversationTurn(next, { turnId: receipt.turnId, status: terminal,
+          requestId: receipt.requestId, attemptId: receipt.attemptId, candidateId: event.candidateId,
+        }, { now: () => event.timestamp });
+      }
+    }
     return next;
   });
+}
+
+const EXECUTION_FACTS = Object.freeze({
+  started: "已开始执行本轮修改。",
+  "starting-session": "正在建立执行会话。",
+  "sending-task": "已发出本轮修改要求。",
+  "generating-modification": "正在生成修改。",
+  "reading-task": "正在读取本轮资料。",
+  "writing-candidate": "正在写入修改结果。",
+  finalizing: "正在核对修改结果。",
+  "validating-html": "正在校验修改结果。",
+  "preparing-review": "正在准备审阅。",
+  "stop-requested": "已请求停止，正在等待确认。",
+  "stop-confirmed": "执行已停止，修改要求已保留。",
+  failed: "执行未能完成，修改要求已保留。",
+  "execution-ended": "执行已结束，结果仍需校验。",
+  interrupted: "执行连接已中断，结果需要核对；部分过程可能未保存。",
+  "candidate-ready": "修改已准备好，尚未采用。",
+  "no-change": "本轮没有产生修改，修改要求已保留。",
+  cancelled: "本轮已停止，修改要求已保留。",
+  error: "修改结果未通过校验，页面尚未修改。",
+  rejected: "未采用本次修改，修改要求与历史已保留。",
+  promoted: "已采用本次修改。",
+});
+
+export function submissionExecutionFact({ eventId, kind, timestamp, candidateId = null }) {
+  if (!Object.hasOwn(EXECUTION_FACTS, kind) || !/^[A-Za-z0-9_-]{1,180}$/u.test(eventId)
+    || !Number.isFinite(Date.parse(timestamp))) {
+    throw new ProjectFileRepositoryError("SUBMISSION_EVENT_INVALID", "Execution fact is invalid.");
+  }
+  return { eventId, kind, timestamp,
+    ...(candidateId && /^candidate_[A-Za-z0-9_-]{1,160}$/u.test(candidateId) ? { candidateId } : {}) };
+}
+
+export async function appendSubmissionExecutionFact(loaded, operationId, input) {
+  const current = await readSubmissionReceipt(loaded, operationId);
+  if (!current) throw new ProjectFileRepositoryError("SUBMISSION_MISSING", "Submission receipt is missing.");
+  const event = submissionExecutionFact(input);
+  const events = current.events || [];
+  const existing = events.find((value) => value.eventId === event.eventId);
+  if (existing && JSON.stringify(existing) !== JSON.stringify(event)) {
+    throw new ProjectFileRepositoryError("SUBMISSION_EVENT_COLLISION", "Execution fact cannot be replaced.");
+  }
+  let receipt = current;
+  if (!existing) {
+    const progressKinds = new Set(["starting-session", "sending-task", "reading-task",
+      "writing-candidate", "generating-modification", "receiving-response",
+      "response-received", "finalizing", "validating-html", "preparing-review"]);
+    const omitProgress = progressKinds.has(event.kind)
+      && events.filter((value) => progressKinds.has(value.kind)).length >= 64;
+    receipt = { ...current, events: omitProgress ? events : [...events, event],
+      eventsTruncated: current.eventsTruncated === true || omitProgress };
+    await atomicWriteProjectJson(loaded.paths.projectRootPath, receiptPath(loaded, operationId), receipt, "submission");
+  }
+  await projectSubmissionReceipt(loaded, receipt);
+  return receipt;
 }

@@ -74,6 +74,36 @@
           "type": "object"
         }
       }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "required": [
+          "eventId",
+          "kind",
+          "timestamp"
+        ],
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,180}$"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "candidateId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "eventsTruncated": {
+      "type": "boolean"
     }
   }
 }
