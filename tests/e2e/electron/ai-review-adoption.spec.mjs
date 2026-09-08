@@ -3354,3 +3354,68 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
+
+test("two lost committed adoption replies stay pending and recover one decision through restart", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async () => {
+  const fixture = createSourceFixture("adoption-unknown-recovery.html");
+  let launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let releaseFirst;
+  const firstHeld = new Promise((resolve) => { releaseFirst = resolve; });
+  let backendCommitted;
+  const committed = new Promise((resolve) => { backendCommitted = resolve; });
+  let allowRecovery = false;
+  let result;
+  const decisions = [];
+  const captures = path.join(productRoot, "output/design-qa/ai-assistant-redesign");
+  mkdirSync(captures, { recursive: true });
+  try {
+    const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
+    writeAiOutput(request.requestRoot, (base) => preserveCandidateSourceIdsForFixture(base, base.replace(ORIGINAL_TEXT, UPDATED_TEXT)));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await launched.page.getByRole("button", { name: "查看修改", exact: true }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
+    await launched.page.route("**/ready-version/activate", async (route) => {
+      decisions.push(route.request().postDataJSON());
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      result = await response.json();
+      if (decisions.length === 1) { backendCommitted(); await firstHeld; }
+      if (!allowRecovery) await route.abort("timedout");
+      else await route.fulfill({ response });
+    });
+    await launched.page.getByRole("button", { name: "采纳修改", exact: true }).click();
+    await launched.page.getByRole("button", { name: "确认并采纳", exact: true }).click();
+    await committed;
+    const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("正在采用");
+    await expect(launched.page.getByRole("button", { name: "正在采纳…", exact: true })).toBeDisabled();
+    await launched.page.screenshot({ path: path.join(captures, "trusted-loop-adopting.png"), animations: "disabled" });
+    releaseFirst();
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("采用结果待确认");
+    expect(decisions.length).toBeGreaterThanOrEqual(2);
+    await expect(sidebar).not.toContainText("尚未采用");
+    await expect(launched.page.getByRole("button", { name: "正在采纳…", exact: true })).toBeDisabled();
+    await expect(sidebar.getByTestId("ai-conversation-action-bar").getByRole("button")).toHaveCount(0);
+    await launched.page.screenshot({ path: path.join(captures, "trusted-loop-adoption-unknown.png"), animations: "disabled" });
+    allowRecovery = true;
+    await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0, { timeout: 30_000 });
+    expect(decisions.every((decision) => JSON.stringify(decision) === JSON.stringify(decisions[0]))).toBe(true);
+    expect(decisions[0].decisionOperationId).toBeTruthy();
+    expect(readFileSync(result.sourcePath, "utf8")).toContain(UPDATED_TEXT);
+    await expect(sidebar.getByText("已采用本次修改。", { exact: true })).toHaveCount(1);
+    const isolatedUserData = launched.isolatedUserData;
+    await closePageRootGracefully(launched.electronApp, launched.page);
+    launched = await launchPageRoot({ isolatedUserData, activeSourcePath: result.sourcePath });
+    await loadedDiskFrame(launched.page, result.sourcePath);
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
+    await expect(launched.page.getByTestId("ai-conversation-sidebar").getByText("已采用本次修改。", { exact: true })).toHaveCount(1);
+    await launched.page.screenshot({ path: path.join(captures, "trusted-loop-adopted-restarted.png"), animations: "disabled" });
+  } finally {
+    releaseFirst();
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
