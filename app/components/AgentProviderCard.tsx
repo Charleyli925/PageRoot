@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Ref } from "react";
+import { Fragment, useState, type Ref } from "react";
 import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
 import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
 
@@ -17,7 +17,7 @@ type AgentActionOutcome = Readonly<{
   code?: string;
   persistFailed?: boolean;
 }> | null | undefined;
-type CardActionKind = AgentProviderGuidanceKind | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning" | "reopen-login";
+type CardActionKind = AgentProviderGuidanceKind | "change-provider" | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning" | "reopen-login";
 type ApiKeyExtras = Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>;
 type ApiKeyField = "apiKey" | "baseUrl" | "modelId" | "form";
 type VendorOption = Readonly<{
@@ -84,6 +84,7 @@ export type AgentProviderCardProps = {
   onInstall?: () => Promise<AgentActionOutcome>;
   onCancelInstall?: () => Promise<AgentActionOutcome>;
   onRecheck?: () => Promise<AgentActionOutcome>;
+  onUseOtherProvider?: () => void;
   onConnectApiKey?: (apiKey: string, extras?: ApiKeyExtras) => Promise<AgentActionOutcome>;
   onRetryPersistCredential?: () => Promise<AgentActionOutcome>;
   onDisconnectApiKey?: () => Promise<AgentActionOutcome>;
@@ -168,6 +169,7 @@ export default function AgentProviderCard({
   onInstall,
   onCancelInstall,
   onRecheck,
+  onUseOtherProvider,
   onConnectApiKey,
   onDisconnectApiKey,
   onOpenVendorApiKeyPage,
@@ -183,6 +185,7 @@ export default function AgentProviderCard({
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [checkReceipt, setCheckReceipt] = useState("");
   const [fieldError, setFieldError] = useState<ApiKeyField | "model" | "reasoning" | "">("");
   const [apiKeyOpen, setApiKeyOpen] = useState(initialApiKeyOpen);
   const [apiKey, setApiKey] = useState("");
@@ -247,6 +250,7 @@ export default function AgentProviderCard({
       ]
       : (recovery ? [
         { kind: recovery.action, label: recovery.actionLabel, copiedLabel: recovery.actionLabel },
+        ...(recovery.allowRecheck ? [{ kind: "recheck" as const, label: "重新检查", copiedLabel: "重新检查" }] : []),
         ...(recovery.allowLogin ? [{ kind: "login" as const, label: "重新登录", copiedLabel: "重新登录" }] : []),
       ] : actionsForAvailability(availability, provider)).filter((action) => !(
         action.kind === "api-key"
@@ -270,6 +274,10 @@ export default function AgentProviderCard({
   const runAction = async (kind: CardActionKind) => {
     if (disabled) return;
     setFieldError("");
+    if (kind === "change-provider") {
+      onUseOtherProvider?.();
+      return;
+    }
     if (kind === "cancel-install") {
       if (cancelPending || cancelRequested || typeof onCancelInstall !== "function") return;
       setCancelRequested(true);
@@ -332,6 +340,7 @@ export default function AgentProviderCard({
     }
     setPendingAction(kind);
     setActionError("");
+    setCheckReceipt("");
     try {
       const outcome = kind === "recheck" && typeof onRecheck === "function"
           ? await onRecheck()
@@ -339,6 +348,9 @@ export default function AgentProviderCard({
             ? await (typeof onStartLogin === "function" ? onStartLogin() : onCopyGuidance(kind))
             : null;
       const succeeded = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
+      if (succeeded && kind === "recheck" && outcome?.status === "succeeded") {
+        setCheckReceipt("刚刚检查：服务可以使用。");
+      }
       if (!succeeded) {
         setActionError(
           outcome?.reason || (kind === "recheck"
@@ -501,7 +513,7 @@ export default function AgentProviderCard({
       data-tone={statusPresentation.tone}
       aria-busy={checking || installing || cancelling || Boolean(pendingAction)}
     >
-      {surface !== "settings" || actions.length > 0 || statusPresentation.detail || (actionError && !fieldError) || loginOpenError ? <div className="qoder-card-summary">
+      {surface !== "settings" || actions.length > 0 || statusPresentation.detail || (actionError && !fieldError) || loginOpenError || checkReceipt ? <div className="qoder-card-summary">
         {surface === "settings" ? null : (
           <span
             className="qoder-card-brand"
@@ -589,6 +601,7 @@ export default function AgentProviderCard({
               {pendingAction === "api-key" && !apiKeyOpen ? "正在断开…" : "断开连接"}
             </button>
           ) : null}
+          {checkReceipt ? <span role="status">{checkReceipt}</span> : null}
           {actionError && !tokenFormOpen && !fieldError ? (
             <span className="qoder-card-error" role="alert">{actionError}</span>
           ) : loginOpenError && loggingIn ? (
@@ -596,6 +609,20 @@ export default function AgentProviderCard({
           ) : null}
         </span>
       </div> : null}
+      {diagnostic ? (
+        <details className="agent-diagnostic-details" data-testid="agent-diagnostic-details">
+          <summary>查看检查详情</summary>
+          <dl>
+            {([ ["installation", "安装"], ["authentication", "登录"], ["protocol", "连接"], ["service", "服务"] ] as const).map(([key, label]) => (
+              <Fragment key={key}><dt>{label}</dt><dd>{({ ready: "通过", configured: "已配置", missing: "未安装", invalid: "无效", required: "需要登录", failed: "未通过", unavailable: "不可用", unknown: "未确认" })[diagnostic.facts[key].status]}</dd></Fragment>
+            ))}
+            <dt>检查时间</dt><dd>{diagnostic.checkedAt ? new Date(diagnostic.checkedAt).toLocaleString() : "未检查"}</dd>
+            {diagnostic.cause ? <><dt>错误码</dt><dd>{diagnostic.cause}</dd></> : null}
+            {diagnostic.diagnosticId ? <><dt>诊断编号</dt><dd>{diagnostic.diagnosticId}</dd></> : null}
+            {diagnostic.configurationGeneration !== undefined ? <><dt>配置代次</dt><dd>{diagnostic.configurationGeneration}</dd></> : null}
+          </dl>
+        </details>
+      ) : null}
       {connection?.vendorId === "custom" && surface !== "settings" ? (
         <p className="qoder-card-connection" data-testid="settings-agent-current-connection">
           当前连接：{connection.vendorDisplayName || connection.vendorId}

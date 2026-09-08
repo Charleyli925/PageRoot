@@ -396,6 +396,7 @@ export async function runAcpTask({
   turnTimeoutMs,
   cancellationSignal,
   expectedAgentName,
+  sessionModelId,
   createHost,
   clock = Date,
   scheduler,
@@ -484,6 +485,14 @@ export async function runAcpTask({
         startupTimeout.expired,
         cancellation.promise,
       ]);
+      if (sessionModelId) {
+        await Promise.race([
+          context.request("session/set_model", {
+            sessionId: session.sessionId, modelId: sessionModelId,
+          }, { cancellationSignal: startupSignal }),
+          startupTimeout.expired, cancellation.promise,
+        ]);
+      }
       startupTimeout.clear();
       host.bindSessionId(session.sessionId);
       const turnTimeout = timeoutController(

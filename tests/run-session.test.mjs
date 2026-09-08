@@ -344,3 +344,19 @@ test("run session allows the controller to observe alongside the existing view o
   assert.equal(controllerSnapshots.length, 2);
   assert.equal(controllerSnapshots[1].activeRun?.requestId, "request");
 });
+
+test("same-Run hydration preserves unresolved adoption until an explicit or authoritative outcome", () => {
+  const session = new RunSession({ sourcePath: "/tmp/page.html" });
+  session.trackRun(run({ status: "ready-to-open", adoptionPhase: "unknown" }));
+  session.trackRun(run({ status: "ready-to-open" }), { recovered: true });
+  assert.equal(session.activeRun.adoptionPhase, "unknown");
+  session.clearActiveRun();
+  session.setActiveRun(run({ status: "ready-to-open" }));
+  assert.equal(session.activeRun.adoptionPhase, "unknown");
+  session.trackRun(run({ status: "ready-to-open", adoptionPhase: undefined }));
+  assert.equal(session.activeRun.adoptionPhase, undefined);
+  session.trackRun(run({ status: "ready-to-open", adoptionPhase: "unknown" }));
+  session.trackRun(run({ status: "complete" }), { recovered: true });
+  assert.equal(session.activeRun.status, "complete");
+  assert.equal(session.activeRun.adoptionPhase, undefined);
+});

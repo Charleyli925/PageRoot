@@ -649,6 +649,7 @@ export class AgentCatalogState {
   #preflightBySelection = new Map();
   #inflightBySelection = new Map();
   #diagnoseInflightBySelection = new Map();
+  #diagnoseTimeoutMs;
   #spentPreflightIds = new Set();
   #generationByProvider = new Map();
   #diagnoseGenerationByProvider = new Map();
@@ -665,6 +666,7 @@ export class AgentCatalogState {
     bridgeClient,
     handoffPort = null,
     clock = Date,
+    diagnoseTimeoutMs = 30_000,
     providers = defaultAgentProviders(),
     selected = null,
     preferencesPort = null,
@@ -679,6 +681,7 @@ export class AgentCatalogState {
     this.#bridgeClient = bridgeClient;
     this.#handoffPort = handoffPort;
     this.#clock = clock;
+    this.#diagnoseTimeoutMs = Math.max(1, Number(diagnoseTimeoutMs) || 30_000);
     this.#preferencesPort = preferencesPort;
     for (const descriptor of providers) {
       if (!descriptor?.providerId || !descriptor?.runtimeId || !descriptor?.selection) {
@@ -1068,13 +1071,15 @@ export class AgentCatalogState {
     if (inflight) return inflight.promise;
     const generation = (this.#diagnoseGenerationByProvider.get(frozen.providerId) || 0) + 1;
     this.#diagnoseGenerationByProvider.set(frozen.providerId, generation);
+    const configurationGeneration = this.#generationByProvider.get(frozen.providerId) || 0;
+    const operationId = `diagnose_${frozen.providerId}_${generation}`;
     const checking = (async () => {
+      let timeout;
       const previousDiagnostic = this.#providers.get(frozen.providerId)?.diagnostic || null;
       try {
         // Bridge AgentInstaller owns install state. Hydrate it before running a
         // side-effect-free diagnosis so a reopened Settings page can cancel an
         // installation already in flight.
-        await this.#applyPublicCatalog();
         const diagnoseMethod = typeof this.#bridgeClient.agentDiagnose === "function"
           ? (input) => this.#bridgeClient.agentDiagnose(input)
           : typeof this.#bridgeClient.agentAvailability === "function"
@@ -1087,13 +1092,24 @@ export class AgentCatalogState {
             code: "AGENT_DIAGNOSE_UNAVAILABLE",
           });
         }
-        const result = await diagnoseMethod({ selection: frozen });
+        const result = await Promise.race([
+          (async () => {
+            await this.#applyPublicCatalog();
+            return diagnoseMethod({ selection: frozen });
+          })(),
+          new Promise((_, reject) => {
+            timeout = setTimeout(() => reject(Object.assign(new Error("本次检查已超时，请重新检查。"), {
+              code: "AGENT_DIAGNOSE_TIMEOUT",
+            })), this.#diagnoseTimeoutMs);
+          }),
+        ]);
         if (
           this.#disposed
           || this.#diagnoseGenerationByProvider.get(frozen.providerId) !== generation
+          || this.#generationByProvider.get(frozen.providerId) !== configurationGeneration
         ) return null;
         const diagnostic = agentDiagnosticSnapshot(
-          result?.diagnostic || result,
+          { ...(result?.diagnostic || result), operationId, configurationGeneration },
           validDate(this.#clock),
           previousDiagnostic,
         );
@@ -1126,14 +1142,19 @@ export class AgentCatalogState {
             : current?.availability || provider.availability,
         });
       } catch (cause) {
+        if (this.#disposed
+          || this.#diagnoseGenerationByProvider.get(frozen.providerId) !== generation
+          || this.#generationByProvider.get(frozen.providerId) !== configurationGeneration) return null;
         if (
           !this.#disposed
           && this.#diagnoseGenerationByProvider.get(frozen.providerId) === generation
+          && this.#generationByProvider.get(frozen.providerId) === configurationGeneration
         ) {
           const current = this.#providers.get(frozen.providerId);
           const diagnostic = agentDiagnosticSnapshot({
             readiness: "connection-failed",
             cause: cause?.code || "AGENT_DIAGNOSE_UNAVAILABLE",
+            operationId, configurationGeneration,
             operation: "diagnose",
           }, validDate(this.#clock), previousDiagnostic);
           if (current) {
@@ -1143,6 +1164,7 @@ export class AgentCatalogState {
         }
         throw cause;
       } finally {
+        clearTimeout(timeout);
         if (this.#diagnoseInflightBySelection.get(key)?.promise === checking) {
           this.#diagnoseInflightBySelection.delete(key);
         }
@@ -1577,7 +1599,9 @@ export class AgentCatalogState {
         activeOperation: operation,
         loginUrlPresent: started?.loginUrlPresent === true,
       });
-      void this.#openOfficialLogin(frozen.providerId, operation.operationId);
+      // Native Codex login already opens the browser. Keep Stemmio's explicit
+      // reopen command as a fallback, with no second automatic opener.
+      if (frozen.providerId !== "codex") void this.#openOfficialLogin(frozen.providerId, operation.operationId);
       return await this.#waitForLogin(frozen, operation.operationId);
     } catch (cause) {
       const cancelled = cause?.code === "AGENT_LOGIN_CANCELLED";

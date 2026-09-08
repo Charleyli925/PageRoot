@@ -28,6 +28,7 @@
     "createdAt"
   ],
   "properties": {
+    "retainedComments": { "type": "array", "maxItems": 1000, "items": { "type": "object" } },
     "schemaVersion": { "const": "4.0.0" },
     "kind": { "const": "promotion" },
     "state": { "enum": ["prepared", "snapshot-created", "working-copy-prepared", "working-copy-created", "manifest-committed", "completed"] },

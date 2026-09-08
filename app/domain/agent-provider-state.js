@@ -13,6 +13,11 @@ export function agentSetupRecovery(diagnostic, availability) {
   const cause = diagnostic.cause || "";
   const auth = diagnostic.facts?.authentication?.status;
   const protocol = diagnostic.facts?.protocol?.status;
+  if (cause === "CODEX_EXECUTION_CONTRACT_UNSUPPORTED") {
+    return { statusLabel: "当前 Codex 组件暂不支持完成修改",
+      detail: `${auth === "ready" ? "账号已登录。" : ""}当前组件缺少所需的受限执行能力。`,
+      tone: "attention", action: "change-provider", actionLabel: "使用其他 AI", allowRecheck: true };
+  }
   if (/NETWORK|TIMEOUT|CONNECTION_FAILED/u.test(cause)) {
     return { statusLabel: "暂时无法连接", detail: "", tone: "attention", action: "recheck", actionLabel: "重新检查" };
   }
@@ -28,7 +33,11 @@ export function agentSetupRecovery(diagnostic, availability) {
     return { statusLabel: "当前组件无法使用", detail: auth === "ready" ? "账号已登录，需要更新连接组件。" : "需要更新受验证的连接组件。", tone: "attention",
       action: "install", actionLabel: "更新连接组件" };
   }
-  if (protocol === "failed" && auth === "ready" || availability.reason === "invalid-installation") {
+  if (protocol === "failed" && auth === "ready" && availability.reason !== "invalid-installation") {
+    return { statusLabel: "暂时无法使用", detail: "账号已登录，但连接检查没有通过。", tone: "attention",
+      action: "recheck", actionLabel: "重新检查" };
+  }
+  if (availability.reason === "invalid-installation") {
     return { statusLabel: "连接需要修复", detail: auth === "ready" ? "账号已登录，但连接组件未能启动。" : "连接组件未能启动。", tone: "attention",
       action: "install", actionLabel: "修复连接" };
   }
@@ -157,6 +166,10 @@ export function agentDiagnosticSnapshot(value = {}, checkedAt = null, previous =
     : readiness;
   return Object.freeze({
     readiness: effectiveReadiness,
+    failureStage: effectiveReadiness === "ready" ? null
+      : AGENT_DIAGNOSTIC_FACT_NAMES.find((name) => ["missing", "invalid", "required", "failed", "unavailable"].includes(facts[name].status)) || null,
+    ...(typeof value?.diagnosticId === "string" && /^[A-Za-z0-9_-]{1,120}$/u.test(value.diagnosticId)
+      ? { diagnosticId: value.diagnosticId } : {}),
     cause: effectiveReadiness === "ready"
       ? null
       : cleanDiagnosticCause(preservesStrongerServiceFailure ? previous.cause : value?.cause),
@@ -164,6 +177,10 @@ export function agentDiagnosticSnapshot(value = {}, checkedAt = null, previous =
       ? value.operation
       : "diagnose",
     checkedAt: cleanDate(value?.checkedAt || checkedAt),
+    ...(typeof value?.operationId === "string" && /^[A-Za-z0-9_-]{1,120}$/u.test(value.operationId)
+      ? { operationId: value.operationId } : {}),
+    ...(Number.isSafeInteger(value?.configurationGeneration) && value.configurationGeneration >= 0
+      ? { configurationGeneration: value.configurationGeneration } : {}),
     activeInstallation: cleanActiveInstallation(value?.activeInstallation),
     facts,
   });

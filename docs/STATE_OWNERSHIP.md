@@ -567,3 +567,60 @@ remain deprecated compatibility surfaces exercised by the legacy activation
 protocol tests (`tests/version-workflow.test.mjs`); Repository recovery of old
 `historyActivation` journals remains separate. New UI commands must use create,
 query and openCreatedHistoryVersion. This batch does not remove the disk protocol.
+
+## Preflight submission receipts
+
+ProjectFileRepository serializes `submissions/<submissionOperationId>.json` inside the managed control root. The receipt owns only frozen submission requirements, preflight acceptance outcome, and stable Conversation/Request linkage. It is not an execution owner. Request/Attempt and Promotion retain execution and result authority. Receipt write precedes Conversation projection; stable identities allow projection repair without replaying Agent execution.
+
+### Execution history recovery
+
+AgentRuntimeCoordinator emits bounded, fixed-category execution facts through its injected repository writer. The start fact must persist before invoking a provider. Stage facts are serialized independently of Renderer mounts; a persistence failure aborts execution and disallows automatic retry. Raw provider text, arguments and output do not enter this history path. On execution settlement, only the assembled visible-text allowlist is sealed as a public summary, redacted by the public projector and bounded to 4096 characters; hidden reasoning and tool output remain excluded. The existing submission receipt replays this immutable summary after restart; Request and Promotion outboxes continue to own result and decision facts.
+
+ProjectFileRepository writes terminal Request state and stable Conversation event IDs together in request.json, then projects those facts through the submission receipt into the fixed Conversation. A crash between these files replays the same event IDs; it never restarts generation. initialize() reconciles only submissions created by this flow: accepted without a Request becomes not-started, and processing Requests receive an interrupted fact while retaining existing Request/lease authority. Missing older submissions never cause invented history. Promotion confirmation remains owned by the completed Promotion transaction.
+
+### Public execution progress and stop ordering
+
+The public projector bounds assembled text to 64 KiB, redacts credentials/paths/URLs and suppresses generated markup. Hidden reasoning and raw tool arguments never enter the public event allowlist. Tool activity is translated from known event categories to fixed labels, with a distinct event identity for each occurrence. HTTP starts generation progress only after actual content arrives, separately reporting response receipt and validation.
+
+For submissions, the durable stop-requested fact fences late completion inside the repository serial writer while cleanup is unconfirmed. A Candidate already authoritative before stop remains available; only an explicit discard intent rejects it. Renderer cancellation reconciles a result-ready receipt instead of clearing that result. The stop-requested fact is not a cancelled result.
+
+## Document Agent preference
+
+Main `ui-preferences` is the only durable writer of bounded `documentAgentSelections` (document ID to provider ID). WorkspacePreferencesSession projects it; the sidebar selects the current document, Settings changes only the initial default. Disabled providers remain selectable. Preference failure remains visible; it never silently routes execution to another provider. A submitted Request continues to own its frozen provider/model identity.
+
+### Conversation read refresh
+
+ConversationWorkflow owns a bounded single-flight read refresh while the sidebar is open. It preserves local draft state, fences document/load generations, and stops when closed. The Renderer writes no history facts. Sidebar groups retain stable Turn keys when execution changes to history; header, scrolling facts, current actions and submission controls are separate regions. Current actions derive only from the live Run projection.
+
+### Trusted modification adoption
+
+VersionWorkflow drains current source and Draft before adoption. The decision carries the reviewed Candidate ID, original source hash and existing `promote_<candidateId>` transaction identity. Promotion freezes comments whose content/revision differs from the submission and publishes them with the next Working Copy; unchanged submitted comments alone are consumed. Completed Promotion is the authority for an idempotent adopted Conversation fact. Unknown or failed delivery never implies adoption. The sidebar opens Review first; adopt and explicit discard remain separate decisions.
+
+PR-8: AgentRuntimeCoordinator owns in-flight execution startup keyed by the
+existing execution identity. Cancellation marks that startup, waits for its
+bounded settlement and only then allows durable cancellation. The final launch
+check prevents a stopped, unpublished startup from spawning later. This registry
+is transient coordination, not a new durable Task/Run authority. VersionWorkflow retains and reconciles lost adoption responses using the identical Candidate decision operation; Promotion remains the idempotent authority.
+### Adoption receipt reconciliation
+
+VersionWorkflow owns an ephemeral pending-activation projection keyed by the existing
+Run operation identity. It retains the original Promotion decision payload and
+replays that same idempotent decision after unknown Bridge receipts; the persisted
+Promotion transaction remains the only adoption authority. Two lost replies show
+`adoptionPhase: unknown`, retain the per-Run activation lock, and release navigation.
+Reconciliation backs off to 30 seconds, pauses publication away from the original
+Run, and stops on disposal. Review cannot override this projection and RunWorkflow
+refuses an opposite cancellation while the decision remains unresolved. Restart
+reconstructs the outcome from the persisted Promotion transaction, never a new AI run.
+Before accepting a submission, Conversation Repository reserves 128 messages, two contexts, one turn and 2 MiB for the bounded execution history, public summary and adoption decision. Near message/context/turn/byte limits it rotates only a settled Conversation, preserving both links and all prior records; interrupted rotation repairs the current index from the archived link. Submission requirements are losslessly split into bounded messages; more than 1 MiB of JSON-encoded requirements is rejected before acceptance or provider contact. Progress is capped before projection, while Request/Promotion terminal facts remain authoritative and replayable.
+Every RunWorkflow submit exit before a known Request settles the original submission identity in finally, including stale navigation after receipt or ticket arrival. A dispatched unknown Request is excluded and stays with existing reconciliation. The in-memory pending run is removed only after this pre-Request settlement path; navigation never changes its target.
+
+Sidebar Turn presentation keeps submitted requirements, sealed public summaries, results and decisions in reading order. Typed progress and legacy fixed-stage facts are default-collapsed under a keyboard-accessible native details element; expanding history never exposes an executable decision. Successful CI desktop/AI evidence includes synthetic visual captures from output/design-qa.
+
+The history view renders the legacy Candidate-ready fact as “修改已准备好。”;
+its former “尚未采用” wording is not reused as a current adoption assertion.
+Current adoption status comes exclusively from the active operation projection.
+RunSession preserves that transient adoption projection across same-Run hydration
+and navigation; a ready Request reread cannot erase an outstanding decision.
+Explicit reconciliation or a terminal authority can clear it.
+Retry preflight is fenced by the original Run's continued membership and cancellation occupancy before dispatch. After dispatch, AgentRuntimeCoordinator owns the pending execution start and waits for its termination/lease cleanup before authorizing durable cancellation. A late preflight or an unpublished provider start must never resurrect an ended Run.

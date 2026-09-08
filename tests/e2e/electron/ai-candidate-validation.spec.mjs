@@ -52,9 +52,9 @@ test("a pre-load review navigation falls back without trusting the replacement p
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     const beforeReviewFrame = launched.page.frameLocator('iframe[title^="修改前"]');
@@ -245,7 +245,7 @@ test("an AI return cannot drop a retained source identity", { tag: ["@smoke-revi
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -278,7 +278,7 @@ test("an AI return cannot replace a retained source identity with a forged ID", 
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 30_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

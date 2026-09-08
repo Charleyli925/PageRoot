@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/submission-receipt.v1.schema.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "operationId",
+    "conversationId",
+    "projectId",
+    "documentId",
+    "workingCopyId",
+    "turnId",
+    "requestId",
+    "attemptId",
+    "createdAt",
+    "status",
+    "snapshotSha256",
+    "snapshot"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "operationId": {
+      "type": "string",
+      "pattern": "^submission_[a-f0-9]{32}$"
+    },
+    "conversationId": {
+      "type": "string",
+      "pattern": "^conversation_[A-Za-z0-9_-]{12,180}$"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "not-started",
+        "request-created"
+      ]
+    },
+    "snapshotSha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "sourceSha256",
+        "comments",
+        "changeEvents",
+        "taskSpec",
+        "agentDelivery",
+        "projectRulesSha256"
+      ],
+      "properties": {
+        "comments": {
+          "type": "array",
+          "maxItems": 1000
+        },
+        "changeEvents": {
+          "type": "array",
+          "maxItems": 10000
+        },
+        "sourceSha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "projectRulesSha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "taskSpec": {
+          "type": "object"
+        },
+        "agentDelivery": {
+          "type": "object"
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "required": [
+          "eventId",
+          "kind",
+          "timestamp"
+        ],
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,180}$"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "candidateId": {
+            "type": "string"
+          },
+          "publicSummary": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        }
+      }
+    },
+    "eventsTruncated": {
+      "type": "boolean"
+    }
+  }
+}

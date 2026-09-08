@@ -36,6 +36,8 @@ export class ConversationWorkflow {
   #pendingWrite = false;
 
   #writing = false;
+  #refreshTimer = null;
+  #loadGeneration = 0;
 
   constructor({
     bridgeClient,
@@ -66,28 +68,55 @@ export class ConversationWorkflow {
    */
   async open(context) {
     if (!context?.sourcePath) {
-      this.#session.deactivate();
+      this.close();
       return null;
     }
     this.#cancelTimer();
+    this.#stopRefresh();
+    const generation = ++this.#loadGeneration;
     this.#session.beginLoad(context);
     try {
       const payload = await this.#bridgeClient.conversation(context.sourcePath);
       // The user may have switched documents while this was in flight.
-      if (!sameDocument(this.#session.snapshot.context, context)) return null;
+      if (generation !== this.#loadGeneration || !sameDocument(this.#session.snapshot.context, context)) return null;
       this.#session.publish(context, {
         conversation: payload?.conversation ?? null,
         draft: payload?.draft ?? null,
         atMessageLimit: payload?.atMessageLimit === true,
       });
+      this.#scheduleRefresh(context, generation);
       return payload ?? null;
     } catch (error) {
+      if (generation !== this.#loadGeneration) return null;
       this.#session.fail(context, error);
       return null;
     }
   }
 
+  #stopRefresh() {
+    if (this.#refreshTimer !== null) this.#timerHost.clearTimeout(this.#refreshTimer);
+    this.#refreshTimer = null;
+  }
+
+  #scheduleRefresh(context, generation) {
+    if (generation !== this.#loadGeneration) return;
+    this.#refreshTimer = this.#timerHost.setTimeout(async () => {
+      this.#refreshTimer = null;
+      try {
+        const payload = await this.#bridgeClient.conversation(context.sourcePath);
+        if (generation !== this.#loadGeneration || !this.#session.isActive(context)) return;
+        // A read refresh preserves local draft state and reading position.
+        this.#session.publish(context, { conversation: payload?.conversation ?? null,
+          draft: this.#session.snapshot.draft, atMessageLimit: payload?.atMessageLimit === true });
+      } catch { /* Keep the last confirmed history during transient read failures. */ }
+      this.#scheduleRefresh(context, generation);
+    }, 1500);
+    this.#refreshTimer?.unref?.();
+  }
+
   close() {
+    this.#loadGeneration += 1;
+    this.#stopRefresh();
     this.#cancelTimer();
     this.#session.deactivate();
   }

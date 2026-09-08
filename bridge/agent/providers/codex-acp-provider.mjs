@@ -469,29 +469,37 @@ function lockedCodexModelItem(raw) {
 }
 
 export function publicCodexAcpModels(rawModels, currentModelId = null) {
-  const seen = new Set();
-  const models = [];
-  const current = cleanProviderText(currentModelId, 80);
+  const grouped = new Map();
+  const current = cleanProviderText(currentModelId, 120);
   for (const raw of Array.isArray(rawModels) ? rawModels : []) {
     const item = lockedCodexModelItem(raw);
-    if (!item.modelId || !SAFE_MODEL_ID.test(item.modelId) || seen.has(item.modelId)) continue;
-    seen.add(item.modelId);
-    const id = item.modelId.startsWith("codex:") ? item.modelId : `codex:${item.modelId}`;
-    const matchesCurrent = Boolean(
-      current
-      && (item.modelId === current || id === current || id === `codex:${current}`),
-    );
-    models.push(Object.freeze({
-      id,
-      providerModelId: id.slice("codex:".length),
-      displayName: item.displayName || id,
-      reasoningEfforts: item.reasoningEfforts,
-      defaultReasoningEffort: item.defaultReasoningEffort || null,
-      isDefault: current ? matchesCurrent : item.isDefault === true,
-    }));
-    if (models.length >= MAX_PUBLIC_MODELS) break;
+    // Codex ACP 1.7 uses modelId[effort]. Keep the public model and reasoning
+    // controls separate while preserving the exact advertised runtime identity.
+    const composite = /^([^\[\]]+)\[([A-Za-z0-9][A-Za-z0-9._-]{0,39})\]$/u.exec(item.modelId);
+    const base = composite ? composite[1] : item.modelId;
+    if (!base || !SAFE_MODEL_ID.test(base)) continue;
+    const id = base.startsWith("codex:") ? base : `codex:${base}`;
+    const matchesCurrent = current === item.modelId || current === `codex:${item.modelId}`;
+    let model = grouped.get(id);
+    if (!model) {
+      if (grouped.size >= MAX_PUBLIC_MODELS) continue;
+      model = { id, providerModelId: id.slice(6),
+        displayName: composite ? item.displayName.replace(/ \([^)]+\)$/u, "") : item.displayName,
+        reasoningEfforts: [], defaultReasoningEffort: item.defaultReasoningEffort || null,
+        isDefault: current ? false : item.isDefault === true };
+      grouped.set(id, model);
+    }
+    for (const effort of composite ? [composite[2]] : item.reasoningEfforts) {
+      if (!model.reasoningEfforts.includes(effort)) model.reasoningEfforts.push(effort);
+    }
+    if (matchesCurrent) {
+      model.isDefault = true;
+      if (composite) model.defaultReasoningEffort = composite[2];
+    }
+    if (composite && !model.defaultReasoningEffort) model.defaultReasoningEffort = composite[2];
   }
-  return Object.freeze(models);
+  return Object.freeze([...grouped.values()].map((model) => Object.freeze({ ...model,
+    reasoningEfforts: Object.freeze(model.reasoningEfforts) })));
 }
 
 function isCodexAcpAuthFailure(cause) {
@@ -557,6 +565,8 @@ export function codexAcpPreflightFailure(code) {
       return "Codex ACP 在预检期间发生变化。PageRoot 尚未创建本轮 Request，也没有启动变化后的命令。";
     case "CODEX_PREFLIGHT_TIMEOUT":
       return "Codex ACP 预检超时。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+    case "CODEX_EXECUTION_CONTRACT_UNSUPPORTED":
+      return "当前 Codex 组件不支持完成修改所需的受限执行工具。修改要求已保留；请先使用其他服务，重复登录或重装相同组件无法修复。";
     case "CODEX_PROTOCOL_UNSUPPORTED":
       return "当前 Codex 组件的模型目录无法识别。PageRoot 尚未创建本轮 Request；请更新受验证组件或改用其他服务。";
     default:
@@ -722,6 +732,12 @@ function sendNdjsonRequestAndReadResponse(child, request, timeoutMs) {
 }
 
 export async function probeCodexAcp(command, environment = process.env) {
+  // Real-account QA verified that the pinned upstream 1.7.0 native tool adapter
+  // does not expose client terminal/create. Never spend on a known-incompatible
+  // execution contract or weaken the restricted host to manufacture success.
+  if (command?.source === "verified-npm-package" && command.version === "1.7.0") {
+    fail("CODEX_EXECUTION_CONTRACT_UNSUPPORTED", codexAcpPreflightFailure("CODEX_EXECUTION_CONTRACT_UNSUPPORTED"), { status: 503 });
+  }
   const processGroup = process.platform !== "win32";
   const child = await spawnCodexAdapter(command, environment);
   let stderr = "";
@@ -800,10 +816,11 @@ export async function probeCodexAcp(command, environment = process.env) {
       : cause instanceof AgentProviderError
         ? cause.code
         : classifyCodexAcpFailure({ ...cause, stderr });
-    fail(code, codexAcpPreflightFailure(code), {
+    const error = agentProviderError(code, codexAcpPreflightFailure(code), {
       status: code === "CODEX_AUTH_REQUIRED" ? 401 : 503,
-      cause,
     });
+    error.exitCode = Number.isInteger(cause?.exitCode) ? cause.exitCode : null;
+    throw error;
   } finally {
     child.stdin?.end();
     if (!(await terminateManagedProcess(child, { processGroup }))) {
@@ -933,7 +950,10 @@ export async function diagnoseCodexAcp(command, environment = process.env) {
   if (authenticationVerified) await checkCodexAuthentication(command, environment);
   try {
     if (!command?.command) fail("CODEX_COMMAND_NOT_FOUND", "Codex 连接组件未安装。", { status: 503 });
-    return await initializeCodexAcpForDiagnosis(command, environment, { authenticationVerified });
+    if (!authenticationVerified) return await initializeCodexAcpForDiagnosis(command, environment);
+    await probeCodexAcp(command, environment);
+    return Object.freeze({ readiness: "ready", cause: null, activeInstallation: null,
+      facts: Object.freeze({ installation: "ready", authentication: "ready", protocol: "ready", service: "unknown" }) });
   } catch (cause) {
     if (cause?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED") throw cause;
     const code = cause instanceof AgentProviderError ? cause.code : classifyCodexAcpFailure(cause);
@@ -943,12 +963,12 @@ export async function diagnoseCodexAcp(command, environment = process.env) {
       facts: Object.freeze({
         installation: "ready",
         authentication: authenticationVerified ? "ready" : "unknown",
-        protocol: "failed",
-        service: "unknown",
+        protocol: code === "CODEX_EXECUTION_CONTRACT_UNSUPPORTED" ? "unknown" : "failed",
+        service: code === "CODEX_EXECUTION_CONTRACT_UNSUPPORTED" ? "failed" : "unknown",
       }),
       // Internal, bounded diagnosis; never include stderr, paths or credential data.
-      details: Object.freeze({ stage: "protocol", code, version: command.version || null,
-        exitCode: Number.isInteger(cause?.exitCode) ? cause.exitCode : null,
+      details: Object.freeze({ stage: code === "CODEX_EXECUTION_CONTRACT_UNSUPPORTED" ? "execution-contract" : "protocol", code, version: command.version || null,
+        exitCode: Number.isInteger(cause?.exitCode ?? cause?.cause?.exitCode) ? (cause.exitCode ?? cause.cause.exitCode) : null,
         reason: codexAcpPreflightFailure(code) }),
     });
   }
@@ -1120,7 +1140,11 @@ export function createCodexAcpProvider({
       inactivityTimeoutMs,
     }) {
       const installation = ticket.installation;
+      const selected = ticket.evidence?.models?.find((model) => model.id === ticket.selection?.resolvedModelId);
+      const effort = ticket.selection?.reasoning?.applied || selected?.defaultReasoningEffort;
+      const baseModelId = ticket.selection?.resolvedModelId?.replace(/^codex:/u, "");
       return Object.freeze({
+        ...(baseModelId ? { sessionModelId: effort ? `${baseModelId}[${effort}]` : baseModelId } : {}),
         securityProfile: "client-mediated",
         command: installation.command,
         expectedExecutable: {

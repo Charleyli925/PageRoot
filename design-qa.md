@@ -2890,3 +2890,33 @@ final result: passed
 - 四条真实 Electron 历史回归通过：原有丢回执/打开失败/编辑保存场景，以及 pending、合法 rename、后续 V10 superseded 三种重启组合。
 - 三种重启后均确认可再次进入历史创建确认并取消；V10 再次普通重启不指定启动文件，旧 V9 回执仍缺少 openedAt，也不会出现旧恢复入口。
 - V10 使用 Repository 的真实 Candidate/Promotion 链路生成；本组不冒充完整 AI 用户交互或动态 Runtime 验证。无视觉语言改动。
+
+## 2026-09-08 — Stemmio trusted loop PR-6 sidebar integration
+
+Synthetic Qoder Electron execution reached a validated Candidate and Review. The sidebar now keeps current decisions outside the scrolling history; 340/400/480 CSS-pixel layout assertions and screenshots passed. Exact test widths are set through the layout variable, independently of drag interaction. Inspected the 340px screenshot and tightened repeated system-message metadata; history starts at the top and retains the submitted requirement and service label.
+
+Evidence: `output/design-qa/ai-assistant-redesign/trusted-loop-pr6-ready-{340,400,480}.png`, `qoder-processing-thinking.png`; scenario `Qoder ACP Agent Bridge streams public execution text without clipboard or automatic adoption`.
+
+Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, and final adoption layout in PR-7/PR-8. This entry does not certify those paths. Continuous resize was timing-sensitive in the combined test and remains a separate check.
+
+## 2026-09-08 — Trusted loop revision: compact, recoverable Turn history
+
+- Visual truth: the existing four-region sidebar and the reviewed requirement → public summary → result → decision reading order. Per-stage articles are superseded by a native, default-closed “查看处理记录” disclosure.
+- Verified in the current rebuilt Electron renderer with synthetic Qoder: sealed public narration appears once, eight stage facts are collapsed, expansion reveals all retained facts, and current actions remain outside the scroll region at 340/400/480 CSS px.
+- Inspected `output/design-qa/ai-assistant-redesign/trusted-loop-pr6-ready-340.png`; summary, result and disclosure are readable, with existing typography, tokens and controls. The existing processing capture and `trusted-loop-process-expanded.png` preserve the before/expanded context. Native disclosure provides keyboard focus and activation without new motion.
+- CI desktop feedback and formal AI evidence now upload `output/design-qa` on success as well as failure. Generated screenshots remain outside source control. Long-history/200% and adoption uncertainty evidence are integrated in PR-8; this entry does not certify real accounts.
+- final result: passed (focused compact history and three supported widths).
+
+## 2026-09-08 — Trusted loop revision: truthful pending adoption
+
+- Visual truth: existing Review and fixed sidebar actions, with the reviewed “正在采用 / 采用结果待确认” distinction above Review's normal decision state.
+- A rebuilt Electron scenario commits the real synthetic Candidate, holds the first reply, loses two replies, and later restores transport. Inspected `trusted-loop-adoption-unknown.png`: the pending status is visible and no opposite action is offered; the adopted history fact is supplied by the actual persisted Promotion, not a guessed frontend success.
+- The scenario verifies the same decision payload on every reconciliation, one successful source publication, and exactly one adopted history result after restarting the application. Screenshots: `output/design-qa/ai-assistant-redesign/trusted-loop-{adopting,adoption-unknown,adopted-restarted}.png`; CI uploads the synthetic captures.
+- Existing typography, neutral colors, Review controls and focus treatment are retained. Native disabled controls prevent double submission; transient status is not a new durable authority.
+- final result: passed (actual backend receipt-loss and restart scenario).
+
+## 2026-09-08 — Known Codex incompatibility recovery
+
+- Rebuilt Electron Settings and sidebar fixtures verify that the known execution-contract incompatibility preserves the logged-in account and offers “使用其他 AI” plus a secondary recheck. The install endpoint is never called.
+- Inspected `output/design-qa/agent-setup-journeys/codex-execution-unsupported-sidebar.png`; the explanation, alternative-service action and return control fit the existing repair card. Settings evidence is `codex-execution-unsupported-settings.png`. CI retains these captures.
+- The focused two-surface scenario passed in 2.2 seconds. This is synthetic recovery UI evidence, not successful real Codex execution; the restricted finalizer compatibility blocker remains open.

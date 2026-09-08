@@ -281,6 +281,8 @@ export function createBridgeClient({
       "无法删除评论附件。",
       DEFAULT_ATTACHMENT_TIMEOUT_MS,
     ),
+    recordSubmission: (body) => command("/submission", body, "本轮要求未保存，没有发送。"),
+    finishSubmission: (body) => command("/submission/finish", body, "提交结果暂时无法记录。"),
     createRequest: (body) => command(
       "/request",
       body,

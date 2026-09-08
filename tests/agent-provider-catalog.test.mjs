@@ -28,7 +28,8 @@ test("Codex recovery distinguishes local authentication from protocol and networ
   for (const [cause, actionLabel, allowLogin] of [
     ["CODEX_AUTH_UNVERIFIED", "检测登录", true],
     ["CODEX_AUTH_REQUIRED", "检测登录", true],
-    ["CODEX_PREFLIGHT_FAILED", "修复连接", undefined],
+    ["CODEX_PREFLIGHT_FAILED", "重新检查", undefined],
+    ["CODEX_EXECUTION_CONTRACT_UNSUPPORTED", "使用其他 AI", undefined],
     ["CODEX_PROTOCOL_UNSUPPORTED", "更新连接组件", undefined],
     ["CODEX_CONNECTION_FAILED", "重新检查", undefined],
     ["AGENT_PREFLIGHT_TIMEOUT", "重新检查", undefined],
@@ -1566,4 +1567,76 @@ test("an in-flight install does not hide the previous login result", async () =>
   assert.equal(catalog.provider(selected).activeOperation?.kind, "install");
   assert.equal(catalog.provider(selected).lastOperation?.kind, "login");
   assert.equal(catalog.provider(selected).lastOperation?.state, "succeeded");
+});
+
+
+test("a timed-out diagnosis finishes and its late result cannot replace the new receipt", async () => {
+  let completeOld;
+  let calls = 0;
+  const catalog = new AgentCatalogState({ providers: [QODER_AGENT_PROVIDER], diagnoseTimeoutMs: 5,
+    bridgeClient: { async preflightAgent() {}, agentDiagnose() {
+      calls += 1;
+      if (calls === 1) return new Promise((resolve) => { completeOld = resolve; });
+      return Promise.resolve({ diagnostic: { readiness: "ready" } });
+    } },
+  });
+  await assert.rejects(catalog.diagnose(), { code: "AGENT_DIAGNOSE_TIMEOUT" });
+  const failed = catalog.provider(catalog.freezeSelected()).diagnostic;
+  assert.equal(failed.cause, "AGENT_DIAGNOSE_TIMEOUT");
+  const current = await catalog.diagnose();
+  assert.notEqual(current.diagnostic.operationId, failed.operationId);
+  completeOld({ diagnostic: { readiness: "connection-failed" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(catalog.provider(catalog.freezeSelected()).diagnostic.readiness, "ready");
+  catalog.dispose();
+});
+
+test("a selection configuration change fences an older diagnosis", async () => {
+  let complete;
+  const catalog = new AgentCatalogState({ providers: [QODER_AGENT_PROVIDER],
+    bridgeClient: { async preflightAgent() {}, agentDiagnose() {
+      return new Promise((resolve) => { complete = resolve; });
+    } },
+  });
+  const pending = catalog.diagnose();
+  await new Promise((resolve) => setImmediate(resolve));
+  catalog.select({ ...catalog.freezeSelected(), requestedModelId: "different" });
+  complete({ diagnostic: { readiness: "ready" } });
+  assert.equal(await pending, null);
+  catalog.dispose();
+});
+
+
+test("Codex leaves automatic browser opening to native login and retains manual reopen", async () => {
+  let opened = 0;
+  let starts = 0;
+  const catalog = new AgentCatalogState({ providers: [CODEX_AGENT_PROVIDER],
+    handoffPort: { async openLogin() { opened += 1; return { opened: true }; } },
+    bridgeClient: {
+      async preflightAgent() {},
+      async loginAgent() { starts += 1; return { generation: 1, loginState: "waiting", loginUrlPresent: true }; },
+      async cancelAgentLogin() { return { generation: 1, loginState: "cancelled" }; },
+      async agentDiagnose() { return { diagnostic: { readiness: "auth-required" } }; },
+    },
+  });
+  const pending = catalog.startLogin();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(opened, 0);
+  await catalog.reopenOfficialLogin();
+  assert.equal(opened, 1);
+  assert.equal(starts, 1);
+  await catalog.cancelAccessOperation(catalog.freezeSelected());
+  await pending.catch(() => null);
+  catalog.dispose();
+});
+
+
+test("known incompatible Codex components offer a different service without reinstalling or relogging", () => {
+  const diagnostic = agentDiagnosticSnapshot({ readiness: "connection-failed", cause: "CODEX_EXECUTION_CONTRACT_UNSUPPORTED",
+    facts: { authentication: "ready", protocol: "failed" } });
+  const recovery = agentSetupRecovery(diagnostic, { status: "unavailable", reason: "service-unavailable" });
+  assert.equal(recovery.action, "change-provider");
+  assert.equal(recovery.allowRecheck, true);
+  assert.equal(recovery.allowLogin, undefined);
+  assert.match(recovery.detail, /账号已登录/u);
 });

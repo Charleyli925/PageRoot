@@ -182,63 +182,22 @@ Prompt 指定的精确路径，不能自行计算、递增或改名：
 
 ### 4.1 锁定顺序
 
-用户触发交接时先选择 `clipboard` 或 `qoder-acp`。工作台在任何异步预检或项目登记前同步
-进入瞬时 `preparing`：它只去重重复发送，不锁定 Canvas，也不是持久 Request 状态。用户在
-这段时间仍可编辑；后续冻结必须捕获届时最新的当前权威内容。若项目身份已经切换，整次意图
-按 stale 丢弃。
+本轮提交先完成本地原生输入 checkpoint、项目登记、源内容冻结与必要保存，然后由 Bridge
+持久化 `submission-receipt.v1` 的要求快照与 execution Turn。只有收到同一
+submissionOperationId 的 accepted 回执，才执行服务预检；通过后建立 Request 并启动。
+复制分支同样保存提交，跳过 Agent 预检，剪贴板成功仍只表示等待导入结果。
 
-打开设置或回到等待登录/安装状态时执行只读 `diagnose`：它可枚举
-并验证安装，执行有界的只读登录或 HTTP 可达性探测，但不创建
-preflight ticket、不建立 ACP session、不改变模型、不创建 Request、不写 output、
-不锁定 Canvas。该结果是进程内展示事实，不得跨进程持久化。
+提交回执保存文档/工作副本身份、源指纹、完整评论（含修订与附件引用）、项目规则指纹、
+Task Spec 和服务快照。它不授予执行权限。预检失败持久化 not-started，并保留用户要求；
+提交保存失败不外发。Request 使用回执保留的 requestId，使重复 IPC 核对同一 Request。
+改变要求必须使用新的 submissionOperationId；不能用同一身份替换快照。
 
-`qoder-acp` 必须在冻结和 Request 发布之前完成 Bridge 的使用前检查；它重新绑定受信
-独立 CLI 的本地来源、版本、文件身份、登录态与静态模型列表，并返回短时不透明
-ticket。检查成功后的立即提交必须复用该 ticket，不得连续运行两次检查。使用前检查不得
-创建 Request、写 output 或锁定 Canvas，失败时退出 `preparing` 并保持可编辑。
+Conversation 是不可变事实投影。提交回执先落盘，携带固定 conversationId、turnId 和
+可重复推导的 messageId；投影失败重放同一回执，不启动 Agent。用户要求是一条已完成消息，
+execution Turn 可以仍 queued。后续执行事实和重启恢复在 ADR 0071 / PR-4 中接通。
 
-probe 通过后，或用户选择 `clipboard` 后，工作台完成必要项目登记、重新读取当前评论，并在
-没有 `await` 插入 source-authority fence 的情况下同步执行 `freezeNow()`。只有这次冻结成功，
-才同步进入：
-
-```text
-lifecycleState=submitting
-projectLocked=true
-freezeCutoffRevision=<current editRevision>
-```
-
-随后才允许：
-
-1. flush 同一自动写回队列。
-2. 等待 `lastPersistedRevision >= freezeCutoffRevision`。
-3. 重读源 HTML并计算精确 Hash。
-4. 把这份完整源 HTML 冻结到 `input/base/index.html`，再冻结截止 revision 内的 comments 和 edit events。
-5. 分配 Request、Attempt 和候选 Version 身份。
-6. 在 `recovery/request-freeze/<requestId>/` staging 目录完成全部文件和附件。
-7. 逐文件 Schema/Hash 校验通过后，用 recovery marker 和目录 rename 原子发布 Request。
-8. 将状态改为 `processing`。
-
-若任一步失败，删除未发布 staging 和 marker 并回到 `editing`；若进程在 marker
-或目录发布边界退出，重启时只恢复经过逐文件校验的 staging，或幂等完成已发布目录的
-Runtime authority。staging 与 public Request 同时存在、Hash 不一致或结构不完整时失败
-关闭；不得丢失评论、编辑事实或源 HTML。
-
-成功发布 Request 后，`input/base/index.html` 是本轮修改前的完整、不可变基线。无论 AI 最终成功、失败、取消或 no-change，它都不得被工作文件或后续 Request 替换。
-
-Request 的受管元数据必须冻结一个严格交付描述：`{"mode":"clipboard"}`，或
-`{"mode":"qoder-acp","trustPolicyVersion":"trusted-local-agent-v1"}`。该字段只授权
-如何把已经发布的 Request 交给 Agent，不授予 Candidate、Version 或当前 HTML authority。
-Bridge 只能从 Registry、runtime 与该 Request 派生 ACP 文件/命令权限；Renderer 不得传入
-任意命令、cwd、环境或 Request/output/finalizer 路径。一次性 preflight ticket 只能启动
-同一个 `projectId/documentId/requestId/attemptId`。只有当前 Bridge 能证明它拥有的 Qoder
-进程组已经退出、且没有 output/completion 残留时，启动失败才可重试这个 Request。Bridge
-崩溃留下的启动租约、无法确认的进程清理或任意残留都必须禁止同 Request 重启和 clipboard
-fallback；用户先持久取消旧 Request 形成 fence，再重新发送并建立新的 Request。
-
-正式执行没有固定总时长条件。HTTP SSE 和 ACP 只在连续 45 分钟没有
-收到有效 content、reasoning、usage 或 heartbeat 时产生 `AGENT_TURN_TIMEOUT`。
-半成品 HTML 仅存于 Bridge 内存；未见 SSE 完成标记、断线、取消或超时
-均不写 output，不运行 finalizer，不生成 Candidate。
+设置诊断不创建提交、Request 或 ticket。执行预检仍是一次性 ticket 权威，超时不应自动重发。
+源字节、身份、附件与完整 HTML 的最终 Request 冻结校验保持不变。
 
 ### 4.2 冻结边界
 

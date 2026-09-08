@@ -10,6 +10,7 @@ import {
   executionPhaseForEvent,
   publicExecutionSession,
   publicVisibleTextUpdates,
+  safePublicAgentSummary,
 } from "./agent-session-projector.mjs";
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
 import {
@@ -151,6 +152,7 @@ function timeoutAfter(milliseconds, code, message) {
 
 export class AgentRuntimeCoordinator {
   #resolveTask;
+  #recordExecutionFact;
   #environment;
   #clock;
   #providerRegistry;
@@ -161,6 +163,7 @@ export class AgentRuntimeCoordinator {
   #tickets = new Map();
   #executionSessions = new Map();
   #pendingStarts = new Set();
+  #executionStarts = new Map();
   #eventReducer;
   #ownerToken = `agent_owner_${randomUUID().replaceAll("-", "")}`;
   #acceptingStarts = true;
@@ -174,6 +177,7 @@ export class AgentRuntimeCoordinator {
 
   constructor({
     resolveTask,
+    recordExecutionFact,
     environment = process.env,
     clock = Date,
     commandResolver,
@@ -214,6 +218,7 @@ export class AgentRuntimeCoordinator {
       }
     }
     this.#resolveTask = resolveTask || null;
+    this.#recordExecutionFact = recordExecutionFact || null;
     this.#environment = environment;
     this.#clock = clock;
     this.#providerRegistry = providerRegistry || createDefaultProviderRegistry({
@@ -291,6 +296,22 @@ export class AgentRuntimeCoordinator {
       this.#pendingStarts.delete(pending);
     }).catch(() => {});
     return pending;
+  }
+
+  #queueExecutionFact(entry, kind, publicSummary = null) {
+    if (!this.#recordExecutionFact) return Promise.resolve();
+    const event = { eventId: `event_${randomUUID().replaceAll("-", "")}`, kind,
+      timestamp: nowIso(this.#clock),
+      ...(kind === "public-summary" ? { publicSummary: safePublicAgentSummary(publicSummary) } : {}) };
+    entry.factWrites = (entry.factWrites || Promise.resolve()).then(async () => {
+      if (entry.historyFailure) return;
+      try { await this.#recordExecutionFact(entry.identity, event); }
+      catch (cause) {
+        entry.historyFailure = cause;
+        entry.controller.abort(new AgentRuntimeError("AGENT_HISTORY_WRITE_FAILED", "Execution history could not be saved."));
+      }
+    });
+    return entry.factWrites;
   }
 
   #touch(entry) {
@@ -496,6 +517,7 @@ export class AgentRuntimeCoordinator {
   }
 
   async diagnose({ selection } = {}) {
+    const diagnosticId = `diagnostic_${randomUUID()}`;
     const requestedSelection = this.#selectionForInput({ selection });
     const checkedAt = nowIso(this.#clock);
     if (!this.#acceptingStarts) {
@@ -528,7 +550,7 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({
       ok: true,
       ...result,
-      diagnostic: Object.freeze({ ...diagnostic, checkedAt, operation: "diagnose" }),
+      diagnostic: Object.freeze({ ...diagnostic, diagnosticId, checkedAt, operation: "diagnose" }),
     });
   }
 
@@ -703,7 +725,12 @@ export class AgentRuntimeCoordinator {
     if (!reduced.accepted) return;
     entry.eventCount = reduced.projection.eventCount;
     if (LIVE_STATES.has(entry.state)) {
+      const previousPhase = entry.phase;
       entry.phase = phaseForEvent(reduced.event, entry.phase);
+      if (entry.phase !== "cancelling" && (entry.phase !== previousPhase
+        || ["file-read", "file-written", "terminal-created"].includes(reduced.event.kind))) {
+        void this.#queueExecutionFact(entry, entry.phase);
+      }
     }
     if (textField) {
       entry[textField] = reduced.projection.visibleText;
@@ -760,13 +787,26 @@ export class AgentRuntimeCoordinator {
     return true;
   }
 
-  async submit({
+  submit(input = {}) {
+    const key = executionKey(validateExecutionIdentity(input));
+    const existing = this.#executionStarts.get(key);
+    if (existing) return existing.promise;
+    const pending = { cancelRequested: false, promise: null };
+    pending.promise = this.#trackStart(() => this.#performSubmit(input, pending));
+    this.#executionStarts.set(key, pending);
+    void pending.promise.finally(() => {
+      if (!pending.cleanupUnconfirmed && this.#executionStarts.get(key) === pending) this.#executionStarts.delete(key);
+    }).catch(() => {});
+    return pending.promise;
+  }
+
+  async #performSubmit({
     selection,
     trustPolicyAccepted,
     preflightId,
     configurationDigest,
     ...identityInput
-  } = {}) {
+  } = {}, pending) {
     this.#assertAcceptingStarts();
     validateTrustPolicy(trustPolicyAccepted);
     const requestedSelection = this.#selectionForInput({
@@ -886,7 +926,11 @@ export class AgentRuntimeCoordinator {
         }
       }
     } catch (cause) {
-      if (!existing?.lease) await this.#leaseStore.release(lease).catch(() => false);
+      if (!existing?.lease && await this.#leaseStore.release(lease).catch(() => false) !== true) {
+        pending.cleanupUnconfirmed = true;
+        this.#preflightCleanupUnconfirmed = true;
+        failAgentRuntime("AGENT_CANCEL_UNCONFIRMED", "启动失败后清理未确认。", { status: 503 });
+      }
       throw cause;
     }
     if (!this.#acceptingStarts) {
@@ -927,6 +971,27 @@ export class AgentRuntimeCoordinator {
       visibleTextUpdates: [],
       textTruncated: false,
     };
+    try {
+      await this.#recordExecutionFact?.(identity, {
+        eventId: `event_${randomUUID().replaceAll("-", "")}`, kind: "started", timestamp: entry.startedAt,
+      });
+    } catch (cause) {
+      if (await this.#leaseStore.release(lease).catch(() => false) !== true) {
+        pending.cleanupUnconfirmed = true;
+        this.#preflightCleanupUnconfirmed = true;
+        failAgentRuntime("AGENT_CANCEL_UNCONFIRMED", "启动失败后清理未确认。", { status: 503 });
+      }
+      throw cause;
+    }
+    if (pending.cancelRequested) {
+      const released = await this.#leaseStore.release(lease).catch(() => false);
+      if (released !== true) {
+        pending.cleanupUnconfirmed = true;
+        this.#preflightCleanupUnconfirmed = true;
+        failAgentRuntime("AGENT_CANCEL_UNCONFIRMED", "启动取消后清理未确认。", { status: 503 });
+      }
+      failAgentRuntime("AGENT_CANCELLED", "Agent 启动已取消。", { status: 409 });
+    }
     this.#executionSessions.set(key, entry);
     const pendingEvents = [];
     let projectionActive = false;
@@ -952,8 +1017,14 @@ export class AgentRuntimeCoordinator {
       projectionActive = true;
       for (const event of pendingEvents.splice(0)) publishEvent(event);
     });
-    entry.promise = Promise.resolve(runtimePromise).then(() => {
+    entry.promise = Promise.resolve(runtimePromise).then(async () => {
       if (this.#executionSessions.get(key) !== entry) return;
+      // Flush events emitted synchronously by a short-lived runtime before its
+      // terminal fact. The scheduled flush sees the same emptied queue.
+      projectionActive = true;
+      for (const event of pendingEvents.splice(0)) publishEvent(event);
+      await entry.factWrites;
+      if (entry.historyFailure) throw entry.historyFailure;
       if (controller.signal.aborted) {
         entry.state = "cancelled";
         entry.phase = "cancelled";
@@ -988,6 +1059,17 @@ export class AgentRuntimeCoordinator {
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
     }).finally(async () => {
+      const summary = safePublicAgentSummary(entry.visibleText);
+      if (summary) await this.#queueExecutionFact(entry, "public-summary", summary);
+      await this.#queueExecutionFact(entry, entry.state === "failed" ? "failed" : "execution-ended");
+      if (entry.historyFailure) {
+        entry.state = "interrupted";
+        entry.phase = "interrupted";
+        entry.errorCode = "AGENT_HISTORY_WRITE_FAILED";
+        entry.errorMessage = "执行记录未能完整保存，请核对本轮结果。";
+        entry.retryable = false;
+        entry.safeToRetry = false;
+      }
       await this.#releaseLease(entry);
     });
     void entry.promise.catch(() => {});
@@ -1042,6 +1124,16 @@ export class AgentRuntimeCoordinator {
 
   async cancelExecution(identityInput) {
     const identity = validateExecutionIdentity(identityInput);
+    const pending = this.#executionStarts.get(executionKey(identity));
+    if (pending) {
+      pending.cancelRequested = true;
+      const timeout = timeoutAfter(this.#cancelTimeoutMs, "AGENT_CANCEL_UNCONFIRMED", "Agent 启动尚未确认停止。");
+      try {
+        await Promise.race([pending.promise.catch((cause) => {
+          if (cause?.code === "AGENT_CANCEL_UNCONFIRMED") throw cause;
+        }), timeout.promise]);
+      } finally { timeout.clear(); }
+    }
     const entry = this.#executionSessions.get(executionKey(identity));
     if (!entry || !LIVE_STATES.has(entry.state)) {
       return { ok: true, stopped: false, session: publicExecutionSession(entry) };
@@ -1050,6 +1142,7 @@ export class AgentRuntimeCoordinator {
     entry.state = "cancelling";
     entry.phase = "cancelling";
     this.#touch(entry);
+    await this.#queueExecutionFact(entry, "stop-requested");
     entry.controller.abort(new AgentRuntimeError("AGENT_CANCELLED", "Cancelled by PageRoot."));
     const timeout = timeoutAfter(
       this.#cancelTimeoutMs,
@@ -1069,6 +1162,7 @@ export class AgentRuntimeCoordinator {
       );
     }
     entry.cancelState = "termination-confirmed";
+    await this.#queueExecutionFact(entry, "stop-confirmed");
     return { ok: true, stopped: true, session: publicExecutionSession(entry) };
   }
 

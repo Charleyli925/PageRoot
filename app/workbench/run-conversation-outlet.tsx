@@ -48,6 +48,7 @@ export const RunConversationOutlet = memo(function RunConversationOutlet({
 
   return (
     <AiConversationSidebar
+      key={sidebarProps.documentKey}
       {...sidebarProps}
       state={state}
       runStatus={activeRun?.status ?? null}

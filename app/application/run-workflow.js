@@ -627,8 +627,20 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 状态检查已经停止。`);
     }
     try {
-      await this.#agentCatalog.diagnose(frozen);
-      return succeeded({ availability: this.#agentCatalog.availability(frozen) });
+      const checked = await this.#agentCatalog.diagnose(frozen);
+      if (this.#disposed || !checked) return stale({ kind: "agent-diagnosis" });
+      if (checked.diagnostic?.readiness !== "ready") {
+        const diagnostic = checked.diagnostic;
+        const reason = diagnostic?.readiness === "auth-required"
+          ? "刚刚检查：请先登录账号。"
+          : diagnostic?.readiness === "not-installed"
+            ? "刚刚检查：请先安装此服务。"
+            : diagnostic?.facts?.authentication?.status === "ready"
+              ? "刚刚检查：账号已登录，但仍无法建立连接。"
+              : "刚刚检查：服务暂时无法使用，请重新检查或使用其他 AI。";
+        return rejected(diagnostic?.cause || "AGENT_CONNECTION_FAILED", reason);
+      }
+      return succeeded({ availability: this.#agentCatalog.availability(frozen), diagnostic: checked.diagnostic });
     } catch (cause) {
       return rejected(
         errorCode(cause, "AGENT_PREFLIGHT_FAILED"),
@@ -683,19 +695,7 @@ export class RunWorkflow {
 
   async checkQoderUsability() {
     const selection = this.#qoderSelection();
-    if (!selection) return rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。");
-    if (this.#disposed) {
-      return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
-    }
-    try {
-      await this.#agentCatalog.diagnose(selection);
-      return succeeded({ availability: this.#agentCatalog.availability(selection) });
-    } catch (cause) {
-      return rejected(
-        errorCode(cause, "AGENT_PREFLIGHT_FAILED"),
-        this.#codecs.errorMessage(cause, "暂时无法检查 Qoder CLI。"),
-      );
-    }
+    return this.checkAgentUsability(selection);
   }
 
   async copyQoderGuidance({ kind } = {}) {
@@ -906,24 +906,9 @@ export class RunWorkflow {
     let durableRun = null;
     let agentPreflight = null;
     let reservedAgentStartKey = null;
+    let submissionEndCode = "SUBMISSION_NOT_STARTED";
+    let submissionRequest = null;
     try {
-      if (frozenAgentDelivery.mode === MANAGED_AGENT_MODE) {
-        agentPreflight = await this.#agentCatalog.spendTicket(
-          frozenAgentDelivery.selection,
-          {
-            purpose: "execution",
-            trustPolicyVersion: frozenAgentDelivery.trustPolicyVersion,
-          },
-        );
-        if (!this.#isCurrentContext(context)) return stale(context);
-        frozenAgentDelivery = Object.freeze({
-          ...frozenAgentDelivery,
-          selection: agentPreflight.selection,
-          ...(agentPreflight.configuration
-            ? { configuration: agentPreflight.configuration }
-            : {}),
-        });
-      }
       const registered = await this.#ensureRegistered({
         sourcePath: context.sourcePath,
         expectedSourceSha256: this.#documentSession.persistedSourceSha256,
@@ -1152,6 +1137,43 @@ export class RunWorkflow {
         changeEvents: persistedEvents.map(this.#codecs.persistedChangeEvent),
         agentDelivery: frozenAgentDelivery,
       };
+      const submissionOperationId = `submission_${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+      request.submissionOperationId = submissionOperationId;
+      submissionRequest = request;
+      let receipt;
+      try {
+        receipt = await this.#bridgeClient.recordSubmission(request);
+      } catch (cause) {
+        if (!responseMayBeUnknown(cause)) throw cause;
+        // This receipt command cannot launch a provider. Reusing the exact
+        // operation and frozen bytes reconciles a lost response idempotently.
+        receipt = await this.#bridgeClient.recordSubmission(request);
+      }
+      if (receipt?.operationId !== submissionOperationId || receipt?.status !== "accepted") {
+        throw responseError("SUBMISSION_RECEIPT_INVALID", "本轮要求的保存结果尚未确认，没有发送。");
+      }
+      if (!this.#isCurrentContext(context)) return stale(context);
+      if (frozenAgentDelivery.mode === MANAGED_AGENT_MODE) {
+        agentPreflight = await this.#agentCatalog.spendTicket(
+          frozenAgentDelivery.selection,
+          {
+            purpose: "execution",
+            trustPolicyVersion: frozenAgentDelivery.trustPolicyVersion,
+          },
+        );
+        if (!this.#isCurrentContext(context)) return stale(context);
+        frozenAgentDelivery = Object.freeze({
+          ...frozenAgentDelivery,
+          selection: agentPreflight.selection,
+          ...(agentPreflight.configuration
+            ? { configuration: agentPreflight.configuration }
+            : {}),
+        });
+      }
+      request.agentDelivery = frozenAgentDelivery;
+      if (sourceAgentBudgetExceeded(frozenAgentDelivery, agentPreflight, frozen.html, persistedComments, finalAttachmentBytes)) {
+        throw responseError("RUN_AGENT_PROMPT_TOO_LARGE", "当前页面超过所选模型输出能力，请更换模型。");
+      }
       const operationId = this.#codecs.operationKey(pendingRun);
       let dispatched = false;
       try {
@@ -1252,6 +1274,7 @@ export class RunWorkflow {
       }
       return succeeded({ run: durableRun });
     } catch (cause) {
+      submissionEndCode = errorCode(cause, "SUBMISSION_NOT_STARTED");
       const message = this.#codecs.errorMessage(
         cause,
         "这次发送没有成功。页面和评论仍然保留。",
@@ -1277,6 +1300,14 @@ export class RunWorkflow {
       });
       return rejected(errorCode(cause, "RUN_SUBMISSION_REJECTED"), message);
     } finally {
+      // Every pre-Request exit settles the original durable submission, even
+      // after navigation. Unknown dispatched Requests retain their own recovery.
+      if (submissionRequest && !durableRun && !submissionUncertain) {
+        const ending = { ...submissionRequest, errorCode: submissionEndCode };
+        try { await this.#bridgeClient.finishSubmission(ending); }
+        catch { await this.#bridgeClient.finishSubmission(ending).catch(() => null); }
+        if (pendingRun && this.#runSession.hasRun(pendingRun)) this.#runSession.removeRun(pendingRun);
+      }
       if (reservedAgentStartKey) {
         this.#agentStartsPending.delete(reservedAgentStartKey);
       }
@@ -1530,6 +1561,10 @@ export class RunWorkflow {
           trustPolicyVersion: delivery.trustPolicyVersion,
         });
       }
+      // Ending this exact Run while retry preflight waits must fence the
+      // eventual launch, including cancellation whose receipt is still pending.
+      if (!this.#runSession.hasRun(run)
+        || this.#runSession.isOperationBusy("cancel", operationKey)) return stale(run);
       if (preflight?.status !== "ready" || !preflight.preflightId) {
         throw responseError(
           "RUN_AGENT_PREFLIGHT_INVALID",
@@ -1636,6 +1671,9 @@ export class RunWorkflow {
       return blocked("RUN_CANCEL_UNAVAILABLE", "当前 Request 尚未形成可取消的身份。");
     }
     const operationKey = this.#codecs.operationKey(run);
+    if (this.#runSession.isOperationBusy("activate", operationKey) || run.adoptionPhase) {
+      return blocked("RUN_ADOPTION_PENDING", "采用结果正在确认，暂时不能结束本轮。");
+    }
     if (!this.#runSession.beginOperation("cancel", operationKey)) {
       return blocked("RUN_CANCEL_BUSY", "本轮结束操作正在进行。");
     }
@@ -1661,7 +1699,8 @@ export class RunWorkflow {
       : null;
     try {
       if (run.sourcePath !== "preview://welcome") {
-        await this.#bridgeClient.cancelActiveRun({
+        const cancellation = await this.#bridgeClient.cancelActiveRun({
+          intent: run.status === "ready-to-open" ? "discard" : "stop",
           projectId: run.projectId,
           documentId: run.documentId,
           sourcePath: run.sourcePath,
@@ -1671,6 +1710,12 @@ export class RunWorkflow {
             ? "cancelled-by-user-after-agent-handoff"
             : "cancelled-by-user"),
         });
+        if (cancellation?.status === "result-ready") {
+          const payload = await this.#bridgeClient.status(run.sourcePath, run.requestId, run.attemptId);
+          if (!context || !this.#isCurrentContext(context)) return stale(run);
+          this.#processStatus(run, payload);
+          return succeeded({ run, resultReady: true });
+        }
       }
       const tracked = this.#runSession.hasRun(run);
       const current = Boolean(tracked && context && this.#isCurrentContext(context));

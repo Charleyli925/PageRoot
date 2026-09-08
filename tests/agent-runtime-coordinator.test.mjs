@@ -5,6 +5,7 @@ import { createAgentEventReducer } from "../bridge/agent/agent-events.mjs";
 import {
   executionPhaseForEvent,
   publicVisibleTextUpdates,
+  safePublicAgentText,
 } from "../bridge/agent/agent-session-projector.mjs";
 import {
   AgentRuntimeCoordinator,
@@ -521,7 +522,9 @@ test("explicit public paragraphs remain separate without terminal punctuation", 
 
 test("execution status projects only public Agent text with frozen provider identity", async () => {
   const finish = deferred();
+  const persistedFacts = [];
   const coordinator = new AgentRuntimeCoordinator({
+    recordExecutionFact: async (_identity, event) => persistedFacts.push(event),
     providerRegistry: registry({
       run: async (_ticket, { onEvent }) => {
         onEvent({ kind: "initialized", agentName: "Synthetic Agent", agentVersion: "1.0.0" });
@@ -571,6 +574,10 @@ test("execution status projects only public Agent text with frozen provider iden
   finish.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(coordinator.executionStatus(IDENTITY).state, "completed");
+  const summaries = persistedFacts.filter((event) => event.kind === "public-summary");
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].publicSummary, "正在读取冻结任务。正在写入 Candidate。");
+  assert.equal(JSON.stringify(persistedFacts).includes("隐藏推理"), false);
   await coordinator.shutdown();
 });
 
@@ -705,4 +712,80 @@ test("current execution binds by selection and rejects a leftover driver-only st
   assert.equal("driver" in redeemed, false);
   assert.equal(redeemed.selection.providerId, "synthetic-provider");
   await coordinator.shutdown();
+});
+
+test("execution persistence failure before launch never invokes the provider", async () => {
+  let starts = 0;
+  let releases = 0;
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({ run: async () => { starts += 1; } }),
+    resolveTask: async () => executionAuthority(CONFIGURATION),
+    recordExecutionFact: async () => { throw new Error("synthetic history write failure"); },
+    leaseStore: { acquire: async () => ({ key: "synthetic" }), release: async () => { releases += 1; return true; } },
+  });
+  const ticket = await ready(coordinator);
+  await assert.rejects(coordinator.submit({ ...IDENTITY, selection: ticket.selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION, preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest }), /synthetic history write failure/);
+  assert.equal(starts, 0);
+  assert.equal(releases, 1);
+  await coordinator.shutdown();
+});
+
+
+test("public text redacts assembled credentials, paths and generated markup", () => {
+  const updates = publicVisibleTextUpdates([
+    { kind: "visible-text", eventId: "event_1", sequence: 1, messageId: "msg_1", text: "Bearer sk-" },
+    { kind: "visible-text", eventId: "event_2", sequence: 2, messageId: "msg_1", text: "synthetic-secret /Users/测试/secret.txt" },
+    { kind: "tool-call", arguments: "password=private", text: "raw prompt" },
+  ]);
+  assert.equal(updates.length, 1);
+  assert.doesNotMatch(updates[0].text, /synthetic-secret|Users|secret.txt|password|raw prompt/);
+  assert.doesNotMatch(safePublicAgentText("<h1>unvalidated output</h1>"), /<h1>|unvalidated/);
+  assert.doesNotMatch(safePublicAgentText("https://service.invalid?api_key=private"), /private|service.invalid/);
+  assert.ok(publicVisibleTextUpdates([{ kind: "visible-text", text: "a".repeat(100000) }])[0].text.length <= 65536);
+});
+
+test("stop during unpublished startup waits and prevents a late provider launch", async () => {
+  const entered = deferred();
+  const release = deferred();
+  let starts = 0;
+  let durableCancelled = false;
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({ run: async () => { starts += 1; } }),
+    resolveTask: async () => executionAuthority(CONFIGURATION),
+    recordExecutionFact: async () => { entered.resolve(); await release.promise; },
+    leaseStore: { acquire: async () => ({ key: "synthetic" }), release: async () => true },
+  });
+  const ticket = await ready(coordinator);
+  const started = coordinator.submit({ ...IDENTITY, selection: ticket.selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION, preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest });
+  const rejected = assert.rejects(started, { code: "AGENT_CANCELLED" });
+  await entered.promise;
+  const stopped = coordinator.cancelDurableExecution({ identity: IDENTITY, cancelRequest: async () => { durableCancelled = true; } });
+  await Promise.resolve();
+  assert.equal(durableCancelled, false);
+  release.resolve();
+  await stopped;
+  await rejected;
+  assert.equal(durableCancelled, true);
+  assert.equal(starts, 0);
+  await coordinator.shutdown();
+});
+
+test("unconfirmed startup lease cleanup never authorizes durable cancellation", async () => {
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry(), resolveTask: async () => executionAuthority(CONFIGURATION),
+    recordExecutionFact: async () => { throw new Error("synthetic write failure"); },
+    leaseStore: { acquire: async () => ({ key: "synthetic" }), release: async () => false },
+  });
+  const ticket = await ready(coordinator);
+  await assert.rejects(coordinator.submit({ ...IDENTITY, selection: ticket.selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION, preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest }), { code: "AGENT_CANCEL_UNCONFIRMED" });
+  let cancellations = 0;
+  await assert.rejects(coordinator.cancelDurableExecution({ identity: IDENTITY,
+    cancelRequest: async () => { cancellations += 1; } }), { code: "AGENT_CANCEL_UNCONFIRMED" });
+  assert.equal(cancellations, 0);
 });

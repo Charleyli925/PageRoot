@@ -32,9 +32,11 @@ type AgentCatalogSnapshot = Readonly<{
 export function useWorkspacePreferences(
   api: DesktopUiPreferencesApi | undefined,
   {
+    documentId = "",
     workspaceController = null,
     agentCatalogSnapshot = null,
   }: {
+    documentId?: string;
     workspaceController?: Readonly<{
       selectAgent(selection: AgentSelection): AgentSelection;
       applyDisabledAgentProviders?(ids: readonly string[]): void;
@@ -67,6 +69,7 @@ export function useWorkspacePreferences(
   });
   const loadedSessionRef = useRef<WorkspacePreferencesSession | null>(null);
   const defaultAgentAppliedRef = useRef("");
+  const initialDocumentDefaults = useRef(new Map<string, WorkspacePreferenceAgentId>());
 
   const handleSessionSnapshot = useCallback((nextSnapshot: WorkspacePreferencesSnapshot) => {
     setSnapshot(nextSnapshot);
@@ -121,16 +124,23 @@ export function useWorkspacePreferences(
   }, [session, snapshot.workspace.rememberPanelWidths]);
   useEffect(() => {
     if (!workspaceController || !snapshot.loaded || !agentCatalogSnapshot) return;
+    if (documentId && !initialDocumentDefaults.current.has(documentId)) {
+      initialDocumentDefaults.current.set(documentId, snapshot.workspace.defaultAgentProviderId);
+    }
+    const desiredProvider = documentId
+      ? snapshot.workspace.documentAgentSelections[documentId]
+        || initialDocumentDefaults.current.get(documentId)!
+      : snapshot.workspace.defaultAgentProviderId;
     const preferred = resolvePreferredAgentProvider({
-      defaultAgentProviderId: snapshot.workspace.defaultAgentProviderId,
+      defaultAgentProviderId: desiredProvider,
       disabledAgentProviderIds: snapshot.workspace.disabledAgentProviderIds,
       providers: Object.values(agentCatalogSnapshot.providers),
     });
     if (!preferred) return;
-    const applyKey = `${snapshot.workspace.defaultAgentProviderId}:${preferred.providerId}:${preferred.selection.runtimeId}`;
+    const applyKey = `${documentId}:${desiredProvider}:${preferred.providerId}:${preferred.selection.runtimeId}`;
     if (defaultAgentAppliedRef.current === applyKey) return;
     defaultAgentAppliedRef.current = applyKey;
-    if (shouldPersistDefaultAgentProvider({
+    if (!documentId && shouldPersistDefaultAgentProvider({
       storedDefaultId: snapshot.workspace.defaultAgentProviderId,
       preferredId: preferred.providerId,
       disabledAgentProviderIds: snapshot.workspace.disabledAgentProviderIds,
@@ -140,7 +150,7 @@ export function useWorkspacePreferences(
     if (agentCatalogSnapshot.selected?.providerId !== preferred.providerId) {
       workspaceController.selectAgent(preferred.selection);
     }
-  }, [agentCatalogSnapshot, session, snapshot.loaded, snapshot.workspace.defaultAgentProviderId, snapshot.workspace.disabledAgentProviderIds, workspaceController]);
+  }, [agentCatalogSnapshot, documentId, session, snapshot.loaded, snapshot.workspace.documentAgentSelections, snapshot.workspace.defaultAgentProviderId, snapshot.workspace.disabledAgentProviderIds, workspaceController]);
   useEffect(() => {
     if (!workspaceController || !snapshot.loaded) return;
     workspaceController.applyDisabledAgentProviders?.(snapshot.workspace.disabledAgentProviderIds);

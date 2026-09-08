@@ -69,20 +69,22 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     const original = readFileSync(workingPath);
     await sidebar.getByRole("button", { name: /交给.*修改/u }).click();
     const progress = sidebar.getByTestId("ai-conversation-run-progress");
     await expect(progress).toContainText("DeepSeek 正在生成");
     await expect(progress).toContainText("正在接收结果");
-    await expect(progress.getByRole("button", { name: "停止", exact: true })).toBeVisible();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-action-bar").getByRole("button", { name: "停止", exact: true })).toBeVisible();
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toHaveCount(1);
     await expect(sidebar.getByTestId("ai-conversation-narration-message")).toHaveCount(0);
     await expect(sidebar.getByTestId("ai-conversation-run-summary")).toHaveCount(0);
     await expect(sidebar.getByText("Thinking", { exact: true })).toHaveCount(0);
     expect(readFileSync(workingPath).equals(original)).toBe(true);
     await launched.page.screenshot({ path: path.join(screenshots, "narrow-sidebar-generating.png"), animations: "disabled" });
     finish();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("等待你的决定", { timeout: 60_000 });
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     await expect(sidebar.getByTestId("ai-conversation-run-summary")).toHaveCount(0);
     const active = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
     const candidates = candidateHtmlFiles(launched.workspace, active.projectId);
@@ -90,7 +92,7 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     expect(candidates.some((file) => readFileSync(file, "utf8").includes('data-pageroot-http-reasoning="high"'))).toBe(true);
     expect(readFileSync(workingPath).equals(original)).toBe(true);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
-    await sidebar.getByRole("button", { name: "审阅对比" }).click();
+    await sidebar.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
     await launched.page.screenshot({ path: path.join(screenshots, "review-result.png"), animations: "disabled" });
   } finally {
@@ -130,12 +132,12 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     await expandSettingsAgent(settings, "codex");
     await setDefaultSettingsAgent(settings, "codex");
     broken = true;
-    await settings.getByRole("button", { name: "重新检查", exact: true }).click();
+    await settings.locator(".settings-secondary-action").filter({ hasText: "重新检查" }).click();
     const row = settings.getByTestId("settings-agent-row-codex");
-    await expect(row).toContainText("连接需要修复");
+    await expect(row).toContainText("暂时无法使用");
     await expect(row.locator(".settings-agent-default-badge")).toBeVisible();
     await expect(settings.getByTestId("settings-agent-row-pageroot").locator(".settings-agent-service-main")).toContainText("未检查");
-    const repairStyle = await row.getByRole("button", { name: "修复连接", exact: true }).evaluate((button) => ({
+    const repairStyle = await row.getByRole("button", { name: "重新检查", exact: true }).evaluate((button) => ({
       fontSize: getComputedStyle(button).fontSize,
       height: button.getBoundingClientRect().height,
       inset: button.getBoundingClientRect().left - button.closest('[data-testid="settings-agent-row-codex"]').getBoundingClientRect().left,
@@ -147,20 +149,22 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     await launched.page.screenshot({ path: path.join(screenshots, "settings-codex-authenticated-repair.png"), animations: "disabled" });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
-    await sidebar.getByRole("button", { name: /设置 Codex/u }).click();
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-codex").click();
     const panel = sidebar.getByTestId("ai-conversation-setup-panel");
-    await expect(panel).toContainText("账号已登录，但连接组件未能启动。");
+    await expect(panel).toContainText("账号已登录，但连接检查没有通过。");
     await expect(sidebar.getByTestId("ai-conversation-send")).toHaveCount(0);
-    await expect(panel.getByRole("button", { name: "修复连接", exact: true })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "重新检查", exact: true })).toBeVisible();
     await panel.screenshot({ path: path.join(screenshots, "narrow-sidebar-codex-repair.png"), animations: "disabled" });
-    await panel.getByRole("button", { name: "修复连接", exact: true }).click();
+    broken = false; // The transient protocol failure clears; recheck must not reinstall.
+    await panel.getByRole("button", { name: "重新检查", exact: true }).click();
     await expect(panel.getByText("已连接", { exact: true })).toBeVisible();
-    expect(installs).toBe(1);
+    expect(installs).toBe(0);
     await panel.getByRole("button", { name: "返回任务", exact: true }).click();
     await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("等待你的决定", { timeout: 60_000 });
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     expect(readFileSync(workingPath, "utf8")).not.toContain('data-pageroot-codex-acp="e2e"');
-    await sidebar.getByRole("button", { name: "审阅对比" }).click();
+    await sidebar.getByRole("button", { name: "查看修改" }).click();
     await launched.page.getByRole("button", { name: "采纳修改", exact: true }).click();
     await launched.page.getByRole("button", { name: "确认并采纳", exact: true }).click();
     await expect.poll(async () => (await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject()))?.sourcePath)
@@ -170,9 +174,54 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     await addComment(launched.page, first.sourcePath, "继续调整标题。");
     if (!await sidebar.isVisible()) await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("等待你的决定", { timeout: 60_000 });
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     await launched.page.screenshot({ path: path.join(screenshots, "codex-second-round.png"), animations: "disabled" });
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("known incompatible Codex offers other AI without reinstalling the same component", async () => {
+  const fixture = createSourceFixture("codex-incompatible-component.html");
+  const command = createCodexAcpE2ECommand(fixture.sourceDirectory);
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath, injectedEnv: {
+    PAGEROOT_CODEX_ACP_ALLOW_TEST_COMMAND: "1", PAGEROOT_CODEX_ACP_COMMAND: command,
+  } });
+  let installs = 0;
+  try {
+    await launched.page.route("**/agent/diagnose?*", async (route) => {
+      const selection = JSON.parse(new URL(route.request().url()).searchParams.get("selection") || "{}");
+      if (selection.providerId !== "codex") return route.continue();
+      return route.fulfill({ json: { status: "unavailable", diagnostic: {
+        readiness: "connection-failed", cause: "CODEX_EXECUTION_CONTRACT_UNSUPPORTED", operation: "diagnose",
+        facts: { installation: "ready", authentication: "ready", protocol: "failed", service: "unknown" },
+      } } });
+    });
+    await launched.page.route("**/agent/install", async (route) => { installs += 1; await route.abort(); });
+    await addComment(launched.page, fixture.sourcePath, "调整标题。");
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    const settings = await openAgentSettingsPage(launched.page);
+    await expandSettingsAgent(settings, "codex");
+    const row = settings.getByTestId("settings-agent-row-codex");
+    await expect(row).toContainText("当前 Codex 组件暂不支持完成修改");
+    await expect(row).toContainText("账号已登录。");
+    await expect(row.getByRole("button", { name: /更新连接组件|修复连接/u })).toHaveCount(0);
+    await launched.page.screenshot({ path: path.join(screenshots, "codex-execution-unsupported-settings.png"), animations: "disabled" });
+    await row.getByRole("button", { name: "使用其他 AI", exact: true }).click();
+    await expect(row).not.toHaveAttribute("data-expanded", "true");
+    await launched.page.getByRole("button", { name: "返回工作台" }).click();
+    const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-codex").click();
+    const panel = sidebar.getByTestId("ai-conversation-setup-panel");
+    await expect(panel).toContainText("当前组件缺少所需的受限执行能力。");
+    await expect(panel.getByRole("button", { name: "重新检查", exact: true })).toBeVisible();
+    await launched.page.screenshot({ path: path.join(screenshots, "codex-execution-unsupported-sidebar.png"), animations: "disabled" });
+    await panel.getByRole("button", { name: "使用其他 AI", exact: true }).click();
+    await expect(sidebar.getByTestId("ai-conversation-service-pageroot")).toBeVisible();
+    expect(installs).toBe(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

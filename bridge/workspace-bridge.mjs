@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { submissionRequestMatches } from "./project-file-repository/submission.mjs";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import {
@@ -94,6 +95,12 @@ function e2eAgentInstallFetch(_url, { signal } = {}) {
 
 const agentBridgeService = new AgentBridgeService({
   resolveTask: resolveAgentBridgeTask,
+  recordExecutionFact: async (identity, event) => {
+    const target = await projectFileTargetForBody(identity);
+    if (!target) throw projectNotFoundError();
+    await projectFileRepository.recordExecutionFact({ target, requestId: identity.requestId,
+      attemptId: identity.attemptId, event });
+  },
   ...(process.env.PAGEROOT_E2E === "1" && process.env.PAGEROOT_AGENT_INSTALL_STUB_FETCH
     ? {
       installerOptions: {
@@ -1310,7 +1317,12 @@ async function createProjectFileRequest(body) {
   if (target.targetKind !== "working-copy") {
     throw new HttpError(409, "WORKING_COPY_REQUIRED", "AI Requests require an editable Working Copy.");
   }
-  const requestId = `req_${randomUUID().replaceAll("-", "")}`;
+  const submission = body.submissionOperationId
+    ? await projectFileRepository.submissionReceipt({ target, operationId: body.submissionOperationId }) : null;
+  if (body.submissionOperationId && (!submission || submission.status === "not-started")) {
+    throw new HttpError(409, "SUBMISSION_NOT_ACCEPTED", "A recorded submission is required.");
+  }
+  const requestId = submission?.requestId || `req_${randomUUID().replaceAll("-", "")}`;
   const attemptId = "attempt_001";
   let taskSpec;
   try {
@@ -1325,7 +1337,11 @@ async function createProjectFileRequest(body) {
       "The current comments could not be compiled into a valid Task Spec.",
     );
   }
+  if (submission && !submissionRequestMatches(submission.snapshot, body, taskSpec)) {
+    throw new HttpError(409, "SUBMISSION_SNAPSHOT_CHANGED", "Submitted requirements cannot be replaced.");
+  }
   const request = {
+    ...(submission ? { submissionOperationId: submission.operationId } : {}),
     freezeCutoffRevision: Number(body.freezeCutoffRevision || 0),
     summary: taskSpec.objective,
     taskSpec,
@@ -1362,6 +1378,8 @@ async function createProjectFileRequest(body) {
       request: { ...request, handoffMessage },
       prompt,
     });
+    if (submission) await projectFileRepository.finishSubmission({ target,
+      operationId: submission.operationId, status: "request-created" });
     const run = projectFileActiveRun({
       activeRequest: durable,
       activeCandidate: null,
@@ -1531,12 +1549,15 @@ async function activateProjectFileCandidate(body) {
       // label select a different Candidate (or turn a valid adoption into an
       // invalid-id error).
       candidateId: body.candidateId || null,
+      expectedSourceSha256: body.expectedSourceSha256,
+      decisionOperationId: body.decisionOperationId,
     });
     const workspace = await projectFileWorkspaceForSource(promoted.target.exactSourcePath);
     const source = workspace.content;
     return {
       ok: true,
       status: "version-activated",
+      retainedDraft: workspace.draft || null,
       projectId: workspace.project.projectId,
       documentId: workspace.project.documentId,
       versionId: promoted.version.versionId,
@@ -1575,6 +1596,7 @@ async function cancelProjectFileRequest(body) {
       },
       cancelRequest: () => projectFileRepository.cancelRequest({
         target,
+        discardCandidate: body.intent === "discard",
         requestId: body.requestId,
         attemptId: body.attemptId || "attempt_001",
       }),
@@ -2847,6 +2869,17 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/agent/cancel") {
     const body = await readBody(request);
     sendJson(response, 200, await cancelActiveRun(body));
+    return;
+  }
+  if (request.method === "POST" && ["/submission", "/submission/finish"].includes(url.pathname)) {
+    const body = await readBody(request);
+    const target = await requireEditableProjectFileTarget(body);
+    const receipt = url.pathname === "/submission"
+      ? await projectFileRepository.recordSubmission({ target, operationId: body.submissionOperationId, input: body })
+      : await projectFileRepository.finishSubmission({ target, operationId: body.submissionOperationId,
+        status: "not-started", errorCode: body.errorCode });
+    sendJson(response, 200, { ok: true, operationId: receipt.operationId,
+      turnId: receipt.turnId, requestId: receipt.requestId, status: receipt.status });
     return;
   }
   if (request.method === "POST" && url.pathname === "/request") {

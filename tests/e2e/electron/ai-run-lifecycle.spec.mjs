@@ -49,7 +49,9 @@ test("a managed Agent failure immediately replaces processing with retry or end"
       fixture.sourcePath,
       "请验证运行中断不会产生 Candidate。",
     );
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
     const qoderCard = await openQoderAvailability(launched.page);
     await expect(qoderCard.getByText("已连接", { exact: true }))
       .toBeVisible({ timeout: 60_000 });
@@ -75,6 +77,8 @@ test("a managed Agent failure immediately replaces processing with retry or end"
     expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
 
     await actionBar.getByRole("button", { name: "结束本轮" }).click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     await expect(launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true }))
       .toBeEnabled({ timeout: 45_000 });
@@ -149,7 +153,9 @@ test("a failed handoff in project A does not block project B or replace its stat
       projectA.sourcePath,
     );
     expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
     await chooseClipboardDelivery(launched.page);
     // The failure is said by the round's own timeline, and it must not have
     // produced a second request.
@@ -172,7 +178,9 @@ test("a failed handoff in project A does not block project B or replace its stat
     expect(projectBWorkingCopyPath).not.toBe(realpathSync(projectB.sourcePath));
     await expect(launched.page.getByRole("button", { name: /AI 助手/u }))
       .toBeEnabled();
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
     await chooseClipboardDelivery(launched.page);
     // B fails on its own round: the same error step appears for B, and the
     // request count says the two failures are two separate rounds.
@@ -186,12 +194,16 @@ test("a failed handoff in project A does not block project B or replace its stat
     await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
     // Each project keeps its own failed state: reopening A still shows A's round
     // stuck at the same error — not B's failure and not a clean slate.
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("任务还没复制成功");
 
     await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("任务还没复制成功");
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
@@ -212,7 +224,9 @@ test("a rapid double click creates exactly one durable Request", {
   try {
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
     await addComment(launched.page, fixture.sourcePath);
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
     const sidebar = await chooseModifyIntent(launched.page);
     await sidebar.getByTestId("ai-conversation-copy-task").dblclick({ delay: 0 });
     await expect(launched.page.getByTestId("ai-conversation-action-bar")
@@ -254,7 +268,9 @@ test("ending a copied run still warns after restart and blocks late finalization
      * phase wording (preparing vs. confirmed) is presentation detail; what the
      * contract needs is that the handoff step is the one carrying the round.
      */
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
     const runProgress = launched.page.getByTestId("ai-conversation-run-progress");
     await expect(runProgress).toBeVisible();
     const endRound = launched.page.getByTestId("ai-conversation-action-bar")
@@ -294,6 +310,8 @@ test("ending a copied run still warns after restart and blocks late finalization
       "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
       { exact: true },
     )).toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true });
     await expect(globalCommentButton).toBeVisible();
@@ -369,7 +387,9 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     };
     await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
 
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
+      await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    }
     await chooseClipboardDelivery(launched.page);
     /*
      * The outcome is unknown, so the round stays in the thread as a delivery still

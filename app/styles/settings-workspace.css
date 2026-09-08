@@ -1080,3 +1080,8 @@
     animation: none;
   }
 }
+
+.agent-diagnostic-details { font-size: 12px; color: var(--text-secondary, #6c6a78); margin-top: 8px; overflow-wrap: anywhere; }
+.agent-diagnostic-details summary { cursor: pointer; }
+.agent-diagnostic-details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; }
+.agent-diagnostic-details dd { margin: 0; }

@@ -206,6 +206,8 @@ function createHarness({
     resolve: [],
     availability: [],
     diagnose: [],
+    submissions: [],
+    submissionEnds: [],
     preflight: [],
     startAgent: [],
     attachment: [],
@@ -215,6 +217,11 @@ function createHarness({
     freeze: 0,
   };
   const client = {
+    async recordSubmission(input) {
+      calls.submissions.push(input);
+      return { operationId: input.submissionOperationId, status: "accepted" };
+    },
+    async finishSubmission(input) { calls.submissionEnds.push(input); return { status: "not-started" }; },
     async createRequest(request) {
       calls.createRequest.push(request);
       return { activeRun: runRecord({ sourcePath, agentDelivery: request.agentDelivery }) };
@@ -650,9 +657,9 @@ test("源页 Agent blocks an over-budget complete HTML rewrite before Request cr
 
   const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
 
-  assert.equal(outcome.status, "blocked", JSON.stringify(outcome));
+  assert.equal(outcome.status, "rejected", JSON.stringify(outcome));
   assert.equal(outcome.code, "RUN_AGENT_PROMPT_TOO_LARGE");
-  assert.match(outcome.reason, /完整输出能力/u);
+  assert.match(outcome.reason, /输出能力/u);
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.calls.unlock, 1);
 });
@@ -1378,7 +1385,7 @@ test("a local disk refresh preserves a known authentication requirement", async 
   });
 
   const checked = await harness.workflow.checkQoderUsability();
-  assert.equal(checked.status, "succeeded");
+  assert.equal(checked.status, "rejected");
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "auth-required");
 
   const refreshed = await harness.workflow.refreshQoderAvailability();
@@ -1414,7 +1421,7 @@ test("a changed Qoder installation asks for a PageRoot restart in shared state",
 
   const checked = await harness.workflow.checkQoderUsability();
 
-  assert.equal(checked.status, "succeeded");
+  assert.equal(checked.status, "rejected");
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "unavailable");
   assert.equal(
     harness.workflow.getSnapshot().qoderAvailability.reason,
@@ -1476,10 +1483,12 @@ test("a failed Qoder preflight creates no Request and leaves editing recoverable
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.calls.startAgent.length, 0);
   assert.equal(harness.calls.handoff.length, 0);
-  assert.equal(harness.runSession.activeRun, null);
+  assert.equal(harness.runSession.activeRun.status, "error");
+  assert.equal(harness.calls.submissions.length, 1);
+  assert.equal(harness.calls.submissionEnds.length, 1);
   assert.equal(harness.runSession.submissionPending, false);
-  assert.equal(harness.calls.freeze, 0);
-  assert.equal(harness.calls.unlock, 0);
+  assert.equal(harness.calls.freeze, 1);
+  assert.equal(harness.calls.unlock, 1);
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "unavailable");
   assert.equal(
     harness.workflow.getSnapshot().qoderAvailability.reason,
@@ -1513,7 +1522,7 @@ test("capacity and timeout preflight failures keep truthful recovery reasons", a
       },
     });
     const outcome = await harness.workflow.checkQoderUsability();
-    assert.equal(outcome.status, "succeeded");
+    assert.equal(outcome.status, "rejected");
     const availability = harness.workflow.getSnapshot().qoderAvailability;
     assert.equal(availability.reason, reason);
     assert.equal(qoderAvailabilityPresentation(availability).statusLabel, statusLabel);
@@ -2471,3 +2480,129 @@ test("submit accepts only its own frozen Hash acknowledgement during a durable s
     harness.workflow.dispose();
   }
 });
+
+test("a completed protocol diagnosis returns a fresh visible rejection without a Request", async () => {
+  const harness = createHarness({ bridge: { async agentDiagnose() {
+    return { diagnostic: { readiness: "connection-failed", cause: "CODEX_ACP_FAILED", facts: {
+      authentication: "ready", protocol: "failed",
+    } } };
+  } } });
+  for (let i = 0; i < 2; i += 1) {
+    const result = await harness.workflow.checkAgentUsability();
+    assert.equal(result.status, "rejected");
+    assert.match(result.reason, /刚刚检查.*账号已登录/);
+    assert.equal(harness.calls.createRequest.length, 0);
+  }
+  harness.workflow.dispose();
+});
+
+test("submission persistence failure never spends a ticket or sends a Request", async () => {
+  const harness = createHarness({ bridge: { async recordSubmission() { throw new Error("disk unavailable"); } } });
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+  assert.equal(outcome.status, "rejected");
+  assert.equal(harness.calls.preflight.length, 0);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.startAgent.length, 0);
+  harness.workflow.dispose();
+});
+
+
+test("a lost submission receipt retries identical authority before any external spend", async () => {
+  const operations = [];
+  const harness = createHarness({ bridge: { async recordSubmission(input) {
+    operations.push(structuredClone(input));
+    assert.equal(harness.calls.preflight.length, 0);
+    if (operations.length === 1) throw new Error("response lost");
+    return { operationId: input.submissionOperationId, status: "accepted" };
+  } } });
+  const result = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+  assert.equal(result.status, "succeeded");
+  assert.equal(operations.length, 2);
+  assert.deepEqual(operations[0], operations[1]);
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.equal(harness.calls.startAgent.length, 1);
+  harness.workflow.dispose();
+});
+for (const delayedMethod of ["recordSubmission", "preflightAgent"]) {
+  test(`navigation while ${delayedMethod} returns settles the original submission without restart`, async () => {
+    const harness = createHarness();
+    const entered = deferred();
+    const release = deferred();
+    const original = harness.client[delayedMethod];
+    harness.client[delayedMethod] = async function(input) {
+      const result = await original.call(this, input);
+      if (delayedMethod === "preflightAgent") result.preflightId += "_delayed";
+      entered.resolve();
+      await release.promise;
+      return result;
+    };
+    const submitting = harness.workflow.submit({ deliveryMode: "managed-agent" });
+    await entered.promise;
+    harness.projectSession.openLocator(SOURCE_B);
+    harness.projectSession.register({ epoch: harness.projectSession.epoch,
+      sourcePath: SOURCE_B, projectId: "project_b", documentId: "document_b" });
+    release.resolve();
+    assert.equal((await submitting).status, "stale");
+    assert.equal(harness.calls.createRequest.length, 0);
+    assert.equal(harness.calls.startAgent.length, 0);
+    assert.equal(harness.calls.submissionEnds.length, 1);
+    assert.equal(harness.calls.submissionEnds[0].sourcePath, SOURCE_A);
+    assert.equal(harness.calls.submissionEnds[0].submissionOperationId,
+      harness.calls.submissions[0].submissionOperationId);
+    harness.client[delayedMethod] = original;
+    harness.projectSession.openLocator(SOURCE_A);
+    harness.projectSession.register({ epoch: harness.projectSession.epoch,
+      sourcePath: SOURCE_A, projectId: "project_a", documentId: "document_a" });
+    const next = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+    assert.equal(next.status, "succeeded", JSON.stringify(next));
+    assert.equal(harness.calls.createRequest.length, 1);
+    assert.equal(harness.calls.createRequest[0].sourcePath, SOURCE_A);
+    harness.workflow.dispose();
+  });
+}
+
+test("an unresolved adoption blocks an opposite end decision before contacting Bridge", async () => {
+  let cancelled = 0;
+  const harness = createHarness({ bridge: { async cancelActiveRun() { cancelled += 1; return {}; } } });
+  const run = runRecord({ status: "ready-to-open", adoptionPhase: "unknown" });
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.runSession.beginOperation("activate", operationKey(run));
+  assert.equal((await harness.workflow.cancel({ run })).code, "RUN_ADOPTION_PENDING");
+  assert.equal(cancelled, 0);
+  assert.equal(harness.runSession.activeRun.adoptionPhase, "unknown");
+  harness.workflow.dispose();
+});
+for (const cancelStillPending of [false, true]) {
+  test(`ending a run during retry preflight fences late Agent start (pending=${cancelStillPending})`, async () => {
+    const preflightEntered = deferred();
+    const releasePreflight = deferred();
+    const releaseCancel = deferred();
+    const harness = createHarness({ bridge: {
+      async preflightAgent() {
+        preflightEntered.resolve();
+        await releasePreflight.promise;
+        return { status: "ready", preflightId: "preflight_retry_cancel", expiresAt: "2026-08-11T00:02:00.000Z" };
+      },
+      async cancelActiveRun() { if (cancelStillPending) await releaseCancel.promise; return {}; },
+    } });
+    const run = runRecord({ agentDelivery: {
+      mode: "managed-agent", selection: {
+        providerId: "qoder", runtimeId: "acp", requestedModelId: null, resolvedModelId: null,
+        reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      }, trustPolicyVersion: "trusted-local-agent-v1",
+    } });
+    harness.runSession.trackRun(run, { activate: "always" });
+    const retry = harness.workflow.startAgent({ run });
+    await preflightEntered.promise;
+    const cancel = harness.workflow.cancel({ run });
+    if (!cancelStillPending) assert.equal((await cancel).status, "succeeded");
+    releasePreflight.resolve();
+    assert.equal((await retry).status, "stale");
+    assert.equal(harness.calls.startAgent.length, 0);
+    releaseCancel.resolve();
+    assert.equal((await cancel).status, "succeeded");
+    assert.equal(harness.runSession.activeRun, null);
+    assert.equal(harness.runSession.activeHandoff, null);
+    harness.workflow.dispose();
+  });
+}

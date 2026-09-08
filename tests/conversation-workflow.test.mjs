@@ -177,7 +177,7 @@ test("a draft write is debounced into one request", async () => {
   // Typing is reflected immediately without waiting for the Bridge.
   assert.equal(session.snapshot.draftText, "一二三");
   assert.equal(bridge.calls.drafts.length, 0);
-  assert.equal(timers.pendingCount, 1);
+  assert.equal(timers.pendingCount, 2);
 
   timers.runAll();
   await Promise.resolve();
@@ -197,7 +197,7 @@ test("flushing a draft at a drain boundary sends the pending text", async () => 
 
   assert.equal(bridge.calls.drafts.length, 1);
   assert.equal(bridge.calls.drafts[0].text, "未发送的草稿");
-  assert.equal(timers.pendingCount, 0);
+  assert.equal(timers.pendingCount, 1); // Read refresh is separate from draft writes.
 });
 
 test("a draft write in flight coalesces later edits into one follow-up", async () => {
@@ -284,7 +284,7 @@ test("closing deactivates the projection and cancels a pending write", async () 
   await workflow.open(documentContext("doc_a", "/tmp/a.html"));
 
   workflow.updateDraftText("草稿");
-  assert.equal(timers.pendingCount, 1);
+  assert.equal(timers.pendingCount, 2);
   workflow.close();
 
   assert.equal(timers.pendingCount, 0);
@@ -301,4 +301,21 @@ test("opening without a source path deactivates instead of calling the Bridge", 
 
   assert.equal(session.snapshot.status, "idle");
   assert.equal(bridge.calls.conversation.length, 0);
+});
+
+
+test("history refresh preserves the draft and never creates execution", async () => {
+  let revision = 0;
+  const bridge = stubBridge({ conversation: () => conversationPayload("doc_a", "conversation_aaaaaaaaaaaa", { revision: ++revision }) });
+  const timers = manualTimers();
+  const { session, workflow } = createWorkflow(bridge, timers);
+  await workflow.open(documentContext("doc_a", "/tmp/a.html"));
+  session.setDraftText("下一轮意见");
+  timers.runAll();
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(session.snapshot.conversation.revision, 2);
+  assert.equal(session.snapshot.draftText, "下一轮意见");
+  assert.equal(bridge.calls.drafts.length, 0);
+  workflow.close();
+  assert.equal(timers.pendingCount, 0);
 });

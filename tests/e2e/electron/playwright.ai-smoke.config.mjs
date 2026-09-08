@@ -10,6 +10,8 @@ const smokeId = process.env.PAGEROOT_SMOKE_SUITE || "ai-smoke";
 
 export default defineConfig({
   ...aiConfig,
+  // A changed on-demand Review spec must be discoverable by the selected gate.
+  testMatch: [aiConfig.testMatch, /review-annotation-clarity\.spec\.mjs/],
   outputDir: path.join(productRoot, "output/playwright", smokeId, "results"),
   reporter: [
     ["list"],

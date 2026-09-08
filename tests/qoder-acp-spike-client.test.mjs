@@ -1143,10 +1143,9 @@ process.stdout.write("1.1.27\\n");
       if (error?.code !== "ESRCH") throw error;
     }
   });
-  assert.throws(
-    () => process.kill(descendantPid, 0),
-    (error) => error?.code === "ESRCH",
-  );
+  // Process-group termination is confirmed by the supervisor; allow the OS
+  // to reap the already-stopped orphan before asserting PID disappearance.
+  assert.equal(await waitForProcessExit(descendantPid, 3_000), true);
 
   await assert.rejects(
     runVerifiedQoderJavaScript({
@@ -1624,4 +1623,29 @@ test("ACP identity repair exhausts three rejected writes without output or compl
   assert.equal(observed.promptCount, 3);
   await assert.rejects(readFile(fixture.outputPath), { code: "ENOENT" });
   await assert.rejects(readFile(fixture.completionPath), { code: "ENOENT" });
+});
+
+test("Codex frozen model and effort are applied before prompt; rejection prevents spending", async (t) => {
+  const fixture = await createFixture(t);
+  for (const reject of [false, true]) {
+    const calls = [];
+    const agent = acp.agent({ name: "codex-selection-fixture" })
+      .onRequest(acp.methods.agent.initialize, () => ({ protocolVersion: acp.PROTOCOL_VERSION,
+        agentCapabilities: {}, authMethods: [], agentInfo: { name: "codex-selection-fixture", version: "1" } }))
+      .onRequest(acp.methods.agent.session.new, () => ({ sessionId: "session_model" }))
+      .onRequest("session/set_model", (value) => value, ({ params }) => {
+        calls.push(params.modelId);
+        if (reject) throw new Error("model unavailable");
+        return {};
+      })
+      .onRequest(acp.methods.agent.session.prompt, () => { calls.push("prompt"); return { stopReason: "end_turn" }; });
+    const result = runGenericAcpTask({ connection: agent, policy: fixture.policy, prompt: "synthetic",
+      sessionModelId: "gpt-synthetic[high]", createHost: () => ({
+        ...Object.fromEntries(["requestPermission", "readTextFile", "writeTextFile", "createTerminal", "terminalOutput", "waitForTerminalExit", "killTerminal", "releaseTerminal"].map((key) => [key, async () => { throw new Error("unexpected tool call"); }])),
+        bindSessionId() {}, assertTurnCompleted: async () => {}, dispose: async () => {}, cancel: async () => {},
+      }) });
+    if (reject) await assert.rejects(result, { code: -32603 });
+    else await result;
+    assert.deepEqual(calls, reject ? ["gpt-synthetic[high]"] : ["gpt-synthetic[high]", "prompt"]);
+  }
 });

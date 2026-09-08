@@ -22,6 +22,7 @@ const SIDEBAR_STATES = new Set([
   "ready-to-open",
   "review-view",
   "promoting",
+  "adoption-unknown",
   "run-error",
 ]);
 
@@ -66,6 +67,7 @@ const MODE_PRESENTATION = Object.freeze({
   "review-view": {
     label: "审阅中",
   },
+  "adoption-unknown": { label: "采用结果待确认" },
   promoting: {
     label: "采用中",
   },
@@ -107,6 +109,8 @@ export function sidebarStateFromRun({
   submissionPending = false,
   reviewing = false,
 } = {}) {
+  if (activeRun?.adoptionPhase === "unknown") return "adoption-unknown";
+  if (activeRun?.adoptionPhase === "applying") return "promoting";
   if (reviewing) return "review-view";
   const mapped = RUN_STATUS_TO_SIDEBAR_STATE[String(activeRun?.status || "")];
   const handoffMatchesRun = Boolean(
@@ -163,6 +167,7 @@ const RUN_PROGRESS_STATES = Object.freeze([
   "processing",
   "validating",
   "promoting",
+  "adoption-unknown",
   // The result states keep the record on screen. The process drawer used to be the
   // only place the round's stages existed, so once it is gone the thread has to
   // hold them — a user deciding whether to adopt still wants to see what happened.
@@ -187,13 +192,13 @@ export function sidebarAgentStageSteps({ state, phase } = {}) {
     })));
   }
   const value = String(phase || "");
-  const currentIndex = ["preparing-delivery", "launching", "starting", "starting-session", "sending-task"]
+  const currentIndex = ["preparing-delivery", "launching", "starting", "starting-session", "sending-task", "request-sent"]
     .includes(value) || currentState === "preparing-delivery"
     ? 0
-    : ["request-sent", "generation-started", "generating-modification", "reading-task", "running", "cancelling", "stopping"]
+    : ["receiving-response", "generation-started", "generating-modification", "reading-task", "running", "cancelling", "stopping"]
       .includes(value)
       ? 1
-      : ["html-validation-completed", "validating-html", "awaiting-validation"]
+      : ["response-received", "html-validation-completed", "validating-html", "awaiting-validation"]
         .includes(value)
         ? 2
         : 3;
@@ -332,7 +337,8 @@ export function sidebarMessageStream(messages) {
       actorLabel: sidebarActorLabel(message.actor),
       kind: String(message.kind || "text"),
       status: String(message.status || "completed"),
-      text: String(message.text || ""),
+      text: message.actor === "pageroot" && message.text === "修改已准备好，尚未采用。"
+        ? "修改已准备好。" : String(message.text || ""),
       truncated: message.truncated === true,
       sequence: Number(message.sequence) || 0,
       createdAt: String(message.createdAt || ""),
@@ -341,6 +347,30 @@ export function sidebarMessageStream(messages) {
       requestId: String(message.requestId || "") || null,
       attemptId: String(message.attemptId || "") || null,
     }));
+}
+
+// Older receipts used text for fixed stage facts. Preserve those records while
+// presenting them with the same disclosure as newly typed progress messages.
+const LEGACY_EXECUTION_PROGRESS = new Set([
+  "已开始执行本轮修改。", "正在建立执行会话。", "已发出本轮修改要求。",
+  "已收到服务响应。", "正在生成修改。", "本轮结果接收结束。",
+  "正在读取本轮资料。", "正在写入修改结果。", "正在核对修改结果。",
+  "正在校验修改结果。", "正在准备审阅。", "已请求停止，正在等待确认。",
+  "执行已结束，结果仍需校验。",
+]);
+
+export function sidebarTurnPresentation(messages = []) {
+  const process = [];
+  const primary = [];
+  for (const message of messages) {
+    if (message.kind === "progress" || (message.actor === "pageroot" && LEGACY_EXECUTION_PROGRESS.has(message.text))) process.push(message);
+    else primary.push(message);
+  }
+  const order = (message) => message.actor === "user" ? 0
+    : message.actor === "agent" ? 1
+    : message.kind === "decision-outcome" || ["已采用本次修改。", "未采用本次修改，修改要求与历史已保留。"].includes(message.text) ? 3 : 2;
+  primary.sort((a, b) => order(a) - order(b));
+  return { primary, process };
 }
 
 function historyIdentity(value) {
@@ -428,9 +458,7 @@ export function sidebarConversationGroups({
     const dateKey = historyDateKey(timestamp);
     const historicalTurnKey = historyIdentity(message.turnId)
       || (requestId && attemptId ? `${requestId}:${attemptId}` : "legacy");
-    const key = current
-      ? `current:${currentRequestId}:${currentAttemptId}`
-      : `history:${dateKey}:${historicalTurnKey}`;
+    const key = historicalTurnKey !== "legacy" ? `turn:${historicalTurnKey}` : `history:${dateKey}:legacy`;
     const previous = groups[groups.length - 1];
     if (previous?.key === key) {
       previous.messageIndices.push(messageIndex);
@@ -441,9 +469,7 @@ export function sidebarConversationGroups({
     const messageId = historyIdentity(message.messageId);
     groups.push({
       key,
-      label: current
-        ? currentTurnLabel(timestamp, now)
-        : historyDateLabel(timestamp),
+      label: `${current ? currentTurnLabel(timestamp, now) : historyDateLabel(timestamp)}${turn?.providerSelection?.providerId ? ` · ${{ qoder: "Qoder", codex: "Codex", pageroot: "HTTP 服务" }[turn.providerSelection.providerId] || "AI"}` : ""}`,
       kind: current ? "current" : "history",
       messageIndices: [messageIndex],
       messageIds: messageId ? [messageId] : [],
@@ -651,46 +677,18 @@ export function sidebarActionBar({
         actions: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
       };
     }
-    const title = candidateVersionLabel
-      ? `${candidateVersionLabel} 等待你的决定`
-      : "AI 修改已完成";
-    const decisionDetail = failureMessage
-      || (candidateStatus === "attention"
-        ? "这次变化较大，先对比审阅。"
-        : "你可以先看变化，也可以直接采用。");
-    // An `attention` candidate offers review only: adopting a large change
-    // without looking at it is not a choice PageRoot should offer.
-    // Already comparing: offering 「审阅对比」 here would point at the screen the user
-    // is looking at. The only decision left is whether to take it, and returning is
-    // owned by the review header beside it.
-    if (state === "review-view") {
-      return {
-        kind: "decision",
-        title,
-        detail: candidateStatus === "attention" && !failureMessage
-          ? "这次变化较大，核对后再决定。"
-          : decisionDetail,
-        actions: [{ id: "adopt", label: "采纳这一版", tone: "primary" }],
-      };
-    }
-    if (candidateStatus === "attention" && !failureMessage) {
-      return {
-        kind: "decision",
-        title,
-        detail: decisionDetail,
-        actions: [{ id: "review", label: "审阅对比", tone: "primary" }],
-      };
-    }
+    const title = "修改已准备好，尚未采用";
+    const detail = failureMessage || (candidateStatus === "attention"
+      ? "这次变化较大，核对后再决定。" : "查看本次修改，再决定是否采用。");
     return {
-      kind: "decision",
-      title,
-      detail: decisionDetail,
-      actions: [
-        { id: "review", label: "审阅对比", tone: "primary" },
-        { id: "adopt", label: "直接采用", tone: "quiet" },
-      ],
+      kind: "decision", title, detail,
+      actions: state === "review-view"
+        ? [{ id: "adopt", label: "采用修改", tone: "primary" },
+          { id: "discard", label: "不用这次", tone: "quiet" }]
+        : [{ id: "review", label: "查看修改", tone: "primary" }],
     };
   }
+
   if (state === "processing" || state === "validating") {
     // The clipboard round is not being processed by the selected Agent at all: the user pasted
     // the task into an Agent of their own and PageRoot is waiting for the file to
@@ -753,11 +751,11 @@ export function sidebarActionBar({
       actions: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
     };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return {
       kind: "progress",
-      title: "正在采用候选版本",
-      detail: "采用完成后会切换到新页面。",
+      title: state === "adoption-unknown" ? "采用结果待确认" : "正在采用候选版本",
+      detail: state === "adoption-unknown" ? "正在自动核对已提交的采用决定，确认后会切换到新页面。" : "采用完成后会切换到新页面。",
       actions: [],
     };
   }
@@ -838,7 +836,7 @@ export function sidebarSendState({
       reason: `${boundedAgentName} 完成本轮后可发送`,
     };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return {
       kind: "send",
       canSend: false,
@@ -998,7 +996,7 @@ export function sidebarCopyTaskState({
   if (state === "processing" || state === "validating") {
     return { canCopy: false, reason: `${boundedAgentName} 完成本轮后可发送` };
   }
-  if (state === "promoting") {
+  if (state === "promoting" || state === "adoption-unknown") {
     return { canCopy: false, reason: "正在采用候选版本" };
   }
   if (queued) {

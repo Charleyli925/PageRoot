@@ -144,6 +144,7 @@ export class VersionWorkflow {
   #navigationGeneration = 0;
   #reviewGeneration = 0;
   #disposed = false;
+  #pendingActivations = new Map();
 
   constructor({
     bridgeClient,
@@ -296,6 +297,11 @@ export class VersionWorkflow {
 
   dispose() {
     this.#disposed = true;
+    for (const [key, pending] of this.#pendingActivations) {
+      clearTimeout(pending.timer);
+      this.#runSession.endOperation("activate", key);
+    }
+    this.#pendingActivations.clear();
     this.#navigationGeneration += 1;
     this.#reviewGeneration += 1;
     this.#canvasPort.onNavigationChange(false);
@@ -431,19 +437,37 @@ export class VersionWorkflow {
       this.#runSession.endOperation("activate", operationKey);
       return blocked("VERSION_NAVIGATION_BUSY", "当前 HTML 视图正在切换，请稍后重试。");
     }
-    this.#runSession.setActiveRun({ ...ready, error: undefined });
+    const pending = this.#pendingActivations.get(operationKey);
+    this.#runSession.trackRun({ ...ready, adoptionPhase: pending ? "unknown" : "applying", error: undefined });
     try {
+      const drained = pending ? { ok: true } : await this.#projectWorkflow.drain("history", { deadlineAt: this.#clock.now() + 15_000 });
+      if (!this.#isNavigationCurrent(operation) || !this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
+      if (!drained.ok) return blocked("ADOPTION_DRAFT_NOT_SAVED", drained.reason || "当前修改意见尚未保存，本次修改尚未采用。");
       const readyTarget = this.#readyOpenTarget(ready);
       perfMark("pageroot:accept:promote-start");
-      const activatedPayload = await this.#bridgeClient.activateReadyVersion({
+      const activationRequest = pending?.request || {
         ...readyTarget,
+        candidateId: ready.readyPayload?.candidate?.candidateId || ready.candidateId || null,
+        ...(ready.readyPayload?.candidate?.candidateId || ready.candidateId ? {
+          decisionOperationId: `promote_${ready.readyPayload?.candidate?.candidateId || ready.candidateId}`,
+        } : {}),
+        expectedSourceSha256: readyTarget.sourceSha256,
         sourcePath: ready.sourcePath,
         projectId: ready.projectId,
         documentId: ready.documentId,
         requestId: ready.requestId,
         attemptId: ready.attemptId,
         versionId: ready.candidateVersionId,
-      });
+      };
+      if (!pending) this.#pendingActivations.set(operationKey, { request: activationRequest, run: ready, reviewLease, timer: null, delay: 1000 });
+      let activatedPayload;
+      try {
+        activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
+      } catch (cause) {
+        if (!activationRequest.decisionOperationId || !isBridgeRequestError(cause) || cause.outcome !== "unknown") throw cause;
+        if (!this.#isNavigationCurrent(operation) || !this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
+        activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
+      }
       perfMark("pageroot:accept:promote-end");
       if (!this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
       const opened = await this.#openCommittedVersion({
@@ -460,6 +484,7 @@ export class VersionWorkflow {
       });
       if (opened.status !== "succeeded") return opened;
 
+      this.#clearPendingActivation(operationKey);
       const completed = this.#settleActivatedRun(ready, opened.value);
       const value = {
         ...opened.value,
@@ -468,7 +493,13 @@ export class VersionWorkflow {
       this.#emitEvent({ type: "version-activated", ...value });
       return succeeded(value);
     } catch (cause) {
-      const reason = this.#codecs.errorMessage(cause, "最新版暂时无法打开。");
+      if (isBridgeRequestError(cause) && cause.outcome === "unknown") {
+        return unknown(operation.operationId, "采用结果待确认，正在自动核对。请勿重复采用或结束本轮。");
+      }
+      this.#clearPendingActivation(operationKey);
+      const reason = ["SOURCE_HASH_CONFLICT", "CANDIDATE_SOURCE_CHANGED", "CANDIDATE_SOURCE_CONFLICT"].includes(errorCode(cause, ""))
+        ? "页面已发生变化，本次修改尚未应用。"
+        : this.#codecs.errorMessage(cause, "最新版暂时无法打开。");
       if (this.#runMatches(this.#runSession.activeRun, ready)) {
         this.#runSession.trackRun({
           ...ready,
@@ -483,9 +514,36 @@ export class VersionWorkflow {
         reason,
       );
     } finally {
-      this.#runSession.endOperation("activate", operationKey);
+      if (this.#pendingActivations.has(operationKey)) {
+        this.#runSession.trackRun({ ...ready, adoptionPhase: "unknown", error: undefined });
+        this.#scheduleActivationReconciliation(operationKey);
+      } else {
+        this.#runSession.endOperation("activate", operationKey);
+        if (this.#isCurrentReadyRun(ready)) this.#runSession.trackRun({ ...this.#runSession.activeRun, adoptionPhase: undefined });
+      }
       this.#finishNavigation(operation);
     }
+  }
+
+  #clearPendingActivation(key) {
+    clearTimeout(this.#pendingActivations.get(key)?.timer);
+    this.#pendingActivations.delete(key);
+  }
+
+  #scheduleActivationReconciliation(key) {
+    const pending = this.#pendingActivations.get(key);
+    if (!pending || !pending.request.decisionOperationId || pending.timer || this.#disposed) return;
+    pending.timer = setTimeout(async () => {
+      pending.timer = null;
+      if (this.#disposed || this.#pendingActivations.get(key) !== pending) return;
+      if (this.#isCurrentReadyRun(pending.run)) {
+        this.#runSession.endOperation("activate", key);
+        await this.activateReadyVersion({ run: pending.run, reviewLease: pending.reviewLease });
+      }
+      pending.delay = Math.min(30_000, pending.delay * 2);
+      this.#scheduleActivationReconciliation(key);
+    }, pending.delay);
+    pending.timer.unref?.();
   }
 
   async openCommittedVersion({
@@ -1174,8 +1232,12 @@ export class VersionWorkflow {
       sourceSha256,
       publishSessions: (publishedContext) => {
         this.#versionSession.adoptCommitted(completion.versionId);
-        this.#draftSession.replaceAuthority(publishedContext, 0, emptyDraftAuthority());
+        const retained = payload.retainedDraft;
+        this.#draftSession.replaceAuthority(publishedContext, Number(retained?.draftRevision || 0), retained || emptyDraftAuthority());
         this.#commentSession.reset();
+        if (retained?.comments?.length) this.#commentSession.update({
+          comments: this.#codecs.commentsFromRecords(retained.comments), changeEvents: [],
+        });
       },
     });
     if (!context || !this.#projectSession.matches(context)) return stale(this.#runIdentity(run));

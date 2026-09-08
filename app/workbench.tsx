@@ -745,15 +745,12 @@ export default function Workbench() {
       selection: provider.selection,
     }),
   );
-  const selectedAgentChoiceId = frozenAgentSelection
-    ? `${frozenAgentSelection.providerId}:${frozenAgentSelection.runtimeId}`
-    : null;
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
   const agentCards = agentProviderCardsFromCatalog(agentCatalogSnapshot);
   const workspacePreferencesController = useWorkspacePreferences(
     desktopUiPreferencesApi,
-    { workspaceController, agentCatalogSnapshot },
+    { workspaceController, agentCatalogSnapshot, documentId: documentId ?? "" },
   );
   const workspacePreferencesSnapshot = workspacePreferencesController.snapshot;
   const workspacePreferences = workspacePreferencesSnapshot.workspace;
@@ -816,6 +813,7 @@ export default function Workbench() {
     // Review is the same workbench with a different Canvas: the thread stays
     // docked and read-only instead of disappearing and coming back.
     reviewing: Boolean(readyReviewSession),
+    commentComposerOpen: commentCanvasPort.getSnapshot().composerOpen,
     canvasMode,
     projectId: projectId ?? "",
     documentId: documentId ?? "",
@@ -834,7 +832,6 @@ export default function Workbench() {
     onOpenAgentSettings: openAgentSettings,
   });
   const revealAiConversation = aiConversation.reveal;
-  const hideAiConversation = aiConversation.hide;
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const {
     runtimePhase: editRuntimePhase,
@@ -5057,7 +5054,7 @@ export default function Workbench() {
         });
       performance.mark("pageroot:accept:activated");
       if (outcome.status !== "succeeded") {
-        if (outcome.status !== "stale") {
+        if (outcome.status !== "stale" && outcome.status !== "unknown") {
           const published = readyVersionPublicationMatches(workspaceController, run);
           if (!published) {
             setCanvasMode("preview");
@@ -5240,7 +5237,7 @@ export default function Workbench() {
         setInterruption({ kind: "review-no-visible-change" });
         return;
       }
-      hideAiConversation();
+      revealAiConversation();
       setInterruption(null);
       setReadyReviewSession({
         operationKey,
@@ -5268,7 +5265,7 @@ export default function Workbench() {
     currentCommentSessionSnapshot,
     currentRunSessionSnapshot,
     fenceAndFreezeCurrentCanvas,
-    hideAiConversation,
+    revealAiConversation,
     isCurrentProjectContext,
     reviewAnalysisSession,
     reviewPreparing,
@@ -5808,7 +5805,17 @@ export default function Workbench() {
       return;
     }
     if (actionId === "review") { void reviewReadyResult(); return; }
-    if (actionId === "adopt") { void activateReadyResult(); return; }
+    if (actionId === "adopt") { void activateReadyResult({ reviewed: Boolean(readyReviewSession) }); return; }
+    if (actionId === "discard") {
+      void cancelActiveRun().then((succeeded) => {
+        if (!succeeded) return;
+        setReadyReviewSession(null);
+        reviewAnalysisSession.clear();
+        setCanvasMode("edit");
+        editorRef.current?.unlockNow?.();
+      });
+      return;
+    }
     if (actionId === "adopt-ai" || actionId === "keep-external") {
       void resolveAiConflict(actionId);
       return;
@@ -5841,6 +5848,8 @@ export default function Workbench() {
     if (actionId === "cancel") requestActiveRunEnd();
   }, [
     activateReadyResult,
+    readyReviewSession,
+    reviewAnalysisSession,
     activeRun,
     cancelActiveRun,
     openAgentSettings,
@@ -5897,22 +5906,23 @@ export default function Workbench() {
   // new path while this overlay is still visible; the live path would rebuild
   // both preview sessions (and retitle the header) mid-accept for nothing.
   const selectDefaultAgent = (selection: AgentSelection) => {
+    workspaceController?.clearPendingDefaultAgent?.();
+    void workspacePreferencesController.update({
+      defaultAgentProviderId: selection.providerId as WorkspacePreferences["defaultAgentProviderId"],
+    });
+  };
+  const selectDocumentAgent = async (selection: AgentSelection) => {
     try {
-      workspaceController?.clearPendingDefaultAgent?.();
       const selected = workspaceController?.selectAgent(selection);
-      if (selected) {
-        void workspacePreferencesController.update({
-          defaultAgentProviderId: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
-        });
-      }
-    } catch (cause) {
-      reportInternalFailure({
-        area: "settings",
-        operation: "select-agent",
-        code: "default-agent-selection-failed",
-        recovered: false,
-        cause,
+      if (!selected || !documentId) return false;
+      return await workspacePreferencesController.update({
+        documentAgentSelections: {
+          ...workspacePreferencesController.snapshot.workspace.documentAgentSelections,
+          [documentId]: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
+        },
       });
+    } catch {
+      return false;
     }
   };
   const agentAccess = {
@@ -5947,7 +5957,7 @@ export default function Workbench() {
       onSelectAgentModel: selectSettingsAgentModel,
       onSelectAgentReasoning: selectSettingsAgentReasoning,
     },
-    onSelect: selectDefaultAgent,
+    onSelect: selectDocumentAgent,
     onQueueDefault: (selection: AgentSelection) => {
       workspaceController?.queuePendingDefaultAgent(selection);
     },
@@ -5966,7 +5976,7 @@ export default function Workbench() {
     <WorkbenchReviewOverlay
       session={readyReviewSession}
       fileName={localFileNameFromSourcePath(readyReviewSession.sourcePath) || currentSourceFileName}
-      accepting={openingReadyVersion}
+      accepting={openingReadyVersion || Boolean(activeRun?.adoptionPhase)}
       activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
       onAbout={openAboutPageRoot}
       onCancelBefore={cancelActiveRun}
@@ -6466,7 +6476,7 @@ export default function Workbench() {
           workspacePreferencesSaving={workspacePreferencesSnapshot.saving}
           workspacePreferencesError={workspacePreferencesSnapshot.error}
           agentChoices={agentProviderChoices}
-          selectedAgentChoiceId={selectedAgentChoiceId}
+          selectedAgentChoiceId={agentProviderChoices.find((choice) => choice.selection.providerId === workspacePreferences.defaultAgentProviderId)?.id ?? null}
           agentCards={agentCards}
           onUpdateWorkspacePreference={workspacePreferencesController.update}
           onRetryWorkspacePreferences={() => {

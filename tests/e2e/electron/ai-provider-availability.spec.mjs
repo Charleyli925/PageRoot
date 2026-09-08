@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { writeFileSync } from "node:fs";
+import { ensureCurrentConversation, mutateConversation } from "../../../bridge/conversation-repository.mjs";
+import { appendConversationTurnMessage } from "../../../shared/conversation.mjs";
 import {
   QODER_VISUAL_OUTPUT,
   addComment,
@@ -80,7 +83,7 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     await expect(deliveryDialog.getByTestId("ai-conversation-agent"))
       .toContainText("Qoder");
     await expect(deliveryDialog.getByTestId("ai-conversation-context-summary"))
-      .toContainText("1 条评论 · 当前 HTML · 项目规则");
+      .toContainText("1 条修改意见");
     await expect(deliveryDialog.getByText("AGENT BRIDGE", { exact: true })).toHaveCount(0);
     await expect(deliveryDialog.getByText("可信本机 Agent 提示", { exact: true }))
       .toHaveCount(0);
@@ -113,11 +116,20 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       .toHaveCount(0);
 
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 60_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     await expect(launched.page.getByTestId("ai-conversation-thinking")).toHaveCount(0);
     await expect.poll(() => launched.page.getByTestId("ai-conversation-stream").evaluate(
       (stream) => Math.round(stream.scrollHeight - stream.clientHeight - stream.scrollTop),
     )).toBeLessThanOrEqual(1);
+    const process = launched.page.getByTestId("ai-turn-process").last();
+    await expect(process).toBeVisible();
+    expect(await process.getAttribute("open")).toBeNull();
+    await expect(process.locator("li").first()).not.toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-message").filter({ hasText: "正在读取冻结任务。正在写入 Candidate。正在等待校验。" })).toHaveCount(1);
+    await process.locator("summary").click();
+    await expect(process.locator("li").first()).toBeVisible();
+    await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-process-expanded.png"), animations: "disabled" });
+    await process.locator("summary").click();
     const readyGeometry = await launched.page.evaluate(() => {
       const sidebar = document.querySelector('[data-testid="ai-conversation-sidebar"]');
       const composer = document.querySelector('[data-testid="ai-conversation-composer"]');
@@ -143,6 +155,70 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       const actionsCenter = readyGeometry.actions.top + readyGeometry.actions.height / 2;
       expect(Math.abs(selectorCenter - actionsCenter)).toBeLessThanOrEqual(1);
     }
+    // The current decision must remain outside history at every supported width.
+    for (const width of [340, 400, 480]) {
+      const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
+      const resizer = launched.page.getByTestId("workbench-resizer-inspector");
+      const handle = await resizer.boundingBox();
+      const currentWidth = (await sidebar.boundingBox()).width;
+      const x = handle.x + handle.width / 2;
+      const y = handle.y + Math.min(80, handle.height / 2);
+      await launched.page.mouse.move(x, y);
+      await launched.page.mouse.down();
+      // A real Conversation refresh during capture must not cancel the drag.
+      await launched.page.waitForResponse((response) => new URL(response.url()).pathname === "/conversation");
+      await launched.page.mouse.move(x + currentWidth - width, y, { steps: 8 });
+      await launched.page.mouse.up();
+      const action = launched.page.getByTestId("ai-conversation-action-bar");
+      await expect(action).toBeVisible();
+      expect(await action.evaluate((element) => element.closest('[data-testid="ai-conversation-stream"]') === null)).toBe(true);
+      await expect.poll(async () => Math.abs((await sidebar.boundingBox()).width - width)).toBeLessThanOrEqual(2);
+      await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, `trusted-loop-pr6-ready-${width}.png`), animations: "disabled" });
+    }
+    const resizer = launched.page.getByTestId("workbench-resizer-inspector");
+    await resizer.focus();
+    await resizer.press("ArrowRight");
+    await expect(resizer).toHaveAttribute("aria-valuenow", "464");
+    await expect(resizer).toBeFocused();
+    const unzoomedWidth = await launched.page.evaluate(() => innerWidth);
+    await launched.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+    await expect.poll(() => launched.page.evaluate(() => innerWidth)).toBeLessThan(unzoomedWidth);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")).toBeVisible();
+    await expect.poll(() => launched.page.getByTestId("ai-conversation-sidebar").evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const stage = element.closest(".review-scroll-stage").getBoundingClientRect();
+      return bounds.left >= stage.left - 1 && bounds.right <= innerWidth + 1 && bounds.bottom <= innerHeight + 1 && element.scrollWidth <= element.clientWidth + 1;
+    })).toBe(true);
+    await expect(launched.page.getByRole("button", { name: "收起会话面板", exact: true })).toBeInViewport();
+    await launched.page.getByRole("button", { name: "收起会话面板", exact: true }).focus();
+    await expect.poll(() => launched.page.locator(".workbench").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ")[0])).toBe("0px");
+    const zoomCapture = await launched.electronApp.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString("base64"));
+    writeFileSync(path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-pr8-zoom-200.png"), zoomCapture, "base64");
+    await launched.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+    const identity = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+    const conversationContext = { projectRoot: path.join(path.dirname(workingCopyPath), ".pageroot"), projectId: identity.projectId, documentId: identity.documentId };
+    const history = await ensureCurrentConversation(conversationContext);
+    const turnId = history.turns[0].turnId;
+    const appendSyntheticHistory = (count, prefix) => mutateConversation(conversationContext, history.conversationId, (value) => {
+      let next = value;
+      for (let index = 0; index < count; index += 1) next = appendConversationTurnMessage(next, { turnId, message: {
+        messageId: `message_${prefix}_${index}`, actor: "pageroot", kind: "text", status: "completed",
+        text: `长历史验收 ${prefix} ${index}：` + "这是合成测试的公开摘要。".repeat(20),
+      } }, { now: () => new Date().toISOString() });
+      return next;
+    });
+    await appendSyntheticHistory(20, "long_history_fixture");
+    const stream = launched.page.getByTestId("ai-conversation-stream");
+    await expect(stream).toContainText("长历史验收 long_history_fixture 19");
+    await stream.evaluate((element) => { element.scrollTop = 0; element.dispatchEvent(new Event("scroll", { bubbles: true })); });
+    await appendSyntheticHistory(1, "new_tail_fixture");
+    await expect(stream).toContainText("长历史验收 new_tail_fixture 0");
+    expect(await stream.evaluate((element) => element.scrollTop)).toBeLessThan(2);
+    await expect(launched.page.getByTestId("ai-conversation-unseen-content")).toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")).toBeVisible();
+    await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-pr8-long-history.png"), animations: "disabled" });
+    await launched.page.getByTestId("ai-conversation-unseen-content").click();
+    await expect.poll(() => stream.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(2);
     await launched.page.screenshot({
       path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "qoder-result-ready.png"),
       fullPage: false,
@@ -177,7 +253,7 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     expect(qoderCandidate).toContain('data-pageroot-qoder-acp="e2e"');
     expect(qoderCandidate).toContain("Qoder \u5df2\u66f4\u65b0\uff1a\u771f\u5b9e");
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
@@ -232,6 +308,8 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
       animations: "disabled",
     });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-codex").click();
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("Codex", { timeout: 60_000 });
     await expect(sidebar.getByRole("button", { name: /交给 Codex 修改/u }))
@@ -259,11 +337,11 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
     await expect(narration.getByTestId("ai-conversation-narration").locator("p"))
       .toHaveCount(3);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 60_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     const decisionAnnouncement = launched.page
       .getByTestId("ai-conversation-action-bar")
       .getByRole("status");
-    await expect(decisionAnnouncement).toHaveText(/版本 2 等待你的决定/u);
+    await expect(decisionAnnouncement).toHaveText(/修改已准备好，尚未采用/u);
     await expect(decisionAnnouncement).toHaveAttribute("aria-live", "polite");
     await expect(launched.page.getByTestId("ai-conversation-thinking")).toHaveCount(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -290,7 +368,7 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
     expect(codexCandidate).toContain('data-pageroot-codex-acp="e2e"');
     expect(codexCandidate).toContain("Codex \u5df2\u66f4\u65b0\uff1a\u771f\u5b9e");
 
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
   } finally {
@@ -399,6 +477,8 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("DeepSeek", { timeout: 20_000 });
     await expect(sidebar.getByTestId("ai-conversation-model")).toBeVisible();
@@ -425,7 +505,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     releaseStream();
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("等待你的决定", { timeout: 60_000 });
+      .toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     const readyGeometry = await launched.page.evaluate(() => {
       const sidebarNode = document.querySelector('[data-testid="ai-conversation-sidebar"]');
       const composer = document.querySelector('[data-testid="ai-conversation-composer"]');
@@ -479,7 +559,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     expect(pagerootCandidate).toContain('data-pageroot-http-agent="e2e"');
     expect(pagerootCandidate).toContain('data-pageroot-http-reasoning="auto"');
     expect(pagerootCandidate).toContain("源页已更新：真实");
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
@@ -520,6 +600,8 @@ test("源页运行时余额失败 offers only provider recovery without a false 
     await setDefaultSettingsAgent(settingsPage, "pageroot");
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
 
     const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
@@ -703,7 +785,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const deliveryDialog = await openQoderAvailability(launched.page);
     const qoderCard = deliveryDialog;
-    await expect(qoderCard.getByText("未安装", { exact: true })).toBeVisible();
+    await expect(qoderCard.locator(".settings-agent-service-main").getByText("未安装", { exact: true })).toBeVisible();
     await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeVisible();
     expect(requestPosts).toBe(0);
 
@@ -750,7 +832,7 @@ test("Qoder managed install can be cancelled while the install request is pendin
     });
 
     const qoderCard = await openQoderAvailability(launched.page);
-    await expect(qoderCard.getByText("未安装", { exact: true }))
+    await expect(qoderCard.locator(".settings-agent-service-main").getByText("未安装", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     await qoderCard.getByRole("button", { name: "安装 Qoder CLI" }).click();
 
@@ -762,7 +844,7 @@ test("Qoder managed install can be cancelled while the install request is pendin
 
     await cancelButton.click();
     await expect.poll(() => cancelPosts).toBe(1);
-    await expect(qoderCard.getByText("未安装", { exact: true }))
+    await expect(qoderCard.locator(".settings-agent-service-main").getByText("未安装", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeEnabled();
     expect(requestPosts).toBe(0);
@@ -894,6 +976,8 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", {
       return (await roundStopButton.count()) === 0 ? "ended" : "";
     }, { timeout: 45_000 }).not.toBe("");
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     await expect(launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true }))
       .toBeEnabled({ timeout: 45_000 });

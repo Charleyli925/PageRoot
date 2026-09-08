@@ -286,7 +286,15 @@ export class RunSession {
     return this.releaseSubmission(this.activeSubmission);
   }
 
+  #preservePendingAdoption(run) {
+    const previous = this.runForSource(run?.sourcePath);
+    return run?.status === "ready-to-open" && sameRun(previous, run)
+      && previous.adoptionPhase && !Object.hasOwn(run, "adoptionPhase")
+      ? { ...run, adoptionPhase: previous.adoptionPhase } : run;
+  }
+
   setActiveRun(run) {
+    run = this.#preservePendingAdoption(run);
     if (
       run?.sourcePath
       && !sameRun(this.#activeRun, run)
@@ -301,6 +309,7 @@ export class RunSession {
 
   trackRun(run, { activate = "if-current", recovered = false } = {}) {
     if (!run?.sourcePath) return null;
+    run = this.#preservePendingAdoption(run);
     const previous = this.runForSource(run.sourcePath);
     const sameTrackedRun = sameRun(previous, run);
     const recoveredHandoff = recovered && !sameTrackedRun

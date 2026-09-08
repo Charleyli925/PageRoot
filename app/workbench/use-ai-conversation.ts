@@ -58,6 +58,7 @@ export type UseAiConversationOptions = {
   activeHandoff?: RunHandoffState | null;
   submissionPending?: boolean;
   reviewing?: boolean;
+  commentComposerOpen?: boolean;
   canvasMode: "edit" | "preview";
   projectId: string;
   documentId: string;
@@ -98,6 +99,7 @@ export function useAiConversation({
   activeHandoff = null,
   submissionPending = false,
   reviewing = false,
+  commentComposerOpen = false,
   canvasMode,
   projectId,
   documentId,
@@ -109,10 +111,10 @@ export function useAiConversation({
   onOpenAgentSettings,
 }: UseAiConversationOptions) {
   const [open, setOpen] = useState(false);
-  // Review remains eligible for the same thread, but every new Review session
-  // explicitly hides it once so the comparison starts at full width.
-  const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
-  const visible = active && open;
+  // The document owns its history across editing, review and settled results.
+  const active = Boolean(sourcePath);
+  const visible = active && open && !commentComposerOpen;
+  if (commentComposerOpen && open) setOpen(false);
 
   // Load when the sidebar becomes visible for a Document and close it on any
   // identity change or when it stops being visible.
@@ -171,6 +173,7 @@ export function useAiConversation({
   }), [conversation, activeRun]);
 
   const sidebarProps = useMemo(() => ({
+    documentKey: `${projectId}:${documentId}`,
     state,
     title: conversation?.title ?? "",
     messages: conversation?.messages ?? [],
@@ -225,6 +228,7 @@ export function useAiConversation({
     onSend,
     onCopyTask,
     onAction: onDecision,
+    onClose: hide,
     onOpenAgentSettings,
   }), [
     state,
@@ -252,6 +256,7 @@ export function useAiConversation({
     onSend,
     onCopyTask,
     onDecision,
+    hide,
     onOpenAgentSettings,
   ]);
 

@@ -2,7 +2,7 @@
 
 ## 基线
 
-2026-09-08 拉取 origin/main，源码基线 `4b6aa8658f324a8c5e319f3bbc379fc785205487`，与报告一致。主目录有无关未提交改动，本轮使用独立工作树。未启动桌面应用；安装应用 commit 与实际运行时版本尚未取证。仓库受管发布描述固定 Codex native 0.148.0、codex-acp 1.7.0（不是实机版本声明）。附件的外部 content-reference 未提供可读取文件；以已附完整文字为执行范围。
+2026-09-08 拉取 origin/main，源码基线 `4b6aa8658f324a8c5e319f3bbc379fc785205487`，与报告一致。主目录有无关未提交改动，本轮使用独立工作树。已读取本机 Developer Preview build-info，安装 commit 为同一基线；本记录初始时尚未执行真实账号验证；最新结果见 STEMMIO_TRUSTED_LOOP_QA.md。仓库受管发布描述固定 Codex native 0.148.0、codex-acp 1.7.0（不是实机版本声明）。附件的外部 content-reference 未提供可读取文件；以已附完整文字为执行范围。
 
 ## 已核对的入口和缺口
 
@@ -22,17 +22,17 @@
 
 | 里程碑 | PR | 范围 | 状态 |
 | --- | --- | --- | --- |
-| A | PR-0 | ADR、场景和基线 | 实施中 |
-| A | PR-1 | 检查、登录、连接修复 | 待实施 |
-| A | PR-2 | 服务选择与计时 | 待实施 |
-| B | PR-3 | 预检前提交、冻结要求、防重、复制 | 待实施 |
-| B | PR-4 | 事实投影、持久执行、重启恢复 | 待实施 |
-| C | PR-5 | 安全进度、停止竞争 | 待实施 |
-| C | PR-6 | 四区域侧栏、原地修复、阅读行为 | 待实施 |
-| C | PR-7 | 审阅、采用、不用、评论修订 | 待实施 |
-| D | PR-8 | 故障注入、真实桌面、视觉与无障碍 | 待实施 |
+| A | PR-0 | ADR、场景和基线 | 已合并 #474；后续 PR 保持 Draft、不合并 |
+| A | PR-1 | 检查、登录、连接修复 | Draft #475，task:finish 通过 |
+| A | PR-2 | 服务选择与计时 | Draft #476，task:finish 通过（独立分支，PR-6 集成） |
+| B | PR-3 | 预检前提交、冻结要求、防重、复制 | Draft #477，完整 task:finish 通过 |
+| B | PR-4 | 事实投影、持久执行、重启恢复 | Draft #478，完整 task:finish 通过 |
+| C | PR-5 | 安全进度、停止竞争 | Draft #479，完整 task:finish 通过 |
+| C | PR-6 | 四区域侧栏、原地修复、阅读行为 | Draft #481，完整 task:finish 通过；已整合 PR-2 |
+| C | PR-7 | 审阅、采用、不用、评论修订 | Draft #482，最终提交与 task:finish 证据见 PR #482 |
+| D | PR-8 | 故障注入、真实桌面、视觉与无障碍 | 代码与自动化已整合，交付见 PR-8；真实 Codex finalizer、DeepSeek 账号链仍阻断 |
 
-PR-0 先行；PR-3 → PR-4 → PR-5；PR-6 接入 PR-1/2/4/5；PR-7 接入历史与审阅；PR-8 汇总。每个 PR 为 Draft，独立说明行为、持久化变化、测试、未覆盖项与回退边界。合并与发布须另行授权。
+PR-0 先行；PR-3 → PR-4 → PR-5；PR-6 接入 PR-1/2/4/5；PR-7 接入历史与审阅；PR-8 汇总。除已合并的 PR-0 外，其余 PR 保持 Draft，独立说明行为、持久化变化、测试、未覆盖项与回退边界。合并与发布须另行授权。
 
 ## 发布阻断矩阵
 
@@ -57,4 +57,13 @@ PR-0 先行；PR-3 → PR-4 → PR-5；PR-6 接入 PR-1/2/4/5；PR-7 接入历�
 17. 原始 Codex 初始化故障：分项诊断与真实受管闭环，不以模拟代替。
 18. Qoder 停止后 DeepSeek 成功：新 Bridge 重启保留两轮要求/服务/摘要/结果；投影失败不重跑。
 
-视觉证据覆盖八种关键状态、340/400/480px、200% 缩放、长文本/历史；键盘焦点与滚动锚点稳定，读屏不逐秒播报。真实账号测试尚未执行。
+视觉证据覆盖八种关键状态、340/400/480px、200% 缩放、长文本/历史；键盘焦点与滚动锚点稳定，读屏不逐秒播报。真实账号结果见 STEMMIO_TRUSTED_LOOP_QA.md；不得将部分通过视作全量通过。
+
+PR-1：新增诊断编号、失败阶段、配置代次与操作回执；检查未就绪返回 rejected。连接失败保留分项事实。真实 Codex 初始化故障与桌面截图仍待真实环境验收，不声明根因已修复。
+
+PR-7 implementation: Candidate-specific Review → adopt/discard, source-hash and decision identity validation, pre-adoption Draft drain, transactional preservation of later comments, and completed-Promotion history replay. Focused repository, workflow and Electron checks are recorded in the PR; real accounts remain PR-8.
+
+PR-8 最终集成基线：主线 589c8954，包括 #473 运行隔离、#480 Stable ID 自动纠错、#474 契约与 #484 收敛规则。保留本轮真实进度事件及模型绑定；共享运行时冲突已逐项合并并纳入最终门禁。
+PR-2 归属：#476 保持服务选择与计时修复的独立交付入口。PR-6 已纳入其同一分支祖先；本次整合无功能净差异，避免把它们视为两份独立功能。后续获准合并时先处理 #476，再处理依赖它的 PR-6；当前全部后续 PR 保持 Draft，不合并。
+
+本次评审补修与验收边界详见 `STEMMIO_TRUSTED_LOOP_QA.md`。PR-3/4 的提前退出与全局容量、PR-5/6 的安全公开摘要与折叠历史、PR-7 的连续未知采用恢复已分配给各自前置 PR；PR-8 只集成并补证据。其余 PR 保持 Draft，不合并。

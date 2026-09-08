@@ -852,7 +852,9 @@ export function candidateHtmlFiles(workspace, projectId) {
 }
 
 export async function adoptReadyResult(page) {
-  await page.getByRole("button", { name: /直接采用|采纳这一版/u }).click();
+  const review = page.getByRole("button", { name: "查看修改", exact: true });
+  if (!await page.getByTestId("ai-review-workspace").isVisible()) await review.click();
+  await page.getByRole("button", { name: "采用修改", exact: true }).click();
 }
 
 export const REVIEW_PROJECTION_CASES = Object.freeze([

@@ -74,7 +74,7 @@ a Custom OpenAI-compatible endpoint validates only its saved configuration and
 does not require a catalog route. Qoder uses version/model-list checks and
 Codex verifies login plus ACP `initialize` without opening a task session. The
 route creates no preflight ticket or ACP session and cannot change the selected
-model. A diagnosis is selection-keyed single-flight, and a weak Settings result
+model. A diagnosis is selection-keyed single-flight with a bounded 30-second UI receipt and configuration-generation fencing. Native Codex login owns automatic browser opening; Stemmio only reopens it on explicit user action. Concurrent login callers reuse the live Bridge operation, including unconfirmed cleanup. A weak Settings result
 cannot erase a stronger failure learned during preflight or execution.
 `GET /agent/availability` remains the disk-only compatibility route. Codex
 collects all candidates before applying explicit-test, managed, then
