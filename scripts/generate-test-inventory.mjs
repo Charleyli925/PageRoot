@@ -14,7 +14,7 @@ export const PLAYWRIGHT_EXECUTION_LANES = Object.freeze([
   { id: "electron-native", config: "tests/e2e/electron/playwright.config.mjs", stage: "ready-full" },
   { id: "electron-ai", config: "tests/e2e/electron/playwright.ai-closed-loop.config.mjs", stage: "ready-full" },
   { id: "electron-ci-preflight", config: "tests/e2e/electron/playwright.ci-preflight.config.mjs", stage: "ready-full" },
-  { id: "electron-review-annotation", config: "tests/e2e/electron/playwright.review-annotation.config.mjs", stage: "ready-full" },
+  { id: "electron-review-annotation", config: "tests/e2e/electron/playwright.review-annotation.config.mjs", stage: "on-demand" },
   { id: "electron-packaged", config: "tests/e2e/electron/playwright.packaged.config.mjs", stage: "release" },
   { id: "electron-packaged-startup", config: "tests/e2e/electron/playwright.packaged-startup.config.mjs", stage: "release" },
   { id: "browser-smoke", config: "tests/e2e/browser/playwright.smoke.config.mjs", stage: "draft-canary" },
@@ -140,7 +140,7 @@ export async function assertTestInventory(root = productRoot) {
   }
   const review = inventory.execution.lanes.find((lane) => lane.id === "electron-review-annotation");
   if (!review?.files.includes("tests/e2e/electron/review-annotation-clarity.spec.mjs")) {
-    throw new Error("Review-annotation execution lane does not include review-annotation-clarity.spec.mjs.");
+    throw new Error("On-demand review annotation execution does not include review-annotation-clarity.spec.mjs.");
   }
   return inventory;
 }

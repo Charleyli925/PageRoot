@@ -2865,3 +2865,28 @@ final result: passed
 - 自动回归：`@smoke-version-display` 的原生界面和 AI 审阅场景分别连续运行两次通过；项目切换使用实际可交互状态作为等待条件。
 - 已记录 P2：历史页沿用的 Runtime 静态降级提示仍有“仍可编辑和保存”通用文案，与历史只读上下文不符；本批不改 Runtime，按钮的历史锁仍生效。
 - final result: passed（本批展示范围；上述既有 Runtime 文案留待后续）
+
+
+## 2026-09-08 — D：独立只读历史预览
+
+- Truth: 用户第二批 D，沿用现有标签、侧栏和 HtmlInteractionPreview。
+- Evidence: `output/playwright/native-dom-electron/results/electron-workbench-tabs-El-d7fb3-in-the-existing-project-tab/version-history-projection.png` 和同目录 `version-current-projection.png`。
+- 核对：历史标签与左侧 V1 选中一致，顶部预览选中、编辑禁用；返回后仍为 V3 工作文件。历史读取失败保持当前视图并可继续切换项目。
+- 修复及复核：初轮截图发现布局仍使用后台编辑模式，预览高度仅 150px；统一展示模式后复拍，完整预览可见，增加大于 400px 的真实窗口尺寸断言。
+- 本 PR 不改变旧继续编辑入口；新建版本事务与入口分别由 E、F 接续。
+- final result: passed（独立历史预览与既有视觉语言）。
+
+## 2026-09-08 — F：历史创建、文件对象与结果恢复
+
+- Truth: 用户 D/E/F 历史闭环；沿用既有确认弹窗、导航提示、侧栏与标签视觉语言。
+- Evidence: Electron `@smoke-version-display`：V1～V8 查看 V3，取消确认无建版；历史导出实际字节等于 V3；丢创建回执和新稿加载失败后仍只产生 V9；打开、编辑保存并重启恢复。截图 `output/playwright/native-dom-electron/results/electron-workbench-tabs-El-d7fb3-in-the-existing-project-tab/history-created-v9.png`。
+- 视觉核对：V9 侧栏选中、标签 V9、顶部编辑选中，真实原位文字修改可见；历史的编辑按钮只打开确认。成功打开清除前次打开失败提示。
+- 验证边界：合成页面含抛错作者脚本，本场景验证静态内容仍可编辑、保存、重启。严格动态 Runtime 探针曾报告未推进到新来源的运行帧；不将本场景通过计作动态脚本运行成功，也不扩展重写 Runtime。
+- P2 / 待核对：同标签切换到含抛错脚本的新稿后，Runtime 的 ready / last-known-good 元数据与静态可编辑内容并不同时推进。记录单独调查，当前完整 HTML 与保存目标通过字节验收。
+- 创建提交前 aborted 的可见准备 HTML 保留策略沿用 E，清理不纳入 F。
+
+### F 合并前恢复生命周期复核
+
+- 四条真实 Electron 历史回归通过：原有丢回执/打开失败/编辑保存场景，以及 pending、合法 rename、后续 V10 superseded 三种重启组合。
+- 三种重启后均确认可再次进入历史创建确认并取消；V10 再次普通重启不指定启动文件，旧 V9 回执仍缺少 openedAt，也不会出现旧恢复入口。
+- V10 使用 Repository 的真实 Candidate/Promotion 链路生成；本组不冒充完整 AI 用户交互或动态 Runtime 验证。无视觉语言改动。

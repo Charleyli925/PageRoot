@@ -3730,6 +3730,7 @@ export class ProjectWorkflow {
         });
         this.#emit({
           type: "project-hydrated",
+          historyCreation: payload.historyCreation || null,
           context,
           projectName: projectRecord.displayName ? String(projectRecord.displayName) : null,
           lastModifiedAt: authoritativeLastModifiedAt || null,
@@ -3908,6 +3909,7 @@ export class ProjectWorkflow {
       this.#versionSession.restoreView?.({
         viewMode: "history",
         viewingVersionId: previous.version.viewingVersionId,
+        historyPreview: previous.version.historyPreview,
       });
     }
     this.#commentSession.update(previous.comment);

@@ -493,6 +493,8 @@ editing
 [返回当前 HTML]
 ```
 
+E 已增加从不可变历史创建下一版本的独立命令和可恢复事务，旧继续编辑入口在 F 切换前仍保持下述行为；详见 `VERSION_AND_PROJECT_FILES_PRD.md` 的历史创建合同。存量旧工作稿不因升级而自动切换。
+
 历史模式不提供覆盖、替换或恢复当前 HTML 的按钮；Bridge 同样不暴露历史 HTML 回写路由。唯一的继续编辑路由只能激活已有受管 Working Copy，且桌面/Bridge/确认响应丢失后的同一回执操作重试必须返回同一 `workingCopyId`。回执提交后不得回滚较新的历史路径；Desktop 与 Bridge 确认成功时才在一个同步发布边界更新 Project、Document、Version、Draft 和 Comment Session，随后才接受新 Canvas 的渲染确认。
 
 ### 5.13 时间语义

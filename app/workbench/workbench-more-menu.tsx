@@ -18,6 +18,7 @@ type MoreMenuItem = Readonly<{
 }>;
 
 export type WorkbenchMoreMenuProps = Readonly<{
+  isHistory?: boolean;
   canShowInFolder: boolean;
   onShowInFolder: () => void;
   canOpenInBrowser: boolean;
@@ -41,6 +42,7 @@ function menuPosition(trigger: HTMLButtonElement) {
 }
 
 export function WorkbenchMoreMenu({
+  isHistory = false,
   canShowInFolder,
   onShowInFolder,
   canOpenInBrowser,
@@ -59,19 +61,19 @@ export function WorkbenchMoreMenu({
   const items = useMemo<readonly MoreMenuItem[]>(() => [
     {
       id: "show-in-folder",
-      label: "在 Finder 中显示",
+      label: isHistory ? "在 Finder 中显示当前工作文件" : "在 Finder 中显示",
       icon: <FolderOpenIcon aria-hidden="true" size={16} weight="duotone" />,
       onSelect: onShowInFolder,
     },
     {
       id: "open-in-browser",
-      label: "在默认浏览器中打开",
+      label: isHistory ? "在浏览器中打开当前工作文件" : "在默认浏览器中打开",
       icon: <ArrowSquareOutIcon aria-hidden="true" size={16} weight="bold" />,
       onSelect: onOpenInBrowser,
     },
     {
       id: "export-html",
-      label: "导出当前 HTML…",
+      label: isHistory ? "导出此版本…" : "导出当前 HTML…",
       icon: <DownloadSimpleIcon aria-hidden="true" size={16} weight="duotone" />,
       onSelect: onExportCurrentHtml,
       dividerBefore: true,
@@ -84,6 +86,7 @@ export function WorkbenchMoreMenu({
       dividerBefore: true,
     },
   ], [
+    isHistory,
     onExportCurrentHtml,
     onOpenInBrowser,
     onReloadCurrentSource,

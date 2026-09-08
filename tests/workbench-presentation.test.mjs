@@ -21,7 +21,7 @@ test("history gives sidebar and tab the viewed Version while retaining distinct 
   assert.equal(p.selectedVersionId, "v1"); assert.equal(p.displayedVersionId, "v1");
   assert.equal(p.tabTitle, "A-V1.html"); assert.equal(p.viewLabel, "历史");
   assert.equal(p.currentEditingVersionId, "v2"); assert.equal(p.latestVersionId, "v3");
-  assert.equal(p.edit.enabled, false); assert.match(p.edit.reason, /历史版本只读/u);
+  assert.equal(p.edit.enabled, true); assert.equal(p.edit.reason, undefined);
   assert.equal(p.canReloadCurrentSource, false);
   assert.equal(p.mode, "edit"); // projection never claims a preview runtime switch
   assert.equal(source.version.currentBasedOnVersionId, "v2");

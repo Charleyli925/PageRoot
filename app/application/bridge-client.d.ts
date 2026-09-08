@@ -65,6 +65,9 @@ export type BridgeClient = {
   cancelAgent(body: BridgeJson): Promise<BridgeJson>;
   resolveConflict(body: BridgeJson): Promise<BridgeJson>;
   activateReadyVersion(body: BridgeJson): Promise<BridgeJson>;
+  createVersionFromHistory(body: BridgeJson): Promise<BridgeJson>;
+  queryHistoryCreation(body: BridgeJson): Promise<BridgeJson>;
+  confirmHistoryCreationOpened(body: BridgeJson): Promise<BridgeJson>;
   continueEditingHistoryVersion(body: BridgeJson): Promise<BridgeJson>;
   confirmEditingHistoryVersion(body: BridgeJson): Promise<BridgeJson>;
   cancelActiveRun(body: BridgeJson): Promise<BridgeJson>;

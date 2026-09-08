@@ -577,7 +577,7 @@ function projectFileVersionRows(workspace, requirements = new Map()) {
     return {
       schemaVersion: "4.0.0",
       ...version,
-      sourceType: version.sourceCandidateId ? "internal-ai" : "initial",
+      sourceType: version.sourceType || (version.sourceCandidateId ? "internal-ai" : "initial"),
       versionLabel: `V${version.ordinal}`,
       generatedAt: version.createdAt,
       requestId: version.sourceRequestId,
@@ -867,6 +867,7 @@ async function projectFileBaseWorkspaceState(workspace) {
     runtimeState: runtime,
     activeRun,
     recentRunOutcome,
+    historyCreation: workspace.runtime.historyCreation || null,
     activeDraft,
     workingCopyRecovered: workspace.workingCopyRecovered === true,
     recoveryIdentity: null,
@@ -1853,6 +1854,21 @@ async function projectFileAiTask(sourcePath) {
   } catch (cause) {
     throw projectFileHttpError(cause);
   }
+}
+
+async function projectFileHistoryCreation(body, action) {
+  const allowedKeys = new Set(["target", "versionId", "operationId", "expectedSourceSha256", "expectedSnapshotSha256"]);
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !allowedKeys.has(key))) {
+    throw new HttpError(400, "INVALID_HISTORY_CREATION", "The history creation payload is invalid.");
+  }
+  const target = projectFileTargetFromBody(body.target);
+  if (!target || target.targetKind !== "working-copy") throw new HttpError(400, "OPEN_TARGET_REQUIRED", "A managed Working Copy identity is required.");
+  try {
+    const result = action === "create"
+      ? await projectFileRepository.createVersionFromHistory({ target, versionId: body.versionId, operationId: body.operationId, expectedSourceSha256: body.expectedSourceSha256, expectedSnapshotSha256: body.expectedSnapshotSha256 })
+      : await projectFileRepository.queryHistoryCreation({ target, operationId: body.operationId, markOpened: action === "opened" });
+    return { ok: true, ...result };
+  } catch (cause) { throw projectFileHttpError(cause); }
 }
 
 async function continueProjectFileHistoryVersion(body) {
@@ -2865,6 +2881,12 @@ async function route(request, response) {
   ) {
     const body = await readBody(request);
     sendJson(response, 200, await activateReadyVersion(body));
+    return;
+  }
+  if (request.method === "POST" && ["/history-version/create", "/history-version/result", "/history-version/opened"].includes(url.pathname)) {
+    const body = await readBody(request);
+    sendJson(response, 200, await projectFileHistoryCreation(body,
+      url.pathname === "/history-version/create" ? "create" : url.pathname === "/history-version/opened" ? "opened" : "result"));
     return;
   }
   if (

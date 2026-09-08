@@ -43,6 +43,7 @@ type HtmlInteractionPreviewProps = {
   sourcePath?: string;
   height?: string;
   transport?: "independent-url" | "srcdoc";
+  staticFallbackOnFailure?: boolean;
   /**
    * Saved comments for this document. The preview renders each resolvable
    * target as a read-only marker; an ambiguous or orphaned target produces no
@@ -432,6 +433,7 @@ const HtmlInteractionPreview = forwardRef<
   sourcePath,
   height = "100%",
   transport = "srcdoc",
+  staticFallbackOnFailure = false,
   comments,
   onInteraction,
   onReady,
@@ -652,6 +654,7 @@ const HtmlInteractionPreview = forwardRef<
     return () => window.removeEventListener("message", receiveScroll);
   }, [frameReady, prepared.channelToken]);
 
+  const staticFallback = staticFallbackOnFailure && loadFailed;
   const frameSource = independentTransport
     ? desktopSession?.url
     : undefined;
@@ -668,21 +671,23 @@ const HtmlInteractionPreview = forwardRef<
       aria-hidden={presentationCovered || undefined}
       inert={presentationCovered || undefined}
     >
+      {staticFallback ? <p role="status">动态内容暂时不可用，正在显示只读静态内容。可刷新重试。</p> : null}
       <div className={styles.viewport} ref={viewportRef}>
         <iframe
           ref={iframeRef}
-          key={independentTransport
+          key={staticFallback ? `static-${reloadRevision}` : independentTransport
             ? desktopSession?.sessionId ?? `pending-${reloadRevision}`
             : reloadRevision}
           className={styles.frame}
           title="HTML 交互预览"
-          {...(independentTransport
+          {...(staticFallback ? { srcDoc: prepared.html } : independentTransport
             ? { src: frameSource ?? "about:blank" }
             : { srcDoc: prepared.html })}
-          sandbox={frameSandbox}
+          sandbox={staticFallback ? "" : frameSandbox}
           allow="autoplay; clipboard-write; fullscreen; picture-in-picture"
           referrerPolicy="no-referrer"
           onLoad={() => {
+            if (staticFallback) { onReady?.(prepared.sourceSha256); return; }
             if (independentTransport && !desktopSession) return;
             setFrameReady(true);
             setLoadFailed(false);

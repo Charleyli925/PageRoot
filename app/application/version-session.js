@@ -11,6 +11,7 @@ function initialSnapshot() {
     restoredFromVersionId: null,
     viewMode: "current",
     viewingVersionId: null,
+    historyPreview: null,
   });
 }
 
@@ -111,17 +112,19 @@ export class VersionSession {
       restoredFromVersionId: null,
       viewMode: "current",
       viewingVersionId: null,
+      historyPreview: null,
     });
     return true;
   }
 
-  enterHistory(versionId) {
+  enterHistory(versionId, preview = null) {
     const id = optionalId(versionId);
     if (!id) return false;
     this.#emit({
       ...this.#snapshot,
       viewMode: "history",
       viewingVersionId: id,
+      historyPreview: preview ? Object.freeze({ ...preview }) : null,
     });
     return true;
   }
@@ -135,6 +138,7 @@ export class VersionSession {
       ...this.#snapshot,
       viewMode: "current",
       viewingVersionId: null,
+      historyPreview: null,
     };
     if (currentBasedOnVersionId !== undefined) {
       next.currentBasedOnVersionId = optionalId(currentBasedOnVersionId);
@@ -153,6 +157,7 @@ export class VersionSession {
     return Object.freeze({
       viewMode: this.#snapshot.viewMode,
       viewingVersionId: this.#snapshot.viewingVersionId,
+      historyPreview: this.#snapshot.historyPreview,
     });
   }
 
@@ -163,6 +168,7 @@ export class VersionSession {
     this.#emit({
       ...this.#snapshot,
       viewMode: view.viewMode,
+      historyPreview: view.viewMode === "history" ? view.historyPreview || null : null,
       viewingVersionId:
         view.viewMode === "history"
           ? optionalId(view.viewingVersionId)
@@ -171,10 +177,8 @@ export class VersionSession {
     return true;
   }
 
-  // Navigation rollback needs the complete immutable Version projection, not
-  // merely the visible history/current toggle. The returned object contains no
-  // mutable Session references and can therefore safely cross an async Canvas
-  // verification boundary inside VersionWorkflow.
+  // Project transition rollback retains the complete immutable projection,
+  // including the verified preview, without borrowing Document source bytes.
   captureSnapshot() {
     return Object.freeze({
       ...this.#snapshot,
@@ -194,6 +198,7 @@ export class VersionSession {
       currentExactVersionId: optionalId(snapshot.currentExactVersionId),
       restoredFromVersionId: optionalId(snapshot.restoredFromVersionId),
       viewMode: snapshot.viewMode,
+      historyPreview: snapshot.viewMode === "history" ? snapshot.historyPreview || null : null,
       viewingVersionId: snapshot.viewMode === "history"
         ? optionalId(snapshot.viewingVersionId)
         : null,

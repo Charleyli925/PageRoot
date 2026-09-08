@@ -1,6 +1,16 @@
 export type VersionViewMode = "current" | "history";
 
+export type HistoryPreview = Readonly<{
+  projectId: string;
+  documentId: string;
+  sourcePath: string;
+  versionId: string;
+  content: string;
+  sha256: string;
+}>;
+
 export type VersionViewSnapshot = {
+  historyPreview: HistoryPreview | null;
   viewMode: VersionViewMode;
   viewingVersionId: string | null;
 };
@@ -34,7 +44,7 @@ export class VersionSession<TVersion = unknown> {
   }): VersionSessionSnapshot<TVersion>;
   markSourceEdited(): boolean;
   adoptCommitted(versionId: string): boolean;
-  enterHistory(versionId: string): boolean;
+  enterHistory(versionId: string, preview?: HistoryPreview): boolean;
   returnCurrent(value?: {
     currentBasedOnVersionId?: unknown;
     currentExactVersionId?: unknown;

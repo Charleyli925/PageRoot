@@ -13,6 +13,9 @@ export default defineConfig({
   outputDir: path.join(productRoot, "output/playwright", smokeId, "results"),
   reporter: [
     ["list"],
+    ["json", {
+      outputFile: path.join(productRoot, "output/playwright", smokeId, "results.json"),
+    }],
     ["html", {
       open: "never",
       outputFolder: path.join(productRoot, "output/playwright", smokeId, "report"),

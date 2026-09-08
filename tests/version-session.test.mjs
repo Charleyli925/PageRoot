@@ -69,3 +69,22 @@ test("VersionSession rejects undecoded or duplicate IDs without replacing its sn
     assert.equal(session.snapshot, before);
   }
 });
+
+ test("history preview survives view rollback but clears on return, adoption and reset", () => {
+  const session = new VersionSession();
+  const preview = { projectId: "p", documentId: "d", sourcePath: "/synthetic/current.html", versionId: "v1", content: "old", sha256: "a".repeat(64) };
+  session.enterHistory("v1", preview);
+  preview.content = "changed caller";
+  const view = session.captureView();
+  assert.equal(view.historyPreview.content, "old");
+  assert.ok(Object.isFrozen(view.historyPreview));
+  session.returnCurrent();
+  assert.equal(session.snapshot.historyPreview, null);
+  session.restoreView(view);
+  assert.equal(session.snapshot.historyPreview.content, "old");
+  session.adoptCommitted("v2");
+  assert.equal(session.snapshot.historyPreview, null);
+  session.restoreView(view);
+  session.reset();
+  assert.equal(session.snapshot.historyPreview, null);
+});

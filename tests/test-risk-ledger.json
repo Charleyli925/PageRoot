@@ -216,7 +216,7 @@
       "riskId": "ai-candidate-review-adoption",
       "primaryOwner": "review-document-orchestrator",
       "oracle": "Candidate HTML + Version identity + Review projection",
-      "stage": "ready-full"
+      "stage": "on-demand"
     }
   }
 }

@@ -559,6 +559,22 @@ export function assertManifest(manifest, project) {
   if (!versionIds.has(manifest.latestOfficialVersionId)) {
     throw new ProjectFileRepositoryError("INVALID_MANIFEST", "latestOfficialVersionId is unknown.");
   }
+  const historyOperations = new Set();
+  for (const version of manifest.versions) {
+    if (version.sourceType !== undefined && !["initial", "internal-ai", "history-copy"].includes(version.sourceType)) {
+      throw new ProjectFileRepositoryError("INVALID_MANIFEST", "Unknown Version source type.");
+    }
+    if (version.sourceType !== "history-copy") continue;
+    const basedOn = manifest.versions.find((v) => v.versionId === version.basedOnVersionId);
+    const previous = manifest.versions.find((v) => v.versionId === version.previousVersionId);
+    if (!SAFE_OPERATION_ID.test(String(version.sourceOperationId || "")) || historyOperations.has(version.sourceOperationId)
+      || !basedOn || basedOn.ordinal >= version.ordinal || basedOn.contentSha256 !== version.contentSha256
+      || !previous || previous.ordinal + 1 !== version.ordinal
+      || version.sourceRequestId !== null || version.sourceCandidateId !== null) {
+      throw new ProjectFileRepositoryError("INVALID_MANIFEST", "Historical creation provenance is inconsistent.");
+    }
+    historyOperations.add(version.sourceOperationId);
+  }
   const workingCopyIds = new Set();
   const workingCopyPaths = new Set();
   for (const workingCopy of manifest.workingCopies) {
@@ -765,6 +781,14 @@ export function assertRuntime(runtime, project, manifest) {
       "INVALID_RUNTIME",
       "active Request runtime anchors are inconsistent.",
     );
+  }
+  if (runtime.historyCreation != null) {
+    const creation = runtime.historyCreation;
+    const version = manifest.versions.find((v) => v.versionId === creation?.versionId);
+    if (!isObject(creation) || !SAFE_OPERATION_ID.test(String(creation.operationId || ""))
+      || version?.sourceType !== "history-copy" || version.sourceOperationId !== creation.operationId) {
+      throw new ProjectFileRepositoryError("INVALID_RUNTIME", "Historical creation receipt is inconsistent.");
+    }
   }
   if (runtime.activeRequest !== null) {
     const active = runtime.activeRequest;

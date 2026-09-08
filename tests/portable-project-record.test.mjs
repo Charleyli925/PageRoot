@@ -43,6 +43,9 @@ const PORTABLE_MANIFEST_MEMBERS = {
     "snapshotRelativePath",
     "sourceRequestId",
     "sourceCandidateId",
+    // Historical creation provenance is project data, never a device locator.
+    "sourceType",
+    "sourceOperationId",
     "createdAt",
   ],
   workingCopy: [

@@ -1916,6 +1916,18 @@ export class WorkspaceController {
     return this.#requireVersionWorkflow().returnToCurrent(input);
   }
 
+  createVersionFromHistory(input) {
+    return this.#requireVersionWorkflow().createVersionFromHistory(input);
+  }
+
+  openCreatedHistoryVersion(input) {
+    return this.#requireVersionWorkflow().openCreatedHistoryVersion(input);
+  }
+
+  queryHistoryCreation(input) {
+    return this.#requireVersionWorkflow().queryHistoryCreation(input);
+  }
+
   continueEditingHistoryVersion(input) {
     return this.#requireVersionWorkflow().continueEditingHistoryVersion(input);
   }
@@ -2324,6 +2336,9 @@ export class WorkspaceController {
   #updateProjectCatalogFromEvent(event) {
     if (!event || typeof event !== "object") return;
     const current = this.#projectCatalogSnapshot;
+    if (event.type === "project-hydrated" && event.historyCreation?.operationId) {
+      void this.#versionWorkflow?.restoreHistoryCreation({ operationId: event.historyCreation.operationId, context: event.context });
+    }
     if (["project-hydrated", "project-source-renamed", "project-source-relocated"].includes(event.type)) this.#captureCurrentVersionSummary();
     if (event.type === "project-recents-loaded") {
       this.#projectCatalogSnapshot = projectCatalogSnapshot({
