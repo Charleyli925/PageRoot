@@ -1561,6 +1561,10 @@ export class RunWorkflow {
           trustPolicyVersion: delivery.trustPolicyVersion,
         });
       }
+      // Ending this exact Run while retry preflight waits must fence the
+      // eventual launch, including cancellation whose receipt is still pending.
+      if (!this.#runSession.hasRun(run)
+        || this.#runSession.isOperationBusy("cancel", operationKey)) return stale(run);
       if (preflight?.status !== "ready" || !preflight.preflightId) {
         throw responseError(
           "RUN_AGENT_PREFLIGHT_INVALID",

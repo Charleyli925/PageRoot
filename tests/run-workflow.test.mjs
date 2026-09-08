@@ -2572,3 +2572,37 @@ test("an unresolved adoption blocks an opposite end decision before contacting B
   assert.equal(harness.runSession.activeRun.adoptionPhase, "unknown");
   harness.workflow.dispose();
 });
+for (const cancelStillPending of [false, true]) {
+  test(`ending a run during retry preflight fences late Agent start (pending=${cancelStillPending})`, async () => {
+    const preflightEntered = deferred();
+    const releasePreflight = deferred();
+    const releaseCancel = deferred();
+    const harness = createHarness({ bridge: {
+      async preflightAgent() {
+        preflightEntered.resolve();
+        await releasePreflight.promise;
+        return { status: "ready", preflightId: "preflight_retry_cancel", expiresAt: "2026-08-11T00:02:00.000Z" };
+      },
+      async cancelActiveRun() { if (cancelStillPending) await releaseCancel.promise; return {}; },
+    } });
+    const run = runRecord({ agentDelivery: {
+      mode: "managed-agent", selection: {
+        providerId: "qoder", runtimeId: "acp", requestedModelId: null, resolvedModelId: null,
+        reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      }, trustPolicyVersion: "trusted-local-agent-v1",
+    } });
+    harness.runSession.trackRun(run, { activate: "always" });
+    const retry = harness.workflow.startAgent({ run });
+    await preflightEntered.promise;
+    const cancel = harness.workflow.cancel({ run });
+    if (!cancelStillPending) assert.equal((await cancel).status, "succeeded");
+    releasePreflight.resolve();
+    assert.equal((await retry).status, "stale");
+    assert.equal(harness.calls.startAgent.length, 0);
+    releaseCancel.resolve();
+    assert.equal((await cancel).status, "succeeded");
+    assert.equal(harness.runSession.activeRun, null);
+    assert.equal(harness.runSession.activeHandoff, null);
+    harness.workflow.dispose();
+  });
+}
