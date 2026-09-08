@@ -11,8 +11,6 @@ import { normalizeAgentConfigurations, validAgentConfigurations, normalizeDocume
 
 export const UI_PREFERENCES_FILE_NAME = "ui-preferences.json";
 export const UI_PREFERENCES_SCHEMA_VERSION = 2;
-export const FIRST_REAL_HTML_EDIT_GUIDE_KEY = "first-real-html-edit-guide";
-export const FIRST_REAL_HTML_EDIT_GUIDE_GENERATION = 2;
 
 export const WORKSPACE_PREFERENCE_DEFAULTS = Object.freeze({
   rememberPanelWidths: true,
@@ -31,31 +29,16 @@ export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
 });
 
 const MAX_STATE_BYTES = 16 * 1024;
-const PROJECT_ID_PATTERN = /^project_[A-Za-z0-9_-]{1,180}$/u;
-const GUIDE_STATUSES = new Set(["pending", "presented", "dismissed"]);
-const GUIDE_ACTIONS = new Set(["presented", "dismissed"]);
 const MOTION_VALUES = new Set(["system", "reduced"]);
 const AGENT_PROVIDER_IDS = new Set(["pageroot", "qoder", "codex"]);
 const WORKSPACE_KEYS = new Set(Object.keys(WORKSPACE_PREFERENCE_DEFAULTS));
 
-// Main owns the only durable preference writer. Keeping writes in one queue is
-// important because the first-edit guide and the Settings page share a JSON
-// document and must never overwrite one another from concurrent read-modify-
-// write operations.
+// Main owns the only durable preference writer so Settings and Agent updates
+// cannot overwrite one another from concurrent read-modify-write operations.
 let writeTail = Promise.resolve();
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function emptyGuide(generation = FIRST_REAL_HTML_EDIT_GUIDE_GENERATION) {
-  return Object.freeze({
-    key: FIRST_REAL_HTML_EDIT_GUIDE_KEY,
-    generation,
-    status: "pending",
-    presentedAt: null,
-    dismissedAt: null,
-  });
 }
 
 function emptyWorkspacePreferences() {
@@ -65,19 +48,8 @@ function emptyWorkspacePreferences() {
 function emptyPreferences() {
   return Object.freeze({
     schemaVersion: UI_PREFERENCES_SCHEMA_VERSION,
-    firstRealHtmlEditGuide: emptyGuide(),
-    builtInWelcomeProjectId: null,
     workspace: emptyWorkspacePreferences(),
   });
-}
-
-function isoNow() {
-  return new Date().toISOString();
-}
-
-function normalizedProjectId(value) {
-  if (typeof value !== "string" || !PROJECT_ID_PATTERN.test(value)) return null;
-  return value;
 }
 
 function normalizedWidth(value, fallback, { min, max }) {
@@ -101,22 +73,6 @@ function normalizedDisabledAgentProviderIds(value) {
     ids.push(item);
   }
   return Object.freeze(ids);
-}
-
-function normalizedGuide(value, fallbackGeneration) {
-  if (!isRecord(value)) return emptyGuide(fallbackGeneration);
-  const generation = Number.isSafeInteger(value.generation) && value.generation >= 1
-    ? value.generation
-    : fallbackGeneration;
-  if (generation !== fallbackGeneration) return emptyGuide(fallbackGeneration);
-  const status = GUIDE_STATUSES.has(value.status) ? value.status : "pending";
-  return Object.freeze({
-    key: FIRST_REAL_HTML_EDIT_GUIDE_KEY,
-    generation,
-    status,
-    presentedAt: typeof value.presentedAt === "string" ? value.presentedAt : null,
-    dismissedAt: typeof value.dismissedAt === "string" ? value.dismissedAt : null,
-  });
 }
 
 export function normalizeWorkspacePreferences(value) {
@@ -203,14 +159,9 @@ export function normalizeWorkspacePatch(value) {
   return Object.freeze(normalized);
 }
 
-function freezePreferences(value, generation = FIRST_REAL_HTML_EDIT_GUIDE_GENERATION) {
+function freezePreferences(value) {
   return Object.freeze({
     schemaVersion: UI_PREFERENCES_SCHEMA_VERSION,
-    firstRealHtmlEditGuide: normalizedGuide(
-      value?.firstRealHtmlEditGuide,
-      generation,
-    ),
-    builtInWelcomeProjectId: normalizedProjectId(value?.builtInWelcomeProjectId),
     workspace: normalizeWorkspacePreferences(value?.workspace),
   });
 }
@@ -237,10 +188,7 @@ async function atomicWrite(filePath, payload) {
   }
 }
 
-export function decodeUiPreferences(
-  raw,
-  { generation = FIRST_REAL_HTML_EDIT_GUIDE_GENERATION } = {},
-) {
+export function decodeUiPreferences(raw) {
   if (raw == null) return emptyPreferences();
   let parsed;
   try {
@@ -250,15 +198,12 @@ export function decodeUiPreferences(
   }
   if (!isRecord(parsed)) return emptyPreferences();
   if (parsed.schemaVersion === 1 || parsed.schemaVersion === UI_PREFERENCES_SCHEMA_VERSION) {
-    return freezePreferences({
-      ...parsed,
-      firstRealHtmlEditGuide: normalizedGuide(parsed.firstRealHtmlEditGuide, generation),
-    }, generation);
+    return freezePreferences(parsed);
   }
   return emptyPreferences();
 }
 
-async function readUiPreferencesFile({ userDataPath, generation }) {
+async function readUiPreferencesFile({ userDataPath }) {
   const filePath = preferencesPath(userDataPath);
   let raw;
   try {
@@ -279,21 +224,20 @@ async function readUiPreferencesFile({ userDataPath, generation }) {
     return { preferences: emptyPreferences(), legacy: false };
   }
   return {
-    preferences: decodeUiPreferences(parsed, { generation }),
+    preferences: decodeUiPreferences(parsed),
     legacy: isRecord(parsed) && parsed.schemaVersion === 1,
   };
 }
 
 export async function readUiPreferences({
   userDataPath,
-  generation = FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
   persistMigration = true,
 } = {}) {
-  const loaded = await readUiPreferencesFile({ userDataPath, generation });
+  const loaded = await readUiPreferencesFile({ userDataPath });
   if (loaded.legacy && persistMigration) {
     try {
       await enqueueWrite(async () => {
-        const latest = await readUiPreferencesFile({ userDataPath, generation });
+        const latest = await readUiPreferencesFile({ userDataPath });
         if (!latest.legacy) return latest.preferences;
         await atomicWrite(preferencesPath(userDataPath), latest.preferences);
         return latest.preferences;
@@ -327,50 +271,6 @@ async function updateUiPreferences(userDataPath, update) {
     const next = update(current);
     return next === current ? current : writeUiPreferences(userDataPath, next);
   });
-}
-
-export async function recordFirstEditGuide({
-  userDataPath,
-  action,
-  generation = FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
-} = {}) {
-  if (!GUIDE_ACTIONS.has(action)) {
-    throw new TypeError("First-edit guide action must be presented or dismissed.");
-  }
-  return updateUiPreferences(userDataPath, (current) => {
-    const guide = current.firstRealHtmlEditGuide;
-    if (guide.status === "dismissed") return current;
-    if (action === "presented" && guide.status !== "pending") return current;
-    const at = isoNow();
-    return {
-      ...current,
-      firstRealHtmlEditGuide: {
-        ...guide,
-        generation,
-        status: action,
-        presentedAt: action === "presented" ? at : guide.presentedAt || at,
-        dismissedAt: action === "dismissed" ? at : guide.dismissedAt,
-      },
-    };
-  });
-}
-
-export async function rememberBuiltInWelcomeProjectId({
-  userDataPath,
-  projectId,
-} = {}) {
-  const nextProjectId = normalizedProjectId(projectId);
-  if (!nextProjectId) {
-    throw new TypeError("Built-in welcome projectId is invalid.");
-  }
-  return updateUiPreferences(userDataPath, (current) => (
-    current.builtInWelcomeProjectId === nextProjectId
-      ? current
-      : {
-        ...current,
-        builtInWelcomeProjectId: nextProjectId,
-      }
-  ));
 }
 
 export async function recordUiWorkspacePreferences({

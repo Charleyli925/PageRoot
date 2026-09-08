@@ -33,7 +33,6 @@ import SettingsPage from "./components/SettingsPage";
 import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
 import HistoryCreationDialog from "./components/HistoryCreationDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
-import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
@@ -1597,14 +1596,10 @@ export default function Workbench() {
           // Reported in the thread, not as a duplicate toolbar status.
           setCanvasMode("preview");
           revealAiConversation();
-          void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-uncertain") {
-        if (runEvent.current) {
-          void workspaceControllerRef.current?.dismissFirstEditGuide();
-        }
         return;
       }
       if (runEvent.type === "run-submission-failed") {
@@ -2304,51 +2299,7 @@ export default function Workbench() {
     || viewTransitioning
     || persistState === "conflict"
     || viewMode === "history";
-  const firstEditGuideVisible =
-    workspaceControllerSnapshot?.firstEditGuide?.visible === true;
-  const isBuiltInWelcomePage = Boolean(
-    projectId
-    && workspaceControllerSnapshot?.firstEditGuide?.builtInWelcomeProjectId
-    && projectId === workspaceControllerSnapshot.firstEditGuide.builtInWelcomeProjectId
-  );
-  useEffect(() => {
-    workspaceController?.evaluateFirstEditGuide({
-      desktop: desktopHostReady,
-      canvasMode,
-      canvasVerified: Boolean(
-        documentSnapshot.canvasAuthority?.status === "verified"
-        && documentSnapshot.canvasAuthority.generation === canvasGeneration
-        && documentSnapshot.canvasAuthority.renderedSha256 === sourceSha256
-      ),
-      viewMode,
-      blockingOverlay: Boolean(
-        openConfirmation
-        || readyReviewSession
-        || persistState === "conflict"
-        || projectLoadError
-        || workspaceIssue
-      ),
-      interactionLocked,
-      runInProgress,
-      projectId,
-    });
-  }, [
-    canvasGeneration,
-    canvasMode,
-    documentSnapshot.canvasAuthority,
-    interactionLocked,
-    openConfirmation,
-    persistState,
-    projectId,
-    projectLoadError,
-    readyReviewSession,
-    runInProgress,
-    desktopHostReady,
-    sourceSha256,
-    viewMode,
-    workspaceController,
-    workspaceIssue,
-  ]);
+  const isBuiltInWelcomePage = projectName === WELCOME_PROJECT.name;
 
   const activeCommentItems = useMemo(
     () => comments.filter(commentHasContent),
@@ -4791,7 +4742,6 @@ export default function Workbench() {
       if (outcome.code === "RUN_SUBMISSION_LOCKED") {
         setCanvasMode("preview");
         revealAiConversation();
-        void workspaceControllerRef.current?.dismissFirstEditGuide();
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_DOCUMENT_EDIT") {
@@ -4870,7 +4820,6 @@ export default function Workbench() {
     if (outcome.status === "unknown") {
       setCanvasMode("preview");
       revealAiConversation();
-      void workspaceControllerRef.current?.dismissFirstEditGuide();
       return outcome;
     }
     presentRunSubmissionFailure(outcome);
@@ -6812,12 +6761,6 @@ export default function Workbench() {
         />
       ) : null}
       </main>
-      <FirstEditGuideCard
-        visible={firstEditGuideVisible}
-        onDismiss={() => {
-          void workspaceControllerRef.current?.dismissFirstEditGuide();
-        }}
-      />
     </>
   );
 }

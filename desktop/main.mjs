@@ -135,9 +135,7 @@ import {
 } from "./usage-telemetry.mjs";
 import {
   readUiPreferences,
-  recordFirstEditGuide,
   recordUiWorkspacePreferences,
-  rememberBuiltInWelcomeProjectId,
 } from "./ui-preferences.mjs";
 import { readOrCreateDeviceIdentity } from "./device-identity.mjs";
 import {
@@ -1551,14 +1549,6 @@ async function ensureBridgeProjectRegistered(project) {
       "欢迎页已经建立，但对应的项目工作区没有通过完整性校验。",
       { sourcePath: project.sourcePath },
     );
-  }
-  try {
-    await rememberBuiltInWelcomeProjectId({
-      userDataPath: app.getPath("userData"),
-      projectId: workspace.projectId,
-    });
-  } catch {
-    // The guide identity is install-level and must not block welcome open.
   }
   if (importedWorkingCopy) {
     const importedProject = await readHtmlProject(registeredSourcePath);
@@ -3922,12 +3912,6 @@ function registerProjectIpc() {
     }),
     recordUiPreference: async (payload) => {
       const userDataPath = app.getPath("userData");
-      if (payload?.action === "presented" || payload?.action === "dismissed") {
-        return recordFirstEditGuide({
-          userDataPath,
-          action: payload.action,
-        });
-      }
       return recordUiWorkspacePreferences({
         userDataPath,
         workspace: payload?.workspace,

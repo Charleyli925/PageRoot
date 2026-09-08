@@ -16,7 +16,7 @@ const report = { startedAt: new Date().toISOString(), providers: {}, synthetic: 
 let app;
 try {
   console.log("Launching isolated real-account QA");
-  app = await launchPageRoot({ isolatedUserData: profile, activeSourcePath: fixture.sourcePath, injectedEnv: { PAGEROOT_E2E_FIRST_EDIT_GUIDE: '1' } });
+  app = await launchPageRoot({ isolatedUserData: profile, activeSourcePath: fixture.sourcePath });
   const workingCopyPath = await addComment(app.page, fixture.sourcePath, '只把选中的列表项文字改为“可信闭环验证通过”，其余 HTML 保持不变。');
   const workingCopyBefore = readFileSync(workingCopyPath);
   app.page.on('response', async (response) => {

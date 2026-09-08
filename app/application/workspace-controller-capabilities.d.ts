@@ -12,7 +12,6 @@ import type {
   CommentWorkflowSnapshot,
 } from "./comment-workflow.js";
 import type { EditAuthorRuntimeSnapshot } from "./edit-author-runtime-session.js";
-import type { FirstEditGuideSnapshot } from "./first-edit-guide-session.js";
 import type { ProjectRulesSnapshot } from "./project-rules-session.js";
 import type { ProjectContext, ProjectSessionSnapshot } from "./project-session.js";
 import type { ProjectWorkflowSnapshot } from "./project-workflow.js";
@@ -68,7 +67,6 @@ export type WorkspaceControllerSnapshot = Readonly<{
   runSession: RunSessionSnapshot | null;
   versionSession: VersionSessionSnapshot | null;
   editRuntime: EditAuthorRuntimeSnapshot | null;
-  firstEditGuide: FirstEditGuideSnapshot | null;
   comment: CommentWorkflowSnapshot | null;
   projectRules: ProjectRulesSnapshot | null;
   project: ProjectWorkflowSnapshot | null;

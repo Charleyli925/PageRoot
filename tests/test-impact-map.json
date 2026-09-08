@@ -1613,30 +1613,15 @@
       ]
     },
     {
-      "id": "first-real-html-guide",
-      "patterns": [
-        "^app/application/first-edit-guide-session\\.(?:js|d\\.ts)$",
-        "^app/components/(?:FirstEditGuideCard(?:\\.module)?|desktop-ui-preferences-api)\\.(?:tsx|ts|js|d\\.ts|css)$",
-        "^app/workbench\\.tsx$",
-        "^desktop/ui-preferences\\.mjs$",
-        "^tests/(?:first-edit-guide-session|ui-preferences)\\.test\\.mjs$"
-      ],
-      "suites": [
-        "typecheck"
-      ],
-      "nodeTests": [
-        "tests/first-edit-guide-session.test.mjs",
-        "tests/ui-preferences.test.mjs"
-      ]
-    },
-    {
       "id": "workspace-preferences",
       "patterns": [
         "^app/application/workspace-preferences-session\\.(?:js|d\\.ts)$",
         "^app/application/workspace-agent-preference\\.(?:js|d\\.ts)$",
+        "^app/components/desktop-ui-preferences-api\\.ts$",
         "^app/components/SettingsPage\\.tsx$",
         "^app/workbench/(?:settings-types|use-workspace-preferences)\\.(?:ts|tsx)$",
         "^app/workbench/workbench-resizer\\.tsx$",
+        "^desktop/ui-preferences\\.mjs$",
         "^tests/workspace-preferences-session\\.test\\.mjs$"
       ],
       "suites": [

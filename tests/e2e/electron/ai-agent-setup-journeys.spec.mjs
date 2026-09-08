@@ -18,8 +18,6 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
   const complete = new Promise((resolve) => { finish = resolve; });
   const httpAgent = await startPagerootHttpAgent({ beforeStreamComplete: () => complete, streamDelayMs: 100 });
   const injectedEnv = {
-    // The ordinary E2E fixture disables preferences IPC; this journey verifies it.
-    PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1",
     PAGEROOT_CODEX_ACP_ALLOW_TEST_COMMAND: "1",
     PAGEROOT_CODEX_ACP_COMMAND: codexCommand,
     ...pagerootHttpAgentEnv(httpAgent.baseUrl),

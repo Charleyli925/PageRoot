@@ -708,19 +708,12 @@ function validWorkspacePreferencePatch(value) {
 const uiPreferencesApi = Object.freeze({
   get: () => invokeProject(uiPreferenceChannels.get),
   record: (payload) => {
-    if (payload?.action === "presented" || payload?.action === "dismissed") {
-      return invokeProject(uiPreferenceChannels.record, { action: payload.action });
-    }
     if (validWorkspacePreferencePatch(payload?.workspace)) {
       return invokeProject(uiPreferenceChannels.record, {
         workspace: { ...payload.workspace },
       });
     }
-    return Promise.reject(new TypeError(
-      payload && typeof payload === "object" && "action" in payload
-        ? "引导记录无效。"
-        : "工作台偏好记录无效。",
-    ));
+    return Promise.reject(new TypeError("工作台偏好记录无效。"));
   },
 });
 const workbenchTabsApi = Object.freeze({
@@ -762,16 +755,6 @@ contextBridge.exposeInMainWorld("htmlAIEditRuntime", editRuntimeApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);
-// Isolated E2E profiles are not first-install UX. Skip the get/record port so
-// Workbench never starts a UI-preferences IPC during hydration. Opt back in
-// with PAGEROOT_E2E_FIRST_EDIT_GUIDE=1 when a test needs the real card.
-const exposeUiPreferences = !(
-  typeof process !== "undefined"
-  && process.env?.PAGEROOT_E2E === "1"
-  && process.env?.PAGEROOT_E2E_FIRST_EDIT_GUIDE !== "1"
-);
-if (exposeUiPreferences) {
-  contextBridge.exposeInMainWorld("htmlAIUiPreferences", uiPreferencesApi);
-}
+contextBridge.exposeInMainWorld("htmlAIUiPreferences", uiPreferencesApi);
 contextBridge.exposeInMainWorld("htmlAIWorkbenchTabs", workbenchTabsApi);
 contextBridge.exposeInMainWorld("htmlAIEdit", editApi);

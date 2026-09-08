@@ -324,7 +324,6 @@ services.
 | Known-source Finder reveal | narrow project IPC in `desktop/ipc/project-ipc.mjs`, composed from `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
-| Install-level first-real-HTML guide status and built-in welcome identity | `desktop/ui-preferences.mjs`, `app/application/first-edit-guide-session.js` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Canvas disposable runtime frame identity and exact-program reuse | `app/components/html-canvas-frame.js`; `HtmlCanvasEditor` owns iframe mount/reload |
 | Native deferred-command arbitration (user-explicit vs system, lease matching, stale drain) | `app/components/html-canvas-native-commands.js`; the editor supplies the live session/lease and still retires the queue before host replacement |

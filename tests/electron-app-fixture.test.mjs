@@ -11,10 +11,6 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
-  decodeUiPreferences,
-} from "../desktop/ui-preferences.mjs";
-import {
   classifyRendererMount,
   closeObservationTimeout,
   collectProjectReadinessDiagnostics,
@@ -22,7 +18,6 @@ import {
   describeRendererReadiness,
   ensureRendererMounted,
   launchPageRoot,
-  seedDismissedFirstEditGuide,
   waitForMainBrowserWindow,
 } from "./e2e/electron/helpers/pageroot-app-fixture.mjs";
 
@@ -353,25 +348,4 @@ test("Electron app fixture cleans up after confirmed process exit when the close
 
   await stop();
   assert.deepEqual(events, ["exit-request", "process-exit", "cleanup"]);
-});
-
-test("Electron app fixture can opt an E2E launch back into the first-edit guide port", () => {
-  const fixture = readFileSync(
-    new URL("./e2e/electron/helpers/electron-app-launch.mjs", import.meta.url),
-    "utf8",
-  );
-  assert.match(fixture, /PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1"/u);
-});
-
-test("Electron app fixture seeds a dismissed first-edit guide for isolated profiles", () => {
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-guide-seed-"));
-  seedDismissedFirstEditGuide(isolatedUserData);
-  const preferences = decodeUiPreferences(
-    readFileSync(path.join(isolatedUserData, "ui-preferences.json"), "utf8"),
-  );
-  assert.equal(preferences.firstRealHtmlEditGuide.status, "dismissed");
-  assert.equal(
-    preferences.firstRealHtmlEditGuide.generation,
-    FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
-  );
 });

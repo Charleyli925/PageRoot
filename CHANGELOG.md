@@ -40,16 +40,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
   that caption selects the advertised target. Deselect still uses Escape,
   the header, the comment-rail blank, and the page root. There is no
   Preview-mode hover state.
-- The first time a real local HTML opens in the verified edit canvas, a
-  non-modal frosted-glass “快速开始” card at the app window’s bottom-right
-  explains the edit → comment → send-to-AI loop. It is a `position: fixed`
-  portal on `document.body`, outside the workbench grid, so it does not cover
-  the page or follow HTML scroll. It stays until Send enters waiting, or until
-  the user skips it with ×. Escape no longer dismisses it. Pointer hover keeps
-  teaching click-to-select and double-click-to-edit as a compact pill on the
-  outline, not on the selected-element toolbar. Click selection range is
-  unchanged, and there is no Preview-mode hover state. The card is remembered
-  per install, not per project, and never appears on the built-in welcome page.
+- 移除了首次打开本地 HTML 时出现的“快速开始”浮层；现有的画布 Hover 提示、直接编辑、
+  评论与发送 AI 流程保持不变。
 
 - Importing HTML no longer reports a failure for work that already succeeded. If
   the project Registry lock could not be cleaned up afterwards — for example

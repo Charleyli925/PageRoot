@@ -144,7 +144,6 @@ test("Electron settings routes categories and persists restore preference withou
   const fixture = createSourceFixture("settings-workspace-preferences.html");
   const first = await launchPageRoot({
     activeSourcePath: fixture.sourcePath,
-    firstEditGuide: true,
   });
   let firstClosed = false;
   let reopened = null;
@@ -277,7 +276,6 @@ test("Electron settings routes categories and persists restore preference withou
     firstClosed = true;
     reopened = await launchPageRoot({
       isolatedUserData: first.isolatedUserData,
-      firstEditGuide: true,
     });
     const reopenedTabs = reopened.page.getByRole("tablist", { name: "已打开的页面" })
       .getByRole("tab");
@@ -295,7 +293,6 @@ test("Electron settings routes categories and persists restore preference withou
     external = await launchPageRoot({
       isolatedUserData: first.isolatedUserData,
       externalSourcePaths: [fixture.sourcePath],
-      firstEditGuide: true,
     });
     await loadedDiskFrame(external.page, fixture.sourcePath, "list-item");
     await expect(external.page.locator("main.workbench")).not.toHaveAttribute(

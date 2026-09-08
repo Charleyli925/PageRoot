@@ -25,7 +25,6 @@ export {
   createSourceFixture,
   removeSourceFixture,
   seedActiveDiskProject,
-  seedDismissedFirstEditGuide,
 } from "./electron-project-fixture.mjs";
 export { openRailGlobalCommentComposer } from "./electron-comment-driver.mjs";
 export { seedLegacyV3Project } from "./electron-legacy-project-fixture.mjs";
