@@ -19,6 +19,10 @@ export type AgentDiagnosticReadiness =
   | "invalid-installation"
   | "connection-failed";
 export type AgentDiagnosticSnapshot = Readonly<{
+  diagnosticId?: string;
+  failureStage?: "installation" | "authentication" | "protocol" | "service" | null;
+  operationId?: string;
+  configurationGeneration?: number;
   readiness: AgentDiagnosticReadiness;
   cause: string | null;
   operation: "diagnose" | "refresh";

@@ -627,8 +627,20 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 状态检查已经停止。`);
     }
     try {
-      await this.#agentCatalog.diagnose(frozen);
-      return succeeded({ availability: this.#agentCatalog.availability(frozen) });
+      const checked = await this.#agentCatalog.diagnose(frozen);
+      if (this.#disposed || !checked) return stale({ kind: "agent-diagnosis" });
+      if (checked.diagnostic?.readiness !== "ready") {
+        const diagnostic = checked.diagnostic;
+        const reason = diagnostic?.readiness === "auth-required"
+          ? "刚刚检查：请先登录账号。"
+          : diagnostic?.readiness === "not-installed"
+            ? "刚刚检查：请先安装此服务。"
+            : diagnostic?.facts?.authentication?.status === "ready"
+              ? "刚刚检查：账号已登录，但仍无法建立连接。"
+              : "刚刚检查：服务暂时无法使用，请重新检查或使用其他 AI。";
+        return rejected(diagnostic?.cause || "AGENT_CONNECTION_FAILED", reason);
+      }
+      return succeeded({ availability: this.#agentCatalog.availability(frozen), diagnostic: checked.diagnostic });
     } catch (cause) {
       return rejected(
         errorCode(cause, "AGENT_PREFLIGHT_FAILED"),
@@ -683,19 +695,7 @@ export class RunWorkflow {
 
   async checkQoderUsability() {
     const selection = this.#qoderSelection();
-    if (!selection) return rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。");
-    if (this.#disposed) {
-      return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
-    }
-    try {
-      await this.#agentCatalog.diagnose(selection);
-      return succeeded({ availability: this.#agentCatalog.availability(selection) });
-    } catch (cause) {
-      return rejected(
-        errorCode(cause, "AGENT_PREFLIGHT_FAILED"),
-        this.#codecs.errorMessage(cause, "暂时无法检查 Qoder CLI。"),
-      );
-    }
+    return this.checkAgentUsability(selection);
   }
 
   async copyQoderGuidance({ kind } = {}) {

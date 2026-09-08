@@ -496,6 +496,7 @@ export class AgentRuntimeCoordinator {
   }
 
   async diagnose({ selection } = {}) {
+    const diagnosticId = `diagnostic_${randomUUID()}`;
     const requestedSelection = this.#selectionForInput({ selection });
     const checkedAt = nowIso(this.#clock);
     if (!this.#acceptingStarts) {
@@ -528,7 +529,7 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({
       ok: true,
       ...result,
-      diagnostic: Object.freeze({ ...diagnostic, checkedAt, operation: "diagnose" }),
+      diagnostic: Object.freeze({ ...diagnostic, diagnosticId, checkedAt, operation: "diagnose" }),
     });
   }
 

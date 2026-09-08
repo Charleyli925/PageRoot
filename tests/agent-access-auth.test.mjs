@@ -67,7 +67,7 @@ test("environment tokens are reported as shared-environment credentials", () => 
   );
 });
 
-test("login jobs cancel, expire, and reject stale generations", async () => {
+test("login jobs share an active operation and only restart after explicit cancellation", async () => {
   const auth = createAgentAccessAuth({ timeoutMs: 40 });
   let cancelled = false;
   auth.login("qoder", async ({ signal }) => {
@@ -101,6 +101,12 @@ test("login jobs cancel, expire, and reject stale generations", async () => {
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(auth.snapshot("codex").loginUrlPresent, true);
   assert.equal(auth.loginUrl("codex"), "https://chatgpt.com/auth/login");
+  const original = auth.snapshot("codex");
+  let secondStarts = 0;
+  const shared = await auth.login("codex", async () => { secondStarts += 1; });
+  assert.equal(shared.generation, original.generation);
+  assert.equal(secondStarts, 0);
+  await auth.cancel("codex");
   const replacement = await auth.login("codex", async () => ({
     authSource: "chatgpt",
     authScope: "app-managed",

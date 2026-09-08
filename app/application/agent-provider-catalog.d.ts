@@ -143,6 +143,7 @@ export class AgentCatalogState {
       copy(input: unknown): Promise<unknown>;
       openLogin?(input: { providerId: string }): Promise<unknown>;
     } | null;
+    diagnoseTimeoutMs?: number;
     clock?: { now(): number };
     providers?: readonly AgentProviderDescriptor[];
     selected?: AgentSelection | null;

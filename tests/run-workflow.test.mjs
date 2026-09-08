@@ -1378,7 +1378,7 @@ test("a local disk refresh preserves a known authentication requirement", async 
   });
 
   const checked = await harness.workflow.checkQoderUsability();
-  assert.equal(checked.status, "succeeded");
+  assert.equal(checked.status, "rejected");
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "auth-required");
 
   const refreshed = await harness.workflow.refreshQoderAvailability();
@@ -1414,7 +1414,7 @@ test("a changed Qoder installation asks for a PageRoot restart in shared state",
 
   const checked = await harness.workflow.checkQoderUsability();
 
-  assert.equal(checked.status, "succeeded");
+  assert.equal(checked.status, "rejected");
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "unavailable");
   assert.equal(
     harness.workflow.getSnapshot().qoderAvailability.reason,
@@ -1513,7 +1513,7 @@ test("capacity and timeout preflight failures keep truthful recovery reasons", a
       },
     });
     const outcome = await harness.workflow.checkQoderUsability();
-    assert.equal(outcome.status, "succeeded");
+    assert.equal(outcome.status, "rejected");
     const availability = harness.workflow.getSnapshot().qoderAvailability;
     assert.equal(availability.reason, reason);
     assert.equal(qoderAvailabilityPresentation(availability).statusLabel, statusLabel);
@@ -2470,4 +2470,19 @@ test("submit accepts only its own frozen Hash acknowledgement during a durable s
     if (change !== "hash") assert.equal(outcome.code, "RUN_SUBMISSION_CONTEXT_STALE", change);
     harness.workflow.dispose();
   }
+});
+
+test("a completed protocol diagnosis returns a fresh visible rejection without a Request", async () => {
+  const harness = createHarness({ bridge: { async agentDiagnose() {
+    return { diagnostic: { readiness: "connection-failed", cause: "CODEX_ACP_FAILED", facts: {
+      authentication: "ready", protocol: "failed",
+    } } };
+  } } });
+  for (let i = 0; i < 2; i += 1) {
+    const result = await harness.workflow.checkAgentUsability();
+    assert.equal(result.status, "rejected");
+    assert.match(result.reason, /刚刚检查.*账号已登录/);
+    assert.equal(harness.calls.createRequest.length, 0);
+  }
+  harness.workflow.dispose();
 });
