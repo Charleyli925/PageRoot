@@ -177,6 +177,7 @@ jobs:
           path: |
             output/ci-evidence
             output/test-runs
+            output/design-qa
           if-no-files-found: warn
           retention-days: 14
       - name: Upload desktop Playwright diagnostics
@@ -780,7 +781,9 @@ jobs:
         timeout-minutes: 10
         with:
           name: PageRoot-electron-ai-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/ci-evidence
+          path: |
+            output/ci-evidence
+            output/design-qa
           if-no-files-found: warn
           retention-days: 30
 

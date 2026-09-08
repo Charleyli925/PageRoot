@@ -219,7 +219,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
   }
 });
 
-test("an AI return cannot drop a retained source identity", async () => {
+test("an AI return cannot drop a retained source identity", { tag: ["@smoke-review"] }, async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("candidate-identity-loss.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -233,30 +233,26 @@ test("an AI return cannot drop a retained source identity", async () => {
       /\sdata-pageroot-id="pr1_[a-f0-9]{32}"/u,
       "",
     ));
-    runOfficialFinalizer(request.requestRoot, request.changeRequest);
-
-    const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
-    await expect(actionBar).toContainText(
-      "输出未保留现有源码元素身份，或包含重复、伪造的 Stable ID",
-      { timeout: 30_000 },
-    );
-    const requestRecord = JSON.parse(readFileSync(
-      path.join(request.requestRoot, "request.json"),
-      "utf8",
-    ));
-    expect(requestRecord.status).toBe("error");
-    expect(requestRecord.error.errorCode).toBe("CANDIDATE_IDENTITY_INVALID");
-    expect(requestRecord.error.code).toBe("CANDIDATE_SOURCE_IDENTITY_LOST");
+    expect(() => runOfficialFinalizer(request.requestRoot, request.changeRequest))
+      .toThrow(/CANDIDATE_SOURCE_IDENTITY_LOST/u);
+    expect(existsSync(path.join(request.requestRoot, "attempts", "attempt_001", "completion.json"))).toBe(false);
+    const requestRecord = JSON.parse(readFileSync(path.join(request.requestRoot, "request.json"), "utf8"));
+    expect(requestRecord.status).not.toBe("error");
     expect(existsSync(path.join(request.requestRoot, "candidate.json"))).toBe(false);
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+    // The same copied task can be corrected without exposing a terminal ID error.
+    writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
 
-test("an AI return cannot replace a retained source identity with a forged ID", async () => {
+test("an AI return cannot replace a retained source identity with a forged ID", { tag: ["@smoke-review"] }, async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("candidate-identity-forgery.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -270,23 +266,19 @@ test("an AI return cannot replace a retained source identity with a forged ID", 
       /data-pageroot-id="pr1_[a-f0-9]{32}"/u,
       'data-pageroot-id="pr1_ffffffffffff4fff8fffffffffffffff"',
     ));
-    runOfficialFinalizer(request.requestRoot, request.changeRequest);
-
-    const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
-    await expect(actionBar).toContainText(
-      "输出未保留现有源码元素身份，或包含重复、伪造的 Stable ID",
-      { timeout: 30_000 },
-    );
-    const requestRecord = JSON.parse(readFileSync(
-      path.join(request.requestRoot, "request.json"),
-      "utf8",
-    ));
-    expect(requestRecord.status).toBe("error");
-    expect(requestRecord.error.errorCode).toBe("CANDIDATE_IDENTITY_INVALID");
-    expect(requestRecord.error.code).toBe("CANDIDATE_SOURCE_IDENTITY_FORGED");
+    expect(() => runOfficialFinalizer(request.requestRoot, request.changeRequest))
+      .toThrow(/CANDIDATE_SOURCE_IDENTITY_FORGED/u);
+    expect(existsSync(path.join(request.requestRoot, "attempts", "attempt_001", "completion.json"))).toBe(false);
+    const requestRecord = JSON.parse(readFileSync(path.join(request.requestRoot, "request.json"), "utf8"));
+    expect(requestRecord.status).not.toBe("error");
     expect(existsSync(path.join(request.requestRoot, "candidate.json"))).toBe(false);
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+    // The same copied task can be corrected without exposing a terminal ID error.
+    writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

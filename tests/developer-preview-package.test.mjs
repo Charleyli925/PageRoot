@@ -28,6 +28,7 @@ import {
   developerPreviewSequenceVersion,
   developerPreviewVersion,
   resolveDeveloperPreviewIdentity,
+  writeDeveloperPreviewBuilderConfig,
   writeDeveloperPreviewAttestation,
 } from "../scripts/developer-preview.mjs";
 import {
@@ -189,7 +190,7 @@ test("developer preview ignores non-official semver-shaped tags", async () => {
   }
 });
 
-test("developer preview is an explicit ad-hoc DMG profile while release packaging stays unchanged", () => {
+test("developer preview is an explicit Developer ID DMG profile while release packaging stays unchanged", () => {
   const sourcePackageJson = developerPreviewSourcePackageJson();
   assert.deepEqual(
     parseBuildOptions(["--arch", "arm64"]),
@@ -220,6 +221,11 @@ test("developer preview is an explicit ad-hoc DMG profile while release packagin
       appId: "com.htmlai.workbench.developer-preview",
       productName: "PageRoot Developer Preview",
       artifactName: DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
+      mac: {
+        ...sourcePackageJson.build.mac,
+        hardenedRuntime: true,
+        notarize: false,
+      },
     },
   });
   assert.deepEqual(
@@ -234,10 +240,9 @@ test("developer preview is an explicit ad-hoc DMG profile while release packagin
       "--arm64",
       "--publish",
       "never",
-      "--config.forceCodeSigning=false",
-      "--config.mac.identity=-",
+      "--config.forceCodeSigning=true",
       "--config.mac.notarize=false",
-      "--config.mac.hardenedRuntime=false",
+      "--config.mac.hardenedRuntime=true",
       "--config.appId=com.htmlai.workbench.developer-preview",
       "--config.productName=PageRoot Developer Preview",
       "--config.extraMetadata.productName=PageRoot Developer Preview",
@@ -258,7 +263,81 @@ test("developer preview is an explicit ad-hoc DMG profile while release packagin
   );
 });
 
-test("developer preview strips release credentials and telemetry configuration", () => {
+test("developer preview DMG uses its own first-open instructions", () => {
+  const sourcePackageJson = developerPreviewSourcePackageJson();
+  const identity = createDeveloperPreviewIdentity({
+    packageJson: sourcePackageJson,
+    stableVersion: "0.9.5",
+    buildSequence: 1,
+    commitSha: "a".repeat(40),
+  });
+  const sourceDmg = {
+    title: "PageRoot ${version}",
+    contents: [
+      { x: 170, y: 210, type: "file" },
+      { x: 330, y: 350, type: "file", path: "desktop/resources/首次打开说明.txt" },
+    ],
+  };
+  const previewPackageJson = developerPreviewPackageJson(
+    {
+      ...sourcePackageJson,
+      build: { ...sourcePackageJson.build, dmg: sourceDmg },
+    },
+    identity,
+  );
+  assert.deepEqual(previewPackageJson.build.dmg, {
+    ...sourceDmg,
+    title: `PageRoot Developer Preview ${identity.version}`,
+    contents: [
+      sourceDmg.contents[0],
+      { ...sourceDmg.contents[1], path: "desktop/resources/开发者测试版说明.txt" },
+    ],
+  });
+});
+
+test("developer preview writes a self-contained builder config for its DMG overrides", async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-preview-builder-config-"));
+  try {
+    const sourcePackageJson = developerPreviewSourcePackageJson();
+    const identity = createDeveloperPreviewIdentity({
+      packageJson: sourcePackageJson,
+      stableVersion: "0.9.5",
+      buildSequence: 1,
+      commitSha: "a".repeat(40),
+    });
+    const previewPackageJson = developerPreviewPackageJson(
+      {
+        ...sourcePackageJson,
+        build: {
+          ...sourcePackageJson.build,
+          dmg: {
+            title: "PageRoot ${version}",
+            contents: [{ path: "desktop/resources/首次打开说明.txt" }],
+          },
+        },
+      },
+      identity,
+    );
+    const configPath = await writeDeveloperPreviewBuilderConfig({
+      productRoot: temporaryRoot,
+      packageJson: previewPackageJson,
+    });
+    assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), previewPackageJson.build);
+    assert.deepEqual(
+      developerPreviewBuilderArguments({
+        architecture: "arm64",
+        identity,
+        releaseDirectory: path.join(temporaryRoot, "release"),
+        configPath,
+      }).at(-1),
+      `--config=${configPath}`,
+    );
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("developer preview keeps local signing identity inputs and strips release credentials", () => {
   const environment = developerPreviewEnvironment({
     PATH: "/usr/bin",
     CSC_LINK: "private-signing-material",
@@ -271,8 +350,6 @@ test("developer preview strips release credentials and telemetry configuration",
   });
   assert.equal(environment.PATH, "/usr/bin");
   for (const key of [
-    "CSC_LINK",
-    "CSC_KEY_PASSWORD",
     "APPLE_ID",
     "APPLE_APP_SPECIFIC_PASSWORD",
     "APPLE_TEAM_ID",
@@ -281,7 +358,9 @@ test("developer preview strips release credentials and telemetry configuration",
   ]) {
     assert.equal(environment[key], undefined, `${key} must not reach preview packaging`);
   }
-  assert.equal(environment.CSC_IDENTITY_AUTO_DISCOVERY, "false");
+  assert.equal(environment.CSC_LINK, "private-signing-material");
+  assert.equal(environment.CSC_KEY_PASSWORD, "private-password");
+  assert.equal(environment.CSC_IDENTITY_AUTO_DISCOVERY, "true");
   assert.equal(environment.PAGEROOT_REQUIRE_NOTARIZATION, "0");
   assert.equal(environment.PAGEROOT_REQUIRE_TELEMETRY_CONFIG, "0");
 });
@@ -324,6 +403,7 @@ test("developer preview attestation is explicitly non-release and binds exact by
     assert.equal(record.attestation.kind, "developer-preview");
     assert.equal(record.attestation.schemaVersion, 2);
     assert.equal(record.attestation.releaseEligible, false);
+    assert.equal(record.attestation.signaturePolicy, "developer-id");
     assert.equal(record.attestation.notarized, false);
     assert.equal(record.attestation.sourceVersion, "0.9.5");
     assert.equal(record.attestation.stableVersion, "0.9.5");

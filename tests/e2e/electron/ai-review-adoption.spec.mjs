@@ -2814,11 +2814,13 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
     await afterFrame.locator("html").evaluate(() => new Promise(resolve => {
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     }));
-    // Several source-backed structure regions may overlap. Activate the exact
-    // analyzer-owned bar rather than asking pointer hit-testing to choose the
-    // topmost sibling at the same coordinates.
-    await afterFrame.locator("[data-pageroot-review-region-bar]").first()
-      .evaluate((bar) => bar.click());
+    // Several source-backed structure regions may overlap and their DOM order
+    // is not a focus contract. Resolve the card's analyzer-owned focus group,
+    // then activate the exact bar for that group.
+    await activateReviewMarkerGroup(
+      afterFrame,
+      afterFrame.locator("[data-stable-review-card]"),
+    );
     await expect.poll(() => afterFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="structure"]',
     ).count()).toBeGreaterThan(0);

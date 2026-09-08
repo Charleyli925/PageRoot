@@ -348,6 +348,30 @@ export function sidebarMessageStream(messages) {
     }));
 }
 
+// Older receipts used text for fixed stage facts. Preserve those records while
+// presenting them with the same disclosure as newly typed progress messages.
+const LEGACY_EXECUTION_PROGRESS = new Set([
+  "已开始执行本轮修改。", "正在建立执行会话。", "已发出本轮修改要求。",
+  "已收到服务响应。", "正在生成修改。", "本轮结果接收结束。",
+  "正在读取本轮资料。", "正在写入修改结果。", "正在核对修改结果。",
+  "正在校验修改结果。", "正在准备审阅。", "已请求停止，正在等待确认。",
+  "执行已结束，结果仍需校验。",
+]);
+
+export function sidebarTurnPresentation(messages = []) {
+  const process = [];
+  const primary = [];
+  for (const message of messages) {
+    if (message.kind === "progress" || (message.actor === "pageroot" && LEGACY_EXECUTION_PROGRESS.has(message.text))) process.push(message);
+    else primary.push(message);
+  }
+  const order = (message) => message.actor === "user" ? 0
+    : message.actor === "agent" ? 1
+    : message.kind === "decision-outcome" || ["已采用本次修改。", "未采用本次修改，修改要求与历史已保留。"].includes(message.text) ? 3 : 2;
+  primary.sort((a, b) => order(a) - order(b));
+  return { primary, process };
+}
+
 function historyIdentity(value) {
   const text = String(value ?? "").trim();
   return text && text !== "null" && text !== "undefined" ? text : null;

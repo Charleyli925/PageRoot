@@ -118,6 +118,15 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     await expect.poll(() => launched.page.getByTestId("ai-conversation-stream").evaluate(
       (stream) => Math.round(stream.scrollHeight - stream.clientHeight - stream.scrollTop),
     )).toBeLessThanOrEqual(1);
+    const process = launched.page.getByTestId("ai-turn-process").last();
+    await expect(process).toBeVisible();
+    expect(await process.getAttribute("open")).toBeNull();
+    await expect(process.locator("li").first()).not.toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-message").filter({ hasText: "正在读取冻结任务。正在写入 Candidate。正在等待校验。" })).toHaveCount(1);
+    await process.locator("summary").click();
+    await expect(process.locator("li").first()).toBeVisible();
+    await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-process-expanded.png"), animations: "disabled" });
+    await process.locator("summary").click();
     const readyGeometry = await launched.page.evaluate(() => {
       const sidebar = document.querySelector('[data-testid="ai-conversation-sidebar"]');
       const composer = document.querySelector('[data-testid="ai-conversation-composer"]');

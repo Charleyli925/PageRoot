@@ -16,6 +16,7 @@ import {
   sidebarReasoningLine,
   sidebarActorInitial,
   sidebarMessageStream,
+  sidebarTurnPresentation,
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarRunProgress,
@@ -281,7 +282,7 @@ export default function AiConversationSidebar({
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
   const displayedGroups = useMemo(() => (historyGroups.length ? historyGroups : [{
     key: "messages", label: "", kind: "history", messageIndices: stream.map((_message, index) => index),
-  }]).map((group) => ({ ...group, messages: stream.filter((_message, index) => group.messageIndices.includes(index)) })), [historyGroups, stream]);
+  }]).map((group) => ({ ...group, ...sidebarTurnPresentation(stream.filter((_message, index) => group.messageIndices.includes(index))) })), [historyGroups, stream]);
   const activeIntent = sidebarResolvedIntent(state);
   // Product state alone determines the one available action and mode copy.
   const mode = sidebarModePresentation(state);
@@ -612,7 +613,7 @@ export default function AiConversationSidebar({
           displayedGroups.map((group) => (
             <section key={group.key} className={styles.turnGroup} data-turn-id={group.key} aria-label={group.label || "一轮修改"}>
               {group.label ? <div className={styles.historyGroup} data-kind={group.kind} data-testid="ai-conversation-history-group">{group.label}</div> : null}
-              {group.messages.map((message) => {
+              {group.primary.map((message) => {
             const timestamp = sidebarTimestampLabel(message.createdAt);
             const copyKey = `message:${message.messageId}`;
             return (
@@ -653,6 +654,17 @@ export default function AiConversationSidebar({
               </Fragment>
             );
               })}
+              {group.process.length ? (
+                <details className={styles.turnProcess} data-testid="ai-turn-process">
+                  <summary>查看处理记录 · {group.process.length}</summary>
+                  <ol>{group.process.map((message) => (
+                    <li key={message.messageId}>
+                      <span>{message.text}</span>
+                      <time dateTime={message.createdAt}>{sidebarTimestampLabel(message.createdAt)}</time>
+                    </li>
+                  ))}</ol>
+                </details>
+              ) : null}
             </section>
           ))
         )}
@@ -715,7 +727,7 @@ export default function AiConversationSidebar({
 
         {/* Public Agent narration grows in one stable article. It is presentation
             evidence only and never changes Candidate authority. */}
-        {runProgress?.narrationUpdates ? (
+        {runProgress?.narrationUpdates && !displayedGroups.some((group) => group.kind === "current" && group.primary.some((message) => message.actor === "agent" && message.kind === "result-summary")) ? (
           <article
             ref={liveMessageRef}
             className={styles.message}

@@ -173,7 +173,7 @@ Qoder process, so it must not be repurposed for real user Requests. See
 | `npm run gate:main:auto` | Optional local/diagnostic Node/browser smoke; it is not part of the automatic post-merge path |
 | `Release Dry Run` Actions workflow | Candidate-classified Ready packaging check: generate the stable application-update config, assemble an explicitly unsigned (`identity=null`) App, cross a clean-job checkpoint, rebuild metadata/renderer oracles and launch-check identity without credentials; source-only candidates skip it |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
-| `npm run package:developer` | Optional arm64 developer preview requested explicitly: distinct app/Bundle identity, stable-tag-derived test version, ad-hoc DMG, packaged-content verification, one isolated startup, and an exact live PR/content delivery report; no notarization or publication |
+| `npm run package:developer` | Optional arm64 Developer Preview requested explicitly: distinct app/Bundle identity, stable-tag-derived test version, stable Developer ID DMG, isolated runtime roots, packaged-content verification, one startup, and an exact live PR/content delivery report; no notarization or publication |
 | `npm run gate:candidate-app:auto` | Guarded internal formal-candidate preflight: assemble one ad-hoc App, verify contents, then run the complete packaged-runtime oracle before signing |
 | `npm run release:mac` | Complete source gate, signed arm64 DMG/ZIP package, packaged runtime test, artifact verification and exact live PR/content delivery report; release credentials are required for notarization proof |
 | `npm run test:electron:ci-preflight` | Synthetic hosted-macOS window, timer and animation-frame preflight used before Electron product suites |
@@ -208,7 +208,7 @@ security, and workflow scans remain with their dedicated owners. The one SSR
 test, `tests/rendered-html.test.mjs`, imports the real `dist/server/index.js`, so
 impact selection schedules `build-web` before running it.
 
-The developer-preview, release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Test reports are written to the ignored `output/test-runs/` directory; successful installer lanes additionally write `package-delivery-report.json` and `.md` below `output/`. The final report step requires live GitHub PR metadata and fails the installer handoff if it cannot enumerate the exact tag-to-commit range. Package commands always build the exact current clean Tree; they do not discover or merge other PRs. For an unqualified "latest" package request, prepare the required `origin/main` plus non-excluded-PR integration Tree first as documented in `docs/GIT_WORKFLOW.md`. `package:developer` is never called by another lane: run it only after an explicit developer request. Its ad-hoc, unnotarized DMG is retained for short installation feedback and is never release-eligible. See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
+The developer-preview, release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Test reports are written to the ignored `output/test-runs/` directory; successful installer lanes additionally write `package-delivery-report.json` and `.md` below `output/`. The final report step requires live GitHub PR metadata and fails the installer handoff if it cannot enumerate the exact tag-to-commit range. Package commands always build the exact current clean Tree; they do not discover or merge other PRs. For an unqualified "latest" package request, prepare the required `origin/main` plus non-excluded-PR integration Tree first as documented in `docs/GIT_WORKFLOW.md`. `package:developer` is never called by another lane: run it only after an explicit developer request. Its Developer ID, optionally unnotarized DMG is retained for short installation feedback and is never release-eligible; missing identity or signing failure is a hard stop, with no ad-hoc fallback. Preview auto-update checks and installs are disabled. See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md` for the isolated roots.
 
 The package delivery report resolves commit-to-PR metadata with at most eight
 concurrent requests and an in-run response cache. It prints the current item
@@ -230,8 +230,10 @@ against the identical source tree. It does not regenerate telemetry or
 application-update configuration, or receive the project token. Formal local
 packaging is a distribution build and therefore requires a valid Developer ID
 identity; publication credentials remain in GitHub encrypted secrets. The
-separate developer-preview profile removes those credentials from its child
-environment and intentionally uses only an ad-hoc signature.
+separate developer-preview profile removes release, Apple and telemetry
+credentials from its child environment, keeps only the local signing identity
+inputs, and requires a Developer ID Application signature. It never silently
+falls back to ad-hoc signing.
 
 Final Ready candidates that touch packaging, release metadata, Electron, packaged
 Bridge, Schema or bundled-resource paths run `Release Dry Run` through the
