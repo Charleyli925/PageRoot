@@ -193,6 +193,7 @@ export async function runAcpProcessTask({
   try {
     const observeEvent = (event) => {
       if (event?.kind === "turn-stopping") turnStopObserved = true;
+      if (event?.kind === "identity-repair-started") turnStopObserved = false;
       onEvent(event);
     };
     const result = await Promise.race([

@@ -128,8 +128,10 @@ checkout without reset or stash.
 An installable developer preview is an optional side output of an exact clean
 commit, not a branch stage. Generate it only after an explicit developer
 request; never commit its `output/developer-preview/` files, merge because it
-passed, or promote its ad-hoc DMG into a formal release. See
-`docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
+passed, or promote its non-release Developer ID DMG into a formal release.
+The local macOS keychain must provide the stable Developer ID Application
+identity; missing or failed signing is a hard stop and has no ad-hoc fallback.
+See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
 
 Recommended prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `integration/`, `refactor/`, `chore/` and `recovery/`. Commits should be small enough to explain and restore. Avoid mixing formatting, generated output and behavioral changes. Pull Request CI enforces these prefixes; Dependabot branches remain allowed.
 
