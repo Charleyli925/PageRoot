@@ -660,6 +660,7 @@ const workspacePreferenceKeys = new Set([
   "restoreTabsOnLaunch",
   "defaultAgentProviderId",
   "agentConfigurations",
+  "documentAgentSelections",
   "disabledAgentProviderIds",
 ]);
 
@@ -672,6 +673,13 @@ function validWorkspacePreferencePatch(value) {
     || Object.keys(value).some((key) => !workspacePreferenceKeys.has(key))
   ) return false;
   return Object.entries(value).every(([key, next]) => {
+    if (key === "documentAgentSelections") {
+      return next && typeof next === "object" && !Array.isArray(next)
+        && Object.keys(next).length <= 128
+        && Object.entries(next).every(([id, provider]) => (
+          /^doc_[a-f0-9]{16,64}$/u.test(id) && ["pageroot", "qoder", "codex"].includes(provider)
+        ));
+    }
     if (key === "agentConfigurations") {
       return next && typeof next === "object" && !Array.isArray(next)
         && Object.entries(next).every(([id, entry]) => ["pageroot", "qoder", "codex"].includes(id)

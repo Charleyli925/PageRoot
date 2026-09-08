@@ -158,3 +158,21 @@ test("failed document selection persistence returns a visible failure without ch
   assert.equal(session.snapshot.workspace.defaultAgentProviderId, "codex");
   session.dispose();
 });
+
+
+test("a transient preference failure retries once without losing the current choice", async () => {
+  let attempts = 0;
+  const session = new WorkspacePreferencesSession({ port: {
+    async get() { return persisted; },
+    async record(input) {
+      if (++attempts === 1) throw new Error("temporary failure");
+      return { workspace: { ...persisted.workspace, ...input.workspace } };
+    },
+  } });
+  await session.load();
+  assert.equal(await session.update({ defaultAgentProviderId: "pageroot" }), true);
+  assert.equal(attempts, 2);
+  assert.equal(session.snapshot.error, null);
+  assert.equal(session.snapshot.workspace.defaultAgentProviderId, "pageroot");
+  session.dispose();
+});

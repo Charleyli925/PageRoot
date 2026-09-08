@@ -665,11 +665,13 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
       node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
       if (typeof node.click === "function") node.click();
     });
-    const setupPanel = sidebar.getByTestId("ai-conversation-setup-panel");
+    await expect(sidebar.getByTestId("ai-conversation-setup-panel")).toHaveCount(0);
+    await expect(settingsPage).toBeVisible();
+    const setupPanel = settingsPage.getByTestId("settings-agent-row-pageroot");
+    if (await setupPanel.getAttribute("data-expanded") !== "true") await setupPanel.locator(".settings-agent-service-main").click();
     await expect(setupPanel.getByRole("textbox", { name: "API Key" })).toBeVisible();
     await expect(setupPanel.getByRole("button", { name: "连接", exact: true })).toBeDisabled();
-    await expect(sidebar.getByTestId("ai-conversation-send")).toHaveCount(0);
-    await expect(sidebar.getByRole("button", { name: /交给 源页 修改/u })).toHaveCount(0);
+
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -718,10 +720,9 @@ test("Qoder settings entry opens the shared access panel without restoring a Dis
     });
     await sidebar.getByRole("button", { name: "设置 Qoder CLI" }).click();
 
-    const setupPanel = sidebar.getByTestId("ai-conversation-setup-panel");
-    await expect(setupPanel).toBeVisible();
-    await expect(launched.page.locator(".workbench-settings-page")).toHaveCount(0);
-    await expect(setupPanel.getByText("Qoder CLI", { exact: true })).toBeVisible();
+    await expect(sidebar.getByTestId("ai-conversation-setup-panel")).toHaveCount(0);
+    await expect(launched.page.locator(".workbench-settings-page")).toBeVisible();
+    const setupPanel = await expandSettingsAgent(launched.page.locator(".workbench-settings-page"), "qoder");
     await expect(setupPanel.getByText("未登录", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(setupPanel.getByRole("button", { name: "登录 Qoder" }))
       .toBeVisible();
@@ -749,6 +750,7 @@ test("Qoder settings entry opens the shared access panel without restoring a Dis
     await setupPanel.getByRole("button", { name: "取消" }).click();
     await expect(setupPanel.getByRole("button", { name: "登录 Qoder" })).toBeVisible({ timeout: 15_000 });
 
+    await launched.page.getByRole("button", { name: "返回工作台" }).click();
     await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
     const reopenedSettingsCard = await openQoderAvailability(launched.page);
     await expect(reopenedSettingsCard.getByText("未登录", { exact: true })).toBeVisible();

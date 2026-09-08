@@ -2920,3 +2920,13 @@ Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, a
 - Rebuilt Electron Settings and sidebar fixtures verify that the known execution-contract incompatibility preserves the logged-in account and offers “使用其他 AI” plus a secondary recheck. The install endpoint is never called.
 - Inspected `output/design-qa/agent-setup-journeys/codex-execution-unsupported-sidebar.png`; the explanation, alternative-service action and return control fit the existing repair card. Settings evidence is `codex-execution-unsupported-settings.png`. CI retains these captures.
 - The focused two-surface scenario passed in 2.2 seconds. This is synthetic recovery UI evidence, not successful real Codex execution; the restricted finalizer compatibility blocker remains open.
+
+## 2026-09-09 — AI settings and working Codex execution
+
+- Truth: user screenshots request Settings-owned installation/diagnostics, a quiet connection overview, three fixed DeepSeek models, and removal of internal preference-save banners.
+- Rebuilt source Electron: inspected `output/design-qa/ai-settings-real/settings-overview.png` and `codex-connected.png`. Three compact service rows show names and status; technical diagnostics stay collapsed at the bottom of the expanded service. The task sidebar contains no setup panel.
+- Real authenticated Codex, no mocked provider: clicked service selection, submitted a synthetic page comment, received a validated Candidate and opened Review. `codex-review.png` shows the changed heading; original and Working Copy bytes remain unchanged. `result.json` records the real-account boundary. This supersedes the earlier real-Codex blocker; it is separate from synthetic recovery tests.
+- Actual preference JSON contains both the default Codex service and the document selection, with no invalid-record or selection-not-saved banner. Isolated test data and screenshots remain outside source control.
+- Fixed DeepSeek model IDs and limits match the vendor's current [Models & Pricing documentation](https://api-docs.deepseek.com/quick_start/pricing/); Vision remains visibly marked experimental. Existing Electron journeys cover switching all three choices, persistence and restart.
+- Evidence applies to the rebuilt test application; no installed application replacement or package release is implied.
+- final result: passed (visual inspection and real Codex Review; deterministic gate evidence is recorded separately).

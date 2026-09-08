@@ -1946,8 +1946,8 @@
     {
       "id": "agent-provider-codex-acp",
       "patterns": [
-        "^bridge/agent/providers/codex-acp-provider\\.mjs$",
-        "^tests/fixtures/codex-acp-agent\\.mjs$",
+        "^bridge/agent/(?:providers/codex-acp-provider|runtimes/codex-client-tools)\\.mjs$",
+        "^tests/fixtures/(?:codex-acp-agent|codex-client-tools-server)\\.mjs$",
         "^tests/codex-candidate-authority\\.test\\.mjs$"
       ],
       "suites": [

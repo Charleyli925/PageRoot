@@ -599,3 +599,12 @@ old source plus prepared/published file identity and bytes before the manifest
 commit. Replays validate operation inputs and return committed facts; a render
 failure cannot allocate another Version. AI task/Candidate decisions are never
 automatically cancelled by manual creation.
+
+Codex managed execution uses an ephemeral read-only native thread and no native
+approval grants. Native environments, inherited MCP servers, apps/plugins and
+additional agents are disabled for this thread. Stemmio exposes only three
+dynamic tools through its ACP adapter:
+allowlisted frozen reads, exact Candidate submission and the frozen finalizer.
+The existing execution host validates all three; the adapter cannot finalize a
+turn from prose or a native write. Session/turn identity mismatches and unknown
+tools are rejected. No additional listening port or credential transport is added.

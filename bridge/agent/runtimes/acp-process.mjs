@@ -1,3 +1,4 @@
+import { createCodexClientToolsAgent } from "./codex-client-tools.mjs";
 import {
   access,
   constants as fsConstants,
@@ -135,6 +136,7 @@ export async function runAcpProcessTask({
   cancellationSignal,
   expectedAgentName,
   sessionModelId,
+  codexClientTools = false,
   expectedExecutable,
   useVerifiedJavaScriptRuntime = false,
   baseEnvironment = process.env,
@@ -187,7 +189,8 @@ export async function runAcpProcessTask({
     stderr.truncated ||= next.truncated;
   });
   const guardedStdout = child.stdout.pipe(new AcpFrameGuard());
-  const stream = acp.ndJsonStream(
+  const codexAdapter = codexClientTools ? createCodexClientToolsAgent({ readable: guardedStdout, writable: child.stdin, policy }) : null;
+  const stream = codexAdapter ? codexAdapter.agent : acp.ndJsonStream(
     Writable.toWeb(child.stdin),
     Readable.toWeb(guardedStdout),
   );
@@ -243,6 +246,7 @@ export async function runAcpProcessTask({
     error[`${stderrFieldPrefix}StderrTruncated`] = stderr.truncated;
     throw error;
   } finally {
+    codexAdapter?.close();
     child.stdin?.end();
     if (!(await terminateManagedProcess(child, { processGroup }))) {
       throw acpPolicyError(

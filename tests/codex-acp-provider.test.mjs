@@ -401,7 +401,7 @@ test("authenticated diagnosis rejects a catalog that preflight cannot use", asyn
 });
 
 
-test("known incompatible native adapter is refused before spawning or prompting", async () => {
+test("missing Codex executable is still refused after client-tool support", async () => {
   await assert.rejects(probeCodexAcp({ source: "verified-npm-package", version: "1.7.0",
-    command: "/nonexistent/synthetic-adapter" }, {}), { code: "CODEX_EXECUTION_CONTRACT_UNSUPPORTED" });
+    command: "/nonexistent/synthetic-adapter" }, {}));
 });

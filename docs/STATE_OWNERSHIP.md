@@ -623,3 +623,10 @@ RunSession preserves that transient adoption projection across same-Run hydratio
 and navigation; a ready Request reread cannot erase an outstanding decision.
 Explicit reconciliation or a terminal authority can clear it.
 Retry preflight is fenced by the original Run's continued membership and cancellation occupancy before dispatch. After dispatch, AgentRuntimeCoordinator owns the pending execution start and waits for its termination/lease cleanup before authorizing durable cancellation. A late preflight or an unpublished provider start must never resurrect an ended Run.
+
+The Codex client-tool adapter (`bridge/agent/runtimes/codex-client-tools.mjs`)
+owns only native protocol requests and the current thread/turn binding. It maps
+three dynamic tools to the existing ACP client host. `execution-host.mjs` remains
+the sole owner of frozen reads, the Candidate write and restricted finalization;
+the shared ACP process supervisor owns the child lifetime. No model-supplied path
+or command can grant additional write authority.

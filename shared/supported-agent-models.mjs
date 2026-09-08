@@ -4,7 +4,7 @@
 // CI fixtures.
 
 export const SUPPORTED_AGENT_MODELS_SCHEMA_VERSION = "1.0.0";
-export const SUPPORTED_AGENT_MODELS_REVISION = "2026-09-06.1";
+export const SUPPORTED_AGENT_MODELS_REVISION = "2026-09-09.1";
 
 const AUTO = Object.freeze(["auto"]);
 const EFFORT = Object.freeze(["auto", "none", "low", "high", "max"]);
@@ -39,8 +39,21 @@ export const SUPPORTED_AGENT_MODELS = Object.freeze([
     vendorId: "deepseek",
     modelId: "deepseek-v4-flash",
     displayName: "V4 Flash",
+    releaseChannel: "stable",
     recommended: false,
     requestAdapter: "deepseek",
+    reasoningOptions: EFFORT,
+    contextWindow: 1_000_000,
+    recommendedMaxInputTokens: 500_000,
+    maxOutputTokens: 384_000,
+  }),
+  model({
+    vendorId: "deepseek",
+    modelId: "deepseek-v4-flash-vision-exp",
+    displayName: "V4 Flash Vision (实验)",
+    recommended: false,
+    requestAdapter: "deepseek",
+    releaseChannel: "stable",
     reasoningOptions: EFFORT,
     contextWindow: 1_000_000,
     recommendedMaxInputTokens: 500_000,
