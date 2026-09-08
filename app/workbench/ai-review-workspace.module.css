@@ -135,7 +135,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: var(--workbench-inspector-width, 376px);
+    width: min(var(--workbench-inspector-width, 376px), 100%);
     height: auto;
   }
 }

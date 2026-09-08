@@ -326,7 +326,7 @@ test("Codex diagnosis uses protected native login status when available", async 
   );
 });
 
-test("Codex diagnosis verifies native login and ACP initialize without session/new", async (t) => {
+test("Codex diagnosis verifies native login and the same model catalog as preflight", async (t) => {
   const root = await isolatedHome(t);
   const marker = path.join(root, "session-new.marker");
   const adapter = await probeCommand(root, `--session-marker=${marker}`);
@@ -339,7 +339,7 @@ test("Codex diagnosis verifies native login and ACP initialize without session/n
   assert.equal(diagnostic.facts.authentication, "ready");
   assert.equal(diagnostic.facts.protocol, "ready");
   assert.equal(diagnostic.facts.service, "unknown");
-  await assert.rejects(() => readFile(marker, "utf8"), { code: "ENOENT" });
+  assert.equal(await readFile(marker, "utf8"), "session.new\n");
 });
 
 test("login completion accepts verified local authentication even when the ACP adapter is broken", async (t) => {
@@ -378,4 +378,30 @@ test("verified JavaScript Codex adapter uses the host runtime without PATH node 
   assert.ok(evidence);
   await writeFile(command, "throw new Error('changed fixture');\n");
   await assert.rejects(probeCodexAcp(installation, {}), { code: "ACP_AGENT_EXECUTABLE_CHANGED" });
+});
+
+
+test("Codex 1.7 composite model IDs become one model with exact reasoning choices", async (t) => {
+  const evidence = await probeCodexAcp(await probeCommand(await isolatedHome(t), "--composite-models"), process.env);
+  assert.equal(evidence.modelCount, 1);
+  assert.equal(evidence.models[0].id, "codex:gpt-real");
+  assert.deepEqual(evidence.models[0].reasoningEfforts, ["low", "high"]);
+  assert.equal(evidence.models[0].defaultReasoningEffort, "high");
+  assert.equal(evidence.models[0].isDefault, true);
+});
+
+test("authenticated diagnosis rejects a catalog that preflight cannot use", async (t) => {
+  const root = await isolatedHome(t);
+  const adapter = await probeCommand(root, "--name-only-models");
+  const native = path.join(root, "codex-native");
+  await writeFile(native, "#!/bin/sh\necho Logged in\n", { mode: 0o755 });
+  const diagnosis = await diagnoseCodexAcp({ ...adapter, nativeCommand: native }, {});
+  assert.equal(diagnosis.readiness, "connection-failed");
+  assert.equal(diagnosis.cause, "CODEX_PROTOCOL_UNSUPPORTED");
+});
+
+
+test("known incompatible native adapter is refused before spawning or prompting", async () => {
+  await assert.rejects(probeCodexAcp({ source: "verified-npm-package", version: "1.7.0",
+    command: "/nonexistent/synthetic-adapter" }, {}), { code: "CODEX_EXECUTION_CONTRACT_UNSUPPORTED" });
 });

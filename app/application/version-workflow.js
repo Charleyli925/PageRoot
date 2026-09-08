@@ -464,7 +464,9 @@ export class VersionWorkflow {
       try {
         activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
       } catch (cause) {
-        if (!isBridgeRequestError(cause) || cause.outcome !== "unknown") throw cause;
+        if (!activationRequest.decisionOperationId || !isBridgeRequestError(cause) || cause.outcome !== "unknown") throw cause;
+        if (!this.#isNavigationCurrent(operation) || !this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
+        // Reconcile the same idempotent Promotion transaction after a lost reply.
         activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
       }
       perfMark("pageroot:accept:promote-end");

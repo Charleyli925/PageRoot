@@ -609,3 +609,9 @@ Reconciliation backs off to 30 seconds, pauses publication away from the origina
 Run, and stops on disposal. Review cannot override this projection and RunWorkflow
 refuses an opposite cancellation while the decision remains unresolved. Restart
 reconstructs the outcome from the persisted Promotion transaction, never a new AI run.
+
+AgentRuntimeCoordinator owns in-flight execution startup keyed by the existing
+execution identity. Cancellation marks that startup, waits for its bounded
+settlement and only then allows durable cancellation. The final launch check
+prevents a stopped, unpublished startup from spawning later. This registry is
+transient coordination, not a new durable Task/Run authority.

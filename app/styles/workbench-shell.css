@@ -219,7 +219,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: var(--workbench-inspector-width);
+    width: min(var(--workbench-inspector-width), 100%);
     height: auto;
     max-height: none;
     grid-column: auto;
@@ -466,5 +466,18 @@
 
   .workbench-header {
     padding-left: 74px;
+  }
+}
+
+/* At 200% zoom keep the entire AI task surface within the viewport. */
+@media (max-width: 840px) {
+  .workbench:has([data-testid="ai-conversation-sidebar"]) {
+    --workbench-sidebar-width: 0px;
+  }
+  .workbench:has([data-testid="ai-conversation-sidebar"]) > .workbench-global-sidebar {
+    visibility: hidden;
+  }
+  .workbench > .review-scroll-stage[data-inspector="ai"] > .ai-conversation-aside {
+    width: min(var(--workbench-inspector-width), 100%);
   }
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { submissionRequestMatches } from "./project-file-repository/submission.mjs";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import {
@@ -1321,12 +1322,6 @@ async function createProjectFileRequest(body) {
   if (body.submissionOperationId && (!submission || submission.status === "not-started")) {
     throw new HttpError(409, "SUBMISSION_NOT_ACCEPTED", "A recorded submission is required.");
   }
-  if (submission && (submission.snapshot.sourceSha256 !== body.expectedSourceSha256
-    || JSON.stringify(submission.snapshot.comments) !== JSON.stringify(body.comments || [])
-    || submission.snapshot.agentDelivery.mode !== body.agentDelivery?.mode
-    || submission.snapshot.agentDelivery.selection?.providerId !== body.agentDelivery?.selection?.providerId)) {
-    throw new HttpError(409, "SUBMISSION_SNAPSHOT_CHANGED", "Submitted requirements cannot be replaced.");
-  }
   const requestId = submission?.requestId || `req_${randomUUID().replaceAll("-", "")}`;
   const attemptId = "attempt_001";
   let taskSpec;
@@ -1341,6 +1336,9 @@ async function createProjectFileRequest(body) {
       cause?.code || "TASK_SPEC_INVALID",
       "The current comments could not be compiled into a valid Task Spec.",
     );
+  }
+  if (submission && !submissionRequestMatches(submission.snapshot, body, taskSpec)) {
+    throw new HttpError(409, "SUBMISSION_SNAPSHOT_CHANGED", "Submitted requirements cannot be replaced.");
   }
   const request = {
     ...(submission ? { submissionOperationId: submission.operationId } : {}),

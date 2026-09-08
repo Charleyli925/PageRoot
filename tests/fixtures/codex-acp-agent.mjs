@@ -84,6 +84,12 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
         },
       };
     }
+    if (process.argv.includes("--composite-models")) {
+      return { sessionId, models: { currentModelId: "gpt-real[high]", availableModels: [
+        { modelId: "gpt-real[low]", name: "GPT Real (low)" },
+        { modelId: "gpt-real[high]", name: "GPT Real (high)" },
+      ] } };
+    }
     if (objectModels) {
       return {
         sessionId,
@@ -111,6 +117,7 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
       },
     };
   })
+  .onRequest("session/set_model", (value) => value, () => ({}))
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     if (hang) return new Promise(() => {});
     if (visibleText) {

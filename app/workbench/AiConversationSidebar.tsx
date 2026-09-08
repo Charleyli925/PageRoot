@@ -85,6 +85,7 @@ export type AiConversationSidebarProps = {
   loading?: boolean;
   onSend?: () => void;
   onAction?: (actionId: string) => void;
+  onClose?: () => void;
   onOpenAgentSettings?: () => void;
   onSelectModel?: (modelId: string) => void;
   onSelectReasoning?: (reasoning: string) => void;
@@ -233,6 +234,7 @@ export default function AiConversationSidebar({
   loading = false,
   onSend,
   onAction,
+  onClose,
   onOpenAgentSettings,
   onSelectModel,
   onSelectReasoning,
@@ -580,6 +582,7 @@ export default function AiConversationSidebar({
           <span className={styles.mode} data-testid="ai-conversation-mode">
             {mode.label}
           </span>
+          {onClose ? <button className={styles.close} type="button" aria-label="收起会话面板" onClick={onClose}>×</button> : null}
         </div>
         {sourceFileName || contextLabel ? (
           <p className={styles.context} data-testid="ai-conversation-context">

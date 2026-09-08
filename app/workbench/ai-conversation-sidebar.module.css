@@ -795,3 +795,7 @@
 
 .turnGroup .message[data-actor="pageroot"] .messageMeta { display: none; }
 .turnGroup .message[data-actor="pageroot"] { font-weight: 400; }
+
+.close { margin-left: auto; width: 28px; height: 28px; flex: none; border: 0; border-radius: 6px; background: transparent; color: #666171; font-size: 20px; cursor: pointer; }
+.close:hover { background: #e9e7f0; }
+.close:focus-visible { outline: 2px solid #7868b9; outline-offset: 2px; }

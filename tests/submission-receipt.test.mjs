@@ -1,9 +1,10 @@
+import { submissionRequestMatches } from "../bridge/project-file-repository/submission.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultManagedAgentDelivery } from "../shared/agent-delivery.mjs";
 import Ajv2020 from "ajv/dist/2020.js";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { fixture, importSource, html as fixtureHtml } from "./project-file-repository-harness.mjs";
 import { ensureCurrentConversation, readConversation, writeConversation } from "../bridge/conversation-repository.mjs";
@@ -248,4 +249,47 @@ test("adoption consumes only unchanged submitted comments and replays its decisi
   assert.equal(conversation.messages.filter((message) => message.text === "已采用本次修改。").length, 1);
   const restored = await restarted.workspace({ sourcePath: result.target.exactSourcePath });
   assert.deepEqual(restored.draft.comments, workspace.draft.comments);
+});
+
+
+test("bounded progress exposes truncation while keeping the terminal outcome", async (t) => {
+  const value = await setup(t);
+  const receipt = await prepareRecordedRequest(value);
+  const file = path.join(value.target.projectRootPath, ".pageroot", "submissions", `${operationId}.json`);
+  const saved = JSON.parse(await readFile(file, "utf8"));
+  saved.events = Array.from({ length: 64 }, (_, index) => ({ eventId: `event_reading_${index}`, kind: "reading-task", timestamp: receipt.createdAt }));
+  await writeFile(file, JSON.stringify(saved));
+  await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId,
+    event: { eventId: "event_reading_overflow", kind: "reading-task", timestamp: receipt.createdAt } });
+  await value.repository.completeRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId,
+    html: await readFile(value.target.exactSourcePath, "utf8") });
+  const final = JSON.parse(await readFile(file, "utf8"));
+  assert.equal(final.eventsTruncated, true);
+  assert.equal(final.events.filter((event) => event.kind === "reading-task").length, 64);
+  assert.equal(final.events.filter((event) => event.kind === "no-change").length, 1);
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  assert.equal(conversation.messages.filter((message) => message.text.includes("早期过程已省略")).length, 1);
+  assert.equal(conversation.turns[0].status, "completed");
+});
+
+
+test("Request binding permits resolved preflight evidence but rejects changed frozen requirements", async (t) => {
+  const value = await setup(t);
+  value.input.agentDelivery = defaultManagedAgentDelivery();
+  const receipt = await value.repository.recordSubmission({ ...value, operationId });
+  const body = structuredClone(value.input);
+  body.agentDelivery.selection.resolvedModelId = "qoder:resolved";
+  assert.equal(submissionRequestMatches(receipt.snapshot, body, receipt.snapshot.taskSpec), true);
+  for (const mutate of [
+    (input) => { input.changeEvents = [{ description: "replaced" }]; },
+    (input) => { input.agentDelivery.selection.providerId = "codex"; },
+    (input) => { input.agentDelivery.selection.runtimeId = "http"; },
+    (input) => { input.agentDelivery.selection.requestedModelId = "qoder:other"; },
+    (input) => { input.agentDelivery.selection.reasoning.requested = "high"; },
+    (input) => { input.comments[0].text = "replaced"; },
+  ]) {
+    const changed = structuredClone(body); mutate(changed);
+    assert.equal(submissionRequestMatches(receipt.snapshot, changed, receipt.snapshot.taskSpec), false);
+  }
+  assert.equal(submissionRequestMatches(receipt.snapshot, body, { ...receipt.snapshot.taskSpec, scope: "changed" }), false);
 });

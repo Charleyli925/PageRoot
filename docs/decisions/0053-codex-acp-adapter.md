@@ -63,3 +63,27 @@ failure pattern. PageRoot still does not send `authenticate`.
 - Packaged-app size does not drop in this PR.
 - The next increment deletes the private App Server stack and bundled
   `@openai/codex` extraResources.
+
+## 2026-09-08 real-account compatibility finding
+
+The installed 1.7.0 adapter exposes model IDs as `base[effort]`, not plain base
+IDs. Public catalog normalization groups these into base model / effort choices;
+the frozen runtime launch applies the advertised composite ID before prompting.
+Authenticated diagnosis now checks the same session catalog as preflight.
+Initialize-only fallback without verified native authentication stays unverified.
+
+Real synthetic execution also revealed a separate unresolved boundary: the
+adapter's native tools can write the candidate, but do not expose the client's
+ACP `terminal/create` tool to the model. The model reported that it could not run
+the required finalizer. The execution host correctly refused completion without
+one observed, successful restricted finalizer invocation. Model catalog repair
+alone is therefore **not** evidence of a working Codex adoption loop.
+
+Do not bypass `assertTurnCompleted`, accept a candidate from agent prose, or
+switch the registration to `agent-native` as a compatibility shortcut. Completing
+this path needs a separately reviewed tool adapter that retains the existing
+restricted finalizer and filesystem contract, or explicit authorization for a
+changed native execution authority. Until then the real Codex closure is a
+release blocker; synthetic provider fixtures cannot clear it.
+
+已对经受管包校验的已知不兼容 1.7.0 版本增加预检阻断：`CODEX_EXECUTION_CONTRACT_UNSUPPORTED`，不再重复产生服务用量；要求记录仍保留。该阻断是诚实的兼容性状态，不代表 Codex 完整闭环已经修复。

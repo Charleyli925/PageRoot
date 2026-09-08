@@ -1140,7 +1140,15 @@ export class RunWorkflow {
       const submissionOperationId = `submission_${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
       request.submissionOperationId = submissionOperationId;
       submissionRequest = request;
-      const receipt = await this.#bridgeClient.recordSubmission(request);
+      let receipt;
+      try {
+        receipt = await this.#bridgeClient.recordSubmission(request);
+      } catch (cause) {
+        if (!responseMayBeUnknown(cause)) throw cause;
+        // This receipt command cannot launch a provider. Reusing the exact
+        // operation and frozen bytes reconciles a lost response idempotently.
+        receipt = await this.#bridgeClient.recordSubmission(request);
+      }
       if (receipt?.operationId !== submissionOperationId || receipt?.status !== "accepted") {
         throw responseError("SUBMISSION_RECEIPT_INVALID", "本轮要求的保存结果尚未确认，没有发送。");
       }

@@ -228,6 +228,7 @@ export function useAiConversation({
     onSend,
     onCopyTask,
     onAction: onDecision,
+    onClose: hide,
     onOpenAgentSettings,
   }), [
     state,
@@ -255,6 +256,7 @@ export function useAiConversation({
     onSend,
     onCopyTask,
     onDecision,
+    hide,
     onOpenAgentSettings,
   ]);
 
