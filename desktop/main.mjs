@@ -531,15 +531,24 @@ const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
 const projectOpenQueue = createProjectOpenQueue();
 
 async function initializeRuntimeEnvironment() {
-  await Promise.all([
+  const requiredPaths = [
     mkdir(runtimeEnvironment.userDataPath, { recursive: true, mode: 0o700 }),
     mkdir(runtimeEnvironment.sessionDataPath, { recursive: true, mode: 0o700 }),
     mkdir(runtimeEnvironment.projectFilesRoot, { recursive: true, mode: 0o700 }),
     mkdir(runtimeEnvironment.workspacePath, { recursive: true, mode: 0o700 }),
     mkdir(runtimeEnvironment.agentsRoot, { recursive: true, mode: 0o700 }),
-    mkdir(runtimeEnvironment.recoveryJournalPath, { recursive: true, mode: 0o700 }),
     mkdir(runtimeEnvironment.logsPath, { recursive: true, mode: 0o700 }),
-  ]);
+  ];
+  // Recovery journals retain the existing optional-degradation contract for
+  // the formal app, source development, and E2E fixtures. A Preview build is
+  // the only channel whose complete isolated environment is a hard startup
+  // requirement; it must never silently continue with a missing root.
+  if (runtimeEnvironment.channel === "preview") {
+    requiredPaths.push(
+      mkdir(runtimeEnvironment.recoveryJournalPath, { recursive: true, mode: 0o700 }),
+    );
+  }
+  await Promise.all(requiredPaths);
 }
 
 function ensurePreviewProtocolController() {
