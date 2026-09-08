@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0070 -->
+<!-- adr-history-max: 0071 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -64,6 +64,8 @@ reused. The four collisions found in the first curation pass were assigned
 | 0069 | [PageRoot native OpenAI-compatible Agent](0069-pageroot-native-openai-compatible-agent.md) | Living |
 
 | 0070 | [Working Copy identity survives filesystem observation changes](0070-durable-working-copy-binding.md) | Living |
+
+| 0071 | [Stemmio trusted modification loop](0071-stemmio-trusted-modification-loop.md) | Accepted contract; implementation tracked separately |
 
 ## Reading guide
 
