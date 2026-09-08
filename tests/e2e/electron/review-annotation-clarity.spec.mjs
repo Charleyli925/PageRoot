@@ -1005,6 +1005,30 @@ test("the review projection annotates a dense report cleanly and accurately", as
         element.getAttribute("data-pageroot-review-projection-facts") || "[]",
       )[0]?.displayGroupId || "");
     const edgeFocusGroupId = `focus-${edgeChangeId}-${edgeDisplayGroupId}`;
+    // A prior focus action can still be scrolling after its overlay is ready.
+    // Capture the baseline only after that action settles; keep exact equality
+    // for the new activation, including after its own animation has finished.
+    const settleReviewScroll = () => Promise.all([beforeFrame, afterFrame].map((frame) => (
+      frame.locator("html").evaluate(() => new Promise((resolve, reject) => {
+        let position = `${scrollX},${scrollY}`;
+        let changedAt = performance.now();
+        const startedAt = changedAt;
+        const sample = () => {
+          const now = performance.now();
+          const next = `${scrollX},${scrollY}`;
+          if (next !== position) { position = next; changedAt = now; }
+          if (now - changedAt >= 250) return resolve();
+          if (now - startedAt >= 5_000) return reject(new Error("Review scroll did not settle"));
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }))
+    )));
+    // Exercise a real first reveal from the top, not an already-reached target.
+    await Promise.all([beforeFrame, afterFrame].map((frame) => frame.locator("html")
+      .evaluate(() => scrollTo({ top: 0, behavior: "instant" }))));
+    await settleReviewScroll();
+    const beforeFirstReveal = await beforeFrame.locator("html").evaluate(() => scrollY);
     await afterFrame.locator(
       `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
     ).first().evaluate((bar) => bar.click());
@@ -1019,6 +1043,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
       `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
     )).toHaveCount(0);
     await expect(beforeFrame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+    await settleReviewScroll();
+    expect(await beforeFrame.locator("html").evaluate(() => scrollY)).toBe(beforeFirstReveal);
     const edgeProjection = await readProjection(afterFrame);
     const edgeBox = edgeProjection.boxes.find((box) => (
       box.changeId === edgeChangeId
@@ -1074,25 +1100,6 @@ test("the review projection annotates a dense report cleanly and accurately", as
       details: [...document.querySelectorAll("details")]
         .map((details) => details.open),
     }));
-    // A prior focus action can still be scrolling after its overlay is ready.
-    // Capture the baseline only after that action settles; keep exact equality
-    // for the new activation, including after its own animation has finished.
-    const settleReviewScroll = () => Promise.all([beforeFrame, afterFrame].map((frame) => (
-      frame.locator("html").evaluate(() => new Promise((resolve, reject) => {
-        let position = `${scrollX},${scrollY}`;
-        let changedAt = performance.now();
-        const startedAt = changedAt;
-        const sample = () => {
-          const now = performance.now();
-          const next = `${scrollX},${scrollY}`;
-          if (next !== position) { position = next; changedAt = now; }
-          if (now - changedAt >= 250) return resolve();
-          if (now - startedAt >= 5_000) return reject(new Error("Review scroll did not settle"));
-          requestAnimationFrame(sample);
-        };
-        requestAnimationFrame(sample);
-      }))
-    )));
     await settleReviewScroll();
     const missingSideBeforeActivation = await missingSideState();
     await afterFrame.locator(
