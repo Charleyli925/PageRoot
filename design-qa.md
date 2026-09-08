@@ -2914,3 +2914,9 @@ Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, a
 - The scenario verifies the same decision payload on every reconciliation, one successful source publication, and exactly one adopted history result after restarting the application. Screenshots: `output/design-qa/ai-assistant-redesign/trusted-loop-{adopting,adoption-unknown,adopted-restarted}.png`; CI uploads the synthetic captures.
 - Existing typography, neutral colors, Review controls and focus treatment are retained. Native disabled controls prevent double submission; transient status is not a new durable authority.
 - final result: passed (actual backend receipt-loss and restart scenario).
+
+## 2026-09-08 — Known Codex incompatibility recovery
+
+- Rebuilt Electron Settings and sidebar fixtures verify that the known execution-contract incompatibility preserves the logged-in account and offers “使用其他 AI” plus a secondary recheck. The install endpoint is never called.
+- Inspected `output/design-qa/agent-setup-journeys/codex-execution-unsupported-sidebar.png`; the explanation, alternative-service action and return control fit the existing repair card. Settings evidence is `codex-execution-unsupported-settings.png`. CI retains these captures.
+- The focused two-surface scenario passed in 2.2 seconds. This is synthetic recovery UI evidence, not successful real Codex execution; the restricted finalizer compatibility blocker remains open.
