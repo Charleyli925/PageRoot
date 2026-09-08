@@ -19,6 +19,7 @@ import {
   developerPreviewPackageJson,
   developerPreviewReleaseDirectory,
   resolveDeveloperPreviewIdentity,
+  writeDeveloperPreviewBuilderConfig,
 } from "./developer-preview.mjs";
 import { writeApplicationUpdateConfig } from "./application-update-config.mjs";
 import {
@@ -35,6 +36,9 @@ import {
 import { writeBuildInfo } from "./release-provenance.mjs";
 import { expectedArtifactLayout } from "./verify-packaged-artifact.mjs";
 import { createTelemetryBuildConfig } from "../desktop/usage-telemetry.mjs";
+import {
+  runtimeEnvironmentMarker,
+} from "../desktop/runtime-environment.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -251,6 +255,25 @@ export async function writeUsageTelemetryBuildConfig({
   };
 }
 
+export async function writeRuntimeEnvironmentBuildConfig({
+  productRoot: root = productRoot,
+  channel,
+} = {}) {
+  const marker = runtimeEnvironmentMarker(channel);
+  const destination = path.join(
+    root,
+    "output",
+    "release-metadata",
+    "runtime-environment.json",
+  );
+  await mkdir(path.dirname(destination), { recursive: true });
+  await writeFile(destination, `${JSON.stringify(marker, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o644,
+  });
+  return { destination, marker };
+}
+
 async function main() {
   const {
     architecture,
@@ -310,6 +333,7 @@ async function main() {
     buildInfo = restored.buildInfo;
     telemetryConfig = restored.telemetry;
     applicationUpdateConfig = restored.applicationUpdate;
+    console.log(`Runtime environment restored from signed app: ${prepackagedAppPath}`);
     console.log(`Build provenance restored from signed app: ${prepackagedAppPath}`);
   } else {
     const provenance = await writeBuildInfo({
@@ -327,8 +351,13 @@ async function main() {
       packageJson: packagedPackageJson,
     });
     applicationUpdateConfig = updateMetadata.config;
+    const runtimeMetadata = await writeRuntimeEnvironmentBuildConfig({
+      productRoot,
+      channel: isDeveloperPreview ? "preview" : "stable",
+    });
     console.log(`Build provenance: ${provenance.destination}`);
     console.log(`Application update config: ${updateMetadata.destination}`);
+    console.log(`Runtime environment: ${runtimeMetadata.destination} (${runtimeMetadata.marker.channel})`);
   }
   console.log(`Git commit: ${buildInfo.commitSha}`);
   console.log(`Package profile: ${profile}`);
@@ -363,6 +392,10 @@ async function main() {
       architecture,
       identity: developerPreviewIdentity,
       releaseDirectory,
+      configPath: await writeDeveloperPreviewBuilderConfig({
+        productRoot,
+        packageJson: packagedPackageJson,
+      }),
     })
     : isCandidateApp
       ? candidateAppBuilderArguments({

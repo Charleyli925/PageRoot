@@ -328,8 +328,18 @@ export type DesktopIntegrationsApi = {
     available?: boolean;
     remembered?: boolean;
     vendorId?: string | null;
+    unreadable?: boolean;
+    reconnectRequired?: boolean;
+    reason?: string;
+    code?: string;
   }>;
-  restoreSessionCredential?: () => Promise<{ ok?: boolean; restored?: boolean }>;
+  restoreSessionCredential?: () => Promise<{
+    ok?: boolean;
+    restored?: boolean;
+    reconnectRequired?: boolean;
+    reason?: string;
+    code?: string;
+  }>;
 };
 
 export type ApplicationUpdateStatus =

@@ -1,11 +1,24 @@
 import { spawn } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+const sourceRuntimeRoot = mkdtempSync(path.join(tmpdir(), "pageroot-source-dev-"));
+const developmentEnvironment = {
+  ...process.env,
+  PAGEROOT_RUNTIME_CHANNEL: "source",
+  HTML_AI_RUNTIME_CHANNEL: "source",
+  HTML_AI_WORKSPACE: process.env.HTML_AI_WORKSPACE || path.join(sourceRuntimeRoot, "workspace"),
+  HTML_AI_PROJECT_FILES_ROOT: process.env.HTML_AI_PROJECT_FILES_ROOT || path.join(sourceRuntimeRoot, "project-files"),
+  HTML_AI_AGENTS_ROOT: process.env.HTML_AI_AGENTS_ROOT || path.join(sourceRuntimeRoot, "agents"),
+};
 
 const children = [];
 
 function start(command, args, label) {
   const child = spawn(command, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: developmentEnvironment,
     stdio: "inherit",
   });
   children.push(child);

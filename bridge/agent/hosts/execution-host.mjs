@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import { prepareCandidateSourceIdentity } from "../../project-file-repository/candidate-identity.mjs";
 import { sha256 } from "../../lifecycle-core.mjs";
 import {
   AGENT_POLICY_BRAND,
@@ -260,6 +261,8 @@ export function createExecutionHost(policy, {
   let finalizerOutcome = null;
   let finalizedOutputSha256 = null;
   let outputWritten = false;
+  let identityFailure = null;
+  let identityFailures = 0;
   let phase = "active";
   let cancellationRequested = false;
   let cancellationPromise = null;
@@ -446,6 +449,28 @@ export function createExecutionHost(policy, {
           if (bytes.byteLength > MAX_HTML_BYTES) {
             throw policyError("OUTPUT_TOO_LARGE", "The Candidate output exceeds 20 MiB.");
           }
+          if (identityFailures >= 3) throw identityFailure;
+          const base = policy.readableFiles.find((file) => file.role === "base-html");
+          const frozen = await readVerifiedRegularFile(base.path, policy.requestRoot, "Frozen base");
+          if (sha256(frozen.bytes) !== base.sha256) {
+            throw policyError("FROZEN_INPUT_DRIFT", "The frozen base changed.");
+          }
+          checkActive();
+          try {
+            prepareCandidateSourceIdentity(frozen.bytes.toString("utf8"), params.content);
+            identityFailure = null;
+          } catch (error) {
+            if (!String(error.code).startsWith("CANDIDATE_SOURCE_IDENTITY_")) throw error;
+            identityFailures += 1;
+            identityFailure = policyError(
+              identityFailures >= 3 ? "AGENT_OUTPUT_INVALID" : "IDENTITY_REPAIR_REQUIRED",
+              identityFailures >= 3
+                ? "Candidate identity repair exhausted. Stop; the original page is preserved."
+                : "Repair the Candidate identities against the frozen base and write the corrected complete HTML again. Preserve requested changes; new elements omit IDs. Validation evidence: "
+                  + JSON.stringify({ code: error.code, details: error.details }).slice(0, 16000),
+            );
+            throw identityFailure;
+          }
           await verifiedOutputParent(policy.outputPath, policy.requestRoot);
           checkActive();
           try {
@@ -623,6 +648,7 @@ export function createExecutionHost(policy, {
     },
     async assertTurnCompleted() {
       return trackActive(null, async (checkActive) => {
+        if (identityFailure) throw identityFailure;
         if (
           !finalizerStarted
           || !finalizerOutcome

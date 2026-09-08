@@ -26,6 +26,7 @@ import {
   buildInfoRelativePath,
   expectedBuildInfo,
 } from "./release-provenance.mjs";
+import { parseRuntimeEnvironmentMarker } from "../desktop/runtime-environment.mjs";
 
 const RELEASE_CREDENTIAL_ENVIRONMENT = new Set([
   "APPLE_API_ISSUER",
@@ -377,11 +378,12 @@ export async function restoreReleaseMetadataFromApp({
 }) {
   const resolvedAppPath = assertManagedReleaseApp(productRoot, appPath, profile);
   const resourcesPath = path.join(resolvedAppPath, "Contents", "Resources");
-  const [buildInfoBytes, telemetryBytes, applicationUpdateBytes, packageJson] =
+  const [buildInfoBytes, telemetryBytes, applicationUpdateBytes, runtimeEnvironmentBytes, packageJson] =
     await Promise.all([
       readFile(path.join(resourcesPath, "build-info.json")),
       readFile(path.join(resourcesPath, "usage-telemetry-config.json")),
       readFile(path.join(resourcesPath, APPLICATION_UPDATE_CONFIG_FILE)),
+      readFile(path.join(resourcesPath, "runtime-environment.json")),
       readFile(path.join(productRoot, "package.json"), "utf8").then(JSON.parse),
     ]);
   const expected = await expectedBuildInfoResolver({
@@ -407,6 +409,10 @@ export async function restoreReleaseMetadataFromApp({
     applicationUpdateBytes,
     packageJson,
   );
+  const runtimeEnvironment = parseRuntimeEnvironmentMarker(
+    JSON.parse(runtimeEnvironmentBytes.toString("utf8")),
+  );
+  assert.equal(runtimeEnvironment.channel, "stable", "candidate app runtime channel must remain stable");
   const metadataDirectory = path.join(productRoot, "output", "release-metadata");
   await mkdir(metadataDirectory, { recursive: true });
   await Promise.all([
@@ -417,6 +423,11 @@ export async function restoreReleaseMetadataFromApp({
       { mode: 0o600 },
     ),
     writeFile(
+      path.join(metadataDirectory, "runtime-environment.json"),
+      runtimeEnvironmentBytes,
+      { mode: 0o644 },
+    ),
+    writeFile(
       path.join(productRoot, APPLICATION_UPDATE_CONFIG_SOURCE),
       applicationUpdateBytes,
       { mode: 0o644 },
@@ -425,6 +436,7 @@ export async function restoreReleaseMetadataFromApp({
   return {
     applicationUpdate,
     buildInfo,
+    runtimeEnvironment,
     telemetry,
   };
 }
