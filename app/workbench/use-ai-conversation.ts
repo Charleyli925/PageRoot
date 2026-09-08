@@ -59,6 +59,7 @@ export type UseAiConversationOptions = {
   submissionPending?: boolean;
   reviewing?: boolean;
   commentComposerOpen?: boolean;
+  draftReadOnly?: boolean;
   canvasMode: "edit" | "preview";
   projectId: string;
   documentId: string;
@@ -100,6 +101,7 @@ export function useAiConversation({
   submissionPending = false,
   reviewing = false,
   commentComposerOpen = false,
+  draftReadOnly = false,
   canvasMode,
   projectId,
   documentId,
@@ -182,7 +184,7 @@ export function useAiConversation({
     title: conversation?.title ?? "",
     messages: conversation?.messages ?? [],
     draftText: conversation?.draftText ?? "",
-    draftAvailable: conversation?.status === "ready"
+    draftAvailable: !draftReadOnly && conversation?.status === "ready"
       && conversation.context?.projectId === projectId
       && conversation.context?.documentId === documentId,
     onDraftTextChange,
@@ -264,6 +266,7 @@ export function useAiConversation({
     pendingCommentCount,
     onSend,
     onDraftTextChange,
+    draftReadOnly,
     onCopyTask,
     onDecision,
     hide,

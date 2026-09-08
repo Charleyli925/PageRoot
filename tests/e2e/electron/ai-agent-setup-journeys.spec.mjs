@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { closePageRootGracefully } from "./helpers/electron-safe-cleanup.mjs";
 import {
   addComment, candidateHtmlFiles, chooseModifyIntent, createCodexAcpE2ECommand,
   createSourceFixture, expandSettingsAgent, launchPageRoot, mkdirSync,
@@ -124,7 +125,59 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
       await expect(review.frameLocator("iframe").nth(index).locator("body")).toContainText("真实");
     }
     await launched.page.screenshot({ path: path.join(screenshots, "review-result.png"), animations: "disabled" });
-    await stopPageRoot(launched.electronApp, profile, { cleanup: false });
+    // A close must freeze draft ingress before draining, and stay frozen
+    // after ready until the shell either exits or aborts that exact request.
+    for (const saveSucceeds of [true, false]) {
+      const requestId = `draft-close-${saveSucceeds}`;
+      const retainedText = `退出前保留的草稿 ${saveSucceeds}`;
+      let releaseSave;
+      const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+      let saveStarted;
+      const saving = new Promise((resolve) => { saveStarted = resolve; });
+      const draftRoute = /\/conversation\/draft(?:\?|$)/u;
+      await launched.page.route(draftRoute, async (route) => {
+        saveStarted(route.request().postDataJSON());
+        await saveGate;
+        if (saveSucceeds) await route.continue();
+        else await route.fulfill({ status: 503, json: { ok: false, code: "FIXTURE_SAVE_UNAVAILABLE" } });
+      });
+      try {
+        await draft.fill(retainedText);
+        await launched.page.evaluate((requestId) => {
+          window.dispatchEvent(new CustomEvent("html-ai:prepare-close", { detail: {
+            requestId, deadlineAt: Date.now() + 15_000,
+            waitUntil: (result) => { window.__stemmioDraftCloseCheck = result; },
+          } }));
+        }, requestId);
+        expect((await saving).text).toBe(retainedText);
+        await expect(draft).toBeDisabled();
+        // Simulate an input event racing the React disabled update. The
+        // Controller must reject it even if the DOM temporarily looks enabled.
+        await draft.evaluate((element) => { element.disabled = false; });
+        await draft.fill("关闭中不应接收的新文字");
+        await expect(draft).toHaveValue(retainedText);
+        await draft.evaluate((element) => { element.disabled = true; });
+        releaseSave();
+        const closeResult = await launched.page.evaluate(() => window.__stemmioDraftCloseCheck);
+        expect(closeResult.ready).toBe(saveSucceeds);
+        if (saveSucceeds) {
+          await expect(draft).toBeDisabled();
+          await launched.page.evaluate(() => window.dispatchEvent(new CustomEvent("html-ai:close-aborted", {
+            detail: { requestId: "unrelated-close-request" },
+          })));
+          await expect(draft).toBeDisabled();
+        } else await expect(draft).toBeEnabled();
+      } finally {
+        releaseSave();
+        await launched.page.unroute(draftRoute);
+        await launched.page.evaluate((requestId) => window.dispatchEvent(new CustomEvent("html-ai:close-aborted", {
+          detail: { requestId },
+        })), requestId);
+      }
+      await expect(draft).toBeEnabled();
+      await draft.fill("下一轮再调整页脚间距");
+    }
+    await closePageRootGracefully(launched.electronApp, launched.page);
     launched = await launchPageRoot({ isolatedUserData: profile, injectedEnv });
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await expect(launched.page.getByRole("textbox", { name: "下一轮草稿" })).toHaveValue("下一轮再调整页脚间距");

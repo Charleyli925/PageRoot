@@ -789,6 +789,7 @@ export default function Workbench() {
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
+    draftReadOnly: ["preparing", "ready"].includes(workspaceControllerSnapshot?.project?.close.phase || ""),
     qoderAvailability,
     agentDisplayName,
     executionDisplayName,

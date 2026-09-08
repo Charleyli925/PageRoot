@@ -1237,7 +1237,7 @@ diagnose，不建立 preflight ticket 或 Agent session，只在 Bridge 真实�
 公开说明逐条积累，实时状态位于消息流末尾，已接收字节直接可见。停止操作仍固定在底部。
 审阅侧栏打开时，采用／不用本次只在侧栏行动区显示；侧栏关闭时顶栏提供对应决定入口。
 底部常驻“下一轮草稿”输入框，复用 ConversationSession / ConversationWorkflow 的文档草稿
-保存与切换/关闭 drain；当前阶段仅记事，不发送、不修改冻结 Request、不自动采用 Candidate。
+保存与切换/关闭 drain；退出核对的 preparing/ready 阶段同时锁定输入及草稿写命令，退出失败或取消后恢复，避免后续保存等待期间再输入而丢失。当前阶段仅记事，不发送、不修改冻结 Request、不自动采用 Candidate。
 HTTP runtime 请求 JSONL 内容流：每行仅包含 `type` 与 `text`，`progress` 是面向用户的简短说明，
 `html` 是完整候选的连续片段。模型应在开头及完成实际修改片段时返回说明，不能声称运行了
 未执行的工具或通过了 Stemmio 校验。Bridge 只在整条记录收齐并脱敏后发出 `visible-text`，
