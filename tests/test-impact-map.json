@@ -2147,6 +2147,15 @@
       ]
     },
     {
+      "id": "portable-manifest-contract",
+      "patterns": [
+        "^schemas/project-manifest\\.v4\\.schema\\.json$",
+        "^tests/portable-project-record\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/portable-project-record.test.mjs"]
+    },
+    {
       "id": "project-runtime-state-v4-candidate-seals",
       "patterns": [
         "^schemas/project-runtime-state\\.v4\\.schema\\.json$"
