@@ -774,7 +774,7 @@ test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate wit
   let callCount = 0;
   const fetchImpl = async () => {
     callCount += 1;
-    return jsonResponse(200, { choices: [{ finish_reason: "stop", message: { content: callCount === 1 ? HTML : callCount === 2 ? candidateHtml.replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(32)}`) : candidateHtml } }] });
+    return jsonResponse(200, { choices: [{ finish_reason: "stop", message: { content: callCount === 1 ? HTML : callCount === 2 ? candidateHtml.replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(12)}4fff8${"f".repeat(15)}`) : candidateHtml } }] });
   };
   const registry = providerRegistry(
     createOpenAiCompatibleProvider({ fetchImpl }),
@@ -876,7 +876,7 @@ for (const kind of ["forged", "duplicate", "lost"]) {
     const base = materializeSourceElementIdentity("<!doctype html><html><head><title>T</title></head><body><p>Before</p></body></html>").html;
     const good = base.replace("Before", "After");
     const ids = [...base.matchAll(/data-pageroot-id="([^"]+)"/gu)].map((m) => m[1]);
-    const bad = kind === "forged" ? good.replace(ids[0], `pr1_${"f".repeat(32)}`)
+    const bad = kind === "forged" ? good.replace(ids[0], `pr1_${"f".repeat(12)}4fff8${"f".repeat(15)}`)
       : kind === "duplicate" ? good.replace(ids[1], ids[0])
       : good.replace(` data-pageroot-id="${ids[0]}"`, "");
     let calls = 0;
@@ -899,7 +899,7 @@ for (const kind of ["forged", "duplicate", "lost"]) {
 test("identity correction is bounded and cancellation prevents further model calls", async () => {
   const { materializeSourceElementIdentity } = await import("../bridge/project-file-repository/working-copy.mjs");
   const base = materializeSourceElementIdentity("<!doctype html><html><head></head><body><p>X</p></body></html>").html;
-  const bad = base.replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(32)}`);
+  const bad = base.replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(12)}4fff8${"f".repeat(15)}`);
   let calls = 0;
   await assert.rejects(completeIdentityCheckedHtml({
     baseHtml: base, messages: [], beforeGeneration: async () => {},
