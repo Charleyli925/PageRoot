@@ -1,0 +1,20 @@
+源页（PageRoot）· Developer Preview
+用于本机开发者测试，不是正式发布版本。
+
+安装
+1. 将“PageRoot Developer Preview”拖到右侧“Applications”。
+2. 在“应用程序”中按住 Control 点击它，选择“打开”。
+3. 按系统提示确认首次打开。未公证的 Developer ID 测试包可能显示一次安全确认。
+
+数据隔离
+首次启动从全新的 Preview 环境开始，不读取、复制、迁移、打开或删除旧 PageRoot 数据。
+之后安装新的测试包会继续使用同一份 Preview 数据：
+~/Library/Application Support/PageRoot Developer Preview/
+~/Documents/PageRoot Developer Preview/
+~/Library/Logs/PageRoot Developer Preview/
+
+Preview 自动更新已关闭。请每次手动安装新的测试包；正式版的目录、更新和数据不受影响。
+
+如果已保存的连接凭证无法读取，仍可继续编辑，按应用内“重新连接”重新输入即可。记住的 API Key 只保存在 Preview 自己的加密凭证文件中，不会写入安装包明文。
+
+本测试包需要稳定的 Developer ID Application 签名。证书缺失或签名失败不会生成 ad-hoc 替代包。

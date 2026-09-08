@@ -75,31 +75,59 @@ export function createAgentSessionCredentialStore({
     ? () => isEncryptionAvailable() === true
     : () => false;
 
-  async function readRecord() {
+  async function readRecordResult() {
     let raw;
     try {
       raw = await readFile(filePath, "utf8");
     } catch (error) {
-      if (error?.code === "ENOENT") return null;
-      return null;
+      if (error?.code === "ENOENT") return Object.freeze({ state: "missing", record: null });
+      return Object.freeze({
+        state: "unreadable",
+        record: null,
+        reason: "AGENT_CREDENTIAL_FILE_UNREADABLE",
+      });
     }
-    if (Buffer.byteLength(raw, "utf8") > MAX_BYTES) return null;
+    if (Buffer.byteLength(raw, "utf8") > MAX_BYTES) {
+      return Object.freeze({
+        state: "unreadable",
+        record: null,
+        reason: "AGENT_CREDENTIAL_RECORD_INVALID",
+      });
+    }
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      return null;
+      return Object.freeze({
+        state: "unreadable",
+        record: null,
+        reason: "AGENT_CREDENTIAL_RECORD_INVALID",
+      });
     }
-    if (!isRecord(parsed) || parsed.schemaVersion !== SCHEMA_VERSION) return null;
-    if (parsed.providerId !== PROVIDER_ID || !SAFE_VENDOR.test(parsed.vendorId || "")) return null;
-    if (typeof parsed.ciphertext !== "string" || !parsed.ciphertext) return null;
+    if (
+      !isRecord(parsed)
+      || parsed.schemaVersion !== SCHEMA_VERSION
+      || parsed.providerId !== PROVIDER_ID
+      || !SAFE_VENDOR.test(parsed.vendorId || "")
+      || typeof parsed.ciphertext !== "string"
+      || !parsed.ciphertext
+    ) {
+      return Object.freeze({
+        state: "unreadable",
+        record: null,
+        reason: "AGENT_CREDENTIAL_RECORD_INVALID",
+      });
+    }
     return Object.freeze({
-      providerId: PROVIDER_ID,
-      vendorId: parsed.vendorId,
-      baseUrl: normalizeBaseUrl(parsed.baseUrl),
-      modelId: SAFE_MODEL_ID.test(String(parsed.modelId || "")) ? String(parsed.modelId) : "",
-      ciphertext: parsed.ciphertext,
-      rememberedAt: typeof parsed.rememberedAt === "string" ? parsed.rememberedAt : null,
+      state: "record",
+      record: Object.freeze({
+        providerId: PROVIDER_ID,
+        vendorId: parsed.vendorId,
+        baseUrl: normalizeBaseUrl(parsed.baseUrl),
+        modelId: SAFE_MODEL_ID.test(String(parsed.modelId || "")) ? String(parsed.modelId) : "",
+        ciphertext: parsed.ciphertext,
+        rememberedAt: typeof parsed.rememberedAt === "string" ? parsed.rememberedAt : null,
+      }),
     });
   }
 
@@ -117,9 +145,28 @@ export function createAgentSessionCredentialStore({
       return null;
     },
     async publicStatus() {
+      const result = await readRecordResult();
+      if (result.state === "missing") return publicStatus(null);
+      if (result.state !== "record") {
+        return Object.freeze({
+          available: false,
+          remembered: true,
+          providerId: PROVIDER_ID,
+          vendorId: null,
+          unreadable: true,
+          reason: result.reason || "AGENT_CREDENTIAL_RECORD_INVALID",
+        });
+      }
       const availability = this.status();
-      if (availability) return availability;
-      return publicStatus(await readRecord());
+      if (availability) {
+        return Object.freeze({
+          ...availability,
+          remembered: true,
+          vendorId: result.record.vendorId,
+          unreadable: true,
+        });
+      }
+      return publicStatus(result.record);
     },
     async persist({ apiKey, vendorId, baseUrl, modelId } = {}) {
       if (!available() || !encrypt) {
@@ -167,24 +214,60 @@ export function createAgentSessionCredentialStore({
       });
       return Object.freeze({ ok: true, remembered: true, vendorId: vendor });
     },
-    async load() {
-      if (!available() || !decrypt) return null;
-      const record = await readRecord();
-      if (!record) return null;
+    async loadResult() {
+      const result = await readRecordResult();
+      if (result.state === "missing") {
+        return Object.freeze({ status: "missing", credential: null });
+      }
+      if (result.state !== "record") {
+        return Object.freeze({
+          status: "unreadable",
+          credential: null,
+          reason: result.reason || "AGENT_CREDENTIAL_RECORD_INVALID",
+        });
+      }
+      if (!available() || !decrypt) {
+        return Object.freeze({
+          status: "unavailable",
+          credential: null,
+          vendorId: result.record.vendorId,
+          reason: "AGENT_CREDENTIAL_STORE_UNAVAILABLE",
+        });
+      }
+      const record = result.record;
       let apiKey = "";
       try {
         apiKey = String(decrypt(Buffer.from(record.ciphertext, "base64")) || "").trim();
       } catch {
-        return null;
+        return Object.freeze({
+          status: "unreadable",
+          credential: null,
+          vendorId: record.vendorId,
+          reason: "AGENT_CREDENTIAL_DECRYPT_FAILED",
+        });
       }
-      if (!apiKey) return null;
+      if (!apiKey) {
+        return Object.freeze({
+          status: "unreadable",
+          credential: null,
+          vendorId: record.vendorId,
+          reason: "AGENT_CREDENTIAL_DECRYPT_FAILED",
+        });
+      }
       return Object.freeze({
-        providerId: PROVIDER_ID,
-        vendorId: record.vendorId,
-        baseUrl: record.baseUrl,
-        modelId: record.modelId || "",
-        apiKey,
+        status: "loaded",
+        credential: Object.freeze({
+          providerId: PROVIDER_ID,
+          vendorId: record.vendorId,
+          baseUrl: record.baseUrl,
+          modelId: record.modelId || "",
+          apiKey,
+        }),
       });
+    },
+    async load() {
+      const result = await this.loadResult();
+      return result.credential || null;
     },
     async clear() {
       try {

@@ -439,3 +439,16 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
     await assert.rejects(readFile(path.join(outsideAttemptRoot, "completion.json")));
   });
 });
+
+test("manual finalizer rejects identity corruption without completion and allows a corrected retry", async (t) => {
+  const { imported, request, requestRoot } = await preparedRequest(t, "req_manual_identity_repair");
+  const outputPath = path.join(imported.target.projectRootPath, ".pageroot", request.outputRelativePath);
+  const completionPath = path.join(requestRoot, "attempts", request.attemptId, "completion.json");
+  const good = await readFile(outputPath, "utf8");
+  await writeFile(outputPath, good.replace("pr1_11111111111141118111111111111111", "pr1_ffffffffffff4fff8fffffffffffffff"));
+  const args = { projectRoot: imported.target.projectRootPath, requestId: request.requestId, attemptId: request.attemptId };
+  await assert.rejects(finalizeProjectFileAttempt(args), { code: "CANDIDATE_SOURCE_IDENTITY_FORGED" });
+  await assert.rejects(readFile(completionPath), { code: "ENOENT" });
+  await writeFile(outputPath, good);
+  assert.equal((await finalizeProjectFileAttempt(args)).ok, true);
+});

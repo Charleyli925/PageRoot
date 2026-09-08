@@ -198,6 +198,7 @@ export default function AgentProviderCard({
   const persistReason = persistFailed
     ? (credentialPersist?.reason || "已连接，但新的 API Key 未保存。")
     : "";
+  const credentialRestoreFailed = persistReason.startsWith("无法读取已保存的连接凭证");
   const formError = persistReason || actionError;
   const formFieldError = persistFailed ? "form" : fieldError;
   const recovery = provider.credentialKind === "api-token" ? null : agentSetupRecovery(diagnostic, availability);
@@ -782,7 +783,7 @@ export default function AgentProviderCard({
             className="agent-control-button"
             disabled={Boolean(pendingAction) || disabled || !apiKey.trim()}
           >
-            {pendingAction === "api-key" ? "正在连接…" : "连接"}
+            {pendingAction === "api-key" ? "正在连接…" : credentialRestoreFailed ? "重新连接" : "连接"}
           </button>
           {pendingAction === "api-key" && onCancelInstall ? (
             <button

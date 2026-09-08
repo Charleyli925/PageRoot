@@ -71,6 +71,7 @@ export const FROZEN_REQUEST_RULES = `# PageRoot HTML Candidate Rules
 - Confirm that the document is complete and usable.
 - Confirm that surviving Stable IDs are preserved and new elements have no IDs.
 - Confirm that no unrelated page-wide change was introduced.
+- If writing or finalizing reports a source identity error, correct only the identity mistakes against the frozen base, preserving the requested changes, then retry the same output and finalizer. Allow at most two correction attempts. Never modify frozen inputs or completion records. Stop if correction is exhausted or the task is cancelled.
 `;
 
 export const FROZEN_REQUEST_POLICY_VERSION = "2.0.0";
