@@ -183,6 +183,7 @@ export default function AgentProviderCard({
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [checkReceipt, setCheckReceipt] = useState("");
   const [fieldError, setFieldError] = useState<ApiKeyField | "model" | "reasoning" | "">("");
   const [apiKeyOpen, setApiKeyOpen] = useState(initialApiKeyOpen);
   const [apiKey, setApiKey] = useState("");
@@ -331,6 +332,7 @@ export default function AgentProviderCard({
     }
     setPendingAction(kind);
     setActionError("");
+    setCheckReceipt("");
     try {
       const outcome = kind === "recheck" && typeof onRecheck === "function"
           ? await onRecheck()
@@ -338,6 +340,9 @@ export default function AgentProviderCard({
             ? await (typeof onStartLogin === "function" ? onStartLogin() : onCopyGuidance(kind))
             : null;
       const succeeded = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
+      if (succeeded && kind === "recheck" && outcome?.status === "succeeded") {
+        setCheckReceipt("刚刚检查：服务可以使用。");
+      }
       if (!succeeded) {
         setActionError(
           outcome?.reason || (kind === "recheck"
@@ -500,7 +505,7 @@ export default function AgentProviderCard({
       data-tone={statusPresentation.tone}
       aria-busy={checking || installing || cancelling || Boolean(pendingAction)}
     >
-      {surface !== "settings" || actions.length > 0 || statusPresentation.detail || (actionError && !fieldError) || loginOpenError ? <div className="qoder-card-summary">
+      {surface !== "settings" || actions.length > 0 || statusPresentation.detail || (actionError && !fieldError) || loginOpenError || checkReceipt ? <div className="qoder-card-summary">
         {surface === "settings" ? null : (
           <span
             className="qoder-card-brand"
@@ -588,6 +593,7 @@ export default function AgentProviderCard({
               {pendingAction === "api-key" && !apiKeyOpen ? "正在断开…" : "断开连接"}
             </button>
           ) : null}
+          {checkReceipt ? <span role="status">{checkReceipt}</span> : null}
           {actionError && !tokenFormOpen && !fieldError ? (
             <span className="qoder-card-error" role="alert">{actionError}</span>
           ) : loginOpenError && loggingIn ? (

@@ -157,6 +157,10 @@ export function agentDiagnosticSnapshot(value = {}, checkedAt = null, previous =
     : readiness;
   return Object.freeze({
     readiness: effectiveReadiness,
+    failureStage: effectiveReadiness === "ready" ? null
+      : AGENT_DIAGNOSTIC_FACT_NAMES.find((name) => ["missing", "invalid", "required", "failed", "unavailable"].includes(facts[name].status)) || null,
+    ...(typeof value?.diagnosticId === "string" && /^[A-Za-z0-9_-]{1,120}$/u.test(value.diagnosticId)
+      ? { diagnosticId: value.diagnosticId } : {}),
     cause: effectiveReadiness === "ready"
       ? null
       : cleanDiagnosticCause(preservesStrongerServiceFailure ? previous.cause : value?.cause),
@@ -164,6 +168,10 @@ export function agentDiagnosticSnapshot(value = {}, checkedAt = null, previous =
       ? value.operation
       : "diagnose",
     checkedAt: cleanDate(value?.checkedAt || checkedAt),
+    ...(typeof value?.operationId === "string" && /^[A-Za-z0-9_-]{1,120}$/u.test(value.operationId)
+      ? { operationId: value.operationId } : {}),
+    ...(Number.isSafeInteger(value?.configurationGeneration) && value.configurationGeneration >= 0
+      ? { configurationGeneration: value.configurationGeneration } : {}),
     activeInstallation: cleanActiveInstallation(value?.activeInstallation),
     facts,
   });

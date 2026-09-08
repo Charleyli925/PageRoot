@@ -128,7 +128,10 @@ export function createAgentAccessAuth({
         fail("AGENT_LOGIN_UNSUPPORTED", "This Agent cannot start an official login.", { status: 409 });
       }
       const previous = currentJob(providerId);
-      if (previous) await abortJob(previous, "AGENT_LOGIN_STALE");
+      // All entry points share the same live operation, including uncertain cleanup.
+      if (previous && !LOGIN_CLEAN_STATES.includes(previous.loginState)) {
+        return jobSnapshot(providerId);
+      }
       const generation = nextGeneration(providerId);
       const controller = new AbortController();
       const job = {
