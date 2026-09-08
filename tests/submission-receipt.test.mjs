@@ -124,3 +124,30 @@ test("crash after authoritative outcome write replays history without repeating 
   assert.equal(conversation.turns[0].status, "completed");
   assert.equal(conversation.messages.filter((message) => message.text.startsWith("本轮没有产生修改")).length, 1);
 });
+
+
+test("accepted stop fences late output while confirmed cancellation remains separate", async (t) => {
+  const value = await setup(t);
+  const receipt = await prepareRecordedRequest(value);
+  await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId,
+    attemptId: receipt.attemptId, event: { eventId: "event_stop_1", kind: "stop-requested", timestamp: new Date().toISOString() } });
+  await assert.rejects(value.repository.completeRequest({ target: value.target, requestId: receipt.requestId,
+    attemptId: receipt.attemptId, html: await readFile(value.target.exactSourcePath, "utf8") }), { code: "AGENT_STOP_PENDING" });
+  const record = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".pageroot", "requests", receipt.requestId, "request.json"), "utf8"));
+  assert.equal(record.status, "processing");
+  const cancelled = await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId });
+  assert.equal(cancelled.status, "cancelled");
+});
+
+test("a candidate that won before stop is retained until an explicit discard", async (t) => {
+  const value = await setup(t);
+  const receipt = await prepareRecordedRequest(value);
+  const html = (await readFile(value.target.exactSourcePath, "utf8")).replaceAll(">V1<", ">V2<");
+  const ready = await value.repository.completeRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId, html });
+  assert.equal(ready.status, "candidate-ready");
+  const stopped = await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId });
+  assert.equal(stopped.status, "result-ready");
+  assert.equal(stopped.candidateId, ready.candidate.candidateId);
+  const discarded = await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId, discardCandidate: true });
+  assert.equal(discarded.status, "cancelled");
+});

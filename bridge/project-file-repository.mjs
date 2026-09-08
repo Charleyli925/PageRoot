@@ -649,8 +649,8 @@ export class ProjectFileRepository {
     return this.#serial(() => this.#requestStatus({ target, requestId, attemptId }));
   }
 
-  async cancelRequest({ target, requestId, attemptId = "attempt_001" } = {}) {
-    return this.#serial(() => this.#cancelRequest({ target, requestId, attemptId }));
+  async cancelRequest({ target, requestId, attemptId = "attempt_001", discardCandidate = false } = {}) {
+    return this.#serial(() => this.#cancelRequest({ target, requestId, attemptId, discardCandidate }));
   }
 
   async saveDraft({
@@ -3258,7 +3258,7 @@ export class ProjectFileRepository {
     });
   }
 
-  async #cancelRequest({ target, requestId, attemptId }) {
+  async #cancelRequest({ target, requestId, attemptId, discardCandidate = false }) {
     const loaded = await this.#resolveMutationTarget(target);
     const requestRoot = requestRootPath(loaded.paths, requestId);
     const requestPath = path.join(requestRoot, "request.json");
@@ -3267,6 +3267,7 @@ export class ProjectFileRepository {
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
     if (record.status === "candidate-ready") {
+      if (!discardCandidate) return { requestId, attemptId, status: "result-ready", candidateId: record.candidateId };
       const rejected = await this.#rejectCandidate({ target, candidateId: record.candidateId });
       return {
         ...rejected,
@@ -3755,6 +3756,12 @@ export class ProjectFileRepository {
       projectRootPath: loaded.paths.projectRootPath,
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
+    if (record.status === "processing" && record.request?.submissionOperationId) {
+      const submission = await readSubmissionReceipt(loaded, record.request.submissionOperationId);
+      if (submission?.events?.some((event) => event.kind === "stop-requested")) {
+        throw new ProjectFileRepositoryError("AGENT_STOP_PENDING", "Stop was accepted before this result; awaiting confirmed cleanup.");
+      }
+    }
     const outputHtml = String(html || "");
     try {
       requireCompleteHtml(outputHtml, "Candidate HTML");

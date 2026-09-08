@@ -577,3 +577,9 @@ ProjectFileRepository serializes `submissions/<submissionOperationId>.json` insi
 AgentRuntimeCoordinator emits bounded, fixed-category execution facts through its injected repository writer. The start fact must persist before invoking a provider. Stage facts are serialized independently of Renderer mounts; a persistence failure aborts execution and disallows automatic retry. Raw provider text, arguments and output do not enter this history path.
 
 ProjectFileRepository writes terminal Request state and stable Conversation event IDs together in request.json, then projects those facts through the submission receipt into the fixed Conversation. A crash between these files replays the same event IDs; it never restarts generation. initialize() reconciles only submissions created by this flow: accepted without a Request becomes not-started, and processing Requests receive an interrupted fact while retaining existing Request/lease authority. Missing older submissions never cause invented history. Promotion confirmation remains owned by the completed Promotion transaction.
+
+### Public execution progress and stop ordering
+
+The public projector bounds assembled text to 64 KiB, redacts credentials/paths/URLs and suppresses generated markup. Hidden reasoning and raw tool arguments never enter the public event allowlist. Tool activity is translated from known event categories to fixed labels, with a distinct event identity for each occurrence. HTTP starts generation progress only after actual content arrives, separately reporting response receipt and validation.
+
+For submissions, the durable stop-requested fact fences late completion inside the repository serial writer while cleanup is unconfirmed. A Candidate already authoritative before stop remains available; only an explicit discard intent rejects it. Renderer cancellation reconciles a result-ready receipt instead of clearing that result. The stop-requested fact is not a cancelled result.

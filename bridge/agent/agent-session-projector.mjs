@@ -3,7 +3,9 @@ export function executionPhaseForEvent(event, current) {
   switch (event?.kind) {
     case "initialized": next = "starting-session"; break;
     case "request-sent": next = "sending-task"; break;
+    case "response-started": next = "receiving-response"; break;
     case "generation-started": next = "generating-modification"; break;
+    case "response-ended": next = "response-received"; break;
     case "html-validation-completed": next = "validating-html"; break;
     case "review-preparation-started": next = "preparing-review"; break;
     case "file-read": next = "reading-task"; break;
@@ -20,13 +22,32 @@ export function executionPhaseForEvent(event, current) {
   const publicOrder = [
     "starting-session",
     "sending-task",
+    "receiving-response",
     "generating-modification",
+    "response-received",
     "validating-html",
     "preparing-review",
   ];
   const currentRank = publicOrder.indexOf(current);
   const nextRank = publicOrder.indexOf(next);
   return currentRank >= 0 && nextRank >= 0 && nextRank < currentRank ? current : next;
+}
+
+// Apply to assembled text, never token fragments, so split credentials cannot
+// bypass the public boundary. Renderer still renders this as plain text.
+export function safePublicAgentText(value) {
+  const text = String(value || "").slice(0, 65536)
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "");
+  if (/<(?:!doctype|\/?[a-z][a-z0-9:-]*(?:\s|>|\/))/iu.test(text)) return "生成内容已隐藏，校验通过后可查看修改。";
+  return text
+    .replace(/https?:\/\/[^\s]+/giu, "[链接已隐藏]")
+    .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]+/gu, "[凭据已隐藏]")
+    .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9+/_=.:-]+/giu, "[凭据已隐藏]")
+    .replace(/((?:api[_ -]?key|access[_ -]?token|secret|password|authorization)\s*[=:]\s*)[^\s,;]+/giu, "$1[已隐藏]")
+    .replace(/\/(?:Users|home|tmp|private|var|Volumes|Applications|etc|root)\/[^\s<>"']+/gu, "[路径已隐藏]")
+    .replace(/(?:\/[A-Za-z0-9._~-]+){2,}(?:\/[A-Za-z0-9._~%+ -]*)?/gu, "[路径已隐藏]")
+    .replace(/[A-Za-z]:\\(?:[^\s\\]+\\)*[^\s]*/gu, "[路径已隐藏]")
+    .replace(/https?:\/\/[^\s]+/giu, "[链接已隐藏]");
 }
 
 const MAX_VISIBLE_TEXT_UPDATES = 80;
@@ -37,7 +58,7 @@ function cleanPublicId(value, fallback) {
     .replace(/[\u0000-\u001f\u007f]/gu, "")
     .trim()
     .slice(0, 160);
-  return normalized || fallback;
+  return /^[A-Za-z0-9_:-]{1,160}$/u.test(normalized) ? normalized : fallback;
 }
 
 function appendUpdate(updates, {
@@ -71,7 +92,7 @@ function freezePublicUpdate(update) {
   return Object.freeze({
     id: update.id,
     sequence: update.sequence,
-    text: update.text,
+    text: safePublicAgentText(update.text),
   });
 }
 
@@ -85,10 +106,12 @@ function freezePublicUpdate(update) {
  */
 export function publicVisibleTextUpdates(events) {
   const updates = [];
+  let remaining = 65536;
   for (const event of Array.isArray(events) ? events : []) {
     if (event?.kind !== "visible-text" || typeof event.text !== "string") continue;
     const rawText = event.text
-      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "");
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "").slice(0, remaining);
+    remaining -= rawText.length;
     if (!rawText) continue;
     const eventId = cleanPublicId(event.eventId, `visible-${Number(event.sequence) || 0}`);
     const rawGroupId = cleanPublicId(event.messageId || event.segmentId, "");
@@ -118,7 +141,7 @@ export function publicVisibleTextUpdates(events) {
     Object.freeze({
       id: `earlier:${first.id}`,
       sequence: collapsed.at(-1).sequence,
-      text: collapsed.map((update) => update.text).join("\n"),
+      text: safePublicAgentText(collapsed.map((update) => update.text).join("\n")),
     }),
     ...retained.map(freezePublicUpdate),
   ]);
@@ -140,11 +163,14 @@ export function publicExecutionSession(entry) {
       ? entry.receivedBytes
       : 0,
     updatedAt: entry.updatedAt,
-    agentName: entry.agentName || null,
-    agentVersion: entry.agentVersion || null,
+    agentName: entry.agentName ? safePublicAgentText(entry.agentName).slice(0, 160) : null,
+    agentVersion: entry.agentVersion ? safePublicAgentText(entry.agentVersion).slice(0, 80) : null,
     eventCount: entry.eventCount || 0,
-    visibleText: entry.visibleText || "",
-    visibleTextUpdates: Object.freeze([...(entry.visibleTextUpdates || [])]),
+    visibleText: safePublicAgentText(entry.visibleText),
+    visibleTextUpdates: Object.freeze((entry.visibleTextUpdates || []).map((update, index) => Object.freeze({
+      id: cleanPublicId(update.id, `public-${index}`), sequence: update.sequence,
+      text: safePublicAgentText(update.text),
+    }))),
     textTruncated: entry.textTruncated === true,
     retryable: entry.retryable === true,
     safeToRetry: typeof entry.safeToRetry === "boolean"
@@ -152,6 +178,6 @@ export function publicExecutionSession(entry) {
       : entry.retryable === true,
     recoveryKind: entry.recoveryKind || "end",
     errorCode: entry.errorCode || null,
-    errorMessage: entry.errorMessage || null,
+    errorMessage: entry.errorMessage ? safePublicAgentText(entry.errorMessage).slice(0, 1000) : null,
   });
 }

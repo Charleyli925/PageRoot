@@ -187,13 +187,13 @@ export function sidebarAgentStageSteps({ state, phase } = {}) {
     })));
   }
   const value = String(phase || "");
-  const currentIndex = ["preparing-delivery", "launching", "starting", "starting-session", "sending-task"]
+  const currentIndex = ["preparing-delivery", "launching", "starting", "starting-session", "sending-task", "request-sent"]
     .includes(value) || currentState === "preparing-delivery"
     ? 0
-    : ["request-sent", "generation-started", "generating-modification", "reading-task", "running", "cancelling", "stopping"]
+    : ["receiving-response", "generation-started", "generating-modification", "reading-task", "running", "cancelling", "stopping"]
       .includes(value)
       ? 1
-      : ["html-validation-completed", "validating-html", "awaiting-validation"]
+      : ["response-received", "html-validation-completed", "validating-html", "awaiting-validation"]
         .includes(value)
         ? 2
         : 3;

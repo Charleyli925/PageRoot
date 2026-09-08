@@ -724,7 +724,10 @@ export class AgentRuntimeCoordinator {
     if (LIVE_STATES.has(entry.state)) {
       const previousPhase = entry.phase;
       entry.phase = phaseForEvent(reduced.event, entry.phase);
-      if (entry.phase !== previousPhase && entry.phase !== "cancelling") void this.#queueExecutionFact(entry, entry.phase);
+      if (entry.phase !== "cancelling" && (entry.phase !== previousPhase
+        || ["file-read", "file-written", "terminal-created"].includes(reduced.event.kind))) {
+        void this.#queueExecutionFact(entry, entry.phase);
+      }
     }
     if (textField) {
       entry[textField] = reduced.projection.visibleText;

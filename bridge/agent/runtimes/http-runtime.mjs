@@ -717,7 +717,7 @@ export function createHttpRuntime({
       const context = await readHttpAgentContext(policy);
       const budget = assertCompleteHtmlBudget(context, launch.modelBudget);
       onEvent({ kind: "request-sent" });
-      onEvent({ kind: "generation-started" });
+      let receivedFirstContent = false;
       const html = await completeChat({
         fetchImpl,
         baseUrl,
@@ -732,7 +732,14 @@ export function createHttpRuntime({
             )
           : undefined,
         signal,
-        onEvent,
+        onEvent: (event) => {
+          if (!receivedFirstContent && event.kind === "activity" && event.channel === "html" && event.byteDelta > 0) {
+            receivedFirstContent = true;
+            onEvent({ kind: "response-started" });
+            onEvent({ kind: "generation-started" });
+          }
+          onEvent(event);
+        },
         inactivityTimeoutMs: positiveTimeout(
           launch.inactivityTimeoutMs ?? launch.turnTimeoutMs,
           runtimeInactivityTimeoutMs,
@@ -760,6 +767,7 @@ export function createHttpRuntime({
           }),
         ]),
       });
+      onEvent({ kind: "response-ended" });
       onEvent({ kind: "html-validation-completed" });
       onEvent({ kind: "review-preparation-started" });
       await verifiedOutputParent(policy.outputPath, policy.requestRoot);
