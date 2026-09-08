@@ -618,3 +618,4 @@ Current adoption status comes exclusively from the active operation projection.
 RunSession preserves that transient adoption projection across same-Run hydration
 and navigation; a ready Request reread cannot erase an outstanding decision.
 Explicit reconciliation or a terminal authority can clear it.
+Retry preflight is fenced by the original Run's continued membership and cancellation occupancy before dispatch. After dispatch, AgentRuntimeCoordinator owns the pending execution start and waits for its termination/lease cleanup before authorizing durable cancellation. A late preflight or an unpublished provider start must never resurrect an ended Run.
