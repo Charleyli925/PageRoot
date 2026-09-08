@@ -906,7 +906,7 @@ export class RunWorkflow {
     let durableRun = null;
     let agentPreflight = null;
     let reservedAgentStartKey = null;
-    let recordedSubmission = null;
+    let submissionEndCode = "SUBMISSION_NOT_STARTED";
     let submissionRequest = null;
     try {
       const registered = await this.#ensureRegistered({
@@ -1144,7 +1144,6 @@ export class RunWorkflow {
       if (receipt?.operationId !== submissionOperationId || receipt?.status !== "accepted") {
         throw responseError("SUBMISSION_RECEIPT_INVALID", "本轮要求的保存结果尚未确认，没有发送。");
       }
-      recordedSubmission = receipt;
       if (!this.#isCurrentContext(context)) return stale(context);
       if (frozenAgentDelivery.mode === MANAGED_AGENT_MODE) {
         agentPreflight = await this.#agentCatalog.spendTicket(
@@ -1267,11 +1266,7 @@ export class RunWorkflow {
       }
       return succeeded({ run: durableRun });
     } catch (cause) {
-      if (recordedSubmission && !durableRun && !submissionUncertain) {
-        await this.#bridgeClient.finishSubmission({ ...submissionRequest,
-          errorCode: errorCode(cause, "SUBMISSION_NOT_STARTED"),
-        }).catch(() => null);
-      }
+      submissionEndCode = errorCode(cause, "SUBMISSION_NOT_STARTED");
       const message = this.#codecs.errorMessage(
         cause,
         "这次发送没有成功。页面和评论仍然保留。",
@@ -1297,6 +1292,14 @@ export class RunWorkflow {
       });
       return rejected(errorCode(cause, "RUN_SUBMISSION_REJECTED"), message);
     } finally {
+      // Every pre-Request exit settles the original durable submission, even
+      // after navigation. Unknown dispatched Requests retain their own recovery.
+      if (submissionRequest && !durableRun && !submissionUncertain) {
+        const ending = { ...submissionRequest, errorCode: submissionEndCode };
+        try { await this.#bridgeClient.finishSubmission(ending); }
+        catch { await this.#bridgeClient.finishSubmission(ending).catch(() => null); }
+        if (pendingRun && this.#runSession.hasRun(pendingRun)) this.#runSession.removeRun(pendingRun);
+      }
       if (reservedAgentStartKey) {
         this.#agentStartsPending.delete(reservedAgentStartKey);
       }
