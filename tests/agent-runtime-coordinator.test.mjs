@@ -745,3 +745,47 @@ test("public text redacts assembled credentials, paths and generated markup", ()
   assert.doesNotMatch(safePublicAgentText("https://service.invalid?api_key=private"), /private|service.invalid/);
   assert.ok(publicVisibleTextUpdates([{ kind: "visible-text", text: "a".repeat(100000) }])[0].text.length <= 65536);
 });
+
+test("stop during unpublished startup waits and prevents a late provider launch", async () => {
+  const entered = deferred();
+  const release = deferred();
+  let starts = 0;
+  let durableCancelled = false;
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({ run: async () => { starts += 1; } }),
+    resolveTask: async () => executionAuthority(CONFIGURATION),
+    recordExecutionFact: async () => { entered.resolve(); await release.promise; },
+    leaseStore: { acquire: async () => ({ key: "synthetic" }), release: async () => true },
+  });
+  const ticket = await ready(coordinator);
+  const started = coordinator.submit({ ...IDENTITY, selection: ticket.selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION, preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest });
+  const rejected = assert.rejects(started, { code: "AGENT_CANCELLED" });
+  await entered.promise;
+  const stopped = coordinator.cancelDurableExecution({ identity: IDENTITY, cancelRequest: async () => { durableCancelled = true; } });
+  await Promise.resolve();
+  assert.equal(durableCancelled, false);
+  release.resolve();
+  await stopped;
+  await rejected;
+  assert.equal(durableCancelled, true);
+  assert.equal(starts, 0);
+  await coordinator.shutdown();
+});
+
+test("unconfirmed startup lease cleanup never authorizes durable cancellation", async () => {
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry(), resolveTask: async () => executionAuthority(CONFIGURATION),
+    recordExecutionFact: async () => { throw new Error("synthetic write failure"); },
+    leaseStore: { acquire: async () => ({ key: "synthetic" }), release: async () => false },
+  });
+  const ticket = await ready(coordinator);
+  await assert.rejects(coordinator.submit({ ...IDENTITY, selection: ticket.selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION, preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest }), { code: "AGENT_CANCEL_UNCONFIRMED" });
+  let cancellations = 0;
+  await assert.rejects(coordinator.cancelDurableExecution({ identity: IDENTITY,
+    cancelRequest: async () => { cancellations += 1; } }), { code: "AGENT_CANCEL_UNCONFIRMED" });
+  assert.equal(cancellations, 0);
+});
