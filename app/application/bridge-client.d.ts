@@ -42,6 +42,8 @@ export type BridgeClient = {
   saveDraft(body: BridgeJson): Promise<BridgeJson>;
   saveAttachment(body: BridgeJson): Promise<BridgeJson>;
   deleteAttachment(body: BridgeJson): Promise<BridgeJson>;
+  recordSubmission(body: BridgeJson): Promise<BridgeJson>;
+  finishSubmission(body: BridgeJson): Promise<BridgeJson>;
   createRequest(body: BridgeJson): Promise<BridgeJson>;
   agentAvailability(input?: BridgeJson): Promise<BridgeJson>;
   agentDiagnose(input?: BridgeJson): Promise<BridgeJson>;

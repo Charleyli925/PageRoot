@@ -133,6 +133,7 @@ async function createManagedRequest(t, { hang = false } = {}) {
     "activeInstallation",
     "cause",
     "checkedAt",
+    "diagnosticId",
     "facts",
     "operation",
     "readiness",

@@ -1001,7 +1001,30 @@ export function startConversationTurn(conversation, turn, { now } = {}) {
   });
 }
 
-// Sealing is the only path that writes messages. A streaming fragment lives in
+// A completed submission fact may be appended while its execution Turn is
+// queued. Stable message identities make replay idempotent; no streaming state
+// or UI controls are writable here.
+export function appendConversationTurnMessage(conversation, { turnId, message }, { now } = {}) {
+  const existing = conversationTurnById(conversation, turnId);
+  if (!existing) throw conversationError("CONVERSATION_TURN_MISSING", "Turn is missing.");
+  const previous = conversation.messages.find((entry) => entry.messageId === message.messageId);
+  if (previous) {
+    if (previous.turnId !== turnId || previous.text !== message.text || previous.kind !== message.kind) {
+      throw conversationError("CONVERSATION_MESSAGE_REUSED", "Message identity cannot replace a fact.");
+    }
+    return conversation;
+  }
+  if (conversation.messages.length >= CONVERSATION_MESSAGE_LIMIT) {
+    throw conversationError("CONVERSATION_MESSAGE_LIMIT", "Conversation is full.");
+  }
+  const at = now?.();
+  const next = cleanMessage({ ...message, turnId, sequence: conversation.lastSequence + 1,
+    contextId: existing.contextId, createdAt: message.createdAt || at, completedAt: message.completedAt || at,
+  }, "fact message");
+  return bumped(conversation, now, { messages: [...conversation.messages, next], lastSequence: next.sequence });
+}
+
+// Sealing writes the final execution messages. A streaming fragment lives in
 // Bridge memory until its Turn reaches a terminal status, so the stored record
 // never contains a half message and crash recovery never repairs one.
 export function sealConversationTurn(
@@ -1047,7 +1070,7 @@ export function sealConversationTurn(
     sequence += 1;
     return cleanMessage(
       {
-        ...(existing.providerBinding
+        ...(message?.actor === "agent" && existing.providerBinding
           ? { providerId: existing.providerBinding.providerId }
           : {}),
         ...(existing.providerSelection?.resolvedModelId

@@ -1,3 +1,4 @@
+import { readSubmissionReceipt, saveSubmissionReceipt, finishSubmissionReceipt } from "./project-file-repository/submission.mjs";
 // Persistence façade. Internals live in ./project-file-repository/.
 // Callers keep importing this module; the public surface is unchanged.
 import { randomUUID } from "node:crypto";
@@ -530,6 +531,23 @@ export class ProjectFileRepository {
       activatedWorkingCopyId,
       versionId,
     }));
+  }
+
+  async recordSubmission({ target, operationId, input }) {
+    return this.#serial(async () => {
+      const loaded = await this.#resolveMutationTarget(target);
+      const { filePath: projectRulesPath } = await ensureProjectRulesFile(loaded.paths.projectRootPath);
+      return saveSubmissionReceipt(loaded, { operationId, input, projectRulesPath }, nowIso(this.#clock));
+    });
+  }
+
+  async submissionReceipt({ target, operationId }) {
+    return this.#serial(async () => readSubmissionReceipt(await this.#resolveMutationTarget(target), operationId));
+  }
+
+  async finishSubmission({ target, operationId, status, errorCode }) {
+    return this.#serial(async () => finishSubmissionReceipt(await this.#resolveMutationTarget(target),
+      { operationId, status, errorCode }, nowIso(this.#clock)));
   }
 
   async prepareRequest({
@@ -1543,6 +1561,14 @@ export class ProjectFileRepository {
         { activeRequestId: active.requestId },
       );
     }
+    const submissionReceipt = request?.submissionOperationId
+      ? await readSubmissionReceipt(loaded, request.submissionOperationId) : null;
+    if (request?.submissionOperationId && (!submissionReceipt
+      || submissionReceipt.requestId !== id || submissionReceipt.status === "not-started"
+      || submissionReceipt.snapshot.sourceSha256 !== expected
+      || JSON.stringify(submissionReceipt.snapshot.comments) !== JSON.stringify(request.comments || []))) {
+      throw new ProjectFileRepositoryError("SUBMISSION_SNAPSHOT_CHANGED", "Submission does not authorize these frozen requirements.");
+    }
     const requestRoot = requestRootPath(loaded.paths, id);
     await this.#recoverRequestFreezeForId(loaded, id);
     const requestPath = path.join(requestRoot, "request.json");
@@ -1611,6 +1637,7 @@ export class ProjectFileRepository {
       );
     }
     const frozenRequest = {
+      ...(submissionReceipt ? { submissionOperationId: submissionReceipt.operationId } : {}),
       freezeCutoffRevision: Number(requestInput.freezeCutoffRevision || 0),
       summary: taskSpec.objective,
       taskSpec,
@@ -1692,6 +1719,9 @@ export class ProjectFileRepository {
     const { filePath: projectNotesPath } =
       await ensureProjectRulesFile(loaded.paths.projectRootPath);
     const projectNotesBuffer = await readFile(projectNotesPath);
+    if (submissionReceipt && sha256(projectNotesBuffer) !== submissionReceipt.snapshot.projectRulesSha256) {
+      throw new ProjectFileRepositoryError("SUBMISSION_RULES_CHANGED", "Project rules changed after submission; create a new submission.");
+    }
     const promptBuffer = Buffer.from(
       `${String(prompt || "")}${frozenCommentAttachments.promptAppendix}`,
       "utf8",

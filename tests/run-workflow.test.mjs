@@ -206,6 +206,8 @@ function createHarness({
     resolve: [],
     availability: [],
     diagnose: [],
+    submissions: [],
+    submissionEnds: [],
     preflight: [],
     startAgent: [],
     attachment: [],
@@ -215,6 +217,11 @@ function createHarness({
     freeze: 0,
   };
   const client = {
+    async recordSubmission(input) {
+      calls.submissions.push(input);
+      return { operationId: input.submissionOperationId, status: "accepted" };
+    },
+    async finishSubmission(input) { calls.submissionEnds.push(input); return { status: "not-started" }; },
     async createRequest(request) {
       calls.createRequest.push(request);
       return { activeRun: runRecord({ sourcePath, agentDelivery: request.agentDelivery }) };
@@ -650,9 +657,9 @@ test("源页 Agent blocks an over-budget complete HTML rewrite before Request cr
 
   const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
 
-  assert.equal(outcome.status, "blocked", JSON.stringify(outcome));
+  assert.equal(outcome.status, "rejected", JSON.stringify(outcome));
   assert.equal(outcome.code, "RUN_AGENT_PROMPT_TOO_LARGE");
-  assert.match(outcome.reason, /完整输出能力/u);
+  assert.match(outcome.reason, /输出能力/u);
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.calls.unlock, 1);
 });
@@ -1476,10 +1483,12 @@ test("a failed Qoder preflight creates no Request and leaves editing recoverable
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.calls.startAgent.length, 0);
   assert.equal(harness.calls.handoff.length, 0);
-  assert.equal(harness.runSession.activeRun, null);
+  assert.equal(harness.runSession.activeRun.status, "error");
+  assert.equal(harness.calls.submissions.length, 1);
+  assert.equal(harness.calls.submissionEnds.length, 1);
   assert.equal(harness.runSession.submissionPending, false);
-  assert.equal(harness.calls.freeze, 0);
-  assert.equal(harness.calls.unlock, 0);
+  assert.equal(harness.calls.freeze, 1);
+  assert.equal(harness.calls.unlock, 1);
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "unavailable");
   assert.equal(
     harness.workflow.getSnapshot().qoderAvailability.reason,
@@ -2486,3 +2495,51 @@ test("a completed protocol diagnosis returns a fresh visible rejection without a
   }
   harness.workflow.dispose();
 });
+
+test("submission persistence failure never spends a ticket or sends a Request", async () => {
+  const harness = createHarness({ bridge: { async recordSubmission() { throw new Error("disk unavailable"); } } });
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+  assert.equal(outcome.status, "rejected");
+  assert.equal(harness.calls.preflight.length, 0);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.startAgent.length, 0);
+  harness.workflow.dispose();
+});
+
+for (const delayedMethod of ["recordSubmission", "preflightAgent"]) {
+  test(`navigation while ${delayedMethod} returns settles the original submission without restart`, async () => {
+    const harness = createHarness();
+    const entered = deferred();
+    const release = deferred();
+    const original = harness.client[delayedMethod];
+    harness.client[delayedMethod] = async function(input) {
+      const result = await original.call(this, input);
+      if (delayedMethod === "preflightAgent") result.preflightId += "_delayed";
+      entered.resolve();
+      await release.promise;
+      return result;
+    };
+    const submitting = harness.workflow.submit({ deliveryMode: "managed-agent" });
+    await entered.promise;
+    harness.projectSession.openLocator(SOURCE_B);
+    harness.projectSession.register({ epoch: harness.projectSession.epoch,
+      sourcePath: SOURCE_B, projectId: "project_b", documentId: "document_b" });
+    release.resolve();
+    assert.equal((await submitting).status, "stale");
+    assert.equal(harness.calls.createRequest.length, 0);
+    assert.equal(harness.calls.startAgent.length, 0);
+    assert.equal(harness.calls.submissionEnds.length, 1);
+    assert.equal(harness.calls.submissionEnds[0].sourcePath, SOURCE_A);
+    assert.equal(harness.calls.submissionEnds[0].submissionOperationId,
+      harness.calls.submissions[0].submissionOperationId);
+    harness.client[delayedMethod] = original;
+    harness.projectSession.openLocator(SOURCE_A);
+    harness.projectSession.register({ epoch: harness.projectSession.epoch,
+      sourcePath: SOURCE_A, projectId: "project_a", documentId: "document_a" });
+    const next = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+    assert.equal(next.status, "succeeded", JSON.stringify(next));
+    assert.equal(harness.calls.createRequest.length, 1);
+    assert.equal(harness.calls.createRequest[0].sourcePath, SOURCE_A);
+    harness.workflow.dispose();
+  });
+}
