@@ -69,13 +69,15 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     const original = readFileSync(workingPath);
     await sidebar.getByRole("button", { name: /交给.*修改/u }).click();
     const progress = sidebar.getByTestId("ai-conversation-run-progress");
     await expect(progress).toContainText("DeepSeek 正在生成");
     await expect(progress).toContainText("正在接收结果");
-    await expect(progress.getByRole("button", { name: "停止", exact: true })).toBeVisible();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-action-bar").getByRole("button", { name: "停止", exact: true })).toBeVisible();
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toHaveCount(1);
     await expect(sidebar.getByTestId("ai-conversation-narration-message")).toHaveCount(0);
     await expect(sidebar.getByTestId("ai-conversation-run-summary")).toHaveCount(0);
     await expect(sidebar.getByText("Thinking", { exact: true })).toHaveCount(0);
@@ -130,12 +132,12 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     await expandSettingsAgent(settings, "codex");
     await setDefaultSettingsAgent(settings, "codex");
     broken = true;
-    await settings.getByRole("button", { name: "重新检查", exact: true }).click();
+    await settings.locator(".settings-secondary-action").filter({ hasText: "重新检查" }).click();
     const row = settings.getByTestId("settings-agent-row-codex");
-    await expect(row).toContainText("连接需要修复");
+    await expect(row).toContainText("暂时无法使用");
     await expect(row.locator(".settings-agent-default-badge")).toBeVisible();
     await expect(settings.getByTestId("settings-agent-row-pageroot").locator(".settings-agent-service-main")).toContainText("未检查");
-    const repairStyle = await row.getByRole("button", { name: "修复连接", exact: true }).evaluate((button) => ({
+    const repairStyle = await row.getByRole("button", { name: "重新检查", exact: true }).evaluate((button) => ({
       fontSize: getComputedStyle(button).fontSize,
       height: button.getBoundingClientRect().height,
       inset: button.getBoundingClientRect().left - button.closest('[data-testid="settings-agent-row-codex"]').getBoundingClientRect().left,
@@ -147,15 +149,17 @@ test("Codex authenticated component failure repairs inline, then reviews and com
     await launched.page.screenshot({ path: path.join(screenshots, "settings-codex-authenticated-repair.png"), animations: "disabled" });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
-    await sidebar.getByRole("button", { name: /设置 Codex/u }).click();
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByTestId("ai-conversation-service-codex").click();
     const panel = sidebar.getByTestId("ai-conversation-setup-panel");
-    await expect(panel).toContainText("账号已登录，但连接组件未能启动。");
+    await expect(panel).toContainText("账号已登录，但连接检查没有通过。");
     await expect(sidebar.getByTestId("ai-conversation-send")).toHaveCount(0);
-    await expect(panel.getByRole("button", { name: "修复连接", exact: true })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "重新检查", exact: true })).toBeVisible();
     await panel.screenshot({ path: path.join(screenshots, "narrow-sidebar-codex-repair.png"), animations: "disabled" });
-    await panel.getByRole("button", { name: "修复连接", exact: true }).click();
+    broken = false; // The transient protocol failure clears; recheck must not reinstall.
+    await panel.getByRole("button", { name: "重新检查", exact: true }).click();
     await expect(panel.getByText("已连接", { exact: true })).toBeVisible();
-    expect(installs).toBe(1);
+    expect(installs).toBe(0);
     await panel.getByRole("button", { name: "返回任务", exact: true }).click();
     await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
     await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("等待你的决定", { timeout: 60_000 });

@@ -2890,3 +2890,11 @@ final result: passed
 - 四条真实 Electron 历史回归通过：原有丢回执/打开失败/编辑保存场景，以及 pending、合法 rename、后续 V10 superseded 三种重启组合。
 - 三种重启后均确认可再次进入历史创建确认并取消；V10 再次普通重启不指定启动文件，旧 V9 回执仍缺少 openedAt，也不会出现旧恢复入口。
 - V10 使用 Repository 的真实 Candidate/Promotion 链路生成；本组不冒充完整 AI 用户交互或动态 Runtime 验证。无视觉语言改动。
+
+## 2026-09-08 — Stemmio trusted loop PR-6 sidebar integration
+
+Synthetic Qoder Electron execution reached a validated Candidate and Review. The sidebar now keeps current decisions outside the scrolling history; 340/400/480 CSS-pixel layout assertions and screenshots passed. Exact test widths are set through the layout variable, independently of drag interaction. Inspected the 340px screenshot and tightened repeated system-message metadata; history starts at the top and retains the submitted requirement and service label.
+
+Evidence: `output/design-qa/ai-assistant-redesign/trusted-loop-pr6-ready-{340,400,480}.png`, `qoder-processing-thinking.png`; scenario `Qoder ACP Agent Bridge streams public execution text without clipboard or automatic adoption`.
+
+Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, and final adoption layout in PR-7/PR-8. This entry does not certify those paths. Continuous resize was timing-sensitive in the combined test and remains a separate check.

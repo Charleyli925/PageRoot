@@ -428,9 +428,7 @@ export function sidebarConversationGroups({
     const dateKey = historyDateKey(timestamp);
     const historicalTurnKey = historyIdentity(message.turnId)
       || (requestId && attemptId ? `${requestId}:${attemptId}` : "legacy");
-    const key = current
-      ? `current:${currentRequestId}:${currentAttemptId}`
-      : `history:${dateKey}:${historicalTurnKey}`;
+    const key = historicalTurnKey !== "legacy" ? `turn:${historicalTurnKey}` : `history:${dateKey}:legacy`;
     const previous = groups[groups.length - 1];
     if (previous?.key === key) {
       previous.messageIndices.push(messageIndex);
@@ -441,9 +439,7 @@ export function sidebarConversationGroups({
     const messageId = historyIdentity(message.messageId);
     groups.push({
       key,
-      label: current
-        ? currentTurnLabel(timestamp, now)
-        : historyDateLabel(timestamp),
+      label: `${current ? currentTurnLabel(timestamp, now) : historyDateLabel(timestamp)}${turn?.providerSelection?.providerId ? ` · ${{ qoder: "Qoder", codex: "Codex", pageroot: "HTTP 服务" }[turn.providerSelection.providerId] || "AI"}` : ""}`,
       kind: current ? "current" : "history",
       messageIndices: [messageIndex],
       messageIds: messageId ? [messageId] : [],

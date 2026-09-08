@@ -242,7 +242,8 @@ test("workspace Agent Bridge completes Qoder ACP into pending review without ado
     + `&attemptId=${encodeURIComponent(value.request.attemptId)}`;
   const ready = await waitForStatus(
     () => value.bridge.requestJson(statusPath),
-    (result) => result.response.status === 200 && result.body.status === "ready-to-open",
+    (result) => result.response.status === 200 && result.body.status === "ready-to-open"
+      && result.body.agentSession?.state === "completed",
   );
   assert.equal(ready.body.agentSession.providerId, "qoder");
   assert.equal(ready.body.agentSession.runtimeId, "acp");

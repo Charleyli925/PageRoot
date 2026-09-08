@@ -171,6 +171,7 @@ export function useAiConversation({
   }), [conversation, activeRun]);
 
   const sidebarProps = useMemo(() => ({
+    documentKey: `${projectId}:${documentId}`,
     state,
     title: conversation?.title ?? "",
     messages: conversation?.messages ?? [],

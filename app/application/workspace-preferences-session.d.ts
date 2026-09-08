@@ -12,6 +12,7 @@ export type WorkspacePreferences = Readonly<{
   motion: WorkspacePreferenceMotion;
   restoreTabsOnLaunch: boolean;
   defaultAgentProviderId: WorkspacePreferenceAgentId;
+  documentAgentSelections: Readonly<Record<string, "pageroot" | "qoder" | "codex">>;
   agentConfigurations: Readonly<Record<string, Readonly<{ modelId: string | null; reasoning: string | null }>>>;
   disabledAgentProviderIds: readonly WorkspacePreferenceAgentId[];
 }>;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Ref } from "react";
+import { Fragment, useState, type Ref } from "react";
 import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
 import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
 
@@ -602,6 +602,20 @@ export default function AgentProviderCard({
           ) : null}
         </span>
       </div> : null}
+      {diagnostic ? (
+        <details className="agent-diagnostic-details" data-testid="agent-diagnostic-details">
+          <summary>查看检查详情</summary>
+          <dl>
+            {([ ["installation", "安装"], ["authentication", "登录"], ["protocol", "连接"], ["service", "服务"] ] as const).map(([key, label]) => (
+              <Fragment key={key}><dt>{label}</dt><dd>{({ ready: "通过", configured: "已配置", missing: "未安装", invalid: "无效", required: "需要登录", failed: "未通过", unavailable: "不可用", unknown: "未确认" })[diagnostic.facts[key].status]}</dd></Fragment>
+            ))}
+            <dt>检查时间</dt><dd>{diagnostic.checkedAt ? new Date(diagnostic.checkedAt).toLocaleString() : "未检查"}</dd>
+            {diagnostic.cause ? <><dt>错误码</dt><dd>{diagnostic.cause}</dd></> : null}
+            {diagnostic.diagnosticId ? <><dt>诊断编号</dt><dd>{diagnostic.diagnosticId}</dd></> : null}
+            {diagnostic.configurationGeneration !== undefined ? <><dt>配置代次</dt><dd>{diagnostic.configurationGeneration}</dd></> : null}
+          </dl>
+        </details>
+      ) : null}
       {connection?.vendorId === "custom" && surface !== "settings" ? (
         <p className="qoder-card-connection" data-testid="settings-agent-current-connection">
           当前连接：{connection.vendorDisplayName || connection.vendorId}

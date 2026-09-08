@@ -28,7 +28,7 @@ test("Codex recovery distinguishes local authentication from protocol and networ
   for (const [cause, actionLabel, allowLogin] of [
     ["CODEX_AUTH_UNVERIFIED", "检测登录", true],
     ["CODEX_AUTH_REQUIRED", "检测登录", true],
-    ["CODEX_PREFLIGHT_FAILED", "修复连接", undefined],
+    ["CODEX_PREFLIGHT_FAILED", "重新检查", undefined],
     ["CODEX_PROTOCOL_UNSUPPORTED", "更新连接组件", undefined],
     ["CODEX_CONNECTION_FAILED", "重新检查", undefined],
     ["AGENT_PREFLIGHT_TIMEOUT", "重新检查", undefined],
