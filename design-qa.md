@@ -2864,3 +2864,9 @@ final result: passed
 - 验证边界：合成页面含抛错作者脚本，本场景验证静态内容仍可编辑、保存、重启。严格动态 Runtime 探针曾报告未推进到新来源的运行帧；不将本场景通过计作动态脚本运行成功，也不扩展重写 Runtime。
 - P2 / 待核对：同标签切换到含抛错脚本的新稿后，Runtime 的 ready / last-known-good 元数据与静态可编辑内容并不同时推进。记录单独调查，当前完整 HTML 与保存目标通过字节验收。
 - 创建提交前 aborted 的可见准备 HTML 保留策略沿用 E，清理不纳入 F。
+
+### F 合并前恢复生命周期复核
+
+- 四条真实 Electron 历史回归通过：原有丢回执/打开失败/编辑保存场景，以及 pending、合法 rename、后续 V10 superseded 三种重启组合。
+- 三种重启后均确认可再次进入历史创建确认并取消；V10 再次普通重启不指定启动文件，旧 V9 回执仍缺少 openedAt，也不会出现旧恢复入口。
+- V10 使用 Repository 的真实 Candidate/Promotion 链路生成；本组不冒充完整 AI 用户交互或动态 Runtime 验证。无视觉语言改动。

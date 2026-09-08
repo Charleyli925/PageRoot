@@ -15,6 +15,7 @@ import {
   openRecentProject,
   path,
   readFileSync,
+  renameSync,
   removeIsolatedUserData,
   removeSourceFixture,
   sha256,
@@ -767,3 +768,113 @@ test("Electron sidebar keeps multiple project lists expanded without switching i
     removeSourceFixture(projectC.sourceDirectory);
   }
 });
+
+
+for (const recoveryCase of ["pending", "rename", "superseded"]) {
+  test(`Electron historical creation restart lifecycle: ${recoveryCase}`, {
+    tag: ["@gate-smoke", "@smoke-project-lifecycle", "@smoke-version-display"],
+  }, async () => {
+    test.setTimeout(180_000);
+    const fixture = createSourceFixture(`history-restart-${recoveryCase}.html`);
+    let app = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const userData = app.isolatedUserData;
+    try {
+      await loadedDiskFrame(app.page, fixture.sourcePath, "list-item");
+      const initialPath = await managedWorkingCopyPath(app.page, fixture.sourcePath);
+      const repository = new ProjectFileRepository({ projectsRoot: path.dirname(path.dirname(initialPath)) });
+      let target = (await repository.workspace({ sourcePath: initialPath })).target;
+      await closePageRootGracefully(app.electronApp, app.page);
+      app = null;
+      for (let ordinal = 2; ordinal <= 8; ordinal += 1) {
+        const candidate = await repository.createCandidate({ target, requestId: `req_restart_${ordinal}`,
+          candidateId: `candidate_restart_${ordinal}_0001`, html: identityPreservingCandidateHtml(target, `Restart V${ordinal}`),
+          expectedSourceSha256: target.sourceSha256 });
+        target = (await repository.promoteCandidate({ target, candidateId: candidate.candidate.candidateId })).target;
+      }
+      app = await launchPageRoot({ isolatedUserData: userData, activeSourcePath: target.exactSourcePath });
+      await waitForProjectReady(app.page);
+      const mode = app.page.getByRole("group", { name: "工作模式", exact: true });
+      await app.page.getByRole("button", { name: "展开左侧边栏", exact: true }).click();
+      // Use the recorded filename, not a guessed source path or mutable label.
+      const summary = await repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId });
+      const historical = summary.versions.find((entry) => entry.ordinal === 3);
+      await app.page.getByRole("button", { name: historical.displayFileName, exact: true }).click();
+      await expect(mode).toHaveAttribute("data-view-label", "历史");
+      let operationId;
+      await app.page.route("**/history-version/create", async (route) => {
+        operationId = route.request().postDataJSON().operationId;
+        await route.fetch();
+        await route.abort("failed");
+      });
+      await app.page.route("**/history-version/opened", (route) => route.abort("failed"));
+      if (recoveryCase === "pending") await app.page.route("**/workspace?*", async (route) => {
+        if (decodeURIComponent(route.request().url()).includes("-V9.html")) {
+          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "TEST_PENDING", message: "尚未打开新稿" } }) });
+        } else await route.continue();
+      });
+      await mode.getByRole("button", { name: "编辑", exact: true }).click();
+      await app.page.getByRole("dialog").getByRole("button", { name: "创建并编辑", exact: true }).click();
+      if (recoveryCase === "pending") await expect(app.page.getByRole("button", { name: "打开已创建版本", exact: true })).toBeEnabled();
+      else await expect(app.page.getByRole("tab", { selected: true })).toContainText("-V9.html");
+      const receipt = await repository.queryHistoryCreation({ target, operationId });
+      expect(receipt.versionId).toBe("ver_0009");
+      expect(receipt.openedAt).toBeNull();
+      let expectedPath = receipt.sourcePath;
+      if (recoveryCase === "superseded") {
+        const current = (await repository.workspace({ sourcePath: receipt.sourcePath })).target;
+        const candidate = await repository.createCandidate({ target: current, requestId: "req_restart_next",
+          candidateId: "candidate_restart_next_0001", html: identityPreservingCandidateHtml(current, "Restart V10"),
+          expectedSourceSha256: current.sourceSha256 });
+        const next = await repository.promoteCandidate({ target: current, candidateId: candidate.candidate.candidateId });
+        expectedPath = next.target.exactSourcePath;
+        expect((await repository.queryHistoryCreation({ target: next.target, operationId })).recoveryState).toBe("superseded");
+      }
+      await closePageRootGracefully(app.electronApp, app.page);
+      app = null;
+      if (recoveryCase === "rename") {
+        const renamed = path.join(target.projectRootPath, "renamed-history.html");
+        renameSync(expectedPath, renamed);
+        await repository.workspace({ sourcePath: renamed });
+        expectedPath = renamed;
+      }
+      // The pending case intentionally uses the existing persisted tab. For
+      // a later AI promotion, seed its selected working file as the open target.
+      app = await launchPageRoot({ isolatedUserData: userData,
+        ...(recoveryCase === "superseded" ? { activeSourcePath: expectedPath } : {}) });
+      await waitForProjectReady(app.page);
+      await expect(app.page.getByRole("tab", { selected: true })).toContainText(path.basename(expectedPath));
+      if (recoveryCase === "superseded") {
+        // Persist the selected V10, then exercise an ordinary restart without
+        // a command-line target. The V9 acknowledgment is still missing.
+        await closePageRootGracefully(app.electronApp, app.page);
+        app = null;
+        app = await launchPageRoot({ isolatedUserData: userData });
+        await waitForProjectReady(app.page);
+        await expect(app.page.getByRole("tab", { selected: true })).toContainText(path.basename(expectedPath));
+      }
+      await expect(app.page.getByText("创建结果暂时未知", { exact: true })).toHaveCount(0);
+      const restored = await repository.queryHistoryCreation({ target, operationId });
+      expect(restored.versionId).toBe("ver_0009");
+      const versions = await repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId });
+      expect(versions.versions).toHaveLength(recoveryCase === "superseded" ? 10 : 9);
+      if (recoveryCase === "superseded") {
+        expect(restored.recoveryState).toBe("superseded");
+        await expect(app.page.getByRole("button", { name: "打开已创建版本", exact: true })).toHaveCount(0);
+      } else {
+        await expect.poll(async () => (await repository.queryHistoryCreation({ target, operationId })).openedAt).not.toBeNull();
+      }
+      await app.page.getByRole("button", { name: "展开左侧边栏", exact: true }).click();
+      const restoredMode = app.page.getByRole("group", { name: "工作模式", exact: true });
+      await expect(restoredMode.getByRole("button", { name: "编辑", exact: true })).toBeEnabled();
+      await app.page.getByRole("button", { name: historical.displayFileName, exact: true }).click();
+      await expect(restoredMode).toHaveAttribute("data-view-label", "历史");
+      await restoredMode.getByRole("button", { name: "编辑", exact: true }).click();
+      await expect(app.page.getByRole("dialog", { name: /创建新版本/ })).toBeVisible();
+      await app.page.getByRole("dialog").getByRole("button", { name: "取消", exact: true }).click();
+    } finally {
+      if (app) await stopPageRoot(app.electronApp, userData);
+      else removeIsolatedUserData(userData);
+      removeSourceFixture(fixture.sourceDirectory);
+    }
+  });
+}

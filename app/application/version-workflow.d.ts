@@ -31,7 +31,7 @@ export type HistoryCreationResult = Readonly<{
 export type VersionNavigationPhase = "idle" | "activating" | "opening" | "history" | "current" | "creating";
 
 export type VersionWorkflowSnapshot = Readonly<{
-  creation?: Readonly<{ phase: "creating" | "created" | "opening" | "opened" | "open-failed" | "not-created" | "unknown"; operationId: string; context: ProjectContext; result?: HistoryCreationResult }>;
+  creation?: Readonly<{ phase: "creating" | "created" | "opening" | "opened" | "superseded" | "open-failed" | "not-created" | "unknown"; operationId: string; context: ProjectContext; result?: HistoryCreationResult }>;
   navigation: Readonly<{
     phase: VersionNavigationPhase;
     operationId: string | null;

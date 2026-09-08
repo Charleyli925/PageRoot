@@ -1205,7 +1205,7 @@ test("a late historical read cannot publish into another project", async () => {
 function historyCreatedResult(operationId) {
   return { status: "created", operationId, projectId: "project_a", documentId: "document_a",
     versionId: "ver_0002", versionOrdinal: 2, workingCopyId: "work_ver_0002", basedOnVersionId: "ver_0001",
-    previousVersionId: "ver_0001", contentSha256: sha256(HISTORY_HTML), sourcePath: HISTORY_WORKING_COPY_PATH, openedAt: null };
+    previousVersionId: "ver_0001", contentSha256: sha256(HISTORY_HTML), sourcePath: HISTORY_WORKING_COPY_PATH, openedAt: null, recoveryState: "pending" };
 }
 
 test("manual creation reconciles a lost receipt without repeating the command or publishing Document", async () => {
@@ -1332,4 +1332,43 @@ test("return-current reconciles committed creation rather than re-exposing the o
   assert.equal((await harness.workflow.returnToCurrent({ context: harness.context })).status, "succeeded");
   assert.equal(harness.projectSession.sourcePath, HISTORY_WORKING_COPY_PATH);
   assert.equal(harness.calls.createHistory.length, 0);
+});
+
+
+test("a lost opened acknowledgement followed by a later Version cannot resurrect the old recovery action", async () => {
+  const operationId = "history_open_0001";
+  let workspaceReads = 0;
+  const harness = createHarness({ queryCreation: async () => ({ ...historyCreatedResult(operationId), recoveryState: "superseded" }),
+    workspaceRead: async () => { workspaceReads += 1; return createdWorkspace(); } });
+  await harness.workflow.restoreHistoryCreation({ operationId, context: harness.context });
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "superseded");
+  assert.equal((await harness.workflow.openCreatedHistoryVersion({ operationId, context: harness.context })).code, "HISTORY_CREATION_SUPERSEDED");
+  assert.equal(workspaceReads, 0);
+  assert.equal(harness.calls.commit.length, 0);
+  assert.equal(harness.documentSession.html, BASE_HTML);
+});
+
+test("later iteration while reading the created workspace stops publication", async () => {
+  let queries = 0;
+  const harness = createHarness({ queryCreation: async () => ({ ...historyCreatedResult("history_open_0001"),
+    recoveryState: ++queries > 1 ? "superseded" : "pending" }), workspaceRead: async () => createdWorkspace() });
+  assert.equal((await harness.workflow.openCreatedHistoryVersion({ operationId: "history_open_0001", context: harness.context })).code, "HISTORY_CREATION_SUPERSEDED");
+  assert.equal(harness.calls.prepare.length, 0);
+  assert.equal(harness.calls.commit.length, 0);
+});
+
+
+test("repairing an opened acknowledgement verifies current Canvas without reopening its workspace", async () => {
+  let reads = 0;
+  let acknowledgements = 0;
+  const harness = createHarness({ queryCreation: async () => historyCreatedResult("history_open_0001"),
+    workspaceRead: async () => { reads += 1; return createdWorkspace(); },
+    confirmCreation: async () => { acknowledgements += 1; throw new Error("lost acknowledgement"); } });
+  assert.equal((await harness.workflow.openCreatedHistoryVersion({ operationId: "history_open_0001", context: harness.context })).status, "succeeded");
+  const commits = harness.calls.commit.length;
+  await harness.workflow.restoreHistoryCreation({ operationId: "history_open_0001", context: harness.projectSession.context });
+  assert.equal(harness.workflow.getSnapshot().creation.phase, "opened");
+  assert.equal(reads, 1);
+  assert.equal(harness.calls.commit.length, commits);
+  assert.equal(acknowledgements, 2);
 });

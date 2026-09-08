@@ -5628,7 +5628,7 @@ export default function Workbench() {
 
   const requestHistoryCreation = () => {
     if (historyCreation?.context.projectId === projectId && historyCreation.context.documentId === documentId
-      && !["opened", "not-created"].includes(historyCreation.phase)) {
+      && !["opened", "superseded", "not-created"].includes(historyCreation.phase)) {
       setFileStatusNotice("请先查询或打开上一次创建操作的结果。");
       return;
     }
@@ -6379,7 +6379,7 @@ export default function Workbench() {
       ) : null}
 
       {historyCreation && historyCreation.context.projectId === projectId
-        && historyCreation.context.documentId === documentId && historyCreation.phase !== "opened" ? (
+        && historyCreation.context.documentId === documentId && !["opened", "superseded"].includes(historyCreation.phase) ? (
         <PreviewNavigationBanner
           icon={<ClockCounterClockwiseIcon aria-hidden="true" size={18} />}
           title={historyCreation.phase === "unknown" ? "创建结果暂时未知"

@@ -662,6 +662,7 @@ export class VersionWorkflow {
       || payload.workingCopyId !== `work_${payload.versionId}`
       || payload.previousVersionId !== `ver_${String(payload.versionOrdinal - 1).padStart(4, "0")}`
       || !/^ver_\d{4,}$/.test(String(payload.basedOnVersionId || ""))
+      || !["pending", "opened", "superseded"].includes(payload.recoveryState)
       || (payload.openedAt !== null && (typeof payload.openedAt !== "string" || Number.isNaN(Date.parse(payload.openedAt))))
       || (versionId && payload.basedOnVersionId !== versionId)
       || (snapshotSha256 && payload.contentSha256 !== snapshotSha256)
@@ -675,7 +676,7 @@ export class VersionWorkflow {
     if (!current || !this.#projectSession.matches(current)) return stale(current || {});
     const pending = this.#snapshot.creation;
     if (pending?.context.projectId === current.projectId && pending.context.documentId === current.documentId
-      && !["opened", "not-created"].includes(pending.phase)) {
+      && !["opened", "superseded", "not-created"].includes(pending.phase)) {
       return blocked("HISTORY_CREATION_PENDING", "请先查询或打开上一次创建操作的结果。");
     }
     const preview = this.#versionSession.snapshot.historyPreview;
@@ -708,7 +709,7 @@ export class VersionWorkflow {
         try {
           const result = this.#validateHistoryCreation(await this.#bridgeClient.queryHistoryCreation({ target: current, operationId }),
             current, operationId, preview.versionId, preview.sha256);
-          this.#setHistoryCreation({ phase: result.status === "created" ? "created" : "not-created", operationId, context: current, result }, creationGeneration);
+          this.#setHistoryCreation({ phase: this.#historyCreationPhase(result), operationId, context: current, result }, creationGeneration);
           if (result.status === "created") return succeeded(result);
           return rejected(errorCode(cause, "HISTORY_CREATION_NOT_CREATED"), this.#codecs.errorMessage(cause, "尚未创建新版本，可以重试。"));
         } catch {
@@ -724,13 +725,19 @@ export class VersionWorkflow {
     }
   }
 
+  #historyCreationPhase(result) {
+    if (result.status !== "created") return "not-created";
+    if (result.recoveryState === "superseded") return "superseded";
+    return result.openedAt ? "opened" : "created";
+  }
+
   async queryHistoryCreation({ operationId, context = this.#projectSession.context } = {}) {
     const current = copyContext(context);
     if (!current || this.#disposed) return blocked("HISTORY_CREATION_CONTEXT", "项目身份不可用。");
     const creationGeneration = ++this.#creationGeneration;
     try {
       const result = this.#validateHistoryCreation(await this.#bridgeClient.queryHistoryCreation({ target: current, operationId }), current, operationId);
-      this.#setHistoryCreation({ phase: result.status === "created" ? "created" : "not-created", operationId, context: current, result }, creationGeneration);
+      this.#setHistoryCreation({ phase: this.#historyCreationPhase(result), operationId, context: current, result }, creationGeneration);
       return succeeded(result);
     } catch {
       this.#setHistoryCreation({ phase: "unknown", operationId, context: current }, creationGeneration);
@@ -744,8 +751,22 @@ export class VersionWorkflow {
     try {
       const result = this.#validateHistoryCreation(await this.#bridgeClient.queryHistoryCreation({ target: context, operationId }), context, operationId);
       if (!this.#projectSession.matches(context)) return;
-      this.#setHistoryCreation({ phase: result.status === "created" ? result.openedAt ? "opened" : "created" : "not-created",
-        operationId, context, result }, generation);
+      let phase = this.#historyCreationPhase(result);
+      // Hydration may already have opened this very Working Copy. Confirm its
+      // existing Canvas, never reopen a receipt merely to repair openedAt.
+      if (phase === "created" && context.workingCopyId === result.workingCopyId
+        && this.#versionSession.snapshot.currentBasedOnVersionId === result.versionId
+        && this.#versionSession.snapshot.viewMode === "current") {
+        try {
+          await this.#canvasPort.verifyRendered(this.#documentSession.html, this.#documentSession.persistedSourceSha256, context);
+          if (!this.#projectSession.matches(context) || generation !== this.#creationGeneration
+            || this.#snapshot.navigation.phase !== "idle") return;
+          phase = "opened";
+          try { await this.#bridgeClient.confirmHistoryCreationOpened({ target: context, operationId }); } catch { /* The verified current Canvas is already usable. */ }
+        } catch { /* Keep the committed result available for explicit opening. */ }
+      }
+      if (!this.#projectSession.matches(context)) return;
+      this.#setHistoryCreation({ phase, operationId, context, result }, generation);
     } catch {
       if (this.#projectSession.matches(context)) this.#setHistoryCreation({ phase: "unknown", operationId, context }, generation);
     }
@@ -765,6 +786,10 @@ export class VersionWorkflow {
         this.#setHistoryCreation({ phase: "not-created", operationId, context: current, result }, generation);
         return rejected("HISTORY_NOT_CREATED", "尚未创建新版本，可以重试。");
       }
+      if (result.recoveryState === "superseded") {
+        this.#setHistoryCreation({ phase: "superseded", operationId, context: current, result }, generation);
+        return blocked("HISTORY_CREATION_SUPERSEDED", "项目已继续到其他版本，旧创建结果无需重新打开。");
+      }
       this.#setHistoryCreation({ phase: "opening", operationId, context: current, result }, generation);
       if (!this.#isNavigationCurrent(operation)) return stale(current);
       const drained = await this.#projectWorkflow.drain("history", { deadlineAt: this.#clock.now() + 15_000 });
@@ -776,7 +801,7 @@ export class VersionWorkflow {
       const content = String(payload.content || "");
       const sha256 = String(payload.currentHtmlSha256 || payload.sourceSha256 || "");
       if (payload.projectId !== current.projectId || payload.documentId !== current.documentId
-        || payload.currentBasedOnVersionId !== result.versionId
+        || payload.currentBasedOnVersionId !== result.versionId || payload.latestVersionId !== result.versionId
         || target?.targetKind !== "working-copy" || target.projectId !== current.projectId
         || target.documentId !== current.documentId || target.versionId !== result.versionId
         || target.workingCopyId !== result.workingCopyId || target.exactSourcePath !== result.sourcePath
@@ -786,6 +811,12 @@ export class VersionWorkflow {
         throw new Error("已创建版本的工作文件身份或内容校验失败。");
       }
       if (!this.#isNavigationCurrent(operation)) return stale(current);
+      const latestReceipt = this.#validateHistoryCreation(await this.#bridgeClient.queryHistoryCreation({ target: current, operationId }), current, operationId);
+      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      if (latestReceipt.status !== "created" || latestReceipt.recoveryState === "superseded") {
+        this.#setHistoryCreation({ phase: this.#historyCreationPhase(latestReceipt), operationId, context: current, result: latestReceipt }, generation);
+        return blocked("HISTORY_CREATION_SUPERSEDED", "项目已继续迭代，停止打开旧创建结果。");
+      }
       const prepared = await this.#projectWorkflow.prepareManagedSourceTransition({
         previousSourcePath: current.sourcePath, nextSourcePath: result.sourcePath,
         expectedSha256: sha256, nextProjectId: current.projectId, nextDocumentId: current.documentId,
@@ -831,6 +862,8 @@ export class VersionWorkflow {
     }
   }
 
+  // Compatibility only: old activation receipts and protocol regression tests.
+  // Product history Edit must use createVersionFromHistory/openCreatedHistoryVersion.
   async continueEditingHistoryVersion({
     versionId = this.#versionSession.snapshot.viewingVersionId,
     context = this.#projectSession.context,
