@@ -195,3 +195,29 @@ for (const boundary of ["messages", "contexts", "bytes"]) {
       input: { ...value.input, expectedSourceSha256: adopted.target.sourceSha256 } });
   });
 }
+
+test("sealed public summary is sanitized, bounded and restored once after failure and restart", async (t) => {
+  const value = await setup(t);
+  value.input.agentDelivery = { ...defaultManagedAgentDelivery(), configuration: {
+    providerId: "qoder", runtimeId: "acp", modelId: null, reasoning: "auto",
+    configurationDigest: `sha256:${"a".repeat(64)}` } };
+  const receipt = await prepareRecordedRequest(value);
+  const event = { eventId: "event_public_summary_0001", kind: "public-summary",
+    timestamp: "2026-09-08T00:00:00.000Z",
+    publicSummary: "已检查标题。Bearer sk-synthetic-secret /tmp/private-source.txt " + "公开说明。".repeat(2000),
+    reasoning: "hidden-synthetic-thought", toolOutput: "raw-synthetic-command" };
+  await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId,
+    attemptId: receipt.attemptId, event });
+  await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId });
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  await restarted.initialize();
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const summaries = conversation.messages.filter((message) => message.messageId === "message_event_public_summary_0001");
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].actor, "agent");
+  assert.equal(summaries[0].kind, "result-summary");
+  assert.ok(summaries[0].text.startsWith("已检查标题。"));
+  assert.ok(summaries[0].text.length <= 4096);
+  assert.doesNotMatch(JSON.stringify(conversation), /sk-synthetic|private-source|hidden-synthetic|raw-synthetic/);
+});

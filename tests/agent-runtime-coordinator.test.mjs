@@ -522,7 +522,9 @@ test("explicit public paragraphs remain separate without terminal punctuation", 
 
 test("execution status projects only public Agent text with frozen provider identity", async () => {
   const finish = deferred();
+  const persistedFacts = [];
   const coordinator = new AgentRuntimeCoordinator({
+    recordExecutionFact: async (_identity, event) => persistedFacts.push(event),
     providerRegistry: registry({
       run: async (_ticket, { onEvent }) => {
         onEvent({ kind: "initialized", agentName: "Synthetic Agent", agentVersion: "1.0.0" });
@@ -572,6 +574,10 @@ test("execution status projects only public Agent text with frozen provider iden
   finish.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(coordinator.executionStatus(IDENTITY).state, "completed");
+  const summaries = persistedFacts.filter((event) => event.kind === "public-summary");
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].publicSummary, "正在读取冻结任务。正在写入 Candidate。");
+  assert.equal(JSON.stringify(persistedFacts).includes("隐藏推理"), false);
   await coordinator.shutdown();
 });
 
