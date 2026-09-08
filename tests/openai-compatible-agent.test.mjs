@@ -13,6 +13,7 @@ import {
   classifyOpenAiCompatibleHttpStatus,
   completeOpenAiCompatibleChat,
   createHttpRuntime,
+  completeIdentityCheckedHtml,
   DEFAULT_INACTIVITY_TIMEOUT_MS,
   extractHtmlDocument,
   readHttpAgentContext,
@@ -773,7 +774,7 @@ test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate wit
   let callCount = 0;
   const fetchImpl = async () => {
     callCount += 1;
-    return jsonResponse(200, { choices: [{ finish_reason: "stop", message: { content: callCount === 1 ? HTML : candidateHtml } }] });
+    return jsonResponse(200, { choices: [{ finish_reason: "stop", message: { content: callCount === 1 ? HTML : callCount === 2 ? candidateHtml.replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(32)}`) : candidateHtml } }] });
   };
   const registry = providerRegistry(
     createOpenAiCompatibleProvider({ fetchImpl }),
@@ -867,4 +868,75 @@ test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate wit
   assert.equal(await readFile(sourcePath, "utf8"), source);
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), managedBefore);
   await coordinator.shutdown();
+});
+
+for (const kind of ["forged", "duplicate", "lost"]) {
+  test(`identity correction repairs ${kind} and preserves requested text`, async () => {
+    const { materializeSourceElementIdentity } = await import("../bridge/project-file-repository/working-copy.mjs");
+    const base = materializeSourceElementIdentity("<!doctype html><html><head><title>T</title></head><body><p>Before</p></body></html>").html;
+    const good = base.replace("Before", "After");
+    const ids = [...base.matchAll(/data-pageroot-id="([^"]+)"/gu)].map((m) => m[1]);
+    const bad = kind === "forged" ? good.replace(ids[0], `pr1_${"f".repeat(32)}`)
+      : kind === "duplicate" ? good.replace(ids[1], ids[0])
+      : good.replace(` data-pageroot-id="${ids[0]}"`, "");
+    let calls = 0;
+    const result = await completeIdentityCheckedHtml({
+      baseHtml: base, messages: [{ role: "user", content: base }], beforeGeneration: async () => {},
+      generate: async (messages) => {
+        calls += 1;
+        if (calls === 2) {
+          assert.equal(messages[1].content, bad);
+          assert.match(messages[2].content, /CANDIDATE_SOURCE_IDENTITY_/u);
+        }
+        return calls === 1 ? bad : good;
+      },
+    });
+    assert.equal(result, good);
+    assert.equal(calls, 2);
+  });
+}
+
+test("identity correction is bounded and cancellation prevents further model calls", async () => {
+  const { materializeSourceElementIdentity } = await import("../bridge/project-file-repository/working-copy.mjs");
+  const base = materializeSourceElementIdentity("<!doctype html><html><head></head><body><p>X</p></body></html>").html;
+  const bad = base.replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(32)}`);
+  let calls = 0;
+  await assert.rejects(completeIdentityCheckedHtml({
+    baseHtml: base, messages: [], beforeGeneration: async () => {},
+    generate: async () => { calls += 1; return bad; },
+  }), { code: "AGENT_OUTPUT_INVALID" });
+  assert.equal(calls, 3);
+  const controller = new AbortController();
+  calls = 0;
+  await assert.rejects(completeIdentityCheckedHtml({
+    baseHtml: base, messages: [], beforeGeneration: async () => controller.signal.throwIfAborted(),
+    generate: async () => { calls += 1; controller.abort(); return bad; },
+  }), { name: "AbortError" });
+  assert.equal(calls, 1);
+});
+
+test("identity correction accepts legitimate deletion and new unassigned elements without retry", async () => {
+  const { materializeSourceElementIdentity } = await import("../bridge/project-file-repository/working-copy.mjs");
+  const base = materializeSourceElementIdentity("<!doctype html><html><head></head><body><p>Delete</p></body></html>").html;
+  const good = base.replace(/<p[^>]*>Delete<\/p>/u, "<section>New</section>");
+  let calls = 0;
+  assert.equal(await completeIdentityCheckedHtml({
+    baseHtml: base, messages: [], beforeGeneration: async () => {},
+    generate: async () => { calls += 1; return good; },
+  }), good);
+  assert.equal(calls, 1);
+});
+
+test("identity correction never retries transport or incomplete-document failures", async () => {
+  for (const code of ["AGENT_NETWORK_INTERRUPTED", "AGENT_AUTH_REQUIRED"]) {
+    let calls = 0;
+    await assert.rejects(completeIdentityCheckedHtml({
+      baseHtml: HTML, messages: [], beforeGeneration: async () => {},
+      generate: async () => { calls += 1; throw Object.assign(new Error(code), { code }); },
+    }), { code });
+    assert.equal(calls, 1);
+  }
+  await assert.rejects(completeIdentityCheckedHtml({
+    baseHtml: HTML, messages: [], beforeGeneration: async () => {}, generate: async () => "partial",
+  }), { code: "AGENT_OUTPUT_INVALID" });
 });
