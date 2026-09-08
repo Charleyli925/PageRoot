@@ -489,6 +489,11 @@ test("the review projection annotates a dense report cleanly and accurately", as
     expect(paragraphOneGroup.id).not.toBe(paragraphTwoGroup.id);
     const paragraphFocusTops = [];
     for (const [index, group] of [paragraphOneGroup, paragraphTwoGroup].entries()) {
+      // Start at the top so selecting the second paragraph must reveal it.
+      for (const frame of [beforeFrame, afterFrame]) {
+        await frame.locator("html").evaluate(() => scrollTo({ top: 0, behavior: "instant" }));
+      }
+      await expect.poll(() => afterFrame.locator("html").evaluate(() => scrollY)).toBeLessThan(100);
       await activateFocusGroup(beforeFrame, afterFrame, group);
       for (const frame of [beforeFrame, afterFrame]) {
         const boxes = frame.locator(
@@ -506,19 +511,14 @@ test("the review projection annotates a dense report cleanly and accurately", as
         const rect = element.getBoundingClientRect();
         return rect.bottom > 0 && rect.top < innerHeight;
       })).toBe(true);
-      // Focus attributes publish before the animation-frame scroll command. Both
-      // paragraphs can already intersect the viewport, so visibility is insufficient.
-      await expect.poll(() => afterFrame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
-      ).evaluate((box) => {
-        const scroller = document.scrollingElement || document.documentElement;
-        const maximum = Math.max(0,
-          Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)
-          - scroller.clientHeight);
-        const target = Math.max(0, Math.min(maximum,
-          Number(box.getAttribute("data-top")) - Math.max(18, innerHeight * .12)));
-        return Math.abs(scrollY - target);
-      })).toBeLessThanOrEqual(2);
+      // Verify the visible focus, including the outer canvas viewport. Exact
+      // scroll offsets are clamped and synchronized across unequal page extents.
+      await expect.poll(() => activeFootprintVisibleInOuterViewport(
+        launched.page, afterFrame, "after",
+      )).toBe(true);
+      await expect.poll(() => activeFootprintVisibleInOuterViewport(
+        launched.page, beforeFrame, "before",
+      )).toBe(true);
       paragraphFocusTops.push(await afterFrame.locator(
         `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
       ).evaluate((box) => Number(box.getAttribute("data-top"))));

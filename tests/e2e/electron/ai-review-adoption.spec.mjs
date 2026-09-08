@@ -2808,6 +2808,12 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
       )).toHaveCount(0);
     }
     await launched.page.getByRole("button", { name: "元素变化" }).click();
+    await expect(afterFrame.locator("html")).toHaveAttribute("data-pageroot-review-filter", "structure");
+    // Filter state publishes before its scheduled overlay render. Do not click
+    // a bar retained from the previous text-inclusive frame.
+    await afterFrame.locator("html").evaluate(() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
     // Several source-backed structure regions may overlap. Activate the exact
     // analyzer-owned bar rather than asking pointer hit-testing to choose the
     // topmost sibling at the same coordinates.
