@@ -895,6 +895,15 @@ export function conversationHasInFlightTurn(conversation) {
   return activeConversationTurn(conversation) !== null;
 }
 
+// Capacity is checked before accepting a new execution; its bounded facts,
+// result and decision fit without rotating an in-flight Turn.
+export function conversationHasCapacity(conversation, { messages = 1, contexts = 0, turns = 0, bytes = 0 } = {}) {
+  return conversation.messages.length + messages <= CONVERSATION_MESSAGE_LIMIT
+    && conversation.contexts.length + contexts <= CONVERSATION_CONTEXT_LIMIT
+    && conversation.turns.length + turns <= CONVERSATION_TURN_LIMIT
+    && jsonByteLength(conversation) + bytes <= CONVERSATION_RECORD_BYTE_LIMIT;
+}
+
 export function conversationAtMessageLimit(conversation) {
   return conversation.messages.length >= CONVERSATION_MESSAGE_LIMIT;
 }
