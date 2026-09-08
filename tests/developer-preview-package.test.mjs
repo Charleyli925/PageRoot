@@ -223,6 +223,7 @@ test("developer preview is an explicit Developer ID DMG profile while release pa
       artifactName: DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
       mac: {
         ...sourcePackageJson.build.mac,
+        identity: null,
         hardenedRuntime: true,
         notarize: false,
       },
@@ -240,7 +241,7 @@ test("developer preview is an explicit Developer ID DMG profile while release pa
       "--arm64",
       "--publish",
       "never",
-      "--config.forceCodeSigning=true",
+      "--config.forceCodeSigning=false",
       "--config.mac.notarize=false",
       "--config.mac.hardenedRuntime=true",
       "--config.appId=com.htmlai.workbench.developer-preview",
@@ -360,7 +361,7 @@ test("developer preview keeps local signing identity inputs and strips release c
   }
   assert.equal(environment.CSC_LINK, "private-signing-material");
   assert.equal(environment.CSC_KEY_PASSWORD, "private-password");
-  assert.equal(environment.CSC_IDENTITY_AUTO_DISCOVERY, "true");
+  assert.equal(environment.CSC_IDENTITY_AUTO_DISCOVERY, "false");
   assert.equal(environment.PAGEROOT_REQUIRE_NOTARIZATION, "0");
   assert.equal(environment.PAGEROOT_REQUIRE_TELEMETRY_CONFIG, "0");
 });
@@ -403,7 +404,7 @@ test("developer preview attestation is explicitly non-release and binds exact by
     assert.equal(record.attestation.kind, "developer-preview");
     assert.equal(record.attestation.schemaVersion, 2);
     assert.equal(record.attestation.releaseEligible, false);
-    assert.equal(record.attestation.signaturePolicy, "developer-id");
+    assert.equal(record.attestation.signaturePolicy, "adhoc");
     assert.equal(record.attestation.notarized, false);
     assert.equal(record.attestation.sourceVersion, "0.9.5");
     assert.equal(record.attestation.stableVersion, "0.9.5");

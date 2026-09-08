@@ -62,7 +62,7 @@ jobs:
             echo "### PageRoot developer preview"
             echo ""
             echo "- Built only because this workflow was dispatched explicitly."
-            echo "- Requires a stable Developer ID Application identity already installed on this runner; missing or failed signing stops the job and never falls back to ad-hoc."
+            echo "- Uses an ad-hoc signature for personal testing; no Developer ID identity, notarization or release credentials are required or read."
             echo "- Notarization is not required for this personal test package."
             echo "- Is not eligible for a tag, GitHub Release, or updater publication."
             echo "- Uses the distinct PageRoot Developer Preview name and a stable-tag-derived test version."

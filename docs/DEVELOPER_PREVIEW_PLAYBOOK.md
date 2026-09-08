@@ -56,15 +56,15 @@ Tree 时，必须停止并报告，不能静默漏包。`npm run package:develop
 
 ## 默认入口
 
-本机有 Developer ID Application 证书时，优先在本机干净 Tree 上执行：
+在本机干净 Tree 上执行即可：
 
 ```bash
 npm run package:developer
 ```
 
-electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID Application 身份；也可以通过本机环境中的 `CSC_NAME` 指定证书名称。证书私钥不进入仓库或安装包。证书缺失、签名失败或身份不符合要求时命令直接失败，不会退回 ad-hoc。
+electron-builder 使用 ad-hoc 签名（`identity: null`，关闭钥匙串身份自动发现），不需要 Developer ID Application 证书，也不读取 Apple 公证或发布凭据。产物仅供本机个人验证：ad-hoc 包未公证，不可正式发布、打 tag 或用于更新通道。
 
-如需在具备同一签名身份的专用 macOS runner 上运行，也可以手动使用 GitHub Actions：
+也可以在任意 macOS runner 上手动使用 GitHub Actions：
 
 1. 打开 `Developer Preview` 工作流。
 2. 选择需要验证的提交所在分支。
@@ -107,7 +107,7 @@ electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID 
 2. 构建最新 Electron renderer。
 3. 只生成一个对应架构的 DMG，不生成 updater ZIP、blockmap 或发布元数据。
 4. 校验 `app.asar` 文件闭包、源文件、Bridge、Schema、法律资源、测试应用名、测试版本、独立 Bundle ID、架构、DMG 完整性和只读挂载内容，并确认没有私有 Codex/App Server 资源或预埋 native Codex。
-5. 要求稳定的 Developer ID Application 签名；不读取 Apple 公证、发布或遥测凭据。签名失败直接停止，不生成可安装的 ad-hoc 替代包。
+5. 要求 ad-hoc 签名（不需要 Developer ID Application 证书）；不读取 Apple 公证、发布或遥测凭据。
 6. 关闭 Preview 的自动更新检查、下载和安装；新包继续手动安装。
 7. 使用上述新根目录启动真实 `.app`，确认首个窗口、版本、Bridge、Workbench 就绪状态和正常退出。
 8. 写入 `developer-preview.json`，包括 DMG SHA-256，并固定：
@@ -129,7 +129,7 @@ electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID 
 1. 对照 `developer-preview.json` 确认测试版本、正式基线、测试序号、架构、commit 与 DMG SHA-256。
 2. 对照 `package-delivery-report.md` 确认内容范围、所有关联 PR、PR 当前
    状态/检查结果、每个 PR 的一句话修改摘要，以及未关联 PR 的直接提交。
-3. 安装并打开应用。Developer ID 签名未公证时，macOS 仍可能显示首次打开确认；按系统提示确认即可。
+3. 安装并打开应用。因为使用 ad-hoc 签名且未公证，macOS 首次打开时通常需要在 Finder 中按住 Control 点击应用并选择“打开”。
 4. 确认首次启动没有旧项目、旧设置或旧连接；新建项目、编辑、保存、重启后数据仍在上述 Preview 目录。
 5. 使用真实文档的副本打开应用，确认本次最关键的一到两个能力能正常运行。
 6. 记录通过或明确的失败现象。

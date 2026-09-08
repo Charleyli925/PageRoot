@@ -218,10 +218,12 @@ export function developerPreviewPackageJson(packageJson, identity) {
   const developerPreviewMac = packageJson.build?.mac
     ? {
       ...packageJson.build.mac,
+      identity: null,
       hardenedRuntime: true,
       notarize: false,
     }
     : {
+      identity: null,
       hardenedRuntime: true,
       notarize: false,
     };
@@ -316,7 +318,7 @@ export function developerPreviewBuilderArguments({
     `--${architecture}`,
     "--publish",
     "never",
-    "--config.forceCodeSigning=true",
+    "--config.forceCodeSigning=false",
     "--config.mac.notarize=false",
     "--config.mac.hardenedRuntime=true",
     `--config.appId=${identity.appId}`,
@@ -337,7 +339,7 @@ export function developerPreviewEnvironment(environment = process.env) {
   for (const name of SENSITIVE_BUILD_ENVIRONMENT) delete sanitized[name];
   return {
     ...sanitized,
-    CSC_IDENTITY_AUTO_DISCOVERY: "true",
+    CSC_IDENTITY_AUTO_DISCOVERY: "false",
     PAGEROOT_REQUIRE_NOTARIZATION: "0",
     PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "0",
   };
@@ -389,7 +391,7 @@ export async function writeDeveloperPreviewAttestation({
     schemaVersion: 2,
     kind: "developer-preview",
     releaseEligible: false,
-    signaturePolicy: "developer-id",
+    signaturePolicy: "adhoc",
     notarized: false,
     sourceVersion: identity.sourceVersion,
     stableVersion: identity.stableVersion,
