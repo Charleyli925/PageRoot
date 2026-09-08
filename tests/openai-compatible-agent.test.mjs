@@ -13,6 +13,7 @@ import {
   classifyOpenAiCompatibleHttpStatus,
   completeOpenAiCompatibleChat,
   createHttpRuntime,
+  createHttpOutputStream,
   completeIdentityCheckedHtml,
   DEFAULT_INACTIVITY_TIMEOUT_MS,
   extractHtmlDocument,
@@ -39,6 +40,63 @@ import {
 
 const HTML = "<!DOCTYPE html><html><head><title>ok</title></head><body><p data-pageroot-id=\"one\">ok</p></body></html>";
 const TRUST = "trusted-local-agent-v1";
+
+test("HTTP public progress is visible before completion while interleaved HTML stays private and byte exact", async () => {
+  const events = [];
+  const record = (type, text) => `${JSON.stringify({ type, text })}\n`;
+  const frame = (content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  let sawProgress;
+  const progressing = new Promise((resolve) => { sawProgress = resolve; });
+  const first = record("progress", "先调整标题，再统一配色。");
+  const response = new Response(new ReadableStream({
+    async start(controller) {
+      for (const part of [first.slice(0, 17), first.slice(17), record("html", HTML.slice(0, 55))]) {
+        controller.enqueue(new TextEncoder().encode(frame(part)));
+      }
+      await blocked;
+      controller.enqueue(new TextEncoder().encode(frame(record("progress", "标题已调整，正在整理完整页面。"))));
+      controller.enqueue(new TextEncoder().encode(frame(record("html", HTML.slice(55)))));
+      controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  }), { headers: { "content-type": "text/event-stream" } });
+  const pending = completeOpenAiCompatibleChat({
+    fetchImpl: async () => response, baseUrl: "https://api.example.com/v1", apiKey: "synthetic",
+    modelId: "fixture", messages: [], publicProgress: true,
+    onEvent(event) { events.push(event); if (event.kind === "visible-text") sawProgress(); },
+  });
+  try {
+    await progressing;
+    assert.equal(events.filter((event) => event.kind === "visible-text").length, 1);
+    assert.ok(!JSON.stringify(events).includes("<!DOCTYPE"));
+  } finally { release(); }
+  assert.equal(await pending, HTML);
+  assert.deepEqual(events.filter((event) => event.kind === "visible-text").map((event) => event.text.trim()), [
+    "先调整标题，再统一配色。", "标题已调整，正在整理完整页面。",
+  ]);
+  assert.equal(events.filter((event) => event.channel === "html").reduce((total, event) => total + event.byteDelta, 0), Buffer.byteLength(HTML));
+});
+
+test("HTTP progress seals split sensitive values, rejects invalid records, and accepts legacy HTML", () => {
+  const events = [];
+  const output = createHttpOutputStream((event) => events.push(event));
+  const record = JSON.stringify({ type: "progress", text: "读取 /Users/example/private/file，token sk-secretvalue" });
+  for (const char of record) output.push(char);
+  assert.equal(events.length, 0);
+  output.push("\n");
+  assert.ok(!JSON.stringify(events).includes("secretvalue"));
+  assert.ok(!JSON.stringify(events).includes("/Users/"));
+  output.push(`${JSON.stringify({ type: "html", text: HTML })}\n`);
+  assert.equal(output.finish(), HTML);
+  for (const bad of ['{"type":"reasoning","text":"hidden"}\n', '{"type":"html","text":', '{"type":"progress","text":7}\n']) {
+    assert.throws(() => { const stream = createHttpOutputStream(); stream.push(bad); stream.finish(); }, (error) => error.code === "AGENT_OUTPUT_INVALID");
+  }
+  const legacy = createHttpOutputStream();
+  for (const char of HTML) legacy.push(char);
+  assert.equal(legacy.finish(), HTML);
+});
 
 function jsonResponse(status, payload) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });

@@ -255,4 +255,4 @@ export const INTENT_MODIFY: "modify";
 export const INTENT_CONTINUE: "continue";
 export const FORBIDDEN_MESSAGE_KEYS: readonly string[];
 
-export function sidebarTurnPresentation(messages?: readonly SidebarMessage[]): { primary: SidebarMessage[]; process: SidebarMessage[] };
+export function sidebarTurnPresentation(messages?: readonly SidebarMessage[]): { primary: SidebarMessage[]; process: SidebarMessage[]; timeline: { process: boolean; messages: SidebarMessage[] }[] };

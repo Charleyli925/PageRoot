@@ -33,9 +33,9 @@ export class ConversationWorkflow {
 
   #timerHost;
 
-  #pendingWrite = false;
-
-  #writing = false;
+  #dirty = false;
+  #pendingDrafts = new Map();
+  #writing = null;
   #refreshTimer = null;
   #loadGeneration = 0;
 
@@ -71,17 +71,19 @@ export class ConversationWorkflow {
       this.close();
       return null;
     }
-    this.#cancelTimer();
+    const flushed = this.flushDraft();
     this.#stopRefresh();
     const generation = ++this.#loadGeneration;
     this.#session.beginLoad(context);
     try {
+      await flushed;
+      if (generation !== this.#loadGeneration) return null;
       const payload = await this.#bridgeClient.conversation(context.sourcePath);
       // The user may have switched documents while this was in flight.
       if (generation !== this.#loadGeneration || !sameDocument(this.#session.snapshot.context, context)) return null;
       this.#session.publish(context, {
         conversation: payload?.conversation ?? null,
-        draft: payload?.draft ?? null,
+        draft: this.#pendingDrafts.get(payload?.conversation?.conversationId)?.draft ?? payload?.draft ?? null,
         atMessageLimit: payload?.atMessageLimit === true,
       });
       this.#scheduleRefresh(context, generation);
@@ -115,6 +117,7 @@ export class ConversationWorkflow {
   }
 
   close() {
+    void this.flushDraft();
     this.#loadGeneration += 1;
     this.#stopRefresh();
     this.#cancelTimer();
@@ -136,11 +139,11 @@ export class ConversationWorkflow {
    * never waits on the Bridge to show what the user typed.
    */
   updateDraftText(text) {
-    if (this.#session.setDraftText(text)) this.#scheduleDraftWrite();
+    if (this.#session.setDraftText(text)) { this.#dirty = true; this.#scheduleDraftWrite(); }
   }
 
   updateDraftIntent(intent) {
-    if (this.#session.setDraftIntent(intent)) this.#scheduleDraftWrite();
+    if (this.#session.setDraftIntent(intent)) { this.#dirty = true; this.#scheduleDraftWrite(); }
   }
 
   #cancelTimer() {
@@ -161,42 +164,51 @@ export class ConversationWorkflow {
    * Flushes any pending draft. Close, project switch and document switch call
    * this so an unsent draft is never lost at a drain boundary.
    */
+  get hasPendingDraft() { return this.#dirty || this.#pendingDrafts.size > 0 || this.#writing !== null; }
+
   async flushDraft() {
     this.#cancelTimer();
     await this.#writeDraft();
+    return !this.hasPendingDraft;
   }
 
   async #writeDraft() {
-    if (this.#writing) {
-      // Single-flight: coalesce into one follow-up write rather than queueing
-      // one request per keystroke.
-      this.#pendingWrite = true;
-      return;
-    }
+    // Capture identity and bytes before close/open can replace the Session.
     const snapshot = this.#session.snapshot;
-    const context = snapshot.context;
-    if (!context?.sourcePath || !snapshot.conversationId) return;
-    this.#writing = true;
-    try {
-      const payload = await this.#bridgeClient.saveConversationDraft({
-        sourcePath: context.sourcePath,
-        projectId: context.projectId,
-        documentId: context.documentId,
-        conversationId: snapshot.conversationId,
-        text: snapshot.draftText,
-        intent: snapshot.draftIntent,
+    if (this.#dirty && snapshot.context?.sourcePath && snapshot.conversationId) {
+      this.#pendingDrafts.set(snapshot.conversationId, {
+        context: snapshot.context, conversationId: snapshot.conversationId,
+        draft: snapshot.draft, text: snapshot.draftText, intent: snapshot.draftIntent,
       });
-      if (payload?.draft) this.#session.acknowledgeDraft(context, payload.draft);
-    } catch {
-      // A failed draft write keeps the local text; the next edit retries. It
-      // never blocks the user and never touches message history.
-    } finally {
-      this.#writing = false;
-      if (this.#pendingWrite) {
-        this.#pendingWrite = false;
-        await this.#writeDraft();
-      }
+      this.#dirty = false;
     }
+    if (this.#writing) return this.#writing;
+    if (!this.#pendingDrafts.size) return;
+    this.#writing = (async () => {
+      const failed = new Set();
+      for (;;) {
+        const entry = [...this.#pendingDrafts.entries()].find(([key]) => !failed.has(key));
+        if (!entry) break;
+        const [key, pending] = entry;
+        try {
+          const payload = await this.#bridgeClient.saveConversationDraft({
+            sourcePath: pending.context.sourcePath,
+            projectId: pending.context.projectId,
+            documentId: pending.context.documentId,
+            conversationId: pending.conversationId,
+            text: pending.text, intent: pending.intent,
+          });
+          if (!payload?.draft) throw new Error("Draft write was not acknowledged.");
+          if (this.#pendingDrafts.get(key) === pending) this.#pendingDrafts.delete(key);
+          this.#session.acknowledgeDraft(pending.context, payload.draft);
+        } catch {
+          // Keep the captured document's text for reopening/retry. A bounded
+          // drain reports failure instead of silently dropping an unsaved draft.
+          failed.add(key);
+        }
+      }
+    })().finally(() => { this.#writing = null; });
+    return this.#writing;
   }
 }
 

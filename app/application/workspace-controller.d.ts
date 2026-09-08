@@ -396,7 +396,7 @@ export class WorkspaceController {
   closeConversation(): void;
   updateConversationDraftText(text: string): void;
   updateConversationDraftIntent(intent: string): void;
-  flushConversationDraft(): Promise<void>;
+  flushConversationDraft(): Promise<boolean>;
   activateWorkbenchTab(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchNavigationOutcome>;
   createWorkbenchStartTab(): Promise<WorkbenchNavigationOutcome>;
   createWorkbenchSettingsTab(): Promise<WorkbenchNavigationOutcome>;

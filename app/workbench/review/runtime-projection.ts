@@ -3525,16 +3525,20 @@ function reviewBootstrap(
   });
   addEventListener("scroll", () => {
     const command = activeScrollCommand;
-    const commandMatches = command
-      && Math.abs(scrollY - command.top) <= 1
-      && Math.abs(scrollX - command.left) <= 1;
-    if (command && !commandMatches) activeScrollCommand = null;
     post("scroll-position", {
       top: scrollY,
       left: scrollX,
-      commandId: commandMatches ? command.commandId : "",
+      // Smooth scrolling reports intermediate positions before reaching its
+      // target. They are still programmatic and must not become a user gesture.
+      commandId: command ? command.commandId : "",
     });
-    if (commandMatches && activeScrollCommand === command) activeScrollCommand = null;
+  }, { passive: true });
+  addEventListener("scrollend", (event) => {
+    const command = activeScrollCommand;
+    // An older animation may have queued its end before a replacement target.
+    if (event.target === document && command
+      && Math.abs(scrollY - command.top) <= 1
+      && Math.abs(scrollX - command.left) <= 1) activeScrollCommand = null;
   }, { passive: true });
   const handleLayoutChange = () => {
     if (projectionTransitioning) {

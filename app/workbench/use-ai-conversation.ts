@@ -59,6 +59,7 @@ export type UseAiConversationOptions = {
   submissionPending?: boolean;
   reviewing?: boolean;
   commentComposerOpen?: boolean;
+  draftReadOnly?: boolean;
   canvasMode: "edit" | "preview";
   projectId: string;
   documentId: string;
@@ -100,6 +101,7 @@ export function useAiConversation({
   submissionPending = false,
   reviewing = false,
   commentComposerOpen = false,
+  draftReadOnly = false,
   canvasMode,
   projectId,
   documentId,
@@ -149,6 +151,10 @@ export function useAiConversation({
     onDeliverModification?.("managed-agent");
   }, [onDeliverModification]);
 
+  const onDraftTextChange = useCallback((text: string) => {
+    controllerRef.current?.updateConversationDraftText(text);
+  }, [controllerRef]);
+
   const state = useMemo(
     () => sidebarStateFromRun({
       activeRun,
@@ -177,6 +183,11 @@ export function useAiConversation({
     state,
     title: conversation?.title ?? "",
     messages: conversation?.messages ?? [],
+    draftText: conversation?.draftText ?? "",
+    draftAvailable: !draftReadOnly && conversation?.status === "ready"
+      && conversation.context?.projectId === projectId
+      && conversation.context?.documentId === documentId,
+    onDraftTextChange,
     historyGroups,
     // The selected Agent's availability is the model catalog's readiness: one owner supplies
     // both, so the Composer can never claim ready while the Agent is not.
@@ -254,6 +265,8 @@ export function useAiConversation({
     submissionPending,
     pendingCommentCount,
     onSend,
+    onDraftTextChange,
+    draftReadOnly,
     onCopyTask,
     onDecision,
     hide,

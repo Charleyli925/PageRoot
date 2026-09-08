@@ -43,7 +43,7 @@ test("the message stream projects immutable facts and never an action", () => {
   ]);
 
   assert.equal(stream.length, 2);
-  assert.deepEqual(stream.map((message) => message.actorLabel), ["你", "Qoder CLI"]);
+  assert.deepEqual(stream.map((message) => message.actorLabel), ["我", "Qoder CLI"]);
   for (const message of stream) {
     for (const key of FORBIDDEN_MESSAGE_KEYS) {
       assert.ok(
@@ -1079,7 +1079,7 @@ test("adoption uncertainty takes precedence over Review and exposes no opposite 
   }
 });
 
-test("turn presentation prioritizes requirements, sealed public summary, result and decision with folded progress", async () => {
+test("turn presentation prioritizes requirements, sealed public summary, result and decision while preserving chronological feed blocks", async () => {
   const { sidebarTurnPresentation } = await import("../app/workbench/ai-conversation-model.js");
   const requirements = factMessage({ actor: "user", text: "调整标题" });
   const progress = factMessage({ kind: "progress", text: "正在生成修改。" });
@@ -1090,4 +1090,12 @@ test("turn presentation prioritizes requirements, sealed public summary, result 
   const presentation = sidebarTurnPresentation([requirements, progress, legacy, result, summary, decision]);
   assert.deepEqual(presentation.primary, [requirements, summary, result, decision]);
   assert.deepEqual(presentation.process, [progress, legacy]);
+  assert.deepEqual(presentation.timeline.map((block) => block.messages), [
+    [requirements], [progress, legacy], [result], [summary], [decision],
+  ]);
+});
+
+
+test("stored provider identities keep their names instead of becoming a generic AI Agent", () => {
+  assert.deepEqual(sidebarMessageStream(["qoder", "codex", "pageroot"].map((providerId) => factMessage({ actor: "agent", providerId }))).map((message) => message.actorLabel), ["Qoder", "Codex", "Stemmio AI"]);
 });

@@ -2220,6 +2220,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         animations: "disabled",
       });
     }
+    await launched.page.getByRole("button", { name: "收起会话面板" }).click();
     await launched.page.getByRole("button", {
       name: "采纳修改",
     }).click();
@@ -2444,6 +2445,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "收起会话面板" }).click();
     await launched.page.getByRole("button", { name: "返回修改前" }).click();
     const dialog = launched.page.getByRole("dialog", {
       name: /返回 AI 修改前（版本 \d+）？/u,
@@ -2489,8 +2491,7 @@ test("returning from review restores the editable pre-AI version and preserves t
       request.changeRequest.projectId,
     );
     await loadedDiskFrame(launched.page, workingCopyPath);
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
-    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
     await expect(launched.page.locator(".comment-card").filter({ hasText: commentText }))
       .toHaveCount(1);
     const restored = await launched.page.evaluate(
@@ -2932,7 +2933,7 @@ test("Review keeps Candidate scope diagnostics out of the comparison canvas", {
       .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByTestId("review-impact-summary")).toHaveCount(0);
     await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
-    await expect(launched.page.getByRole("button", { name: "采纳修改" }))
+    await expect(launched.page.getByRole("button", { name: "采用修改" }))
       .toBeVisible();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
@@ -3384,18 +3385,17 @@ test("two lost committed adoption replies stay pending and recover one decision 
       if (!allowRecovery) await route.abort("timedout");
       else await route.fulfill({ response });
     });
-    await launched.page.getByRole("button", { name: "采纳修改", exact: true }).click();
-    await launched.page.getByRole("button", { name: "确认并采纳", exact: true }).click();
+    await launched.page.getByRole("button", { name: "采用修改", exact: true }).click();
     await committed;
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("正在采用");
-    await expect(launched.page.getByRole("button", { name: "正在采纳…", exact: true })).toBeDisabled();
+    await expect(launched.page.getByRole("button", { name: "正在采纳…", exact: true })).toHaveCount(0);
     await launched.page.screenshot({ path: path.join(captures, "trusted-loop-adopting.png"), animations: "disabled" });
     releaseFirst();
     await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("采用结果待确认");
     expect(decisions.length).toBeGreaterThanOrEqual(2);
     await expect(sidebar).not.toContainText("尚未采用");
-    await expect(launched.page.getByRole("button", { name: "正在采纳…", exact: true })).toBeDisabled();
+    await expect(launched.page.getByRole("button", { name: "正在采纳…", exact: true })).toHaveCount(0);
     await expect(sidebar.getByTestId("ai-conversation-action-bar").getByRole("button")).toHaveCount(0);
     await launched.page.screenshot({ path: path.join(captures, "trusted-loop-adoption-unknown.png"), animations: "disabled" });
     allowRecovery = true;

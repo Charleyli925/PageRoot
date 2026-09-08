@@ -277,7 +277,7 @@ test("a failed draft write keeps the local text for the next attempt", async () 
   assert.equal(session.snapshot.draftText, "保留我");
 });
 
-test("closing deactivates the projection and cancels a pending write", async () => {
+test("closing deactivates the projection after capturing the pending draft for persistence", async () => {
   const bridge = stubBridge();
   const timers = manualTimers();
   const { session, workflow } = createWorkflow(bridge, timers);
@@ -290,6 +290,55 @@ test("closing deactivates the projection and cancels a pending write", async () 
   assert.equal(timers.pendingCount, 0);
   assert.equal(session.snapshot.status, "idle");
   assert.equal(session.snapshot.conversationId, null);
+  await workflow.flushDraft();
+  assert.equal(bridge.calls.drafts.at(-1).text, "草稿");
+  assert.equal(bridge.calls.drafts.at(-1).documentId, "doc_a");
+});
+
+test("switching during an in-flight draft write drains the latest text to its original document", async () => {
+  let release;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  let count = 0;
+  const bridge = stubBridge({
+    conversation: (sourcePath) => conversationPayload(sourcePath === "/tmp/a.html" ? "doc_a" : "doc_b", sourcePath === "/tmp/a.html" ? "conversation_aaaaaaaaaaaa" : "conversation_bbbbbbbbbbbb"),
+    saveConversationDraft: async (body) => {
+      if (++count === 1) await waiting;
+      return { draft: { conversationId: body.conversationId, revision: count, text: body.text, intent: body.intent } };
+    },
+  });
+  const { session, workflow } = createWorkflow(bridge, manualTimers());
+  await workflow.open(documentContext("doc_a", "/tmp/a.html"));
+  workflow.updateDraftText("旧草稿");
+  const saving = workflow.flushDraft();
+  workflow.updateDraftText("最后输入");
+  workflow.close();
+  const opening = workflow.open(documentContext("doc_b", "/tmp/b.html"));
+  assert.equal(session.snapshot.status, "loading");
+  release();
+  await saving;
+  await opening;
+  assert.deepEqual(bridge.calls.drafts.map((body) => [body.documentId, body.text]), [["doc_a", "旧草稿"], ["doc_a", "最后输入"]]);
+  assert.equal(session.snapshot.context.documentId, "doc_b");
+  assert.equal(session.snapshot.draftText, "");
+  assert.equal(workflow.hasPendingDraft, false);
+});
+
+test("failed draft persistence survives close and reopen and reports an unresolved drain", async () => {
+  let failing = true;
+  const bridge = stubBridge({ saveConversationDraft: async (body) => {
+    if (failing) throw new Error("offline");
+    return { draft: { conversationId: body.conversationId, revision: 1, text: body.text, intent: body.intent } };
+  } });
+  const { session, workflow } = createWorkflow(bridge, manualTimers());
+  const context = documentContext("doc_a", "/tmp/a.html");
+  await workflow.open(context);
+  workflow.updateDraftText("不能丢失");
+  assert.equal(await workflow.flushDraft(), false);
+  workflow.close();
+  await workflow.open(context);
+  assert.equal(session.snapshot.draftText, "不能丢失");
+  failing = false;
+  assert.equal(await workflow.flushDraft(), true);
 });
 
 test("opening without a source path deactivates instead of calling the Bridge", async () => {

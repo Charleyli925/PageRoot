@@ -466,6 +466,13 @@ export class WorkspaceController {
         bridgeClient,
         conversationSession,
       });
+      this.#drainCoordinator.replace("conversation-draft", {
+        label: "保存下一轮草稿",
+        inspect: () => this.#conversationWorkflow?.hasPendingDraft
+          ? { state: "pending", reason: "下一轮草稿尚未保存。" }
+          : { state: "resolved" },
+        drain: () => this.#conversationWorkflow?.flushDraft() ?? true,
+      });
       this.#conversationSessionUnsubscribe = conversationSession.subscribe(
         (snapshot) => {
           this.#conversationSnapshot = snapshot;
@@ -959,15 +966,18 @@ export class WorkspaceController {
   }
 
   updateConversationDraftText(text) {
+    // Close phase is published before draining; React may not have disabled the input yet.
+    if (["preparing", "ready"].includes(this.#projectSnapshot?.close?.phase)) return;
     this.#conversationWorkflow?.updateDraftText(text);
   }
 
   updateConversationDraftIntent(intent) {
+    if (["preparing", "ready"].includes(this.#projectSnapshot?.close?.phase)) return;
     this.#conversationWorkflow?.updateDraftIntent(intent);
   }
 
   flushConversationDraft() {
-    return this.#conversationWorkflow?.flushDraft() ?? Promise.resolve();
+    return this.#conversationWorkflow?.flushDraft() ?? Promise.resolve(true);
   }
 
   subscribe(listener) {

@@ -13,6 +13,9 @@
 > 已交付方案的历史记录，不再是实现或验收要求。旧记录中的 `discussion` mode 和 `discuss`
 > draft intent 只为无损读取保留，不能成为新的发送能力。
 
+> **当前展示补充（2026-09-09）：** 执行记录默认展开并按时间保留；常驻下一轮草稿仅保存文字，
+> 不恢复 Discussion 或新发送入口。当前行为唯一合同见 [交互流程](INTERACTION_FLOW.md)。
+
 本文定义 PageRoot 下一阶段的目标产品规则。它不是对现有 Agent 交付弹窗或处理抽屉的局部换皮，而是把编辑、评论、AI 讨论、受管执行、Candidate 决策与审阅统一为一个围绕真实 HTML 的连续工作流。
 
 本文只定义目标产品与验收合同。实施时必须同步更新协议、Schema、状态所有权、安全模型、测试和 ADR；不能只增加一个聊天侧栏，也不能让 Renderer 或 Qoder 会话绕过现有 Request、Candidate、Version 与 Working Copy 权威。
