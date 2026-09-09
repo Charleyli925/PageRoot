@@ -3519,6 +3519,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     mutation: HtmlCanvasMutation,
     options: {
       validateResult?: (result: ReturnType<typeof applyPatchPlan>) => void;
+      onUnchanged?: () => void;
       islandTextCommit?: {
         selection: NativeEditSelection;
         deferPreviewReconcile?: boolean;
@@ -3608,7 +3609,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (!result) {
         throw new Error("语义操作未产出可发布的源码物化结果。");
       }
-      if (result.html === currentSource) return null;
+      if (result.html === currentSource) {
+        options.onUnchanged?.();
+        return null;
+      }
       const forwardPlan = plannedCommand ?? {
         type: String(result.inversePlan?.metadata?.originalType ?? ""),
         targetRefs: operationTargetRefs,
@@ -7858,7 +7862,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             computedValue: verifiedOverride.computedValue,
           },
         };
+        let unchanged = false;
         const styled = applySourceCommand(command, mutation, {
+          onUnchanged: () => { unchanged = true; },
           validateResult: (candidate) => {
             const expectedTargetId = activeNativeEdit?.rootTargetRef.targetId
               ?? activeRange.target.id;
@@ -7876,13 +7882,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           },
         });
         const resumed = Boolean(
-          styled
+          (styled || unchanged)
           && resumeNativeEditAfterStyle
           && startEditing(undefined, nativeSelectionAfterStyle)
         );
         containerRef.current?.setAttribute(
           "data-native-format-resume",
-          `${styled ? "source" : "rejected"}:${
+          `${styled ? "source" : unchanged ? "unchanged" : "rejected"}:${
             resumeNativeEditAfterStyle ? "requested" : "not-requested"
           }:${resumed ? "resumed" : "not-resumed"}`,
         );
@@ -7919,6 +7925,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           computedValue: verifiedOverride.computedValue,
         },
       };
+      let unchanged = false;
       const styled = applySourceCommand({
         type: "set-inline-style",
         targetRef: sourceTargetRefForSelection(target),
@@ -7926,15 +7933,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         value,
         ...(verifiedOverride.priority === "important" ? { important: true } : {}),
         expectedSourceSha256: sourceIndexRef.current?.sourceSha256 || "",
-      }, mutation);
+      }, mutation, { onUnchanged: () => { unchanged = true; } });
       const resumed = Boolean(
-        styled
+        (styled || unchanged)
         && resumeNativeEditAfterStyle
         && startEditing(undefined, nativeSelectionAfterStyle)
       );
       containerRef.current?.setAttribute(
         "data-native-format-resume",
-        `${styled ? "source" : "rejected"}:${
+        `${styled ? "source" : unchanged ? "unchanged" : "rejected"}:${
           resumeNativeEditAfterStyle ? "requested" : "not-requested"
         }:${resumed ? "resumed" : "not-resumed"}`,
       );

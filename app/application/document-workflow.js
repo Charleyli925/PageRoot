@@ -2441,6 +2441,11 @@ export class DocumentWorkflow {
     const drainedRevision = this.#documentSession.editRevision;
     const flush = await this.flush({ throughRevision: drainedRevision });
     if (!flush || flush.status !== "succeeded") return flush;
+    // A newer direct edit may arrive while the initial drain waits. Undo must
+    // not silently retarget that newer history entry, even on a legacy route
+    // whose context Hash did not change with the save receipt.
+    if (this.#documentSession.editRevision !== drainedRevision
+      || this.#documentSession.html !== drainedHtml) return stale(context);
     if (!this.#isCurrent(context)) {
       const current = copyContext(this.#projectSession.context);
       if (!sameOpenRoute(context, current, this.#codecs.sameSourcePath)

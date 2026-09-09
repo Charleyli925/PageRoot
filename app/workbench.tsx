@@ -3342,10 +3342,12 @@ export default function Workbench() {
       || projectHydrating
       || projectLoadError
       || isViewTransitioning()
-      || workspaceController?.hasDocumentHistoryAction
       || String(currentDocument.persistState) === "conflict"
       || viewMode === "history"
     ) return false;
+    // A published history projection can accept the next source transaction
+    // while its save receipt drains. The history chain validates its base;
+    // an in-flight receipt alone must not revoke visible editability.
     try {
       const enqueued = enqueueAutosave(nextHtml, mutation, sourceTransaction);
       if (enqueued.status !== "succeeded") {

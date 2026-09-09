@@ -1343,7 +1343,12 @@ export class IslandEditingController {
     );
     let current = walker.nextNode();
     while (current) {
-      if (range.intersectsNode(current) && current.parentElement) {
+      // A range ending at offset zero in the next Text node visually selects
+      // none of it, although intersectsNode includes that boundary. Its style
+      // must not change the toolbar's state for the selected characters.
+      const start = range.startContainer === current ? range.startOffset : 0;
+      const end = range.endContainer === current ? range.endOffset : (current as Text).length;
+      if (end > start && range.intersectsNode(current) && current.parentElement) {
         if (!elements.includes(current.parentElement)) {
           elements.push(current.parentElement);
         }

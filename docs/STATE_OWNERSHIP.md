@@ -287,6 +287,11 @@ Rules:
   persisted/working Hash and revision with no pending write. Another edit or
   navigation invalidates the queued request; it never shares the preceding
   command's success as if its own direction had executed.
+- A history request checks its captured HTML/revision after the initial save
+  drain even when the route Hash stays unchanged. A newer edit invalidates that
+  request before history apply. After canonical history apply, further edits
+  may extend the verified source chain while its save receipt drains; receipt
+  latency alone cannot revoke editing on the published projection.
 - A current-source transition first stages one complete candidate containing
   project identity, full OpenTarget identity, source path, Version authority,
   HTML bytes and verified Hash. Only after every field is valid may the
@@ -640,5 +645,7 @@ or command can grant additional write authority.
 ### Controller-owned source node copies
 
 `HtmlCanvasEditor` retains private Runtime source identity. `IslandEditingController` reports only its own snapshot clone pairs and canonical source imports; the editor transfers proof only from an already registered object in the same frame/execution, or from a canonical import under a proved host. IME snapshots, rollback, canonical remount and history adoption must preserve this provenance. Public DOM attributes, author-created clones and source-identical runtime nodes do not confer authority. Semantic source commits keep their existing revision/identity checks.
+
+Inline format state counts only characters actually covered by the selection, excluding zero-length boundary text. After semantic identity and materialization checks succeed, an unchanged HTML result may resume the existing native edit session without publishing a write; rejected commands retain their failure path.
 
 Explicit source reload additionally checks the verified physical frame generation: identical source bytes in the previous frame cannot acknowledge recovery. Workbench waits for an admitted author candidate; a settled static/failure outcome uses the existing bounded static rebuild. Frame promotion transfers keyboard focus only when the retiring Canvas owns it, without reconstructing a native caret or taking focus from another input. Commit rollback returns focus only if the failed candidate still owns it.

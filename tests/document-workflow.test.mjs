@@ -2153,3 +2153,30 @@ for (const change of ['none', 'working-copy', 'project-root', 'epoch', 'invalid-
     assert.equal(harness.workflow.hasHistoryAction, false);
   });
 }
+
+
+test("DocumentWorkflow does not retarget Undo when a newer edit arrives during its initial drain", async () => {
+  const before = '<!doctype html><html><body><p>one</p></body></html>';
+  const after = before.replace('one', 'two');
+  const newer = before.replace('one', 'three');
+  let releaseSave;
+  const writes = [];
+  const harness = createHarness({ html: before, bridge: {
+    async autosave(body) {
+      writes.push(body);
+      if (writes.length === 1) await new Promise(resolve => { releaseSave = resolve; });
+      return { ok: true, content: body.html, sha256: sha256(body.html),
+        persistedRevision: body.editRevision, lastModifiedAt: '2026-09-09T00:00:00.000Z' };
+    },
+  } });
+  harness.sourceHistorySession.activate(harness.context, sha256(before), null);
+  harness.workflow.enqueueEdit({ html: after, sourceTransaction: operation(before, after), context: harness.context });
+  const undo = harness.workflow.performHistoryAction({ direction: 'undo', context: harness.context });
+  while (!releaseSave) await new Promise(resolve => setImmediate(resolve));
+  harness.workflow.enqueueEdit({ html: newer, sourceTransaction: operation(after, newer), context: harness.context });
+  releaseSave();
+  assert.equal((await undo).status, 'stale');
+  assert.equal(harness.documentSession.html, newer);
+  assert.equal((await harness.workflow.flush()).status, 'succeeded');
+  assert.deepEqual(writes.map(write => write.html), [after, newer]);
+});

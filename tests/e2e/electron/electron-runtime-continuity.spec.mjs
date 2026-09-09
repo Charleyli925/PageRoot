@@ -639,3 +639,88 @@ test("Canvas shortcuts follow the promoted frame and same-source reload keeps ch
     await page.screenshot({ path: testInfo.outputPath("history-focus-and-reload-chart.png") });
   });
 });
+
+test("format state ignores unselected boundary text and unchanged formatting keeps the native session", async () => {
+  const source = DELAYED_CHART_PAGE.replace('Revenue grew steadily this quarter.', '<span style="font-style:italic">Selected</span> unselected normal text.');
+  await withRuntimeProject('pageroot-format-boundary-e2e-', { 'runtime-report.html': source }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, 'format-chart');
+    const editor = page.getByTestId('html-canvas-editor');
+    const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const target = frame.locator('[data-native-case="format-chart"]');
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await target.dblclick();
+    await target.evaluate(node => {
+      const span = node.querySelector('span');
+      const range = node.ownerDocument.createRange();
+      range.setStart(span.firstChild, 0);
+      range.setEnd(span.nextSibling, 0);
+      const selection = node.ownerDocument.getSelection();
+      selection.removeAllRanges(); selection.addRange(range);
+      node.ownerDocument.dispatchEvent(new Event('selectionchange'));
+    });
+    const italic = editor.getByRole('button', { name: '斜体', exact: true });
+    await expect(italic).toHaveAttribute('aria-pressed', 'true');
+    await italic.click();
+    await expect.poll(() => target.locator('span').first().evaluate(node => getComputedStyle(node).fontStyle)).toBe('normal');
+    await editor.getByText('样式与间距', { exact: true }).click();
+    const size = editor.getByLabel('字号（像素）');
+    await size.fill('24');
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain('font-size: 24px');
+    const saved = await readPublishedWorkingCopy(working);
+    // A different numeric spelling requests the same valid 24px style.
+    await editor.getByText('样式与间距', { exact: true }).click();
+    await size.fill('024');
+    await expect(editor).toHaveAttribute('data-native-format-resume', 'unchanged:requested:resumed');
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    expect(await readPublishedWorkingCopy(working)).toBe(saved);
+    await target.press(keyShortcut('ArrowRight'));
+    await page.keyboard.insertText(' STILL_EDITING');
+    await page.keyboard.press(keyShortcut('s'));
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain('STILL_EDITING');
+  });
+});
+
+
+test("editing a published Undo projection remains available while its save receipt waits", async () => {
+  await withRuntimeProject('pageroot-history-followup-e2e-', { 'runtime-report.html': DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, 'format-chart');
+    const editor = page.getByTestId('html-canvas-editor');
+    const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const target = frame.locator('[data-native-case="format-chart"]');
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await target.dblclick();
+    await target.press(keyShortcut('ArrowRight'));
+    await page.keyboard.insertText(' BEFORE_UNDO');
+    await page.keyboard.press(keyShortcut('s'));
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain('BEFORE_UNDO');
+    let release;
+    const barrier = new Promise(resolve => { release = resolve; });
+    let started;
+    const saving = new Promise(resolve => { started = resolve; });
+    const routePattern = /\/autosave(?:\?|$)/u;
+    await page.route(routePattern, async route => {
+      started();
+      await barrier;
+      await route.continue();
+    });
+    try {
+      await page.keyboard.press(keyShortcut('z'));
+      await saving;
+      await expect(target).not.toContainText('BEFORE_UNDO');
+      await target.dblclick();
+      await target.press(keyShortcut('ArrowLeft'));
+      for (let i = 0; i < 6; i++) await page.keyboard.press('Shift+ArrowRight');
+      await editor.getByRole('button', { name: '加粗', exact: true }).click();
+      await expect(target).toHaveAttribute('contenteditable', 'true');
+      await target.press(keyShortcut('ArrowRight'));
+      await page.keyboard.insertText(' AFTER_UNDO');
+      release();
+      await page.keyboard.press(keyShortcut('s'));
+      await expect.poll(() => readPublishedWorkingCopy(working)).toContain('AFTER_UNDO');
+      expect(await readPublishedWorkingCopy(working)).not.toContain('BEFORE_UNDO');
+    } finally {
+      release();
+      await page.unroute(routePattern);
+    }
+  });
+});
