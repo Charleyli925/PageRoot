@@ -552,8 +552,14 @@ test("owned composition snapshots keep formatted source nodes editable but autho
     await page.keyboard.press(keyShortcut("s"));
     const working = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(async () => await readPublishedWorkingCopy(working, "utf8")).toContain("CONTINUED");
+    const retiringGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
     await page.keyboard.press("Escape");
     await expect(paragraph).not.toHaveAttribute("contenteditable", "true");
+    // Escape publishes the deferred runtime refresh. Inject into its completed
+    // active document; a disposable clone in the retiring iframe should vanish.
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', retiringGeneration);
+    await expect(editor.locator('iframe[data-runtime-slot-role="inactive"]')).toHaveCount(0);
+    await expect(editor).toHaveAttribute('data-render-verified', 'true');
     // Public attributes and source-identical bytes cannot grant authority.
     await paragraph.evaluate((node) => {
       const clone = node.cloneNode(true);
