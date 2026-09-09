@@ -23,6 +23,7 @@ import {
   activateNativeEdit,
   caseSelector,
   currentEditorFrame,
+  currentNativeTarget,
   documentToken,
   fixtureBuffer,
   geometrySnapshot,
@@ -406,7 +407,10 @@ export async function clickEditHistoryMenu(electronApp, page, direction) {
 
 export async function addCanvasComment(page, frame, caseId, text) {
   await page.keyboard.press("Escape");
-  const target = frame.locator(caseSelector(caseId));
+  // A source-authority fence can replace the active iframe after a persisted
+  // edit. Resolve the comment target through the current iframe locator so
+  // the click follows that replacement instead of waiting on a retired Frame.
+  const target = currentNativeTarget(frame, caseId);
   await target.scrollIntoViewIfNeeded();
   await target.click();
   const commentButton = page.getByRole("button", { name: /给.+留评论/u })
