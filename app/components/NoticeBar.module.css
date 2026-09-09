@@ -52,14 +52,27 @@
 
 .viewport {
   position: fixed;
-  top: calc(var(--notice-header-height, 88px) + 16px);
-  left: calc((100vw - var(--workbench-inspector-width, 376px)) / 2);
-  width: min(
-    520px,
-    calc(100vw - var(--workbench-inspector-width, 376px) - 28px)
-  );
+  top: 8px;
+  left: 50%;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 32px));
+  min-height: 0;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 7px 12px;
+  border-color: #c8c2f2;
+  border-radius: 24px;
+  color: var(--indigo-deep);
+  background: rgb(247 246 255 / 96%);
+  box-shadow: 0 8px 20px rgb(40 37 56 / 12%);
   pointer-events: auto;
 }
+.viewport .icon { width: 20px; height: 24px; margin: 0; background: transparent; }
+.viewport .copy { gap: 1px; }
+.viewport .copy strong { color: var(--indigo-deep); font-size: 12px; font-weight: 650; }
+.viewport .copy > span { font-size: 12px; }
+.viewport .actions button { min-height: 28px; border-radius: 999px; }
+.viewport .close { width: 24px; min-width: 24px; }
 
 .canvas {
   position: absolute;

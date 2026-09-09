@@ -2,7 +2,7 @@ export function alignPreviewSourceSurface(sourceIndex, liveNodes) {
   const elements = sourceIndex.elements;
   const liveLeaves = new Set(
     liveNodes.filter((node) => (
-      !liveNodes.some((other) => other !== node && node.contains(other))
+      !liveNodes.some((other) => other !== node && (node.contains(other) || (node.tagName.toLowerCase() === "template" && node.content?.contains(other))))
     )),
   );
   const skipDescendantsOf = new Set();

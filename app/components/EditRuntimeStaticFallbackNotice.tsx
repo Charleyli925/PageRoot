@@ -25,6 +25,8 @@ export default function EditRuntimeStaticFallbackNotice({
   const latestStaticVisible = state === "static-visible";
   const directStaticVisible = state === "direct-static-visible";
   const lastKnownGoodReadOnly = state === "last-known-good-readonly";
+  // A usable static document is an ordinary editable surface, not an alert.
+  if (state === "none" || latestStaticVisible || directStaticVisible) return null;
   if (!lastKnownGoodReadOnly && dismissedState === state) return null;
 
   return (
@@ -35,19 +37,19 @@ export default function EditRuntimeStaticFallbackNotice({
       aria-live={lastKnownGoodReadOnly ? "assertive" : "polite"}
     >
       <strong>{lastKnownGoodReadOnly
-        ? "页面预览未能完整更新"
+        ? "页面暂时无法编辑"
         : latestStaticVisible
           ? "部分动态内容未更新"
           : directStaticVisible
             ? "部分动态内容未运行"
           : "部分动态内容未加载"}</strong>
       <span>{lastKnownGoodReadOnly
-        ? "当前画面是上一次可用预览；最新 HTML 未回滚。"
+        ? "仍显示上一次可用预览，你的修改已保留。请重新加载后继续。"
         : latestStaticVisible
           ? "已显示最新源码的静态页面，仍可编辑和保存。"
           : directStaticVisible
             ? "当前已显示静态页面，仍可编辑和保存。"
-          : "旧页面会保持可见，直到最新静态页面准备完成。"}</span>
+          : "正在恢复页面，完成后即可继续编辑。"}</span>
       {onRetry ? (
         <button
           type="button"
@@ -61,7 +63,7 @@ export default function EditRuntimeStaticFallbackNotice({
             finally { setRetrying(false); }
           }}
         >
-          {retrying ? "正在保存并重新加载…" : lastKnownGoodReadOnly ? "重新加载" : "重新加载动态内容"}
+          {retrying ? "正在重新加载…" : lastKnownGoodReadOnly ? "重新加载" : "重新加载动态内容"}
         </button>
       ) : null}
       {retryFailed ? <span role="status">暂时无法重新加载，请检查文件保存状态后重试。</span> : null}

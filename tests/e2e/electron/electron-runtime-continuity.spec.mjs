@@ -524,3 +524,211 @@ test("restored hidden tabs initialize real charts with visible geometry before f
     await page.screenshot({ path: testInfo.outputPath('restored-tab-chart.png') });
   });
 });
+
+
+test("owned composition snapshots keep formatted source nodes editable but author clones stay comment-only", {
+  tag: ["@cap-canvas-editing"],
+}, async ({}, testInfo) => {
+  const source = DELAYED_CHART_PAGE.replace("Revenue grew steadily this quarter.", "Revenue <strong>grew steadily</strong> this quarter.");
+  await withRuntimeProject("pageroot-owned-snapshot-e2e-", { "runtime-report.html": source }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, "format-chart");
+    const editor = page.getByTestId("html-canvas-editor");
+    const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const paragraph = frame.locator('[data-native-case="format-chart"]');
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    await paragraph.dblclick();
+    await expect(paragraph).toHaveAttribute("contenteditable", "true");
+    await paragraph.press(keyShortcut("ArrowRight"));
+    await paragraph.dispatchEvent("compositionstart", { data: "" });
+    await paragraph.dispatchEvent("compositionend", { data: "续写" });
+    await paragraph.press(keyShortcut("ArrowLeft"));
+    for (let i = 0; i < 7; i += 1) await page.keyboard.press("Shift+ArrowRight");
+    await editor.getByRole("button", { name: "加粗", exact: true }).click();
+    await paragraph.locator("strong").dblclick();
+    await expect(editor.getByRole("button", { name: "斜体", exact: true })).toBeVisible();
+    await editor.getByRole("button", { name: "斜体", exact: true }).click();
+    await paragraph.press(keyShortcut("ArrowRight"));
+    await page.keyboard.insertText(" CONTINUED");
+    await page.keyboard.press(keyShortcut("s"));
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await expect.poll(async () => await readPublishedWorkingCopy(working, "utf8")).toContain("CONTINUED");
+    const retiringGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+    await page.keyboard.press("Escape");
+    await expect(paragraph).not.toHaveAttribute("contenteditable", "true");
+    // Escape publishes the deferred runtime refresh. Inject into its completed
+    // active document; a disposable clone in the retiring iframe should vanish.
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', retiringGeneration);
+    // Both physical slots persist. The retired document becomes the empty
+    // inactive slot only after promotion cleanup (it was `previous` before).
+    await expect(editor.locator('iframe[data-runtime-slot-role="inactive"]')).toHaveCount(1);
+    await expect(editor).toHaveAttribute('data-render-verified', 'true');
+    // Public attributes and source-identical bytes cannot grant authority.
+    await paragraph.evaluate((node) => {
+      const clone = node.cloneNode(true);
+      clone.setAttribute("data-untrusted-copy", "true");
+      node.after(clone);
+    });
+    await frame.locator('[data-untrusted-copy] strong').first().click();
+    await expect(editor.getByRole("button", { name: "加粗", exact: true })).toHaveCount(0);
+    await expect(editor.getByRole("button", { name: /评论/ })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("owned-snapshot-authority.png") });
+  });
+});
+
+test("source reload recovers editing from a read-only frame even when dynamic preparation fails", async ({}, testInfo) => {
+  await withRuntimeProject("pageroot-static-reload-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, electronApp, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, 'format-chart');
+    const editor = page.getByTestId('html-canvas-editor');
+    const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const target = frame.locator('[data-native-case="format-chart"]');
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    await target.dblclick();
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    await target.press(keyShortcut('ArrowRight'));
+    await page.keyboard.insertText(' FAIL_CHART');
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveAttribute('aria-readonly', 'true', { timeout: 20_000 });
+    await expect(page.getByTestId('edit-runtime-static-fallback')).toContainText('页面暂时无法编辑');
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain('FAIL_CHART');
+    // A second, independent failure during reload used to retain the previous
+    // runtime's read-only flag forever, despite a verified static document.
+    await electronApp.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('html-edit-runtime:prepare');
+      ipcMain.handle('html-edit-runtime:prepare', () => { throw new Error('synthetic preparation unavailable'); });
+    });
+    await page.getByRole('button', { name: '更多', exact: true }).click();
+    await page.getByRole('menuitem', { name: '重新载入当前 HTML', exact: true }).click();
+    await expect(page.locator('.workbench-chrome-status')).toHaveText('页面已重新加载，可以继续编辑');
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+    await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
+    await target.dblclick();
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    await target.press(keyShortcut('ArrowRight'));
+    await page.keyboard.insertText(' RECOVERED');
+    await page.keyboard.press(keyShortcut('s'));
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain('RECOVERED');
+    await page.screenshot({ path: testInfo.outputPath('reload-editing-restored.png') });
+  });
+});
+
+test("Canvas shortcuts follow the promoted frame and same-source reload keeps charts running", async ({}, testInfo) => {
+  await withRuntimeProject("pageroot-history-focus-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, "format-chart");
+    const editor = page.getByTestId("html-canvas-editor");
+    const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const target = frame.locator('[data-native-case="format-chart"]');
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await target.dblclick();
+    await target.press(keyShortcut("ArrowLeft"));
+    for (let i = 0; i < 6; i += 1) await page.keyboard.press("Shift+ArrowRight");
+    await editor.getByRole("button", { name: "加粗", exact: true }).click();
+    await target.press(keyShortcut("ArrowRight"));
+    await page.keyboard.insertText(" HISTORY_CONTINUITY");
+    await page.keyboard.press(keyShortcut("s"));
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain("HISTORY_CONTINUITY");
+    const generation = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute("data-frame-generation");
+    await page.keyboard.press(keyShortcut("z"));
+    await expect.poll(() => readPublishedWorkingCopy(working)).not.toContain("HISTORY_CONTINUITY");
+    // No extra click or history-settlement wait: a distinct Redo arriving
+    // during Undo's save/acknowledgement must execute after it, not disappear.
+    await page.keyboard.press(keyShortcut("Shift+z"));
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain("HISTORY_CONTINUITY");
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute("data-frame-generation", generation);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-runtime-slot-role"))).toBe("active");
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "重新载入当前 HTML", exact: true }).click();
+    await expect(page.locator(".workbench-chrome-status")).toHaveText("页面已重新加载，可以继续编辑");
+    await expect.poll(() => frame.locator("#chart canvas").evaluateAll(canvases => canvases.filter(canvas => (
+      canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data.some((value, index) => index % 4 === 3 && value > 0)
+    )).length)).toBe(1);
+    await target.dblclick();
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await page.screenshot({ path: testInfo.outputPath("history-focus-and-reload-chart.png") });
+  });
+});
+
+test("format state ignores unselected boundary text and unchanged formatting keeps the native session", async () => {
+  const source = DELAYED_CHART_PAGE.replace('Revenue grew steadily this quarter.', '<span style="font-style:italic">Selected</span> unselected normal text.');
+  await withRuntimeProject('pageroot-format-boundary-e2e-', { 'runtime-report.html': source }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, 'format-chart');
+    const editor = page.getByTestId('html-canvas-editor');
+    const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const target = frame.locator('[data-native-case="format-chart"]');
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await target.dblclick();
+    await target.evaluate(node => {
+      const span = node.querySelector('span');
+      const range = node.ownerDocument.createRange();
+      range.setStart(span.firstChild, 0);
+      range.setEnd(span.nextSibling, 0);
+      const selection = node.ownerDocument.getSelection();
+      selection.removeAllRanges(); selection.addRange(range);
+      node.ownerDocument.dispatchEvent(new Event('selectionchange'));
+    });
+    const italic = editor.getByRole('button', { name: '斜体', exact: true });
+    await expect(italic).toHaveAttribute('aria-pressed', 'true');
+    await italic.click();
+    await expect.poll(() => target.locator('span').first().evaluate(node => getComputedStyle(node).fontStyle)).toBe('normal');
+    await editor.getByText('样式与间距', { exact: true }).click();
+    const size = editor.getByLabel('字号（像素）');
+    await size.fill('24');
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain('font-size: 24px');
+    const saved = await readPublishedWorkingCopy(working);
+    // A different numeric spelling requests the same valid 24px style.
+    await editor.getByText('样式与间距', { exact: true }).click();
+    await size.fill('024');
+    await expect(editor).toHaveAttribute('data-native-format-resume', 'unchanged:requested:resumed');
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    expect(await readPublishedWorkingCopy(working)).toBe(saved);
+    await target.press(keyShortcut('ArrowRight'));
+    await page.keyboard.insertText(' STILL_EDITING');
+    await page.keyboard.press(keyShortcut('s'));
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain('STILL_EDITING');
+  });
+});
+
+
+test("editing a published Undo projection remains available while its save receipt waits", async () => {
+  await withRuntimeProject('pageroot-history-followup-e2e-', { 'runtime-report.html': DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, 'format-chart');
+    const editor = page.getByTestId('html-canvas-editor');
+    const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const target = frame.locator('[data-native-case="format-chart"]');
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await target.dblclick();
+    await target.press(keyShortcut('ArrowRight'));
+    await page.keyboard.insertText(' BEFORE_UNDO');
+    await page.keyboard.press(keyShortcut('s'));
+    await expect.poll(() => readPublishedWorkingCopy(working)).toContain('BEFORE_UNDO');
+    let release;
+    const barrier = new Promise(resolve => { release = resolve; });
+    let started;
+    const saving = new Promise(resolve => { started = resolve; });
+    const routePattern = /\/autosave(?:\?|$)/u;
+    await page.route(routePattern, async route => {
+      started();
+      await barrier;
+      await route.continue();
+    });
+    try {
+      await page.keyboard.press(keyShortcut('z'));
+      await saving;
+      await expect(target).not.toContainText('BEFORE_UNDO');
+      await target.dblclick();
+      await target.press(keyShortcut('ArrowLeft'));
+      for (let i = 0; i < 6; i++) await page.keyboard.press('Shift+ArrowRight');
+      await editor.getByRole('button', { name: '加粗', exact: true }).click();
+      await expect(target).toHaveAttribute('contenteditable', 'true');
+      await target.press(keyShortcut('ArrowRight'));
+      await page.keyboard.insertText(' AFTER_UNDO');
+      release();
+      await page.keyboard.press(keyShortcut('s'));
+      await expect.poll(() => readPublishedWorkingCopy(working)).toContain('AFTER_UNDO');
+      expect(await readPublishedWorkingCopy(working)).not.toContain('BEFORE_UNDO');
+    } finally {
+      release();
+      await page.unroute(routePattern);
+    }
+  });
+});

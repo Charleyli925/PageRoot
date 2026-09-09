@@ -513,6 +513,7 @@ export default function Workbench() {
     expectedHtml: string,
     expectedSha256: string,
     context?: ProjectContext,
+    previousFrameGeneration?: number | null,
   ) => Promise<void>>(async () => {
     throw new Error("画布核对尚未完成初始化。");
   });
@@ -2585,6 +2586,7 @@ export default function Workbench() {
     expectedHtml: string,
     expectedSha256: string,
     context?: ProjectContext,
+    previousFrameGeneration?: number | null,
   ): Promise<void> => {
     performance.mark("pageroot:canvas:verify-start");
     let expectedGeneration = currentDocumentSessionSnapshot().canvasGeneration;
@@ -2595,9 +2597,10 @@ export default function Workbench() {
       );
       for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
-        if (EDIT_RUNTIME_PENDING_PHASES.has(
+        const runtimePending = EDIT_RUNTIME_PENDING_PHASES.has(
           currentControllerSnapshot()?.editRuntime?.phase || "static",
-        )) {
+        );
+        if (runtimePending) {
           // Main bounds preparation and visible iframe load independently.
           // The disposable author frame cannot acknowledge its source until
           // both phases settle; treating that permitted interval as a failed
@@ -2615,6 +2618,14 @@ export default function Workbench() {
         }
         const renderedSource = editorRef.current?.getRenderedSourceHtml();
         if (renderedSource !== expectedHtml) continue;
+        if (previousFrameGeneration != null
+          && editorRef.current?.getRenderedFrameGeneration() === previousFrameGeneration) {
+          // Same bytes in the old frame are not a reload receipt. Let the new
+          // author candidate finish; only a settled failure/static state needs
+          // the bounded rebuild below, which must not cancel a healthy load.
+          if (!runtimePending) return false;
+          continue;
+        }
         const renderedSha256 = await browserSha256(renderedSource);
         if (renderedSha256 !== expectedSha256) {
           throw new Error("画布已载入内容的 Hash 与源 HTML 不一致。");
@@ -3331,10 +3342,12 @@ export default function Workbench() {
       || projectHydrating
       || projectLoadError
       || isViewTransitioning()
-      || workspaceController?.hasDocumentHistoryAction
       || String(currentDocument.persistState) === "conflict"
       || viewMode === "history"
     ) return false;
+    // A published history projection can accept the next source transaction
+    // while its save receipt drains. The history chain validates its base;
+    // an in-flight receipt alone must not revoke visible editability.
     try {
       const enqueued = enqueueAutosave(nextHtml, mutation, sourceTransaction);
       if (enqueued.status !== "succeeded") {
@@ -3616,6 +3629,8 @@ export default function Workbench() {
     ) return;
     const operationId = beginSourceTransition();
     if (operationId === null) return;
+    const previousFrameGeneration = editorRef.current?.getRenderedFrameGeneration() ?? null;
+    let restored = false;
     try {
       const outcome = await requiredWorkspaceController(workspaceController)
         .reloadDocumentAuthority({
@@ -3636,9 +3651,14 @@ export default function Workbench() {
         sourceTransitionOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
       ) return;
-      setFileStatusNotice("已加载磁盘最新版本");
+      setFileStatusNotice("已重新读取文件，正在恢复页面…");
+      const reloadedDocument = currentDocumentSessionSnapshot();
+      await verifyCanvasRendered(reloadedDocument.html, reloadedDocument.workingHtmlSha256 || await browserSha256(reloadedDocument.html), context, previousFrameGeneration);
+      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return;
+      restored = true;
     } catch (cause) {
-      if (!isCurrentProjectContext(context)) return;
+      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return;
+      setFileStatusNotice("页面未能重新加载，请重试");
       reportInternalFailure({
         area: "document",
         operation: "reload",
@@ -3648,6 +3668,15 @@ export default function Workbench() {
       });
     } finally {
       finishSourceTransition(operationId);
+    }
+    if (restored) {
+      // Let the completed transition release its imperative and controlled
+      // locks before reporting editor readiness, rather than disk-read success.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return;
+      setFileStatusNotice(editorRef.current?.isCurrentProjectionEditable()
+        ? "页面已重新加载，可以继续编辑"
+        : "文件已重新读取，但页面暂时无法编辑，请重试");
     }
   }, [
     beginSourceTransition,
@@ -3660,6 +3689,7 @@ export default function Workbench() {
     projectLoadError,
     refreshWorkspace,
     workspaceController,
+    verifyCanvasRendered,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.reloadCurrentSource = () => {
@@ -6158,6 +6188,13 @@ export default function Workbench() {
             onExportCurrentHtml: () => void exportCurrentHtml(),
             canReloadCurrentSource,
             onReloadCurrentSource: () => void reloadCurrentSource(),
+            onRetryDynamicContent: canReloadCurrentSource && editRuntimeSnapshot?.retryAvailable
+              ? () => {
+                  void workspaceControllerRef.current?.retryEditAuthorRuntime().then((started) => {
+                    if (!started) setFileStatusNotice("暂时无法重新加载，请稍后重试");
+                  });
+                }
+              : undefined,
           }}
           onSelectEdit={onSelectEdit}
           onSelectPreview={onSelectPreview}

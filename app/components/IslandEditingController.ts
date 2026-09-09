@@ -76,6 +76,10 @@ export type IslandEditingControllerOptions = {
   onEscape?: () => void;
   onError?: (error: Error) => void;
   onPendingCommandReady?: () => void;
+  /** Only controller-owned copies transfer private runtime identity. */
+  onCloneElement?: (original: Element, clone: Element) => void;
+  /** Newly parsed children originate in the authoritative source baseline. */
+  onSourceChildrenRestored?: (elements: readonly Element[]) => void;
 };
 
 export type IslandExternalBaselineOptions = {
@@ -471,9 +475,19 @@ function deleteSelection(
   return true;
 }
 
-function restoreChildren(hostElement: HTMLElement, children: Node[]): void {
+function cloneOwnedNode(node: Node, onClone?: IslandEditingControllerOptions["onCloneElement"]): Node {
+  const clone = node.cloneNode(true);
+  const visit = (original: Node, copy: Node) => {
+    if (original.nodeType === 1 && copy.nodeType === 1) onClone?.(original as Element, copy as Element);
+    Array.from(original.childNodes).forEach((child, index) => visit(child, copy.childNodes[index]));
+  };
+  if (onClone) visit(node, clone);
+  return clone;
+}
+
+function restoreChildren(hostElement: HTMLElement, children: Node[], onClone?: IslandEditingControllerOptions["onCloneElement"]): void {
   hostElement.replaceChildren(
-    ...children.map((node) => node.cloneNode(true)),
+    ...children.map((node) => cloneOwnedNode(node, onClone)),
   );
 }
 
@@ -595,7 +609,7 @@ export class IslandEditingController {
 
   private readonly callbacks: Pick<
     IslandEditingControllerOptions,
-    "onStateChange" | "onBlur" | "onEscape" | "onError" | "onPendingCommandReady"
+    "onStateChange" | "onBlur" | "onEscape" | "onError" | "onPendingCommandReady" | "onCloneElement" | "onSourceChildrenRestored"
   >;
 
   private readonly savedAttributes = new Map<string, SavedAttribute>();
@@ -647,6 +661,8 @@ export class IslandEditingController {
       onEscape: options.onEscape,
       onError: options.onError,
       onPendingCommandReady: options.onPendingCommandReady,
+      onCloneElement: options.onCloneElement,
+      onSourceChildrenRestored: options.onSourceChildrenRestored,
     };
     this.baselineCanonicalInnerHtml = this.normalizeInnerHtml(
       this.baselineInnerHtml,
@@ -661,6 +677,7 @@ export class IslandEditingController {
     }
     if (!liveDomMatchesSource) {
       restoreSourceChildren(this.hostElement, this.baselineInnerHtml);
+      this.callbacks.onSourceChildrenRestored?.(Array.from(this.hostElement.querySelectorAll("*")));
       if (
         this.serializeLiveCanonical()
         !== this.baselineCanonicalInnerHtml
@@ -681,7 +698,7 @@ export class IslandEditingController {
       });
     this.ownedCanonicalInnerHtml = this.baselineCanonicalInnerHtml;
     this.baselineChildren = Array.from(this.hostElement.childNodes).map(
-      (node) => node.cloneNode(true),
+      (node) => cloneOwnedNode(node, this.callbacks.onCloneElement),
     );
     this.baselineSelection = options.baseline.selection ?? {
       anchor: options.baseline.text.length,
@@ -689,7 +706,7 @@ export class IslandEditingController {
       affinity: "right",
     };
     this.lastValidatedChildren = this.baselineChildren.map(
-      (node) => node.cloneNode(true),
+      (node) => cloneOwnedNode(node, this.callbacks.onCloneElement),
     );
     this.lastValidatedSelection = { ...this.baselineSelection };
 
@@ -959,7 +976,7 @@ export class IslandEditingController {
     this.normalizeCollapsedInsertionAffinity();
     this.compositionSnapshot = {
       children: Array.from(this.hostElement.childNodes).map(
-        (node) => node.cloneNode(true),
+        (node) => cloneOwnedNode(node, this.callbacks.onCloneElement),
       ),
       selection: this.getSelection(),
     };
@@ -978,7 +995,7 @@ export class IslandEditingController {
     this.compositionSnapshot = null;
     if (snapshot) {
       this.runExpectedMutation(() => {
-        restoreChildren(this.hostElement, snapshot.children);
+        restoreChildren(this.hostElement, snapshot.children, this.callbacks.onCloneElement);
         setSelectionValue(this.hostElement, snapshot.selection);
         if (
           !this.compositionEscapeRequested
@@ -1011,7 +1028,7 @@ export class IslandEditingController {
       this.observer?.takeRecords();
       if (snapshot) {
         this.runExpectedMutation(() => {
-          restoreChildren(this.hostElement, snapshot.children);
+          restoreChildren(this.hostElement, snapshot.children, this.callbacks.onCloneElement);
           setSelectionValue(this.hostElement, snapshot.selection);
         });
       }
@@ -1110,7 +1127,7 @@ export class IslandEditingController {
 
   private refreshLastValidatedDraft(): void {
     this.lastValidatedChildren = Array.from(this.hostElement.childNodes).map(
-      (node) => node.cloneNode(true),
+      (node) => cloneOwnedNode(node, this.callbacks.onCloneElement),
     );
     this.lastValidatedSelection = this.getSelection();
   }
@@ -1120,6 +1137,7 @@ export class IslandEditingController {
     this.runExpectedMutation(() => restoreChildren(
       this.hostElement,
       this.lastValidatedChildren,
+      this.callbacks.onCloneElement,
     ));
     const length = nativeLogicalText(this.hostElement).length;
     setSelectionValue(this.hostElement, {
@@ -1325,7 +1343,12 @@ export class IslandEditingController {
     );
     let current = walker.nextNode();
     while (current) {
-      if (range.intersectsNode(current) && current.parentElement) {
+      // A range ending at offset zero in the next Text node visually selects
+      // none of it, although intersectsNode includes that boundary. Its style
+      // must not change the toolbar's state for the selected characters.
+      const start = range.startContainer === current ? range.startOffset : 0;
+      const end = range.endContainer === current ? range.endOffset : (current as Text).length;
+      if (end > start && range.intersectsNode(current) && current.parentElement) {
         if (!elements.includes(current.parentElement)) {
           elements.push(current.parentElement);
         }
@@ -1487,7 +1510,7 @@ export class IslandEditingController {
     this.baselineCanonicalInnerHtml = canonical;
     this.ownedCanonicalInnerHtml = canonical;
     this.baselineChildren = Array.from(this.hostElement.childNodes).map(
-      (node) => node.cloneNode(true),
+      (node) => cloneOwnedNode(node, this.callbacks.onCloneElement),
     );
     this.baselineSelection = options.preserveLiveSelection
       ? this.getSelection()
@@ -1530,6 +1553,7 @@ export class IslandEditingController {
     this.runExpectedMutation(() => restoreChildren(
       this.hostElement,
       this.baselineChildren,
+      this.callbacks.onCloneElement,
     ));
     const length = nativeLogicalText(this.hostElement).length;
     setSelectionValue(this.hostElement, {

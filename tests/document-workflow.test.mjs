@@ -2094,3 +2094,89 @@ test("ensureCurrentCanvas fails closed when the canvas cannot render", async () 
   assert.equal(harness.documentSession.canvasAuthority.status, "failed");
   assert.equal(harness.documentSession.canvasAuthority.generation, 0);
 });
+
+for (const change of ['none', 'working-copy', 'project-root', 'epoch', 'invalid-ack', 'independent-edit']) {
+  test(`DocumentWorkflow serializes queued Undo then Redo against verified history receipts (${change})`, async () => {
+    const before = '<!doctype html><html><body><p>one</p></body></html>';
+    const after = before.replace('one', 'two');
+    const target = {
+      projectId: PROJECT_ID, documentId: DOCUMENT_ID,
+      projectRootPath: '/tmp/managed-project', targetKind: 'working-copy',
+      workingCopyId: 'work_ver_0001', versionId: 'ver_0001',
+      exactSourcePath: SOURCE_PATH, sourceSha256: sha256(before),
+    };
+    const writes = [];
+    let releaseUndo;
+    const harness = createHarness({ html: before, bridge: {
+      async autosave(body) {
+        writes.push(body);
+        if (writes.length === 2) await new Promise(resolve => { releaseUndo = resolve; });
+        return { ok: true, content: body.html,
+          sha256: change === 'invalid-ack' && writes.length === 2 ? sha256('wrong receipt') : sha256(body.html),
+          persistedRevision: body.editRevision, lastModifiedAt: '2026-09-09T00:00:00.000Z',
+          openTarget: { ...target, sourceSha256: sha256(body.html) } };
+      },
+    } });
+    harness.projectSession.refreshOpenTarget(target);
+    harness.sourceHistorySession.activate(harness.projectSession.context, sha256(before), null);
+    harness.workflow.enqueueEdit({ html: after, sourceTransaction: operation(before, after), context: harness.projectSession.context });
+    assert.equal((await harness.workflow.flush()).status, 'succeeded');
+    const undo = harness.workflow.performHistoryAction({ direction: 'undo', context: harness.projectSession.context });
+    while (!releaseUndo) await new Promise(resolve => setImmediate(resolve));
+    const redo = harness.workflow.performHistoryAction({ direction: 'redo', context: harness.projectSession.context });
+    assert.notEqual(redo, undo, 'opposite history intents must not share a success receipt');
+    if (change === 'working-copy' || change === 'project-root') {
+      harness.projectSession.refreshOpenTarget({ ...target, sourceSha256: sha256(after),
+        ...(change === 'working-copy' ? { workingCopyId: 'work_ver_0002', versionId: 'ver_0002' } : { projectRootPath: '/tmp/other-project' }) });
+    } else if (change === 'epoch') harness.projectSession.openLocator('/tmp/other-document.html');
+    else if (change === 'independent-edit') {
+      const independent = before.replace('one', 'independent');
+      assert.equal(harness.workflow.enqueueEdit({ html: independent,
+        sourceTransaction: { ...operation(before, independent), operationId: 'sourceop_document_workflow_002' },
+        context: harness.projectSession.context }).status, 'succeeded');
+    }
+    releaseUndo();
+    const outcomes = await Promise.all([undo, redo]);
+    if (change === 'none') {
+      assert.deepEqual(outcomes.map(outcome => outcome.value?.direction), ['undo', 'redo']);
+      assert.deepEqual(writes.map(write => write.html), [after, before, after]);
+      assert.equal(writes[2].expectedSourceSha256, sha256(before));
+      assert.equal(harness.documentSession.html, after);
+      assert.equal(harness.documentSession.persistedSourceSha256, sha256(after));
+    } else {
+      assert.notEqual(outcomes[1].status, 'succeeded');
+      if (change === 'independent-edit') {
+        assert.equal(harness.documentSession.html, before.replace('one', 'independent'));
+        assert.equal(writes.slice(2).some(write => write.html === after), false);
+      } else assert.equal(writes.length, 2, 'queued Redo must not write after its route or receipt changes');
+    }
+    assert.equal(harness.workflow.hasHistoryAction, false);
+  });
+}
+
+
+test("DocumentWorkflow does not retarget Undo when a newer edit arrives during its initial drain", async () => {
+  const before = '<!doctype html><html><body><p>one</p></body></html>';
+  const after = before.replace('one', 'two');
+  const newer = before.replace('one', 'three');
+  let releaseSave;
+  const writes = [];
+  const harness = createHarness({ html: before, bridge: {
+    async autosave(body) {
+      writes.push(body);
+      if (writes.length === 1) await new Promise(resolve => { releaseSave = resolve; });
+      return { ok: true, content: body.html, sha256: sha256(body.html),
+        persistedRevision: body.editRevision, lastModifiedAt: '2026-09-09T00:00:00.000Z' };
+    },
+  } });
+  harness.sourceHistorySession.activate(harness.context, sha256(before), null);
+  harness.workflow.enqueueEdit({ html: after, sourceTransaction: operation(before, after), context: harness.context });
+  const undo = harness.workflow.performHistoryAction({ direction: 'undo', context: harness.context });
+  while (!releaseSave) await new Promise(resolve => setImmediate(resolve));
+  harness.workflow.enqueueEdit({ html: newer, sourceTransaction: operation(after, newer), context: harness.context });
+  releaseSave();
+  assert.equal((await undo).status, 'stale');
+  assert.equal(harness.documentSession.html, newer);
+  assert.equal((await harness.workflow.flush()).status, 'succeeded');
+  assert.deepEqual(writes.map(write => write.html), [after, newer]);
+});

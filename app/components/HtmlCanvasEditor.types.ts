@@ -250,6 +250,10 @@ export type HtmlCanvasEditorHandle = {
   getSourceHtml: () => string;
   /** Exact source string whose sanitized representation has finished loading in the iframe. */
   getRenderedSourceHtml: () => string | null;
+  /** Identifies a verified physical frame, including same-source reloads. */
+  getRenderedFrameGeneration: () => number | null;
+  /** Readiness only; semantic commits still validate their own source target. */
+  isCurrentProjectionEditable: () => boolean;
   /**
    * Rebuilds the visible Active frame from the current source as static first.
    * Used when Canvas generation advances without a new React host (reload

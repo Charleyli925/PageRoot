@@ -794,11 +794,31 @@ export class DocumentWorkflow {
         "只能撤销或重做源码历史。",
       ));
     }
-    if (this.#historyActionPromise) return this.#historyActionPromise;
-    const operation = this.#runHistoryAction({
-      direction,
-      context: copyContext(context) || this.#projectSession.context,
-    });
+    const requestedContext = copyContext(context) || this.#projectSession.context;
+    if (!requestedContext || !this.#isCurrent(requestedContext)) {
+      return Promise.resolve(requestedContext ? stale(requestedContext) : blocked(
+        "DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。",
+      ));
+    }
+    const previous = this.#historyActionPromise;
+    const operation = previous ? previous.then((outcome) => {
+      if (this.#disposed || outcome.status !== "succeeded") {
+        return blocked("SOURCE_HISTORY_PREVIOUS_ACTION_FAILED", "上一条历史操作未完成，请重试。");
+      }
+      const current = copyContext(this.#projectSession.context);
+      const document = this.#documentSession.snapshot;
+      // Each shortcut is a distinct intent. Only the preceding operation's
+      // verified receipt may advance its queued successor to a new source Hash;
+      // a member switch or an independent edit cannot rebind that request.
+      if (!sameOpenRoute(requestedContext, current, this.#codecs.sameSourcePath)
+        || outcome.value?.sourceSha256 !== document.workingHtmlSha256
+        || outcome.value?.sourceSha256 !== document.persistedSourceSha256
+        || (current.sourceSha256 && current.sourceSha256 !== outcome.value?.sourceSha256)
+        || outcome.value?.persistedRevision !== document.editRevision
+        || document.editRevision !== document.lastPersistedRevision
+        || document.hasPendingWrite) return stale(requestedContext);
+      return this.#runHistoryAction({ direction, context: current });
+    }) : this.#runHistoryAction({ direction, context: requestedContext });
     this.#historyActionPromise = operation;
     operation.finally(() => {
       if (this.#historyActionPromise === operation) {
@@ -2421,6 +2441,11 @@ export class DocumentWorkflow {
     const drainedRevision = this.#documentSession.editRevision;
     const flush = await this.flush({ throughRevision: drainedRevision });
     if (!flush || flush.status !== "succeeded") return flush;
+    // A newer direct edit may arrive while the initial drain waits. Undo must
+    // not silently retarget that newer history entry, even on a legacy route
+    // whose context Hash did not change with the save receipt.
+    if (this.#documentSession.editRevision !== drainedRevision
+      || this.#documentSession.html !== drainedHtml) return stale(context);
     if (!this.#isCurrent(context)) {
       const current = copyContext(this.#projectSession.context);
       if (!sameOpenRoute(context, current, this.#codecs.sameSourcePath)

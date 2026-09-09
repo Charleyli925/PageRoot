@@ -148,6 +148,10 @@ export async function loadedDiskFrame(page, sourcePath, caseId, {
     ).count();
     const runtimePhase = await editSurface.getAttribute("data-edit-runtime-phase");
     const runtimeOutcome = await editSurface.getAttribute("data-edit-runtime-outcome");
+    const staticFrameVerified = runtimePhase === "static-fallback"
+      && await loaded.editor.getAttribute("data-render-verified") === "true"
+      && await loaded.editor.getAttribute("aria-readonly") === "false"
+      && await loaded.editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute("sandbox") === "allow-same-origin";
     let activeBootstrapCount = 0;
     try {
       const activeHandle = await loaded.editor.locator(
@@ -166,6 +170,7 @@ export async function loadedDiskFrame(page, sourcePath, caseId, {
       staticFallbackVisible,
       runtimePhase,
       runtimeOutcome,
+      staticFrameVerified,
       activeBootstrapCount,
       candidateId: await loaded.editor.getAttribute("data-runtime-candidate-id"),
       candidateRevision: await loaded.editor.getAttribute(
@@ -177,7 +182,7 @@ export async function loadedDiskFrame(page, sourcePath, caseId, {
     return (
       lastKnownGoodRevision === expectedSourceRevision
       && activeBootstrapCount === 1
-    ) || staticFallbackVisible > 0
+    ) || staticFrameVerified || staticFallbackVisible > 0
       || (
         allowSourceNotAuthoritative
         && runtimePhase === "static"
