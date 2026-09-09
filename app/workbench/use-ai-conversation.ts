@@ -113,10 +113,12 @@ export function useAiConversation({
   onOpenAgentSettings,
 }: UseAiConversationOptions) {
   const [open, setOpen] = useState(false);
-  // The document owns its history across editing, review and settled results.
-  const active = Boolean(sourcePath);
+  // The Document owns its history, but the conversation is only presented
+  // beside Preview or Review. Returning to Edit restores the comment rail and
+  // closes the presentation without deleting the Document's durable thread.
+  const active = Boolean(sourcePath) && (canvasMode === "preview" || reviewing);
   const visible = active && open && !commentComposerOpen;
-  if (commentComposerOpen && open) setOpen(false);
+  if ((!active || commentComposerOpen) && open) setOpen(false);
 
   // Load when the sidebar becomes visible for a Document and close it on any
   // identity change or when it stops being visible.

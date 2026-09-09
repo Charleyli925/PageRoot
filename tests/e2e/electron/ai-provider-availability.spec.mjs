@@ -995,8 +995,7 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", {
       return (await roundStopButton.count()) === 0 ? "ended" : "";
     }, { timeout: 45_000 }).not.toBe("");
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
-    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeHidden();
     await expect(launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true }))
       .toBeEnabled({ timeout: 45_000 });
