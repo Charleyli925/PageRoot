@@ -311,7 +311,7 @@ test("the shell owns the outer grid and one fixed inspector contract", async () 
   assert.doesNotMatch(tabs, /--workbench-sidebar-width:\s*240px/u);
   assert.doesNotMatch(reviewModule, /:has\(/u);
   assert.doesNotMatch(noticeBar, /--notice-rail-width/u);
-  assert.match(noticeBar, /--workbench-inspector-width/u);
+  assert.match(noticeBar, /\.viewport\s*\{[^}]*left:\s*50%/u);
   assert.equal((workbench.match(/data-inspector=\{workbenchInspector\}/gu) || []).length, 1);
 
   assert.equal(deriveWorkbenchInspector({

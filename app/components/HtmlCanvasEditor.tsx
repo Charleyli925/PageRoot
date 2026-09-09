@@ -1356,6 +1356,54 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
   }, []);
 
+  // Snapshots and canonical remounts create new objects. Only these private,
+  // controller-owned paths may transfer identity; matching public attributes
+  // on an author-created clone never confers mutation authority.
+  const transferRuntimeSourceElement = useCallback((original: Element, clone: Element) => {
+    const registered = runtimeSourceElementsRef.current;
+    const runtime = runtimeFrameRef.current;
+    const id = registered?.pagerootIds.get(original as HTMLElement);
+    if (!registered || !runtime || !id
+      || registered.elementGeneration !== runtime.elementGeneration
+      || registered.executionId !== runtime.grant.executionId
+      || runtime.elementGeneration !== frameLoadGenerationRef.current
+      || original.ownerDocument !== iframeRef.current?.contentDocument
+      || clone.ownerDocument !== original.ownerDocument
+      || !registered.elements.has(original as HTMLElement)
+      || original.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) !== id
+      || clone.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) !== id
+      || clone.localName !== original.localName) return;
+    registered.elements.add(clone as HTMLElement);
+    registered.pagerootIds.set(clone as HTMLElement, id);
+    clone.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, id);
+  }, []);
+
+  const registerRestoredRuntimeElements = useCallback((
+    authorityRoot: HTMLElement,
+    elements: readonly Element[],
+    sourceIndex = sourceIndexRef.current,
+  ) => {
+    const registered = runtimeSourceElementsRef.current;
+    const runtime = runtimeFrameRef.current;
+    const rootId = registered?.pagerootIds.get(authorityRoot);
+    if (!registered || !runtime || !sourceIndex || !rootId
+      || !registered.elements.has(authorityRoot)
+      || authorityRoot.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) !== rootId
+      || registered.elementGeneration !== runtime.elementGeneration
+      || registered.executionId !== runtime.grant.executionId
+      || runtime.elementGeneration !== frameLoadGenerationRef.current
+      || authorityRoot.ownerDocument !== iframeRef.current?.contentDocument) return;
+    for (const element of elements) {
+      const id = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+      const entry = id ? sourceIndex.byPagerootId.get(id) : null;
+      if (!id || entry?.type !== "element" || entry.tagName !== element.localName
+        || element.ownerDocument !== authorityRoot.ownerDocument) continue;
+      registered.elements.add(element as HTMLElement);
+      registered.pagerootIds.set(element as HTMLElement, id);
+      element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, id);
+    }
+  }, []);
+
   const selectedElementHasSourceMutationAuthority = useCallback(() => {
     const element = selectedElementRef.current;
     if (
@@ -2476,6 +2524,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       "data-render-verified",
     ) ?? null;
     const previousSlotId = activeRuntimeSlotId;
+    const previousIframe = iframeRef.current;
+    const transferCanvasFocus = Boolean(previousIframe
+      && previousIframe.ownerDocument.activeElement === previousIframe);
     const previousRender = frameRender;
     const previousCleanup = cleanupFrameRef.current;
     const previousRegistration = runtimeSourceRegistrationCleanupRef.current;
@@ -2532,6 +2583,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         setRuntimeCandidateRender(candidate.render);
         setActiveRuntimeSlotId(previousSlotId);
       });
+      if (iframe.ownerDocument.activeElement === iframe) {
+        previousIframe?.focus({ preventScroll: true });
+      }
       failRuntimeCandidateActivationRef.current(candidate, outcome)
         || cancelRuntimeCandidateRef.current(candidate, outcome);
       return true;
@@ -2616,6 +2670,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       abortCommit("failed");
       return false;
     }
+    // Keyboard focus must follow the physical Canvas slot. Otherwise the next
+    // shortcut goes to the retired, empty iframe (notably Undo then Redo).
+    // Do not steal focus from a comment/composer or recreate a native caret.
+    if (transferCanvasFocus) promotedIframe.focus({ preventScroll: true });
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
     return true;
@@ -4869,6 +4927,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             islandHostElement,
             hostElementId,
             sourceIndex,
+            (elements) => registerRestoredRuntimeElements(islandHostElement, elements),
           )
         ) {
           containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
@@ -4941,6 +5000,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
       };
       const session = new IslandEditingController({
+        onCloneElement: transferRuntimeSourceElement,
+        onSourceChildrenRestored: (elements) => registerRestoredRuntimeElements(islandHostElement, elements),
         hostElement,
         baseline,
         sourceInnerHtml,
@@ -5063,6 +5124,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     finishNativeEditing,
     refreshNativeEditRangeState,
     reportBlockedEdit,
+    registerRestoredRuntimeElements,
+    transferRuntimeSourceElement,
     selectElement,
     selectedElementHasSourceMutationAuthority,
     syncRuntimeCandidateDiagnostics,
@@ -5110,6 +5173,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     active.rootElement.ownerDocument.getSelection()?.removeAllRanges();
     nativeDomGenerationRef.current += 1;
     parentNode.replaceChild(nextRoot, active.rootElement);
+    registerRestoredRuntimeElements(active.rootElement, [nextRoot, ...Array.from(nextRoot.querySelectorAll("*"))], nextIndex);
 
     nativeEditNeedsReloadRef.current = false;
     selectedElementRef.current = nextRoot;
@@ -5976,6 +6040,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         nextIndex,
         previousTargetRef,
         nextTargetRef,
+        onSourceChildrenRestored: (elements) => registerRestoredRuntimeElements(rootElement, elements, nextIndex),
       })) return false;
 
       // The Bridge-validated bytes remain authoritative. This only advances
@@ -6035,6 +6100,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return false;
     }
   }, [
+    registerRestoredRuntimeElements,
     markRuntimeRefreshPending,
     selectTarget,
     startEditing,
@@ -6333,6 +6399,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
       getRenderedSourceHtml: () => renderedSourceHtmlRef.current,
+      getRenderedFrameGeneration: () => containerRef.current?.getAttribute("data-render-verified") === "true"
+        ? frameLoadGenerationRef.current
+        : null,
+      isCurrentProjectionEditable: () => !readOnlyRef.current
+        && !lockedRef.current
+        && renderedSourceHtmlRef.current === frameSourceHtmlRef.current
+        && containerRef.current?.getAttribute("data-render-verified") === "true",
       rebuildActiveFrame: () => {
         loadFrameSource(frameSourceHtmlRef.current, {
           forceStatic: true,
@@ -6650,6 +6723,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: runtimeFrame ? "runtime-loaded" : "static-complete" }) });
       fencedDocumentCleanupRef.current();
       if (!runtimeFrame) {
+        // A source reload may end in a verified static frame when author
+        // preparation fails. Retire the previous frame's read-only fallback
+        // here as well; waiting for a dynamic `ready` leaves editing locked.
+        publishRuntimeDegradation("none");
         window.requestAnimationFrame(() => replayDeferredRuntimeCandidateRef.current());
       }
     }

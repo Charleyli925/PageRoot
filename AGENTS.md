@@ -36,7 +36,7 @@ Release, packaging, and Candidate publication: `docs/RELEASING.md`.
 - Privileged filesystem behavior stays behind the Electron/Bridge boundary with narrow validated IPC.
 - AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML. Weak page continuity forces review instead of failing an otherwise usable candidate.
 - QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. Authorized automatic paths are ADR 0032's Qoder ACP driver, ADR 0053's Codex ACP adapter, and ADR 0069's PageRoot native OpenAI-compatible HTTP Agent. Anthropic is not authorized.
-- Tests and fixtures use synthetic data only. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
+- Committed tests and fixtures use synthetic data only. Relevant editor/runtime/recovery changes also require real Electron acceptance using the user-designated local HTML corpus, as defined in `tests/TEST_STRATEGY.md`. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
 
 1. Keep the architecture small, explicit, and internally consistent; prefer the smallest coherent solution and avoid speculative abstractions, compatibility layers, or parallel flows.
 2. Give every module and piece of mutable state one clear responsibility and owner, with predictable dependency direction and minimal hidden coupling.

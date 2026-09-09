@@ -171,6 +171,7 @@ export function remountNativeHostFromSource(
   hostElement: HTMLElement,
   nodeId: string,
   sourceIndex: SourceIndexValue,
+  onSourceChildrenRestored?: (elements: readonly Element[]) => void,
 ): boolean {
   const canonical = canonicalNativeHostPreview(hostElement, nodeId, sourceIndex);
   if (!canonical) return false;
@@ -178,6 +179,7 @@ export function remountNativeHostFromSource(
   hostElement.replaceChildren(
     ...Array.from(canonical.childNodes).map((node) => documentNode.importNode(node, true)),
   );
+  onSourceChildrenRestored?.(Array.from(hostElement.querySelectorAll("*")));
   return true;
 }
 
@@ -215,6 +217,7 @@ export function adoptCanonicalHistoryIslandInPlace(options: {
   nextIndex: SourceIndexValue;
   previousTargetRef: SourceTargetRef;
   nextTargetRef: SourceTargetRef;
+  onSourceChildrenRestored?: (elements: readonly Element[]) => void;
 }): boolean {
   const {
     rootElement,
@@ -263,6 +266,7 @@ export function adoptCanonicalHistoryIslandInPlace(options: {
   );
 
   rootElement.replaceChildren(...canonicalChildren);
+  options.onSourceChildrenRestored?.(Array.from(rootElement.querySelectorAll("*")));
   const nextElements = nextIndex.elements as SourceElementValue[];
   const mountedElements = sourceBackedPreviewElements(documentNode);
   if (

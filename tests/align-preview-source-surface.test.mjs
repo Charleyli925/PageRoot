@@ -80,3 +80,28 @@ test("alignPreviewSourceSurface rejects leftover source elements and tag drift",
     null,
   );
 });
+
+
+test("template content belongs to its source surface even though DOM contains excludes the fragment", () => {
+  const index = buildSourceIndex("<!doctype html><html><head></head><body><template><p>template copy</p></template><p>editable copy</p></body></html>");
+  const inner = element("p");
+  const template = element("template");
+  template.content = { contains: (node) => node === inner };
+  const paragraph = element("p");
+  const body = element("body", [template, paragraph]);
+  const head = element("head");
+  const html = element("html", [head, body]);
+  assert.equal(alignPreviewSourceSurface(index, [html, head, body, template, inner, paragraph])?.length, 6);
+});
+
+
+test("metadata content strings are not template fragments", () => {
+  const index = buildSourceIndex('<!doctype html><html><head><meta name="description" content="report"></head><body><p>copy</p></body></html>');
+  const meta = element("meta");
+  meta.content = "report";
+  const head = element("head", [meta]);
+  const paragraph = element("p");
+  const body = element("body", [paragraph]);
+  const html = element("html", [head, body]);
+  assert.equal(alignPreviewSourceSurface(index, [html, head, meta, body, paragraph])?.length, 5);
+});

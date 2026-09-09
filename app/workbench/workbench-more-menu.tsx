@@ -27,6 +27,7 @@ export type WorkbenchMoreMenuProps = Readonly<{
   onExportCurrentHtml: () => void;
   canReloadCurrentSource: boolean;
   onReloadCurrentSource: () => void;
+  onRetryDynamicContent?: () => void;
 }>;
 
 function menuPosition(trigger: HTMLButtonElement) {
@@ -51,6 +52,7 @@ export function WorkbenchMoreMenu({
   onExportCurrentHtml,
   canReloadCurrentSource,
   onReloadCurrentSource,
+  onRetryDynamicContent,
 }: WorkbenchMoreMenuProps) {
   const menuId = useId();
   const [open, setOpen] = useState(false);
@@ -78,6 +80,12 @@ export function WorkbenchMoreMenu({
       onSelect: onExportCurrentHtml,
       dividerBefore: true,
     },
+    ...(onRetryDynamicContent ? [{
+      id: "retry-dynamic",
+      label: "重新加载动态内容",
+      icon: <ArrowClockwiseIcon aria-hidden="true" size={16} weight="duotone" />,
+      onSelect: onRetryDynamicContent,
+    }] : []),
     {
       id: "reload-source",
       label: "重新载入当前 HTML",
@@ -90,6 +98,7 @@ export function WorkbenchMoreMenu({
     onExportCurrentHtml,
     onOpenInBrowser,
     onReloadCurrentSource,
+    onRetryDynamicContent,
     onShowInFolder,
   ]);
   const visibleItems = useMemo(() => items.filter((item) => (

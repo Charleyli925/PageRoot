@@ -2386,9 +2386,7 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
       "data-edit-runtime-outcome",
       "candidate-failed",
     );
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "部分动态内容未更新",
-    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
     await expect(editor).toHaveAttribute("data-runtime-degradation", "static-visible");
     const staticFrame = await currentEditorFrame(page);
@@ -2408,7 +2406,6 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
     });
     expect(oldFrameState).toEqual({ connected: true, role: "inactive", text: "" });
 
-    await page.getByRole("button", { name: "关闭动态内容提示" }).click();
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     const staticTarget = staticFrame.locator('[data-native-case="runtime-candidate-failure"]');
     await staticTarget.click();
@@ -2656,8 +2653,8 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
     );
     await expect(editor).toHaveAttribute("aria-readonly", "true");
     const degradationNotice = page.getByTestId("edit-runtime-static-fallback");
-    await expect(degradationNotice).toContainText("页面预览未能完整更新");
-    await expect(degradationNotice).toContainText("最新 HTML 未回滚");
+    await expect(degradationNotice).toContainText("页面暂时无法编辑");
+    await expect(degradationNotice).toContainText("你的修改已保留");
     await expect(degradationNotice.getByRole("button", { name: "重新加载", exact: true }))
       .toBeVisible();
     await expect(degradationNotice.getByRole("button", { name: "导出当前 HTML", exact: true }))
@@ -2948,12 +2945,11 @@ test("a Candidate commit verification failure restores the visible Active", {
     await expect.poll(() => editor.getAttribute("data-runtime-degradation"), {
       timeout: 15_000,
     }).toMatch(/^(static-visible|none)$/u);
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toBeVisible();
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     await expect(editor).toHaveAttribute("data-render-verified", "true");
     expect((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).toBe(workingHtmlAfterFailure);
 
     const staticNotice = page.getByTestId("edit-runtime-static-fallback");
-    await staticNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
     await expect(staticNotice).toHaveCount(0);
     frame = await currentEditorFrame(page);
     const restoredTarget = frame.locator('[data-native-case="runtime-commit-verify-failure"]').first();
@@ -3060,12 +3056,8 @@ test("unsupported Script programs enter an explicit static Edit state", async ()
     "runtime-module.js": "export const runtimeMarker = 'executed';",
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "static-runtime-fallback");
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "部分动态内容未运行",
-    );
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "当前已显示静态页面，仍可编辑和保存。",
-    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "重新加载动态内容" })).toHaveCount(0);
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",
@@ -3076,7 +3068,6 @@ test("unsupported Script programs enter an explicit static Edit state", async ()
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
       .toHaveAttribute("sandbox", "allow-same-origin");
     await expect(frame.locator("body")).not.toHaveAttribute("data-runtime-marker", "executed");
-    await page.getByRole("button", { name: "关闭动态内容提示" }).click();
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",
@@ -3103,9 +3094,7 @@ test("static fallback can reload dynamic content and dismiss itself after succes
   await withRuntimeProject("pageroot-runtime-retry-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "部分动态内容未更新",
-    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",
       "static-fallback",
@@ -3162,7 +3151,8 @@ test("static fallback can reload dynamic content and dismiss itself after succes
       });
       window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__ = observer;
     });
-    await page.getByRole("button", { name: "重新加载动态内容" }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "重新加载动态内容", exact: true }).click();
     ({ frame } = await loadedDiskFrame(page, sourcePath, "runtime-retry"));
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
