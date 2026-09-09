@@ -3282,11 +3282,14 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     });
     await holdEditRuntimePrepare(launched.electronApp);
     await adoptReadyResult(launched.page);
-    // Return to the comments rail explicitly; adoption retains AI history.
-    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     await launched.page.getByRole("button", { name: "确认并采纳" })
       .click({ timeout: 5_000 })
       .catch(() => undefined);
+    // Adoption returns to Edit automatically. The Document keeps its AI
+    // history, while the visible inspector goes back to editing comments.
+    await expect(launched.page.getByRole("button", { name: "AI 助手", exact: true }))
+      .toHaveAttribute("aria-expanded", "false");
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
 
     await expect.poll(async () => {
       const snapshot = await readActiveAcceptSnapshot(launched.page);
@@ -3403,6 +3406,10 @@ test("two lost committed adoption replies stay pending and recover one decision 
     expect(decisions.every((decision) => JSON.stringify(decision) === JSON.stringify(decisions[0]))).toBe(true);
     expect(decisions[0].decisionOperationId).toBeTruthy();
     expect(readFileSync(result.sourcePath, "utf8")).toContain(UPDATED_TEXT);
+    await expect(sidebar).toHaveCount(0);
+    await expect(launched.page.getByRole("button", { name: "AI 助手", exact: true }))
+      .toHaveAttribute("aria-expanded", "false");
+    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     await expect(sidebar.getByText("已采用本次修改。", { exact: true })).toHaveCount(1);
     const isolatedUserData = launched.isolatedUserData;
     await closePageRootGracefully(launched.electronApp, launched.page);

@@ -474,9 +474,10 @@ test("orphaned comments stay card-local and block send without a relink flow", a
 
     await activeLaunch.page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
-    // The settled AI history stays visible until the user returns to comments;
-    // the orphaned cards and their focus state live in the comments rail.
-    await activeLaunch.page.getByRole("button", { name: "AI 助手", exact: true }).click();
+    // A blocked handoff returns to Edit, which closes the AI presentation while
+    // preserving its Document history and restores the orphaned comment cards.
+    await expect(activeLaunch.page.getByRole("button", { name: "AI 助手", exact: true }))
+      .toHaveAttribute("aria-expanded", "false");
     await expect(activeLaunch.page.locator(".comment-rail")).toBeVisible();
     await expect(activeLaunch.page.locator(".comment-rail .rail-relink-status"))
       .toHaveCount(0);
@@ -1045,9 +1046,9 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
 
     const aiToggle = launched.page.getByRole("button", { name: "AI 助手", exact: true });
     await expect(aiToggle).toHaveAttribute("aria-expanded", "true");
-    await aiToggle.click();
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
     await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(aiToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
     await expect(stage).toHaveAttribute("data-inspector", "comments");
     await expect(launched.page.locator(".review-scroll-stage > .comments-panel.comment-rail"))
       .toBeVisible();
