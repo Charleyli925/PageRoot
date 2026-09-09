@@ -21,7 +21,8 @@ The publication workflow creates the annotated tag only after the pre-tag candid
 The `Developer Preview` workflow exists only for an explicitly requested
 installation check. No push, Pull Request, schedule, formal candidate or
 publication event triggers it. It must run where the stable Developer ID
-Application identity is available (normally the developer's local keychain);
+Application identity is available: the repository signing credential secrets
+(`MAC_CSC_LINK`/`MAC_CSC_KEY_PASSWORD`) or the developer's local keychain;
 otherwise it stops rather than producing an ad-hoc package. Its seven-day
 artifact cannot be promoted; formal release evidence starts independently from
 reviewed `main`.
