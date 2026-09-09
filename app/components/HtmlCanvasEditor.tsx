@@ -2844,13 +2844,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       && !runtimeSurfacesReady(iframeRef.current?.contentDocument ?? null, documentNode, candidate.sourceIndex)) {
       return false;
     }
-    if (!candidate.runtimeFrame
-      && !runtimeSurfacesReady(iframeRef.current?.contentDocument ?? null, documentNode, candidate.sourceIndex)) {
-      // A technically valid static document must not silently erase visible
-      // charts. Keep the last usable frame, mark it read-only, and offer Retry.
-      failRuntimeCandidateActivationRef.current(candidate, "failed");
-      return false;
-    }
+    // Runtime-generated Canvas/SVG surfaces are presentation state, not edit
+    // authority. A Script-disabled candidate is the verified projection of the
+    // latest Working HTML and must remain editable even when it cannot recreate
+    // those surfaces. This usable degradation stays quiet; an optional bounded
+    // Runtime retry remains available through the More menu.
     return promoteRuntimeCandidate(candidate);
   }, [promoteRuntimeCandidate, syncRuntimeCandidateDiagnostics]);
   connectRuntimeCandidateRef.current = connectRuntimeCandidate;

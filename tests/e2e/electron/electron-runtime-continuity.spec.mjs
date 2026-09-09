@@ -410,7 +410,11 @@ const DELAYED_CHART_PAGE = `<!doctype html><html><head><title>Continuous report<
 <body><h1>Quarterly report</h1><main><p data-native-case="format-chart">Revenue grew steadily this quarter.</p><div id="chart"></div></main>
 <script>
  const text = document.querySelector('[data-native-case="format-chart"]').textContent;
- if (text.includes('FAIL_CHART')) throw new Error('synthetic chart initialization failure');
+ if (text.includes('FAIL_CHART')) {
+   parent.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ =
+     (parent.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0) + 1;
+   throw new Error('synthetic chart initialization failure');
+ }
  setTimeout(() => {
    const canvas = document.createElement('canvas'); canvas.width=320; canvas.height=180;
    document.querySelector('#chart').append(canvas);
@@ -459,21 +463,52 @@ test("formatting preserves charts and a delayed replacement never presents missi
   });
 });
 
-test("failed chart refresh retains the usable frame and identifies it as an older preview", async ({}, testInfo) => {
+test("failed chart refresh keeps the latest static source quietly editable across repeated retries", async ({}, testInfo) => {
   await withRuntimeProject("pageroot-chart-failure-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
-    const { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
+    let { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
+    const editor = page.getByTestId('html-canvas-editor').filter({ visible: true }).first();
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     await activateNativeEdit(frame, 'format-chart');
     await frame.locator('[data-native-case="format-chart"]').press('End');
     await page.keyboard.insertText(' FAIL_CHART');
     await page.keyboard.press('Escape');
-    const notice = page.getByTestId('edit-runtime-static-fallback');
-    await expect(notice).toContainText('上一次可用预览');
-    await expect(notice.getByRole('button', { name: '重新加载', exact: true })).toBeVisible();
-    await expect((await currentEditorFrame(page)).locator('#chart canvas')).toHaveCount(1);
+    await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
+    await expect(editor).toHaveAttribute('data-runtime-degradation', 'static-visible');
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('#chart canvas')).toHaveCount(0);
     const working = await managedWorkingCopyPath(page, sourcePath);
     expect(await readPublishedWorkingCopy(working, 'utf8')).toContain('FAIL_CHART');
-    await page.screenshot({ path: testInfo.outputPath('chart-failed-refresh.png') });
+
+    let target = frame.locator('[data-native-case="format-chart"]');
+    await target.dblclick();
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    await target.press('End');
+    await page.keyboard.insertText('        CONTINUED');
+    await page.keyboard.press(keyShortcut('s'));
+    await page.keyboard.press('Escape');
+    await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('CONTINUED');
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+
+    const failuresBeforeRetry = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    ));
+    await page.getByRole('button', { name: '更多', exact: true }).click();
+    await page.getByRole('menuitem', { name: '重新加载动态内容', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeRetry);
+    await expect(editor).toHaveAttribute('data-runtime-degradation', 'static-visible');
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+    frame = await currentEditorFrame(page);
+    target = frame.locator('[data-native-case="format-chart"]');
+    await target.dblclick();
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    await target.press('End');
+    await page.keyboard.insertText(' STILL_EDITABLE');
+    await page.keyboard.press('Escape');
+    await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('STILL_EDITABLE');
+    await page.screenshot({ path: testInfo.outputPath('chart-failed-refresh-editable.png') });
   });
 });
 
@@ -575,7 +610,7 @@ test("owned composition snapshots keep formatted source nodes editable but autho
   });
 });
 
-test("source reload recovers editing from a read-only frame even when dynamic preparation fails", async ({}, testInfo) => {
+test("the read-only recovery notice reloads source authority even when dynamic preparation fails", async ({}, testInfo) => {
   await withRuntimeProject("pageroot-static-reload-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, electronApp, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, 'format-chart');
     const editor = page.getByTestId('html-canvas-editor');
@@ -597,8 +632,8 @@ test("source reload recovers editing from a read-only frame even when dynamic pr
       ipcMain.removeHandler('html-edit-runtime:prepare');
       ipcMain.handle('html-edit-runtime:prepare', () => { throw new Error('synthetic preparation unavailable'); });
     });
-    await page.getByRole('button', { name: '更多', exact: true }).click();
-    await page.getByRole('menuitem', { name: '重新载入当前 HTML', exact: true }).click();
+    await page.getByTestId('edit-runtime-static-fallback')
+      .getByRole('button', { name: '重新载入当前 HTML', exact: true }).click();
     await expect(page.locator('.workbench-chrome-status')).toHaveText('页面已重新加载，可以继续编辑');
     await expect(editor).toHaveAttribute('aria-readonly', 'false');
     await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
@@ -609,6 +644,10 @@ test("source reload recovers editing from a read-only frame even when dynamic pr
     await page.keyboard.press(keyShortcut('s'));
     await expect.poll(() => readPublishedWorkingCopy(working)).toContain('RECOVERED');
     await page.screenshot({ path: testInfo.outputPath('reload-editing-restored.png') });
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_STATIC_CANDIDATE_FAILURE: "1",
+    },
   });
 });
 
