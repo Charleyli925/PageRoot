@@ -454,7 +454,7 @@ export class WorkspaceController {
     outcome: "ready" | "rejected" | "failed" | "superseded";
     preserveLastKnownGood: boolean;
   }): boolean;
-  retryEditAuthorRuntime(): boolean;
+  retryEditAuthorRuntime(): Promise<boolean>;
   getCurrentProjectContext(): ProjectContext | null;
   matchesCurrentProjectContext(context: ProjectContext): boolean;
   reloadDocumentCanvas(): DocumentSessionSnapshot;

@@ -228,6 +228,7 @@ test("a rapid double click creates exactly one durable Request", {
       await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     }
     const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByLabel("更多发送选项", { exact: true }).click();
     await sidebar.getByTestId("ai-conversation-copy-task").dblclick({ delay: 0 });
     await expect(launched.page.getByTestId("ai-conversation-action-bar")
       .getByText("任务已复制，等你的 AI 改完", { exact: true })).toBeVisible();
@@ -273,8 +274,7 @@ test("ending a copied run still warns after restart and blocks late finalization
     }
     const runProgress = launched.page.getByTestId("ai-conversation-run-progress");
     await expect(runProgress).toBeVisible();
-    const endRound = launched.page.getByTestId("ai-conversation-action-bar")
-      .getByRole("button", { name: "结束本轮" });
+    const endRound = launched.page.getByTestId("ai-conversation-stop");
     await expect(endRound).toBeEnabled();
     await endRound.click();
 
@@ -416,8 +416,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
     // Ending the reconciled round still asks once: the task may already be in
     // an Agent's hands, so the confirmation dialog owns the final action.
-    await launched.page.getByTestId("ai-conversation-action-bar")
-      .getByRole("button", { name: "结束本轮" }).click();
+    await launched.page.getByTestId("ai-conversation-stop").click();
     await expect(launched.page.getByRole("dialog", {
       name: "AI Agent 可能仍在修改",
     }).getByRole("button", { name: "结束本轮并继续编辑" })).toBeEnabled();

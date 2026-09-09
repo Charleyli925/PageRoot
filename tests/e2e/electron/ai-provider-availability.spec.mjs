@@ -120,12 +120,24 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     await expect.poll(() => launched.page.getByTestId("ai-conversation-stream").evaluate(
       (stream) => Math.round(stream.scrollHeight - stream.clientHeight - stream.scrollTop),
     )).toBeLessThanOrEqual(1);
-    const process = launched.page.getByTestId("ai-turn-process").last();
+    const process = launched.page.locator('[data-testid="ai-turn-process"][data-actor="agent"]')
+      .filter({ hasText: "正在读取本轮资料" }).first();
     await expect(process).toBeVisible();
     await expect(process.locator("summary")).toHaveCount(0);
-    await expect(process).toContainText("Stemmio");
+    await expect(process).toContainText("Qoder");
     await expect(launched.page.getByTestId("ai-conversation-message").filter({ hasText: "正在读取冻结任务。正在写入 Candidate。正在等待校验。" })).toHaveCount(1);
     await expect(process.locator("li").first()).toBeVisible();
+    const processTime = process.locator("time").first();
+    await launched.page.mouse.move(0, 0);
+    await expect(processTime).toHaveCSS("opacity", "0");
+    await processTime.hover();
+    await expect(processTime).toHaveCSS("opacity", "1");
+    const agentMessage = launched.page.locator('[data-testid="ai-conversation-message"][data-actor="agent"]').last();
+    const copyMetadata = agentMessage.getByRole("button", { name: "复制", exact: true }).locator('..');
+    await launched.page.mouse.move(0, 0);
+    await expect(copyMetadata).toHaveCSS("opacity", "0");
+    await agentMessage.hover();
+    await expect(copyMetadata).toHaveCSS("opacity", "1");
     await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "trusted-loop-process-expanded.png"), animations: "disabled" });
     const readyGeometry = await launched.page.evaluate(() => {
       const sidebar = document.querySelector('[data-testid="ai-conversation-sidebar"]');
@@ -168,6 +180,12 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       await launched.page.mouse.up();
       const action = launched.page.getByTestId("ai-conversation-action-bar");
       await expect(action).toBeVisible();
+      const composerBounds = await launched.page.getByTestId("ai-conversation-composer").boundingBox();
+      const layer = action.locator('..');
+      const layerBounds = await layer.boundingBox();
+      expect(layerBounds.width).toBeLessThan(composerBounds.width - 24);
+      expect(layerBounds.x).toBeGreaterThan(composerBounds.x + 10);
+      expect(await layer.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgba(255, 255, 255, 0.38)");
       expect(await action.evaluate((element) => element.closest('[data-testid="ai-conversation-stream"]') === null)).toBe(true);
       await expect.poll(async () => Math.abs((await sidebar.boundingBox()).width - width)).toBeLessThanOrEqual(2);
       await launched.page.screenshot({ path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, `trusted-loop-pr6-ready-${width}.png`), animations: "disabled" });
@@ -318,8 +336,6 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
       animations: "disabled",
     });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
-    await sidebar.getByTestId("ai-conversation-agent").click();
-    await sidebar.getByTestId("ai-conversation-service-codex").click();
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("Codex", { timeout: 60_000 });
     await expect(sidebar.getByRole("button", { name: /交给 Codex 修改/u }))
@@ -338,7 +354,7 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
 
     // A frozen running round exposes no Agent switch control. Its identity
     // remains Codex until this execution completes.
-    await expect(sidebar.getByTestId("ai-conversation-agent")).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-agent")).toContainText("Codex");
     await expect(narration).toContainText("Codex");
     await expect(narration).toContainText(
       "先读取冻结任务。再写入 Candidate。最后等待校验。",
@@ -487,12 +503,10 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
-    await sidebar.getByTestId("ai-conversation-agent").click();
-    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("DeepSeek", { timeout: 20_000 });
-    await expect(sidebar.getByTestId("ai-conversation-model")).toBeVisible();
-    await expect(sidebar.getByTestId("ai-conversation-model"))
+    await expect(sidebar.getByTestId("ai-conversation-model")).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("V4 Pro");
     await expect(sidebar.getByTestId("ai-conversation-model-choices")).toHaveCount(0);
     await expect(sidebar.getByTestId("ai-conversation-reasoning")).toHaveCount(0);
@@ -610,8 +624,6 @@ test("源页运行时余额失败 offers only provider recovery without a false 
     await setDefaultSettingsAgent(settingsPage, "pageroot");
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = await chooseModifyIntent(launched.page);
-    await sidebar.getByTestId("ai-conversation-agent").click();
-    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
 
     const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
@@ -668,13 +680,8 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
     await expect(pagerootCard.getByText("未连接", { exact: true })).toBeVisible();
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
-    await sidebar.getByTestId("ai-conversation-agent").click();
-    const choices = sidebar.getByTestId("ai-conversation-service-choices");
-    await expect(choices).toBeVisible();
-    await choices.getByTestId("ai-conversation-service-pageroot").evaluate((node) => {
-      node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
-      if (typeof node.click === "function") node.click();
-    });
+    await expect(sidebar.getByTestId("ai-conversation-service-choices")).toHaveCount(0);
+    await openAgentSettingsPage(launched.page);
     await expect(sidebar.getByTestId("ai-conversation-setup-panel")).toHaveCount(0);
     await expect(settingsPage).toBeVisible();
     const setupPanel = settingsPage.getByTestId("settings-agent-row-pageroot");

@@ -1060,7 +1060,7 @@ test("the conversation sidebar routes access repair to Settings", async () => {
   const source = await readFile(new URL("../app/workbench/AiConversationSidebar.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /<BoundAgentSetupPanel|ai-conversation-setup-panel/u);
   assert.match(source, /onOpenAgentSettings/u);
-  assert.match(source, /ai-conversation-service-choices/u);
+  assert.doesNotMatch(source, /ai-conversation-service-choices/u);
   assert.match(source, /replace-api-key/u);
   assert.match(source, /不会对当前文件发送/u);
   assert.match(source, /onQueueDefault/u);
@@ -1098,4 +1098,15 @@ test("turn presentation prioritizes requirements, sealed public summary, result 
 
 test("stored provider identities keep their names instead of becoming a generic AI Agent", () => {
   assert.deepEqual(sidebarMessageStream(["qoder", "codex", "pageroot"].map((providerId) => factMessage({ actor: "agent", providerId }))).map((message) => message.actorLabel), ["Qoder", "Codex", "Stemmio AI"]);
+});
+
+test("process blocks preserve executor boundaries and narration sentences survive display", async () => {
+  const { sidebarTurnPresentation, sidebarNarrationParagraphs } = await import('../app/workbench/ai-conversation-model.js');
+  const messages = [
+    { messageId: 'a', actor: 'pageroot', actorLabel: 'Stemmio', kind: 'progress', text: '交付任务' },
+    { messageId: 'b', actor: 'agent', actorLabel: 'Codex', kind: 'progress', text: '读取资料' },
+    { messageId: 'c', actor: 'pageroot', actorLabel: 'Stemmio', kind: 'progress', text: '准备审阅' },
+  ];
+  assert.deepEqual(sidebarTurnPresentation(messages).timeline.map(block => block.messages[0].actor), ['pageroot', 'agent', 'pageroot']);
+  assert.deepEqual(sidebarNarrationParagraphs('读取资料。生成结果。\n\n版本 1.2 保持原样。'), ['读取资料。', '生成结果。', '版本 1.2 保持原样。']);
 });

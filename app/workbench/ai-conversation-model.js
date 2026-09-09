@@ -373,10 +373,19 @@ export function sidebarTurnPresentation(messages = []) {
     : message.kind === "decision-outcome" || ["已采用本次修改。", "未采用本次修改，修改要求与历史已保留。"].includes(message.text) ? 3 : 2;
   primary.sort((a, b) => order(a) - order(b));
   const timeline = [];
-  for (const message of messages) {
+  // Receipts can arrive before buffered tool facts. Keep the handoff readable:
+  // preparation, the Agent's complete execution, then host verification and decision.
+  const firstAgent = messages.findIndex((message) => message.actor === "agent");
+  const ordered = firstAgent < 0 ? messages : [
+    ...messages.slice(0, firstAgent),
+    ...messages.slice(firstAgent).filter((message) => message.actor === "agent"),
+    ...messages.slice(firstAgent).filter((message) => message.actor !== "agent"),
+  ];
+  for (const message of ordered) {
     const isProcess = process.includes(message);
     const previous = timeline.at(-1);
-    if (isProcess && previous?.process) previous.messages.push(message);
+    if (isProcess && previous?.process && previous.messages[0].actor === message.actor
+      && previous.messages[0].actorLabel === message.actorLabel) previous.messages.push(message);
     else timeline.push({ process: isProcess, messages: [message] });
   }
   return { primary, process, timeline };
@@ -1079,3 +1088,20 @@ export {
   INTENT_CONTINUE,
   FORBIDDEN_MESSAGE_KEYS,
 };
+
+/** A display-only sentence boundary; preserve original text for copy and storage. */
+export function sidebarNarrationParagraphs(text) {
+  return String(text || "").split(/\n\s*\n/u).flatMap((paragraph) =>
+    paragraph.split(/(?<=[。！？])\s*|(?<=[.!?])\s+(?=[A-Z])/u)
+  ).map((part) => part.trim()).filter(Boolean);
+}
+
+export function sidebarProcessRows(messages = []) {
+  const rows = [];
+  for (const message of messages) {
+    const previous = rows.at(-1);
+    if (previous && previous.message.text === message.text) previous.count += 1;
+    else rows.push({ message, count: 1 });
+  }
+  return rows;
+}

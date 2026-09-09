@@ -377,11 +377,7 @@ Discussion Turn 使用比 Execution Turn 更短的超时预算（建议 2 分钟
 
 ### 10.1 模型选择是显式的，但不是常驻控件
 
-模型由用户显式选择。Composer 底部显示当前模型名称，作为一个安静的小号文字按钮。
-
-- 目录有多个可选模型时，名称带下拉指示，点击展开短列表。
-- 目录只有一个可用模型时，名称是静态文本，不带下拉指示。给用户一个点开后无可选项的下拉框违反 2.5。
-- 模型切换只影响后续 Turn，不改写历史消息。
+模型在设置中的 AI 服务面板选择。Composer 底部只显示当前默认 Agent 的静态身份，不提供服务、模型或思考深度选择器。目录只有一个模型时不提供无意义的下拉；切换只影响后续 Turn，不改写冻结 Request 或历史消息。
 
 > **实现现状（2026-08-22 实测校正）**：模型选择**可以实现**，往下的路径是 CLI 参数而不是 ACP 字段。
 >
@@ -1355,7 +1351,7 @@ PageRoot 不是把聊天框贴到 HTML 编辑器旁边，而是把同一份真�
 - 进入 AI 后，页面自然切到预览，评论变成同一个“评”标记的只读态，对话出现在右侧。
 - 对话跟着 Document 走，切换文档就切换对话，后台仍在生成的那一轮不会被打断。
 - Qoder 在讨论时只能阅读一份短命只读快照；用户明确交给 AI 后才可以写独立 Candidate。
-- 模型在用户进入前尽可能加载，由用户显式选择；用户改不了的参数不出现在界面上。
+- 模型在用户进入前尽可能加载，在设置中选择；用户改不了的参数不出现在界面上。
 - Qoder 展示它正在做什么，PageRoot 展示哪些结果已经被验证。
 - 消息流只留不可变事实，当前该做的决定永远在视野里。
 - Candidate 返回后，原页面保持不变，直到用户审阅、采用或拒绝。
@@ -1369,3 +1365,13 @@ requested/resolved provider selection, nullable validated binding and capability
 snapshot fingerprint; each reply uses actor `agent`, provider id and actual
 provider-namespaced model. v1 is projected in memory without rewriting bytes.
 Unknown-provider history stays visible and reviewable but cannot restart.
+
+### Current compact composer contract (2026-09)
+
+The Settings default selects new turns; document-specific historical service overrides no
+longer determine the composer. A frozen Request keeps its original Agent. The composer
+shows a static identity, a persistent local draft and one send/stop action. Model, service
+and reasoning selection live in Settings. Current decisions attach above the input and
+never enter historical messages. Public progress uses the actual executor, preserves
+message paragraph boundaries when sealed, and reveals metadata only on hover/focus.
+The behavior and refresh matrix is owned by `INTERACTION_FLOW.md`.

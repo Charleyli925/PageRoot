@@ -152,9 +152,11 @@ export async function projectSubmissionReceipt(loaded, receipt) {
       const messageKind = event.kind === "public-summary" ? "result-summary"
         : ["promoted", "rejected"].includes(event.kind) ? "decision-outcome"
         : ["candidate-ready", "no-change", "cancelled", "error", "failed", "interrupted", "stop-confirmed"].includes(event.kind) ? "result-summary" : "progress";
+      const agentOwned = ["public-summary", "reading-task", "writing-candidate", "finalizing",
+        "receiving-response", "generating-modification", "response-received", "execution-ended"].includes(event.kind);
       next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
-        messageId, actor: event.kind === "public-summary" && receipt.snapshot.agentDelivery.selection?.providerId ? "agent" : "pageroot",
-        ...(event.kind === "public-summary" && receipt.snapshot.agentDelivery.selection?.providerId
+        messageId, actor: agentOwned && receipt.snapshot.agentDelivery.selection?.providerId ? "agent" : "pageroot",
+        ...(agentOwned && receipt.snapshot.agentDelivery.selection?.providerId
           ? { providerId: receipt.snapshot.agentDelivery.selection.providerId } : {}),
         kind: next.messages.find((message) => message.messageId === messageId)?.kind || messageKind, status: "completed",
         text: event.kind === "public-summary" ? event.publicSummary : EXECUTION_FACTS[event.kind], createdAt: event.timestamp, completedAt: event.timestamp,

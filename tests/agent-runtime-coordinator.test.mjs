@@ -576,7 +576,7 @@ test("execution status projects only public Agent text with frozen provider iden
   assert.equal(coordinator.executionStatus(IDENTITY).state, "completed");
   const summaries = persistedFacts.filter((event) => event.kind === "public-summary");
   assert.equal(summaries.length, 1);
-  assert.equal(summaries[0].publicSummary, "正在读取冻结任务。正在写入 Candidate。");
+  assert.equal(summaries[0].publicSummary, "正在读取冻结任务。\n\n正在写入 Candidate。");
   assert.equal(JSON.stringify(persistedFacts).includes("隐藏推理"), false);
   await coordinator.shutdown();
 });

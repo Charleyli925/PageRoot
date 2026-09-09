@@ -1853,7 +1853,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     echarts.init(chart).setOption({ series: [{ type: 'bar', data: [1, 2, 3] }] });
     document.querySelector('#latest-wins-proof').textContent =
       '运行时卡片 ' + document.querySelectorAll('[data-native-case="runtime-latest-wins"]').length;
-    if (heading?.textContent.includes('候选失败')) {
+    if (heading?.textContent.includes('候选失败') && !parent.__PAGEROOT_RUNTIME_FAILURE_CLEARED__) {
       throw new Error('synthetic latest candidate activation failure');
     }
   </script>
@@ -2087,9 +2087,9 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await expect(heading).toHaveAttribute("data-html-canvas-selected", "part");
     await expect(heading).toContainText("你好");
 
-    // A true latest candidate activation failure must promote the same latest
-    // Working HTML as a Script-disabled page. Dynamic execution resumes only
-    // after the user removes the fault and explicitly retries it.
+    // If static fallback would erase visible charts, retain the usable frame
+    // as explicitly older and read-only. A retry must use the latest Working
+    // HTML once the transient author failure has cleared.
     frame = await currentEditorFrame(page);
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await heading.click();
@@ -2118,69 +2118,41 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
       timeout: 12_000,
     }).toBe("candidate-failed");
     await expect(surface).toHaveAttribute("data-edit-runtime-phase", "static-fallback");
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "部分动态内容未更新",
-    );
-    await expect(editor).toHaveAttribute("data-runtime-degradation", "static-visible");
+    const notice = page.getByTestId("edit-runtime-static-fallback");
+    await expect(notice).toContainText("上一次可用预览");
+    await expect(editor).toHaveAttribute("data-runtime-degradation", "last-known-good-readonly");
+    await expect(editor).toHaveAttribute("aria-readonly", "true");
     frame = await currentEditorFrame(page);
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
-      .toHaveAttribute("sandbox", "allow-same-origin");
-    await expect(editor).toHaveAttribute("aria-readonly", "false");
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "已显示最新源码的静态页面，仍可编辑和保存。",
-    );
-    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(0);
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    const latestSource = await readPublishedWorkingCopy(workingCopyPath, "utf8");
+    expect(latestSource).toContain("候选失败");
+    expect(latestSource).toContain("你好");
+    expect(latestSource).not.toContain("pinyin");
+    await expect(notice.getByRole("button", { name: "导出当前 HTML", exact: true })).toBeVisible();
 
-    heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
-    await heading.click();
-    await heading.dblclick({ force: true });
-    await expect(heading).toHaveAttribute("contenteditable", "true");
-    await heading.evaluate((element) => {
-      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-      let startText = null;
-      let markerText = null;
-      let text = walker.nextNode();
-      while (text instanceof Text) {
-        if (!startText && text.data.includes("你好")) startText = text;
-        if (text.data.includes("候选失败")) {
-          markerText = text;
-          break;
-        }
-        text = walker.nextNode();
-      }
-      if (!(startText instanceof Text) || !(markerText instanceof Text)) {
-        throw new Error("Editable spaces or failure marker text is missing.");
-      }
-      const markerEnd = markerText.data.indexOf("候选失败") + "候选失败".length;
-      const range = document.createRange();
-      range.setStart(startText, startText.data.indexOf("你好") + "你好".length);
-      range.setEnd(markerText, markerEnd);
-      const selection = document.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
+    await page.evaluate(() => { window.__PAGEROOT_RUNTIME_FAILURE_CLEARED__ = true; });
+    await notice.getByRole("button", { name: "重新加载", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+    ))).toBeGreaterThan(0);
+    await page.evaluate(() => {
+      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
+      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
+      releases.forEach((release) => release());
     });
-    await page.keyboard.press("Backspace");
-    await expect(heading).not.toContainText("候选失败");
-    await page.keyboard.press("Escape");
-    await expect.poll(async () => (await readPublishedWorkingCopy(workingCopyPath, "utf8")).match(
-      /<h2[^>]*data-native-case="runtime-latest-wins-text"[^>]*>([\s\S]*?)<\/h2>/u,
-    )?.[1] ?? "").not.toContain("候选失败");
-
+    await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
+      timeout: 12_000,
+    }).toBe("ready");
+    await expect(notice).toHaveCount(0);
+    await expect(editor).toHaveAttribute("aria-readonly", "false");
     frame = await currentEditorFrame(page);
-    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(0);
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    await expect(frame.locator('[data-native-case="runtime-latest-wins-text"]').first()).toContainText("候选失败");
     await expect(frame.locator('[data-native-case="runtime-latest-wins"]')).toHaveCount(3);
     await expect(editor.locator('iframe:not([data-frame-role])')).toHaveCount(1);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
-    await expect(editor.locator('iframe[data-frame-role="runtime-previous"]')).toHaveCount(0);
-    const degradedSource = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
-    expect(degradedSource).toContain("你好");
-    expect(degradedSource).not.toContain("pinyin");
-    const degradedHeadingSource = degradedSource.match(
-      /<h2[^>]*data-native-case="runtime-latest-wins-text"[^>]*>([\s\S]*?)<\/h2>/u,
-    )?.[1] ?? "";
-    expect(degradedHeadingSource).not.toContain("候选失败");
-    const degradedIndex = buildSourceIndex(degradedSource);
-    expect(degradedIndex.byPagerootId.size).toBeGreaterThanOrEqual(5);
+    expect(await readPublishedWorkingCopy(workingCopyPath, "utf8")).toBe(latestSource);
+    expect(buildSourceIndex(latestSource).byPagerootId.size).toBeGreaterThanOrEqual(5);
   });
 });
 
@@ -2684,7 +2656,7 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
     );
     await expect(editor).toHaveAttribute("aria-readonly", "true");
     const degradationNotice = page.getByTestId("edit-runtime-static-fallback");
-    await expect(degradationNotice).toContainText("动态和静态页面都未能更新");
+    await expect(degradationNotice).toContainText("页面预览未能完整更新");
     await expect(degradationNotice).toContainText("最新 HTML 未回滚");
     await expect(degradationNotice.getByRole("button", { name: "重新加载", exact: true }))
       .toBeVisible();

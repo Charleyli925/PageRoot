@@ -404,3 +404,123 @@ test("double-clicking the sixth blank line after a Runtime refresh places the ca
     expect((beforeMarker.match(/<br\b/giu) || []).length).toBe(5);
   });
 });
+
+const DELAYED_CHART_PAGE = `<!doctype html><html><head><title>Continuous report</title>
+<style>body{font:18px system-ui;padding:32px;color:#25232a}main{display:grid;grid-template-columns:1fr 1fr;gap:24px}#chart{height:180px}canvas{width:320px;height:180px}</style></head>
+<body><h1>Quarterly report</h1><main><p data-native-case="format-chart">Revenue grew steadily this quarter.</p><div id="chart"></div></main>
+<script>
+ const text = document.querySelector('[data-native-case="format-chart"]').textContent;
+ if (text.includes('FAIL_CHART')) throw new Error('synthetic chart initialization failure');
+ setTimeout(() => {
+   const canvas = document.createElement('canvas'); canvas.width=320; canvas.height=180;
+   document.querySelector('#chart').append(canvas);
+   const ctx = canvas.getContext('2d'); ctx.fillStyle='#6054d9';
+   [70,120,155].forEach((height,index)=>ctx.fillRect(20+index*95,180-height,60,height));
+ }, text.includes('UPDATED') ? 700 : 30);
+</script></body></html>`;
+
+test("formatting preserves charts and a delayed replacement never presents missing surfaces", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async ({}, testInfo) => {
+  await withRuntimeProject("pageroot-chart-format-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "format-chart");
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    const editor = page.getByTestId('html-canvas-editor');
+    const generation = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+    await activateNativeEdit(frame, 'format-chart');
+    const target = frame.locator('[data-native-case="format-chart"]');
+    await target.press('End');
+    await page.keyboard.insertText(' UPDATED');
+    await target.press('Home');
+    await target.press('Shift+End');
+    for (const name of ['加粗', '下划线', '加粗', '下划线']) {
+      await editor.getByRole('button', { name, exact: true }).click();
+      await expect(frame.locator('#chart canvas')).toHaveCount(1);
+      expect(await frame.locator('#chart canvas').evaluate((canvas) => canvas.getContext('2d').getImageData(30,160,1,1).data[3])).toBe(255);
+      await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', generation);
+    }
+    await page.evaluate(() => {
+      window.__chartContinuitySamples = [];
+      window.__chartContinuityTimer = setInterval(() => {
+        const frame = document.querySelector('iframe[data-runtime-slot-role="active"]');
+        if (frame?.contentDocument) window.__chartContinuitySamples.push(frame.contentDocument.querySelectorAll('#chart canvas').length);
+      }, 16);
+    });
+    await page.keyboard.press('Escape');
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', generation);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    const samples = await page.evaluate(() => { clearInterval(window.__chartContinuityTimer); return window.__chartContinuitySamples; });
+    expect(samples.length).toBeGreaterThan(1);
+    expect(samples.every((count) => count === 1)).toBe(true);
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    expect(await readPublishedWorkingCopy(working, 'utf8')).toContain('UPDATED');
+    await page.screenshot({ path: testInfo.outputPath('chart-format-continuity.png') });
+  });
+});
+
+test("failed chart refresh retains the usable frame and identifies it as an older preview", async ({}, testInfo) => {
+  await withRuntimeProject("pageroot-chart-failure-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    await activateNativeEdit(frame, 'format-chart');
+    await frame.locator('[data-native-case="format-chart"]').press('End');
+    await page.keyboard.insertText(' FAIL_CHART');
+    await page.keyboard.press('Escape');
+    const notice = page.getByTestId('edit-runtime-static-fallback');
+    await expect(notice).toContainText('上一次可用预览');
+    await expect(notice.getByRole('button', { name: '重新加载', exact: true })).toBeVisible();
+    await expect((await currentEditorFrame(page)).locator('#chart canvas')).toHaveCount(1);
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    expect(await readPublishedWorkingCopy(working, 'utf8')).toContain('FAIL_CHART');
+    await page.screenshot({ path: testInfo.outputPath('chart-failed-refresh.png') });
+  });
+});
+
+const HIDDEN_TAB_CHART_PAGE = `<!doctype html><html><head><title>Tabbed report</title>
+<style>body{font:18px system-ui;padding:32px}.panel[hidden]{display:none}#chart{width:500px;height:240px}</style>
+<script src="echarts.js"></script></head><body>
+<nav role="tablist"><button role="tab" aria-controls="overview" aria-selected="true" class="tab active" data-p="overview">Overview</button><button role="tab" aria-controls="details" aria-selected="false" class="tab" data-p="details">Details</button></nav>
+<section role="tabpanel" id="overview" class="panel active"><p data-native-case="overview-copy">Report overview</p></section>
+<section role="tabpanel" id="details" class="panel" hidden><p data-native-case="hidden-chart-copy">Revenue grew this quarter.</p><div id="chart"></div></section>
+<script>
+const chart = echarts.init(document.querySelector('#chart'));
+chart.setOption({animation:false,xAxis:{data:['A','B']},yAxis:{},series:[{type:'bar',data:[30,60]}]});
+window.addEventListener('resize',()=>chart.resize());
+document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{
+ document.querySelectorAll('.tab,.panel').forEach(el=>el.classList.remove('active'));
+ document.querySelectorAll('.panel').forEach(el=>el.hidden=true);
+ tab.classList.add('active');document.getElementById(tab.dataset.p).classList.add('active');document.getElementById(tab.dataset.p).hidden=false;chart.resize();
+}));
+</script></body></html>`;
+
+test("restored hidden tabs initialize real charts with visible geometry before frame promotion", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async ({}, testInfo) => {
+  await withRuntimeProject('pageroot-hidden-chart-e2e-', {
+    'runtime-report.html': HIDDEN_TAB_CHART_PAGE,
+    'echarts.js': readFileSync(new URL('../../../node_modules/echarts/dist/echarts.min.js', import.meta.url), 'utf8'),
+  }, async ({ page, sourcePath }) => {
+    let { frame, editor } = await loadedDiskFrame(page, sourcePath, 'overview-copy');
+    await page.getByRole('button', { name: '预览', exact: true }).click();
+    const preview = page.frameLocator('iframe[title="HTML 交互预览"]');
+    await preview.locator('.tab[data-p="details"]').click();
+    await page.getByRole('button', { name: '编辑', exact: true }).click();
+    frame = await currentEditorFrame(page);
+    const chartWidth = () => frame.locator('#chart canvas').first().evaluate(canvas => canvas.width);
+    await expect.poll(chartWidth).toBeGreaterThan(400);
+    for (const marker of [' First edit.', ' Second edit.']) {
+      const generation = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+      await activateNativeEdit(frame, 'hidden-chart-copy');
+      await frame.locator('[data-native-case="hidden-chart-copy"]').press('End');
+      await page.keyboard.insertText(marker);
+      await page.keyboard.press('Escape');
+      await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', generation);
+      frame = await currentEditorFrame(page);
+      await expect(frame.locator('#details')).toBeVisible();
+      await expect.poll(chartWidth).toBeGreaterThan(400);
+      await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
+    }
+    await page.screenshot({ path: testInfo.outputPath('restored-tab-chart.png') });
+  });
+});
