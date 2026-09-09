@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 
 import {
   currentEditorFrame,
+  documentToken,
   expect,
   expectCheckpointPersisted,
   keyShortcut,
@@ -39,12 +40,13 @@ if (!files.length) {
 const reportDir = mkdtempSync(path.join(tmpdir(), "stemmio-real-html-acceptance-"));
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const report = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   head: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
   diffSha256: sha256(execFileSync("git", ["diff", "HEAD", "--binary"])),
   planned: files.length,
   minimumTextHostsPerFile: 3,
   minimumStructureCyclesPerFile: 2,
+  minimumOrdinaryContinuityChecksPerFile: 3,
   inputAuthority: "Playwright mouse and keyboard events; DOM evaluation is discovery/oracle only",
   results: [],
 };
@@ -77,12 +79,36 @@ async function currentRevision(page) {
   return Number(value || 0);
 }
 
+async function currentFrameIdentity(page) {
+  const editor = editorFor(page);
+  return {
+    document: await documentToken(page),
+    generation: await editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute("data-frame-generation"),
+    pendingRefresh: {
+      present: await editor.getAttribute("data-runtime-refresh-pending") !== null,
+      sourceRevision: await editor.getAttribute(
+        "data-runtime-refresh-pending-source-revision",
+      ),
+      reason: await editor.getAttribute("data-runtime-refresh-pending-reason"),
+      coalescedCount: await editor.getAttribute(
+        "data-runtime-refresh-coalesced-count",
+      ),
+    },
+  };
+}
+
 async function clickAuthoredTab(page, tabId) {
   if (!tabId) return;
   const frame = await currentEditorFrame(page);
   const tab = frame.locator(`[data-pageroot-id="${tabId}"]`);
   await tab.scrollIntoViewIfNeeded();
   await tab.click();
+  const activate = editorFor(page).getByRole("button", {
+    name: "切换到此页签",
+    exact: true,
+  });
+  if (await activate.count()) await activate.click();
   await page.waitForTimeout(200);
 }
 
@@ -150,7 +176,7 @@ async function planTextTargets(page) {
   const extras = [];
   let frame = await currentEditorFrame(page);
   const tabs = await frame.locator(
-    '[role="tab"][data-pageroot-id], .tab[data-p][data-pageroot-id]',
+    '[role="tab"][aria-controls][data-pageroot-id]',
   ).evaluateAll((elements) => (
     elements.filter((element) => {
       const rect = element.getBoundingClientRect();
@@ -285,6 +311,7 @@ async function exerciseTextTarget({
   const lineMarker = `PRQA_${fileIndex}_${markerIndex}_LINE`;
   let beforeRevision = await currentRevision(page);
   let target = await enterNativeEdit(page, plan);
+  const ordinaryBoundaryBefore = await currentFrameIdentity(page);
 
   await target.press(keyShortcut("ArrowUp"));
   await page.keyboard.insertText(`${startMarker} `);
@@ -327,6 +354,13 @@ async function exerciseTextTarget({
   await page.keyboard.press("Escape");
   await waitForRuntimeHandoffSettled(page);
   await waitUntilEditable(page);
+  await page.locator(".comments-panel.comment-rail").click({
+    position: { x: 12, y: 96 },
+  });
+  await page.waitForTimeout(750);
+  const ordinaryBoundaryAfter = await currentFrameIdentity(page);
+  expect(ordinaryBoundaryAfter).toEqual(ordinaryBoundaryBefore);
+  await expect(editor.locator('iframe[data-runtime-slot-role="candidate"]')).toHaveCount(0);
 
   let savedHtml = await readPublishedWorkingCopy(workingCopyPath, "utf8");
   expect(savedHtml).toContain(startMarker);
@@ -394,6 +428,20 @@ async function exerciseTextTarget({
     endMarker,
     historyMarker,
     lineMarker: round === 1 ? lineMarker : null,
+    ordinaryBoundary: {
+      sameDocument: ordinaryBoundaryAfter.document === ordinaryBoundaryBefore.document,
+      sameGeneration: ordinaryBoundaryAfter.generation === ordinaryBoundaryBefore.generation,
+      ordinaryEditCreatedPendingRefresh: (
+        !ordinaryBoundaryBefore.pendingRefresh.present
+        && ordinaryBoundaryAfter.pendingRefresh.present
+      ),
+      pendingRefreshUnchanged: (
+        JSON.stringify(ordinaryBoundaryAfter.pendingRefresh)
+        === JSON.stringify(ordinaryBoundaryBefore.pendingRefresh)
+      ),
+      noDeferredCandidate: true,
+      boundaries: ["edit-end", "selection-clear", "wait", "ordinary-save"],
+    },
   };
 }
 
@@ -405,9 +453,9 @@ async function exerciseDuplicateDelete({ page, plan, marker }) {
   await original.click();
   const beforeDuplicate = await currentRevision(page);
   await editorFor(page).getByRole("button", { name: "复制元素", exact: true }).click();
-  await expectCheckpointPersisted(page, beforeDuplicate);
   await waitForRuntimeHandoffSettled(page);
   await waitUntilEditable(page);
+  await expectCheckpointPersisted(page, beforeDuplicate);
 
   frame = await currentEditorFrame(page);
   const matchingIds = await frame.locator(`${plan.tag}[data-pageroot-id]`).evaluateAll(
@@ -424,9 +472,9 @@ async function exerciseDuplicateDelete({ page, plan, marker }) {
   const beforeDelete = await currentRevision(page);
   page.once("dialog", (dialog) => dialog.accept());
   await editorFor(page).getByRole("button", { name: "删除元素", exact: true }).click();
-  await expectCheckpointPersisted(page, beforeDelete);
   await waitForRuntimeHandoffSettled(page);
   await waitUntilEditable(page);
+  await expectCheckpointPersisted(page, beforeDelete);
 
   frame = await currentEditorFrame(page);
   await expect(frame.locator(`[data-pageroot-id="${duplicateId}"]`)).toHaveCount(0);
@@ -497,6 +545,7 @@ for (const [fileIndex, filename] of files.entries()) {
             successful.length === 2 ? "line split and undo/redo" : "selection delete and undo/redo",
             "save and re-enter",
           ],
+          ordinaryBoundary: markers.ordinaryBoundary,
         });
       } catch (cause) {
         row.completedTargets.push({
@@ -513,7 +562,8 @@ for (const [fileIndex, filename] of files.entries()) {
 
     await page.screenshot({ path: path.join(copyDir, "after-complex-text-edits.png"), fullPage: true });
     for (let cycle = 0; cycle < 2; cycle += 1) {
-      const sample = successful[0];
+      const sample = successful.find(({ plan }) => !["td", "th"].includes(plan.tag))
+        ?? successful[0];
       const duplicateId = await exerciseDuplicateDelete({
         page,
         plan: sample.plan,

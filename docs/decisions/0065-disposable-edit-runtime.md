@@ -80,9 +80,12 @@ source or be reconciled node by node.
   moved, duplicated or deleted as source.
 - Every accepted semantic source change still produces complete next HTML.
   Structural and other non-native changes rebuild the disposable iframe and
-  rerun the author program. Native text input may remain in the current frame
-  while composing and rebuilds once when the edit finishes. Comments, save and
-  source echoes without an HTML change do not require a rebuild.
+  rerun the author program. Successful direct text and common-style source
+  changes update the proved current DOM projection and end there; finishing the
+  edit, changing selection, waiting or saving does not create a deferred author
+  program rerun. Local projection failure, stale source identity and explicit
+  recovery remain rebuild boundaries. Comments, save and source echoes without
+  an HTML change do not require a rebuild.
 - One scoped resource session may serve repeated disposable frames only while
   the authored script markup and bodies have the same exact program identity.
   A script change requires a new Canvas generation and a newly authorized
@@ -121,11 +124,14 @@ saved fact.**
 - Direct text and common-style edits must be visible in the current Canvas
   without a manual refresh. Safe high-frequency input updates the current
   authored DOM projection and must not replace the iframe for every keystroke.
+  Once that synchronization succeeds it must not replace the iframe during
+  input or after the ordinary edit boundary.
 - The implementation preserves the current page whenever it can still prove a
   local source-backed update. A structure change or a change whose result
   requires author Script may rebuild the disposable iframe, but rebuilds are
-  coalesced at semantic/checkpoint boundaries rather than driven by individual
-  input events.
+  reserved for those explicit boundaries and for failed/stale local projection,
+  rather than being a default follow-up to an already successful text/style
+  edit.
 - A necessary rebuild should restore the shared scroll position, any exposed
   zoom context, and the selection resolved by stable element ID when those
   facts still have a valid target. Restoration is best-effort presentation;
@@ -207,8 +213,10 @@ runtime-only state after reopen.
 - `location.assign()` and `location.replace()` cannot navigate the Edit frame.
 - A semantic structure edit rebuilds the iframe, reruns the program and saves
   only the complete semantic HTML result.
-- Continuous direct text input is visible immediately without repeated iframe
-  replacement; a completed common edit survives close and reopen from HTML.
+- Continuous direct text input and common formatting stay in the same document
+  through edit completion, target changes, waiting and ordinary save; author
+  Script is not rerun for those successful local projections. The completed
+  common edit survives close and reopen from HTML.
 - A required rebuild preserves shared scroll and stable-ID selection when the
   target remains valid, without serializing runtime output.
 - Switching away and back creates a fresh runtime page without replaying an old

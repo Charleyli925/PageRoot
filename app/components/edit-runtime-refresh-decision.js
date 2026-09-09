@@ -46,13 +46,18 @@ export function decideEditRuntimeRefresh({
     });
   }
 
+  if (mutationKind === "text" || mutationKind === "style") {
+    return Object.freeze({
+      action: "in-place",
+      reason: `runtime-${mutationKind}`,
+      synchronizeCurrentFrame: true,
+      markRuntimeRefreshPending: false,
+    });
+  }
+
   if (
-    mutationKind === "text"
-    || mutationKind === "style"
-    || (
-      mutationKind === "attribute"
-      && isRuntimeInPlaceAttribute(attributeName)
-    )
+    mutationKind === "attribute"
+    && isRuntimeInPlaceAttribute(attributeName)
   ) {
     return Object.freeze({
       action: "defer-until-boundary",

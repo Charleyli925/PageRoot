@@ -7783,9 +7783,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           return;
         }
       }
+      const resumeRejectedNativeStyle = () => {
+        if (!resumeNativeEditAfterStyle) return false;
+        const resumed = Boolean(startEditing(undefined, nativeSelectionAfterStyle));
+        containerRef.current?.setAttribute(
+          "data-native-format-resume",
+          `rejected:requested:${resumed ? "resumed" : "not-resumed"}`,
+        );
+        if (resumed && activeNativeEditRef.current) {
+          rememberNativeEditSelection(activeNativeEditRef.current);
+        } else if (!resumed) {
+          reportBlockedEdit(new Error(
+            "格式修改已停止，但原文字选区无法恢复。",
+          ));
+        }
+        return resumed;
+      };
       if (activeRange && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)) {
         const sourceIndex = sourceIndexRef.current;
-        if (!sourceIndex) return;
+        if (!sourceIndex) {
+          resumeRejectedNativeStyle();
+          return;
+        }
         const styleTargets = activeRange.styleElements.filter(
           (candidate) => candidate.isConnected,
         );
@@ -7798,6 +7817,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
         if (!verifiedOverride) {
           reportInlineStyleOverrideFailure();
+          resumeRejectedNativeStyle();
           return;
         }
         const beforeFacts = inlineStyleFacts(styleTarget, config.cssProperty);
@@ -7823,6 +7843,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             reportBlockedEdit(new Error(
               "当前文字的布局节点与源码映射不完整，本次格式修改已阻止。",
             ));
+            resumeRejectedNativeStyle();
             return;
           }
           const hasFlexOrGridTextParent = sourceTextParents?.some((parent) => (
@@ -7837,16 +7858,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             reportBlockedEdit(new Error(
               "选区的直接文字容器使用 flex/grid，新包装会改变间距；本次格式修改已阻止。请选择已有的完整样式片段。",
             ));
+            resumeRejectedNativeStyle();
             return;
           }
           if (createsRangeWrapper && property === "backgroundColor") {
             reportBlockedEdit(new Error(
               "局部填充色需要新增可见盒子，可能改变原页间距；本次修改已阻止。选中已有完整样式片段时仍可修改。",
             ));
+            resumeRejectedNativeStyle();
             return;
           }
         } catch (cause) {
           reportBlockedEdit(cause);
+          resumeRejectedNativeStyle();
           return;
         }
         const mutation: HtmlCanvasMutation = {

@@ -17,25 +17,25 @@ test("static text, style and sibling reorder stay in the mounted frame", () => {
   }
 });
 
-test("Runtime text and style edits coalesce until an explicit boundary", () => {
+test("Runtime text and style edits end after a successful in-place projection", () => {
   assert.deepEqual(decideEditRuntimeRefresh({
     hasRuntime: true,
     nativeEditActive: true,
     mutationKind: "text",
   }), {
-    action: "defer-until-boundary",
-    reason: "continuous-native-edit",
+    action: "in-place",
+    reason: "runtime-text",
     synchronizeCurrentFrame: true,
-    markRuntimeRefreshPending: true,
+    markRuntimeRefreshPending: false,
   });
   assert.deepEqual(decideEditRuntimeRefresh({
     hasRuntime: true,
     mutationKind: "style",
   }), {
-    action: "defer-until-boundary",
+    action: "in-place",
     reason: "runtime-style",
     synchronizeCurrentFrame: true,
-    markRuntimeRefreshPending: true,
+    markRuntimeRefreshPending: false,
   });
 });
 
@@ -58,9 +58,19 @@ test("Runtime structure, reorder and program changes prepare a candidate now", (
   });
 });
 
-test("ordinary attributes are in-place while script-sensitive attributes rebuild", () => {
+test("ordinary Runtime attributes defer while script-sensitive attributes rebuild", () => {
   for (const name of ["class", "title", "aria-label", "data-report-kind"]) {
     assert.equal(isRuntimeInPlaceAttribute(name), true);
+    assert.deepEqual(decideEditRuntimeRefresh({
+      hasRuntime: true,
+      mutationKind: "attribute",
+      attributeName: name,
+    }), {
+      action: "defer-until-boundary",
+      reason: "runtime-attribute",
+      synchronizeCurrentFrame: true,
+      markRuntimeRefreshPending: true,
+    });
   }
   for (const name of ["onclick", "src", "srcset", "href", "action", "integrity"]) {
     assert.equal(isRuntimeInPlaceAttribute(name), false);

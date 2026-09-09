@@ -533,10 +533,12 @@ element's public source identity revokes that authority. Every source mutation
 must revalidate the live DOM object, its registered stable ID and its current
 SourceIndex mapping; cached selection state is never mutation authority. A runtime descendant is
 display-only and resolves to the nearest still-proven source host for comments;
-it cannot become a semantic source edit. A supported semantic
-source change materializes complete HTML, rebuilds the disposable frame and
-reruns the author program. Native input may postpone that rebuild until editing
-finishes. The resource session may be reused only while exact authored script
+it cannot become a semantic source edit. Every supported semantic source change
+materializes complete HTML. A successful direct text/common-style change also
+updates the proved current DOM projection and ends without a deferred rebuild;
+structure, program-identity change, failed local projection or stale projection
+authority rebuilds the disposable frame and reruns the author program. The
+resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
 `RuntimeFrameCoordinator` solely owns two fixed physical slots (`a` and `b`),
 their monotonically increasing slot leases, the active/candidate identities,
@@ -668,9 +670,12 @@ defence in depth.
 
 The Edit Canvas has one normative experience/persistence contract. Direct
 source text and common-style edits are reflected in the current projection
-without a user refresh, and high-frequency input must not replace the iframe on
-each event. A structure or Script-dependent semantic operation may rebuild one
-disposable frame at its checkpoint; unnecessary rebuilds are forbidden. A
+without a user refresh. After source and current-DOM synchronization succeeds,
+high-frequency input, edit completion, target changes, waiting and ordinary
+save must retain the same document and must not rerun author Script. A structure
+or Script-dependent semantic operation, failed local projection or stale
+projection authority may rebuild one disposable frame at its checkpoint;
+unnecessary rebuilds are forbidden. A
 rebuild restores the shared scroll position, exposed zoom context and
 stable-element-ID selection when each target remains valid. Every completed
 operation first materializes complete HTML and enters the ordinary Hash/CAS,
@@ -689,8 +694,10 @@ revision is persisted; it still does not execute Script. A hard leave ends nativ
 Text-range formatting always allocates any persistent wrapper through
 SourcePatch, updates the current iframe in place and resumes the logical range;
 only nodes imported by that trusted patch may extend Runtime's private source
-authority registration. Author Script cannot gain authority by copying public
-Stable-ID or marker attributes.
+authority registration. If layout safety rejects a wrapper-producing format,
+source remains unchanged and the same native text session, caret and logical
+selection resume in the current document. Author Script cannot gain authority
+by copying public Stable-ID or marker attributes.
 When its destination leaves Edit Canvas, `leave-canvas` records the same source
 checkpoint but does not rebuild or start a candidate before departure, even
 while a Runtime refresh is pending or the visible projection Hash is stale. An aborted

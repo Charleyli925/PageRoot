@@ -1668,7 +1668,7 @@ test("overlapping edits promote only the latest Runtime without losing charts or
   });
 });
 
-test("Runtime style edits stay in one document and coalesce at selection boundary", {
+test("Runtime text and style edits stay in one document across selection and save boundaries", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -1715,6 +1715,30 @@ test("Runtime style edits stay in one document and coalesce at selection boundar
     const initialDocument = await documentToken(page);
     const initialGeneration = await editor.locator('iframe:not([data-frame-role])')
       .getAttribute("data-frame-generation");
+    const initialScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_STYLE_RUNTIME_COUNT__ || 0
+    ));
+    const second = frame.locator('[data-native-case="runtime-style-second"]');
+    await first.dblclick();
+    await expect(first).toHaveAttribute("contenteditable", "true");
+    await first.press("End");
+    await page.keyboard.insertText(" 连续文字");
+    await second.click();
+    await expect(first).not.toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("连续文字");
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      initialGeneration,
+    );
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_STYLE_RUNTIME_COUNT__ || 0
+    ))).toBe(initialScriptCount);
+
+    await first.click();
     const toolbar = editor.getByRole("toolbar");
     await expect(toolbar).toBeVisible();
     await toolbar.getByText("样式与间距", { exact: true }).click();
@@ -1733,33 +1757,26 @@ test("Runtime style edits stay in one document and coalesce at selection boundar
       initialGeneration,
     );
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
-    await expect(editor).toHaveAttribute("data-runtime-refresh-pending", "");
-    await expect(editor).toHaveAttribute(
-      "data-runtime-refresh-pending-source-revision",
-      /^sha256:[a-f0-9]{64}$/u,
-    );
-    await expect.poll(async () => Number(
-      await editor.getAttribute("data-runtime-refresh-coalesced-count"),
-    )).toBeGreaterThanOrEqual(2);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect(editor).toHaveAttribute("data-runtime-refresh-decision", "in-place");
+    await expect(editor).toHaveAttribute("data-runtime-refresh-reason", "runtime-style");
 
-    const latestSourceRevision = buildSourceIndex(
-      (await readPublishedWorkingCopy(workingCopyPath, "utf8")),
-    ).sourceSha256;
-    await frame.locator('[data-native-case="runtime-style-second"]').click();
-    await expect(editor).toHaveAttribute("data-runtime-refresh-decision", "candidate-now");
-    await expect(editor).toHaveAttribute("data-runtime-refresh-reason", "selection-changed");
-    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
-      "data-edit-runtime-phase",
-    )).toBe("settled");
-    await expect(editor).toHaveAttribute(
-      "data-runtime-last-known-good-source-revision",
-      latestSourceRevision,
+    await second.click();
+    await page.keyboard.press(keyShortcut("s"));
+    await page.waitForTimeout(1_100);
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      initialGeneration,
     );
-    frame = await currentEditorFrame(page);
-    await expect(frame.locator('[data-native-case="runtime-style-first"]'))
-      .toHaveCSS("padding-top", "22px");
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_STYLE_RUNTIME_COUNT__ || 0
+    ))).toBe(initialScriptCount);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "false");
+    await expect(frame.locator('[data-native-case="runtime-style-first"]'))
+      .toHaveCSS("padding-top", "22px");
 
     const styleRevision = await expectCheckpointPersisted(page, 0);
     await frame.locator('[data-native-case="runtime-style-first"]').click();
@@ -1833,7 +1850,7 @@ test("Runtime range styling never grants a forged clone source authority", {
   });
 });
 
-test("latest Runtime candidate wins across slow ECharts, native editing and static degradation", {
+test("latest required Runtime candidate wins across slow ECharts, in-place text editing and static degradation", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -2059,15 +2076,20 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8")).toContain("你好");
     await expectCheckpointPersisted(page, textRevision);
 
-    // The explicit edit boundary coalesces the text and Enter checkpoints into
-    // one newest candidate. The two earlier structural candidates remain
-    // blocked and superseded; only this source revision may activate.
-    const beforeBoundaryCandidate = await editor.getAttribute("data-runtime-candidate-id");
-    const boundaryCandidatePending = waitForNewCandidate(beforeBoundaryCandidate);
+    // Ordinary text and Enter checkpoints finish in this document. Escape is
+    // not a deferred Runtime trigger; a subsequent explicit structure command
+    // creates the newest required candidate and supersedes the earlier work.
     await page.keyboard.press("Escape");
-    const boundaryCandidate = await boundaryCandidatePending;
+    await page.waitForTimeout(800);
+    await expect.poll(() => documentToken(page)).toBe(documentBeforeEnter);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      generationBeforeEnter,
+    );
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    const boundaryCandidate = await captureNextCandidate(() => duplicateButton.click());
     expect(boundaryCandidate).toBeTruthy();
-    candidateIds.push(boundaryCandidate);
     expect(new Set(candidateIds).size).toBe(candidateIds.length);
     await expect.poll(() => page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
@@ -2103,9 +2125,21 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     const pendingResolverCount = await page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
     ));
+    const failureDocumentBeforeEscape = await documentToken(page);
+    const failureGenerationBeforeEscape = await editor.locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
     const beforeFailureCandidate = await editor.getAttribute("data-runtime-candidate-id");
-    const failureCandidatePending = waitForNewCandidate(beforeFailureCandidate);
     await page.keyboard.press("Escape");
+    await page.waitForTimeout(800);
+    await expect.poll(() => documentToken(page)).toBe(failureDocumentBeforeEscape);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      failureGenerationBeforeEscape,
+    );
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    const failureCandidatePending = waitForNewCandidate(beforeFailureCandidate);
+    await duplicateButton.click();
     const failureCandidate = await failureCandidatePending;
     expect(failureCandidate).toBeTruthy();
     candidateIds.push(failureCandidate);
@@ -2738,7 +2772,7 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
   });
 });
 
-test("a failed candidate after text editing promotes static without resuming Native Edit", {
+test("a failed structural candidate after in-place text editing promotes static without resuming Native Edit", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -2748,6 +2782,7 @@ test("a failed candidate after text editing promotes static without resuming Nat
     <p data-native-case="runtime-text-candidate-failure" id="text-failure">
       文字编辑失败触发后仍需保留换行和后续编辑能力。
     </p>
+    <aside data-native-case="runtime-text-candidate-trigger">必要重建触发器</aside>
   </main>
   <div aria-hidden="true" style="height:1800px"></div>
   <script>
@@ -2763,6 +2798,7 @@ test("a failed candidate after text editing promotes static without resuming Nat
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-text-candidate-failure");
+    const editor = page.getByTestId("html-canvas-editor");
     const reviewStage = page.locator(".review-scroll-stage");
     const target = frame.locator('[data-native-case="runtime-text-candidate-failure"]');
     await target.click();
@@ -2774,7 +2810,7 @@ test("a failed candidate after text editing promotes static without resuming Nat
     await expect(target).toHaveAttribute("contenteditable", "true");
     await target.press("End");
     const beforeDocument = await documentToken(page);
-    const beforeGeneration = await page.getByTestId("html-canvas-editor")
+    const beforeGeneration = await editor
       .locator('iframe:not([data-frame-role])')
       .getAttribute("data-frame-generation");
     await target.press("Enter");
@@ -2783,16 +2819,24 @@ test("a failed candidate after text editing promotes static without resuming Nat
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/runtime-text-candidate-failure[\s\S]*<br/u);
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
-    await expect(page.getByTestId("html-canvas-editor")
-      .locator('iframe:not([data-frame-role])'))
+    await expect(editor.locator('iframe:not([data-frame-role])'))
       .toHaveAttribute("data-frame-generation", beforeGeneration);
-    await expect(page.getByTestId("html-canvas-editor")
-      .locator('iframe[data-frame-role="runtime-candidate"]'))
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]'))
       .toHaveCount(0);
     await expect(target).toHaveAttribute("contenteditable", "true");
 
     await armRuntimeHandoffSamples(page);
     await page.keyboard.press("Escape");
+    await page.waitForTimeout(800);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    frame = await currentEditorFrame(page);
+    await frame.locator('[data-native-case="runtime-text-candidate-trigger"]').click();
+    await editor.getByRole("button", { name: "复制元素", exact: true }).click();
     const failedHandoffSamples = await assertRuntimeHandoff(page, {
       requireActiveChrome: true,
       expectPromotion: false,
