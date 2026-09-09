@@ -950,20 +950,17 @@ export async function assertProjectionGeometryCase(frame, geometryCase) {
   const masks = frame.locator(
     `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
   );
-  // Region-bar focus can start a projection transition. Re-resolve after the
-  // frame is idle so a click during the previous transition is not treated as
-  // a missing outline.
-  await expect(async () => {
-    await expect.poll(async () => frame.locator("html").evaluate((html) => (
-      html.hasAttribute("data-pageroot-review-transitioning") ? "transitioning" : "idle"
-    )), { timeout: 15_000 }).toBe("idle");
+  // Region bars toggle focus. Retrying a click while its asynchronous state
+  // arrives can close the group again; wait for the one requested transition.
+  const root = frame.locator("html");
+  await expect(root).not.toHaveAttribute("data-pageroot-review-transitioning", /./);
+  if (await root.getAttribute("data-pageroot-review-focus-group") !== focusGroupId) {
     await regionBar.click({ timeout: 8_000 });
-    await expect.poll(async () => frame.locator("html").evaluate((html) => (
-      html.hasAttribute("data-pageroot-review-transitioning") ? "transitioning" : "idle"
-    )), { timeout: 15_000 }).toBe("idle");
-    expect(await frames.count()).toBe(geometryCase.expectedFrameCount);
-    expect(await masks.count()).toBe(geometryCase.expectedMaskCount);
-  }).toPass({ timeout: 45_000, intervals: [250, 500, 1_000] });
+  }
+  await expect(root).toHaveAttribute("data-pageroot-review-focus-group", focusGroupId);
+  await expect(root).not.toHaveAttribute("data-pageroot-review-transitioning", /./);
+  await expect(frames).toHaveCount(geometryCase.expectedFrameCount);
+  await expect(masks).toHaveCount(geometryCase.expectedMaskCount);
   await expect.poll(() => frames.evaluate((overlay, { ownerSelector, tolerance }) => {
     const owner = document.querySelector(ownerSelector);
     if (!owner) return false;
