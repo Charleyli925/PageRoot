@@ -74,24 +74,22 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const sidebar = await chooseModifyIntent(launched.page);
-    await sidebar.getByTestId("ai-conversation-agent").click();
-    await sidebar.getByTestId("ai-conversation-service-pageroot").click();
     await expect(launched.page.getByText(/设置暂未保存|选择未保存|工作台偏好记录无效/u)).toHaveCount(0);
-    await expect.poll(() => Object.values(JSON.parse(readFileSync(path.join(profile, "ui-preferences.json"), "utf8"))
-      .workspace?.documentAgentSelections || {})).toContain("pageroot");
+    await expect.poll(() => JSON.parse(readFileSync(path.join(profile, "ui-preferences.json"), "utf8"))
+      .workspace?.defaultAgentProviderId).toBe("pageroot");
     const original = readFileSync(workingPath);
     await sidebar.getByRole("button", { name: /交给.*修改/u }).click();
     const progress = sidebar.getByTestId("ai-conversation-run-progress");
     await expect(progress).toContainText("DeepSeek 正在生成");
     await expect(progress).toContainText("正在接收结果");
-    await expect(sidebar.getByTestId("ai-conversation-action-bar").getByRole("button", { name: "停止", exact: true })).toBeVisible();
-    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toHaveCount(1);
+    await expect(sidebar.getByTestId("ai-conversation-stop")).toBeVisible();
+    await expect(sidebar.getByTestId("ai-conversation-action-bar")).toHaveCount(0);
     const narration = sidebar.getByTestId("ai-conversation-narration-message");
     await expect(narration).toContainText("我会先检查页面结构");
     await expect(narration).toContainText("标题与配色已调整");
     await expect(narration).not.toContainText("fixture-hidden");
     await expect(narration).not.toContainText("<!DOCTYPE");
-    const draft = sidebar.getByRole("textbox", { name: "下一轮草稿" });
+    const draft = sidebar.getByRole("textbox", { name: "修改要求草稿" });
     await draft.fill("下一轮再调整页脚间距");
     await expect(draft).toHaveValue("下一轮再调整页脚间距");
     await expect(sidebar.getByTestId("ai-turn-process").first().locator("li").first()).toBeVisible();
@@ -113,13 +111,13 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     await expect(launched.page.getByRole("button", { name: "采纳修改", exact: true })).toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "采用修改", exact: true })).toHaveCount(1);
     await expect(draft).toHaveValue("下一轮再调整页脚间距");
-    const layout = await sidebar.evaluate((element) => {
+    await expect.poll(() => sidebar.evaluate((element) => {
       const draft = element.querySelector('[data-testid="ai-conversation-composer"]').getBoundingClientRect();
       const actions = element.querySelector('[data-testid="ai-conversation-current-actions"]').getBoundingClientRect();
-      return { gap: draft.top - actions.bottom, bottom: element.getBoundingClientRect().bottom - draft.bottom };
-    });
-    expect(Math.abs(layout.gap)).toBeLessThanOrEqual(1);
-    expect(Math.abs(layout.bottom)).toBeLessThanOrEqual(1);
+      const gap = Math.abs(draft.top - actions.bottom);
+      const bottom = element.getBoundingClientRect().bottom - draft.bottom;
+      return gap <= 1 && bottom >= 10 && bottom <= 14;
+    })).toBe(true);
     const review = launched.page.getByTestId("ai-review-workspace");
     for (const index of [0, 1]) {
       await expect(review.frameLocator("iframe").nth(index).locator("body")).toContainText("真实");
@@ -180,7 +178,7 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
     await closePageRootGracefully(launched.electronApp, launched.page);
     launched = await launchPageRoot({ isolatedUserData: profile, injectedEnv });
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
-    await expect(launched.page.getByRole("textbox", { name: "下一轮草稿" })).toHaveValue("下一轮再调整页脚间距");
+    await expect(launched.page.getByRole("textbox", { name: "修改要求草稿" })).toHaveValue("下一轮再调整页脚间距");
   } finally {
     finish();
     await stopPageRoot(launched.electronApp, profile);
@@ -235,9 +233,8 @@ test("Codex authenticated component failure repairs in Settings, then reviews an
     await launched.page.screenshot({ path: path.join(screenshots, "settings-codex-authenticated-repair.png"), animations: "disabled" });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
-    await sidebar.getByTestId("ai-conversation-agent").click();
-    await sidebar.getByTestId("ai-conversation-service-codex").click();
     await expect(sidebar.getByTestId("ai-conversation-setup-panel")).toHaveCount(0);
+    await openAgentSettingsPage(launched.page);
     await expect(settings).toBeVisible();
     const panel = await expandSettingsAgent(settings, "codex");
     await expect(panel).toContainText("账号已登录，但连接检查没有通过。");
@@ -299,9 +296,8 @@ test("known incompatible Codex offers other AI without reinstalling the same com
     await expect(row).not.toHaveAttribute("data-expanded", "true");
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
-    await sidebar.getByTestId("ai-conversation-agent").click();
-    await sidebar.getByTestId("ai-conversation-service-codex").click();
     await expect(sidebar.getByTestId("ai-conversation-setup-panel")).toHaveCount(0);
+    await openAgentSettingsPage(launched.page);
     await expect(settings).toBeVisible();
     const panel = await expandSettingsAgent(settings, "codex");
     await expect(panel.getByRole("button", { name: "重新检查", exact: true })).toBeVisible();

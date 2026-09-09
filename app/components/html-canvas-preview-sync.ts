@@ -274,3 +274,100 @@ export function adoptCanonicalHistoryIslandInPlace(options: {
   ) throw new Error("历史文字结果无法保持当前画布的 Stable ID 映射。");
   return true;
 }
+
+/**
+ * Reconcile a range-style projection without detaching unchanged source
+ * subtrees (their runtime children, canvas pixels and listeners belong to the
+ * mounted document). Plan everything before touching the live DOM. An
+ * unaccounted runtime child in a changed branch requires a fresh candidate.
+ */
+export function reconcileRangeStyleInPlace(
+  liveRoot: HTMLElement,
+  canonicalRoot: Element,
+  previousIndex: SourceIndexValue,
+  nextIndex: SourceIndexValue,
+): readonly HTMLElement[] | null {
+  const documentNode = liveRoot.ownerDocument;
+  const imported: HTMLElement[] = [];
+  const pending: Array<() => void> = [];
+  const liveById = new Map<string, Element>();
+  for (const element of [liveRoot, ...Array.from(liveRoot.querySelectorAll(`[${SOURCE_ELEMENT_ATTRIBUTE}]`))]) {
+    const id = element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+    if (!id || liveById.has(id)) return null;
+    liveById.set(id, element);
+  }
+  const plan = (canonical: Node): Node => {
+    if (canonical.nodeType !== 1) return documentNode.importNode(canonical, true);
+    const element = canonical as Element;
+    const id = element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+    const live = id ? liveById.get(id) : null;
+    const previous = id ? previousIndex.byPagerootId.get(id) : null;
+    const next = id ? nextIndex.byPagerootId.get(id) : null;
+    if (live && previous?.raw === next?.raw && previous?.raw) return live;
+    if (live && live.tagName !== element.tagName) throw new Error("Changed source shape");
+    if (live && Array.from(live.children).some((child) => !child.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE))) {
+      throw new Error("Runtime children in changed source branch");
+    }
+    const target = live || documentNode.importNode(element, false) as Element;
+    if (!live && target instanceof documentNode.defaultView!.HTMLElement) imported.push(target);
+    const children = Array.from(element.childNodes).map(plan);
+    pending.push(() => {
+      // Change only authored style when this operation changed it. Never
+      // restore all source attributes over runtime state.
+      const authoredStyle = (source: typeof previous) => source?.attributesByName?.get("style")?.[0]?.value ?? null;
+      if (live && authoredStyle(previous) !== authoredStyle(next)) {
+        const style = element.getAttribute("style");
+        if (style === null) target.removeAttribute("style");
+        else target.setAttribute("style", style);
+      }
+      let cursor = target.firstChild;
+      for (const child of children) {
+        if (child === cursor) cursor = cursor.nextSibling;
+        else target.insertBefore(child, cursor);
+      }
+      while (cursor) { const nextSibling = cursor.nextSibling; target.removeChild(cursor); cursor = nextSibling; }
+    });
+    return target;
+  };
+  try {
+    if (plan(canonicalRoot) !== liveRoot) return null;
+  } catch { return null; }
+  pending.forEach((apply) => apply());
+  return imported;
+}
+
+/** A continuity check, not source authority or a general script-completion oracle.
+ * An unchanged, visible chart host must regain its generated surfaces before
+ * replacing the current document. The caller owns identity and the deadline.
+ */
+export function runtimeSurfacesReady(
+  active: Document | null,
+  candidate: Document,
+  nextIndex: SourceIndexValue,
+): boolean {
+  if (!active?.defaultView) return true;
+  const hosts = new Map<string, { canvas: number; svg: number }>();
+  for (const surface of Array.from(active.querySelectorAll("canvas, svg"))) {
+    const rect = surface.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || rect.bottom < 0 || rect.top > active.defaultView.innerHeight) continue;
+    const host = surface.closest(`[${SOURCE_ELEMENT_ATTRIBUTE}]`);
+    const id = host?.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+    if (!id || !nextIndex.byPagerootId.has(id)) continue;
+    const expected = hosts.get(id) || { canvas: 0, svg: 0 };
+    expected[surface.tagName.toLowerCase() as "canvas" | "svg"] += 1;
+    hosts.set(id, expected);
+  }
+  for (const [id, expected] of hosts) {
+    const host = uniqueSourceElement(candidate, id);
+    if (!host) return false;
+    for (const kind of ["canvas", "svg"] as const) {
+      const surfaces = [ ...(host.matches(kind) ? [host] : []), ...Array.from(host.querySelectorAll(kind)) ];
+      const visible = surfaces.filter((surface) => {
+        const rect = surface.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+      if (visible.length < expected[kind]) return false;
+    }
+  }
+  return true;
+}

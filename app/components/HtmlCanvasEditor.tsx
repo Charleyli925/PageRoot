@@ -159,6 +159,8 @@ import {
   adoptCanonicalHistoryIslandInPlace,
   canonicalNativeHostPreview,
   remountNativeHostFromSource,
+  reconcileRangeStyleInPlace,
+  runtimeSurfacesReady,
   nativeEditHostForElement,
   refreshStableMountedPreviewSourceNodeIds,
   sourceBackedPreviewElements,
@@ -492,6 +494,7 @@ type RuntimeCandidate = {
   previousPendingToolbarVisible: boolean;
   presentationAnchor: RuntimePresentationAnchor;
   retiredSlot: RuntimeSlotRetirement | null;
+  viewContext: PageViewContext | null;
 };
 
 type RuntimeCandidateTransfer = {
@@ -2238,6 +2241,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       previousPendingToolbarVisible,
       presentationAnchor,
       retiredSlot: null,
+      viewContext: null,
     };
     if (runtimeFrame) {
       const registrationProperty = editRuntimeRegistrationProperty(
@@ -2286,7 +2290,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               || !activeIframe
               || sourceWindow !== activeIframe?.contentWindow
             ) return false;
-            return registerProvedStableSourceElements({
+            const registered = registerProvedStableSourceElements({
               candidates,
               documentNode: activeIframe.contentDocument,
               sourceIndex,
@@ -2296,6 +2300,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               conflicted: conflictedPagerootIds,
               markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
             });
+            // Source registration runs before author scripts. Restore the visible
+            // tab now so chart libraries initialize against its actual layout.
+            if (registered && activeIframe.contentDocument) {
+              applyPageViewContextToDocument(
+                activeIframe.contentDocument, candidate.source,
+                pageViewContextRef.current, candidate.viewContext,
+              );
+              candidate.viewContext = pageViewContextRef.current;
+            }
+            return registered;
           };
           const reportActivationOutcome = (outcome: unknown) => {
             const currentCandidate = runtimeCandidateRef.current;
@@ -2757,6 +2771,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       syncRuntimeCandidateDiagnostics();
       return false;
     }
+    if (candidate.viewContext !== pageViewContextRef.current) {
+      applyPageViewContextToDocument(
+        documentNode, candidate.source, pageViewContextRef.current, candidate.viewContext,
+      );
+      candidate.viewContext = pageViewContextRef.current;
+      // A tab may change while a candidate is preparing. Notify existing author
+      // layout listeners once, then allow a paint before checking its surfaces.
+      iframe.contentWindow?.dispatchEvent(new Event("resize"));
+      return false;
+    }
+    if (candidate.runtimeFrame
+      && runtimeFrameRef.current?.grant.programIdentity === candidate.runtimeFrame.grant.programIdentity
+      && !runtimeSurfacesReady(iframeRef.current?.contentDocument ?? null, documentNode, candidate.sourceIndex)) {
+      return false;
+    }
+    if (!candidate.runtimeFrame
+      && !runtimeSurfacesReady(iframeRef.current?.contentDocument ?? null, documentNode, candidate.sourceIndex)) {
+      // A technically valid static document must not silently erase visible
+      // charts. Keep the last usable frame, mark it read-only, and offer Retry.
+      failRuntimeCandidateActivationRef.current(candidate, "failed");
+      return false;
+    }
     return promoteRuntimeCandidate(candidate);
   }, [promoteRuntimeCandidate, syncRuntimeCandidateDiagnostics]);
   connectRuntimeCandidateRef.current = connectRuntimeCandidate;
@@ -3170,16 +3206,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
       } else if (originalMutation.kind === "style") {
         if (isTextRangeStyle) {
-          liveTarget.replaceChildren(
-            ...Array.from(detachedTarget.childNodes).map((node) => (
-              documentNode.importNode(node, true)
-            )),
-          );
-          if (targetedRuntimeSync) {
-            trustedImportedRuntimeElements = Array.from(
-              liveTarget.querySelectorAll<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`),
-            );
-          }
+          const imported = reconcileRangeStyleInPlace(liveTarget, detachedTarget, previousIndex, result.sourceIndex);
+          if (!imported) return failPreviewSync("runtime-subtree-needs-candidate");
+          if (targetedRuntimeSync) trustedImportedRuntimeElements = [...imported];
           const openingPatches = plan.patches.filter(
             (patch: { kind?: string }) => patch.kind === "text-range-style-open",
           );
@@ -6187,7 +6216,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       nextContext,
       appliedPageViewContextRef.current,
     );
+    const changed = appliedPageViewContextRef.current !== nextContext;
     appliedPageViewContextRef.current = nextContext;
+    if (changed) documentNode.defaultView?.dispatchEvent(new Event("resize"));
     requestAnimationFrame(() => updateOverlayPosition());
     return true;
   }, [updateOverlayPosition]);

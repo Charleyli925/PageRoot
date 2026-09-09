@@ -2941,3 +2941,15 @@ Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, a
 - Review full-page capture initially preceded iframe paint; the capture now waits for both synthetic review documents to be visible. The narrow sidebar's behavioral assertions (one adoption button, adjacent action/draft geometry and draft recovery after restart) already passed; final full-scene capture is recorded with the final task gate.
 - Follow-up P2: live elapsed status is still repeated in the bottom Stop area; kept outside this request's button/stream scope. Historical public text is a bounded sealed summary, and legacy HTML-only services cannot supply public narration.
 - final result: passed for the sidebar scope; complete task-gate evidence is required before delivery.
+
+## 2026-09-09 — Editing continuity and compact conversation dock
+
+- Visual truth: user-supplied screenshots; decisions are narrower than the input, with a translucent background and a light border. Existing Stemmio typography, indigo and icons remain in use. Private screenshots and source documents are excluded from Git.
+- Implementation: compact comment footer; one bottom composer with Settings-owned Agent/model choices; attached decision layer; executor-owned process rows; sentence-separated public narration; metadata revealed on hover or keyboard focus.
+- Real rebuilt Electron QA: Qoder synthetic execution through Candidate/Review, 340/400/480px sidebars, 200% zoom, scrollback, hover metadata, and decision/input geometry pass. Inspected `output/design-qa/ai-assistant-redesign/trusted-loop-pr6-ready-400.png` and `trusted-loop-process-expanded.png`.
+- Runtime QA: repeated bold/underline keeps the active chart intact; delayed chart preparation retains the previous frame; failed initialization retains the usable older preview with reload/export. Real ECharts initialized in a hidden tab survives two edit/promotion cycles after restoring the tab before author activation.
+- A private isolated copy of the reported document also passed three rounds of bold, underline and editing completion. Both reported charts retained nonzero geometry and painted pixels. The original file was not modified, and private evidence remains outside source control.
+- Baseline contrast: the two chart continuity/failure regressions fail against the original editor and pass against the changed editor. Runtime surface checks establish visible surface continuity, not completion of arbitrary author scripts or animations.
+- Evidence applies to source Electron launched with isolated profiles; no installed app replacement or release is implied. Task-level gate results are recorded separately by the existing runner.
+
+- Recovery follow-through: a real Electron regression exposed a reload click arriving before autosave acknowledgement. Retry now joins the existing save flight, shows pending feedback and verifies the same document/canvas afterward. Electron recovery passes; controller negative cases cover save failure and document switching during the wait.

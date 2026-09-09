@@ -16,10 +16,10 @@ import {
 
 import {
   sidebarActionBar,
-  sidebarAgentLine,
-  sidebarReasoningLine,
   sidebarMessageStream,
   sidebarTurnPresentation,
+  sidebarNarrationParagraphs,
+  sidebarProcessRows,
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarRunProgress,
@@ -229,8 +229,6 @@ export default function AiConversationSidebar({
   credentialKind = null,
   models = [],
   selectedModelId = null,
-  reasoningChoices = [],
-  selectedReasoningId = null,
   candidateVersionLabel = null,
   candidateStatus = null,
   runStatus = null,
@@ -246,8 +244,6 @@ export default function AiConversationSidebar({
   onAction,
   onClose,
   onOpenAgentSettings,
-  onSelectModel,
-  onSelectReasoning,
   onCopyTask,
   agentAccess,
   deliveryMode = "managed-agent",
@@ -266,7 +262,6 @@ export default function AiConversationSidebar({
   sourceFileName = null,
   handoffStatus = null,
 }: AiConversationSidebarProps) {
-  const [openChoice, setOpenChoice] = useState<null | "model" | "reasoning" | "service">(null);
 
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
@@ -276,11 +271,6 @@ export default function AiConversationSidebar({
   const streamRef = useRef<HTMLDivElement | null>(null);
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const liveMessageRef = useRef<HTMLElement | null>(null);
-  const agentSelectorRef = useRef<HTMLDivElement | null>(null);
-  const serviceSelectorRef = useRef<HTMLDivElement | null>(null);
-  const serviceSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
-  const agentSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
-  const reasoningSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const followingRef = useRef(true);
   const contentKeyRef = useRef<string | null>(null);
   const runKeyRef = useRef<string | null>(null);
@@ -366,16 +356,6 @@ export default function AiConversationSidebar({
       })
     : null;
   const selectedModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
-  const agentLine = sidebarAgentLine({
-    catalogStatus,
-    modelDisplayName: selectedModel?.displayName || selectedModel?.id || null,
-    modelChoiceCount: models.length,
-  });
-  const reasoningLine = sidebarReasoningLine({
-    choices: reasoningChoices,
-    selectedId: selectedReasoningId,
-  });
-  const showComposerIdentity = state === "preview-ready" || state === "no-change";
   const schemeName = (typeof agentDisplayName === "string" && agentDisplayName.trim())
     || resolvedAgentActionName;
   const recovery = agentAccess?.recovery || null;
@@ -383,8 +363,6 @@ export default function AiConversationSidebar({
     || "";
   const currentCard = agentAccess?.cards.find((card) => card.selection.providerId === currentProviderId)
     || null;
-  const canChooseModel = currentCard?.presentation?.supportsSelectableModels === true
-    || currentCard?.presentation?.credentialKind === "api-token";
   const serviceTriggerLabel = (() => {
     const name = agentServiceLabel(currentProviderId, schemeName);
     const currentCardForLabel = currentCard;
@@ -494,28 +472,7 @@ export default function AiConversationSidebar({
     if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
   }, []);
 
-  useEffect(() => {
-    if (!openChoice) return undefined;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!agentSelectorRef.current?.contains(event.target as Node)
-        && !serviceSelectorRef.current?.contains(event.target as Node)) {
-        setOpenChoice(null);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpenChoice(null);
-      (openChoice === "service" ? serviceSelectorButtonRef : openChoice === "reasoning" ? reasoningSelectorButtonRef : agentSelectorButtonRef)
-        .current?.focus();
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [openChoice]);
+
 
   useEffect(() => {
     const key = `${runKey || ""}:${agentStartedAt || ""}`;
@@ -621,13 +578,13 @@ export default function AiConversationSidebar({
               {group.label ? <div className={styles.historyGroup} data-kind={group.kind} data-testid="ai-conversation-history-group">{group.label}</div> : null}
               {group.timeline.map((block) => {
             if (block.process) return (
-              <article key={block.messages[0].messageId} className={`${styles.message} ${styles.turnProcess}`} data-actor="pageroot" data-testid="ai-turn-process" aria-label="Stemmio 处理记录">
-                <PageRootAvatar />
-                <span className={styles.actor}>Stemmio <span className={styles.actorDetail}>处理记录</span></span>
-                <ol>{block.messages.map((message) => (
+              <article key={block.messages[0].messageId} className={`${styles.message} ${styles.turnProcess}`} data-actor={block.messages[0].actor} data-testid="ai-turn-process" aria-label={`${block.messages[0].actorLabel} 处理记录`}>
+                <>{block.messages[0].actor === "agent" ? <AgentAvatar presentation={null} /> : <PageRootAvatar />}</>
+                <span className={styles.actor}>{block.messages[0].actorLabel} <span className={styles.actorDetail}>处理记录</span></span>
+                <ol>{sidebarProcessRows(block.messages).map(({ message, count }) => (
                   <li key={message.messageId}>
                     <CheckIcon size={13} aria-hidden="true" />
-                    <span>{message.text === "执行已结束，结果仍需校验。" ? "本轮执行已结束。" : message.text}</span>
+                    <span>{message.text === "执行已结束，结果仍需校验。" ? "本轮执行已结束。" : message.text}{count > 1 ? ` · ${count} 次` : ""}</span>
                     <time dateTime={message.createdAt}>{sidebarTimestampLabel(message.createdAt)}</time>
                   </li>
                 ))}</ol>
@@ -651,7 +608,7 @@ export default function AiConversationSidebar({
                     <span className={`${styles.avatar} ${styles.userAvatar}`} aria-hidden="true"><UserIcon size={16} weight="regular" /></span>
                   ) : <AgentAvatar presentation={null} />}
                   <span className={styles.actor}>{message.actor === "agent" ? message.modelDisplayName || message.actorLabel : message.actorLabel}</span>
-                  <p className={styles.text}>{message.text}</p>
+                  <div className={styles.text}>{(message.actor === "agent" ? sidebarNarrationParagraphs(message.text) : [message.text]).map((text, index) => <p key={index} className={styles.narrationLine}>{text}</p>)}</div>
                   {timestamp || message.text ? (
                     <div className={styles.messageMeta}>
                       {timestamp ? <time dateTime={message.createdAt}>{timestamp}</time> : null}
@@ -709,7 +666,7 @@ export default function AiConversationSidebar({
                 data-testid="ai-conversation-narration"
               >
                 {runProgress.narrationUpdates.map((update) => (
-                  <p key={update.id} className={styles.narrationLine}>{update.text}</p>
+                  <div key={update.id}>{sidebarNarrationParagraphs(update.text).map((text, index) => <p key={index} className={styles.narrationLine}>{text}</p>)}</div>
                 ))}
               </div>
             ) : null}
@@ -807,8 +764,9 @@ export default function AiConversationSidebar({
         <div ref={bottomSentinelRef} className={styles.bottomSentinel} aria-hidden="true" />
       </div>
 
+      <div className={styles.inputDock}>
       <div className={styles.currentActions} data-testid="ai-conversation-current-actions">
-        {actionBar ? (
+        {actionBar && !executionStatus ? (
           <section
             className={`${styles.message} ${styles.actionBar}`}
             data-actor="pageroot"
@@ -824,13 +782,13 @@ export default function AiConversationSidebar({
                   ? { role: "status", "aria-live": "polite", "aria-atomic": "true" }
                   : {})}
               >
-                {executionStatus?.title || actionBar.title}
+                {actionBar.title}
               </strong>
             ) : null}
-            {executionStatus?.detail || actionBar.detail ? <p>{executionStatus?.detail || actionBar.detail}</p> : null}
+            {actionBar.detail ? <p>{actionBar.detail}</p> : null}
             {actionBar.actions.length > 0 ? (
               <div className={styles.actions}>
-                {actionBar.actions.map((action) => (
+                {actionBar.actions.filter((action) => action.id !== "cancel").map((action) => (
                   <button
                     key={action.id}
                     type="button"
@@ -843,7 +801,6 @@ export default function AiConversationSidebar({
                         agentAccess.onBeginAccessRepair?.(action.id === "replace-api-key" ? "apiKey"
                           : action.id === "reauthenticate-agent" ? "login" : "install");
                         onOpenAgentSettings?.();
-                        setOpenChoice(null);
                         return;
                       }
                       onAction?.(action.id);
@@ -859,18 +816,22 @@ export default function AiConversationSidebar({
       </div>
 
       <div className={styles.composer} data-testid="ai-conversation-composer">
-        <label className={styles.draftLabel} htmlFor="ai-conversation-draft">下一轮草稿</label>
+        <label className={styles.draftLabel} htmlFor="ai-conversation-draft">修改要求草稿</label>
         <textarea
           id="ai-conversation-draft"
           className={styles.draftInput}
           data-testid="ai-conversation-draft"
           aria-describedby="ai-conversation-draft-hint"
-          placeholder="先记下接下来想调整的内容…"
+          placeholder="记下接下来想调整的内容…"
           value={draftText}
           disabled={!draftAvailable}
           maxLength={8000}
-          rows={3}
-          onChange={(event) => onDraftTextChange?.(event.target.value)}
+          rows={2}
+          onChange={(event) => {
+            event.target.style.height = "auto";
+            event.target.style.height = `${Math.min(160, event.target.scrollHeight)}px`;
+            onDraftTextChange?.(event.target.value);
+          }}
         />
         <p id="ai-conversation-draft-hint" className={styles.draftHint}>草稿随文档保留，暂不发送给 AI。</p>
         {/*
@@ -893,173 +854,17 @@ export default function AiConversationSidebar({
         ) : null}
 
         <div className={styles.composerActions}>
-          {showComposerIdentity ? <div className={styles.identityActions}>
-            <div className={styles.agentSelector} ref={serviceSelectorRef}>
-              <button
-                ref={serviceSelectorButtonRef}
-                type="button"
-                className={styles.schemeTrigger}
-                data-testid="ai-conversation-agent"
-                onClick={() => {
-                  if (agentAccess?.cards.length) {
-                    setOpenChoice((value) => (value === "service" ? null : "service"));
-                    return;
-                  }
-                  onOpenAgentSettings?.();
-                }}
-                aria-expanded={openChoice === "service"}
-                aria-controls="ai-conversation-service-choices"
-                aria-label={`当前服务 ${serviceTriggerLabel}，选择 AI 服务`}
-              >
-                <AgentChoiceMark label={schemeName} logoSrc={agentPresentation?.logoSrc} />
-                <span>{serviceTriggerLabel}</span>
-                <span className={styles.agentChevron} aria-hidden="true">▾</span>
-              </button>
-              {openChoice === "service" && agentAccess?.cards.length ? (
-                <div
-                  id="ai-conversation-service-choices"
-                  className={styles.agentChoices}
-                  aria-label="选择 AI 服务"
-                  data-testid="ai-conversation-service-choices"
-                >
-                  {agentAccess.cards.map((card) => {
-                    const snapshot = card.presentation.availability(card.availability);
-                    const disconnected = card.availability.reason === "disabled";
-                    const chooseService = () => {
-                      void Promise.resolve(agentAccess.onSelect(card.selection)).catch(() => {});
-                      if (card.availability.status !== "ready") onOpenAgentSettings?.();
-                      setOpenChoice(null);
-                      serviceSelectorButtonRef.current?.focus();
-                    };
-                    return (
-                      <button
-                        key={card.selection.providerId}
-                        type="button"
-                        aria-pressed={card.selection.providerId === currentProviderId}
-                        className={styles.agentChoice}
-                        data-testid={`ai-conversation-service-${card.selection.providerId}`}
-                        onClick={chooseService}
-                      >
-                        <strong>{agentServiceLabel(card.selection.providerId, card.presentation.displayName)}</strong>
-                        <span>{disconnected ? "已断开" : snapshot.statusLabel}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-
-            <div ref={agentSelectorRef} className={styles.identityPickers}>
-              <div className={styles.agentSelector}>
-                {agentLine?.choosable ? (
-                  <button
-                    ref={agentSelectorButtonRef}
-                    id="ai-conversation-model-selector"
-                    type="button"
-                    className={styles.agentTrigger}
-                    data-testid="ai-conversation-model"
-                    onClick={() => setOpenChoice((value) => (value === "model" ? null : "model"))}
-                    aria-expanded={openChoice === "model"}
-                    aria-controls="ai-conversation-model-choices"
-                    aria-label={`当前模型 ${agentLine.text}，点击切换`}
-                  >
-                    <span>{agentLine.text}</span>
-                    <span className={styles.agentChevron} aria-hidden="true">▾</span>
-                  </button>
-                ) : agentLine ? (
-                  <span className={styles.agentStatic} data-testid="ai-conversation-model">
-                    <span>{agentLine.text}</span>
-                  </span>
-                ) : null}
-
-                {openChoice === "model" && canChooseModel && models.length > 1 ? (
-                  <div
-                    id="ai-conversation-model-choices"
-                    className={styles.agentChoices}
-                    aria-label="选择模型"
-                    data-testid="ai-conversation-model-choices"
-                  >
-                    {models.map((model) => (
-                      <button
-                        key={model.id}
-                        type="button"
-                        aria-pressed={model.id === (selectedModel?.id || selectedModelId)}
-                        className={styles.agentChoice}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                        }}
-                        onClick={() => {
-                          agentSelectorButtonRef.current?.focus();
-                          onSelectModel?.(model.id);
-                          setOpenChoice(null);
-                        }}
-                      >
-                        <strong>{model.displayName}</strong>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-
-              {reasoningLine ? (
-                <div className={styles.agentSelector}>
-                  {reasoningLine.choosable ? (
-                    <button
-                      ref={reasoningSelectorButtonRef}
-                      id="ai-conversation-reasoning-selector"
-                      type="button"
-                      className={styles.agentTrigger}
-                      data-testid="ai-conversation-reasoning"
-                      onClick={() => setOpenChoice((value) => (value === "reasoning" ? null : "reasoning"))}
-                      aria-expanded={openChoice === "reasoning"}
-                      aria-controls="ai-conversation-reasoning-choices"
-                      aria-label={`当前思考深度 ${reasoningLine.text}，点击切换`}
-                    >
-                      <span>{reasoningLine.text}</span>
-                      <span className={styles.agentChevron} aria-hidden="true">▾</span>
-                    </button>
-                  ) : (
-                    <span className={styles.agentStatic} data-testid="ai-conversation-reasoning">
-                      <span>{reasoningLine.text}</span>
-                    </span>
-                  )}
-
-                  {openChoice === "reasoning" && reasoningChoices.length > 1 ? (
-                    <div
-                      id="ai-conversation-reasoning-choices"
-                      className={styles.agentChoices}
-                      aria-label="选择思考深度"
-                      data-testid="ai-conversation-reasoning-choices"
-                    >
-                      {reasoningChoices.map((choice) => (
-                        <button
-                          key={choice.id}
-                          type="button"
-                          aria-pressed={choice.id === reasoningLine.selectedId}
-                          className={styles.agentChoice}
-                          onPointerDown={(event) => {
-                            event.preventDefault();
-                          }}
-                          onClick={() => {
-                            reasoningSelectorButtonRef.current?.focus();
-                            onSelectReasoning?.(choice.id);
-                            setOpenChoice(null);
-                          }}
-                        >
-                          <strong>{choice.label}</strong>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </div> : null}
-
+          <span className={styles.agentStatic} data-testid="ai-conversation-agent">
+            <AgentChoiceMark label={schemeName} logoSrc={agentPresentation?.logoSrc} />
+            <span>{serviceTriggerLabel}</span>
+          </span>
+          {actionBar?.actions.some((action) => action.id === "cancel") ? <button type="button" className={styles.send}
+            data-testid="ai-conversation-stop" onClick={() => onAction?.("cancel")}
+            disabled={actionBar?.actions.find((action) => action.id === "cancel")?.disabled}>{executionStatus ? "停止" : "结束本轮"}</button> : null}
           {(state === "preview-ready" || state === "no-change") ? (
           <div className={styles.deliveryActions}>
             {activeIntent === "modify" && onCopyTask ? (
-              <button
+              <details className={styles.moreActions}><summary aria-label="更多发送选项">＋</summary><button
                 type="button"
                 className={styles.copyTask}
                 data-testid="ai-conversation-copy-task"
@@ -1067,7 +872,7 @@ export default function AiConversationSidebar({
                 onClick={() => onCopyTask()}
               >
                 复制给别的 AI
-              </button>
+              </button></details>
             ) : null}
             {send.kind === "status" ? (
               send.label ? (
@@ -1120,6 +925,7 @@ export default function AiConversationSidebar({
           </p>
         ) : null}
 
+      </div>
       </div>
     </aside>
   );

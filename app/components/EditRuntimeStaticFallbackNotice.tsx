@@ -13,13 +13,15 @@ export default function EditRuntimeStaticFallbackNotice({
   onExport,
   state = "none",
 }: {
-  onRetry?: () => void;
+  onRetry?: () => boolean | Promise<boolean>;
   onExport?: () => void;
   state?: EditRuntimeStaticFallbackNoticeState;
 }) {
   const [dismissedState, setDismissedState] = useState<
     EditRuntimeStaticFallbackNoticeState | null
   >(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryFailed, setRetryFailed] = useState(false);
   const latestStaticVisible = state === "static-visible";
   const directStaticVisible = state === "direct-static-visible";
   const lastKnownGoodReadOnly = state === "last-known-good-readonly";
@@ -33,7 +35,7 @@ export default function EditRuntimeStaticFallbackNotice({
       aria-live={lastKnownGoodReadOnly ? "assertive" : "polite"}
     >
       <strong>{lastKnownGoodReadOnly
-        ? "动态和静态页面都未能更新"
+        ? "页面预览未能完整更新"
         : latestStaticVisible
           ? "部分动态内容未更新"
           : directStaticVisible
@@ -50,11 +52,19 @@ export default function EditRuntimeStaticFallbackNotice({
         <button
           type="button"
           className="edit-runtime-static-fallback__retry"
-          onClick={onRetry}
+          disabled={retrying}
+          onClick={async () => {
+            setRetrying(true);
+            setRetryFailed(false);
+            try { setRetryFailed(!await onRetry()); }
+            catch { setRetryFailed(true); }
+            finally { setRetrying(false); }
+          }}
         >
-          {lastKnownGoodReadOnly ? "重新加载" : "重新加载动态内容"}
+          {retrying ? "正在保存并重新加载…" : lastKnownGoodReadOnly ? "重新加载" : "重新加载动态内容"}
         </button>
       ) : null}
+      {retryFailed ? <span role="status">暂时无法重新加载，请检查文件保存状态后重试。</span> : null}
       {lastKnownGoodReadOnly && onExport ? (
         <button
           type="button"

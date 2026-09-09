@@ -296,3 +296,17 @@ test("sealed public summary is sanitized, bounded and restored once after failur
   assert.ok(summaries[0].text.length <= 4096);
   assert.doesNotMatch(JSON.stringify(conversation), /sk-synthetic|private-source|hidden-synthetic|raw-synthetic/);
 });
+
+test("execution tools belong to the Agent while preparation and validation belong to Stemmio", async (t) => {
+  const value = await setup(t);
+  value.input.agentDelivery = { ...defaultManagedAgentDelivery(), configuration: {
+    providerId: "qoder", runtimeId: "acp", modelId: null, reasoning: "auto",
+    configurationDigest: `sha256:${"a".repeat(64)}` } };
+  const receipt = await prepareRecordedRequest(value);
+  for (const kind of ['sending-task','reading-task','writing-candidate','finalizing','validating-html','preparing-review']) {
+    await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId,
+      event: { eventId: `owner_${kind}`, kind, timestamp: '2026-09-09T00:00:00.000Z' } });
+  }
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, '.pageroot'), projectId: value.target.projectId, documentId: value.target.documentId });
+  assert.deepEqual(conversation.messages.filter(message => message.messageId.startsWith('message_owner_')).map(message => message.actor), ['pageroot','agent','agent','agent','pageroot','pageroot']);
+});

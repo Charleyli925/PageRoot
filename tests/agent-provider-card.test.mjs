@@ -130,5 +130,5 @@ test("the conversation sidebar names pageroot from the connection summary", asyn
   assert.match(sidebar, /vendorDisplayName/u);
   assert.doesNotMatch(sidebar, /DeepSeek ·/u);
   assert.match(sidebar, /recovery\.lastOutcome/u);
-  assert.match(sidebar, /supportsSelectableModels === true/u);
+  assert.doesNotMatch(sidebar, /ai-conversation-service-choices|ai-conversation-model-choices/u);
 });

@@ -816,3 +816,34 @@
 .draftInput:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
 .draftInput:disabled { opacity: .6; }
 .draftHint { margin: 0; font-size: 10px; color: var(--muted); }
+
+/* One quiet bottom dock: decisions attach to the input, never to the log. */
+.sidebar { grid-template-rows: auto minmax(0, 1fr) auto; }
+.inputDock { min-width: 0; padding: 0 12px 12px; }
+.currentActions { padding: 0; max-height: 30vh; }
+.currentActions:has(.actionBar) {
+  margin: 0 16px; padding: 12px 14px; border: 1px solid rgb(104 96 140 / 10%);
+  border-bottom: 0; border-radius: 14px 14px 0 0; background: rgb(255 255 255 / 38%);
+  backdrop-filter: blur(12px);
+  animation: decision-enter 140ms ease-out;
+}
+.composer { position: relative; min-height: 0; gap: 6px; padding: 10px 12px 8px;
+  border: 1px solid var(--line, #dedce5); border-radius: 16px; background: #fff;
+  box-shadow: 0 2px 8px rgb(32 29 49 / 4%); }
+.composer:focus-within { border-color: #b9b4e6; box-shadow: 0 0 0 2px rgb(90 85 223 / 6%); }
+.draftLabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.draftInput { min-height: 48px; padding: 2px 0; border: 0; border-radius: 0; resize: none; background: transparent; box-shadow: none; }
+.draftInput:focus-visible { outline: none; }
+.draftHint { font-size: 10px; color: var(--faint); }
+.composerActions { align-items: center; justify-content: space-between; gap: 8px; }
+.agentStatic { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.moreActions { position: relative; }
+.moreActions summary { cursor: pointer; list-style: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; font-size: 20px; color: var(--muted); }
+.moreActions summary::-webkit-details-marker { display: none; }
+.moreActions[open] .copyTask { position: absolute; bottom: 36px; right: 0; z-index: 3; white-space: nowrap; background: white; box-shadow: 0 6px 24px rgb(32 29 49 / 12%); }
+.turnProcess time { opacity: 0; transition: opacity 120ms ease; }
+.turnProcess li:hover time, .turnProcess:focus-within time { opacity: 1; }
+.narrationLine { margin: 0; }
+.narrationLine + .narrationLine, .narrationText > div + div { margin-top: 8px; }
+@keyframes decision-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .currentActions:has(.actionBar) { animation: none; } }

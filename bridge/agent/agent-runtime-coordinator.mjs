@@ -1059,7 +1059,9 @@ export class AgentRuntimeCoordinator {
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
     }).finally(async () => {
-      const summary = safePublicAgentSummary(entry.visibleText);
+      const summary = safePublicAgentSummary(entry.visibleTextUpdates?.length
+        ? entry.visibleTextUpdates.map((update) => update.text).join("\n\n")
+        : entry.visibleText);
       if (summary) await this.#queueExecutionFact(entry, "public-summary", summary);
       await this.#queueExecutionFact(entry, entry.state === "failed" ? "failed" : "execution-ended");
       if (entry.historyFailure) {

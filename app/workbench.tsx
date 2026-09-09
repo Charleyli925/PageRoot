@@ -6538,9 +6538,7 @@ export default function Workbench() {
                     state={runtimeNoticeState}
                     {...(editRuntimeSnapshot?.retryAvailable
                       ? {
-                          onRetry: () => {
-                            workspaceControllerRef.current?.retryEditAuthorRuntime();
-                          },
+                          onRetry: () => workspaceControllerRef.current?.retryEditAuthorRuntime() ?? false,
                         }
                       : {})}
                     onExport={() => {

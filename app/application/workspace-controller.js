@@ -1100,8 +1100,18 @@ export class WorkspaceController {
     return this.#editRuntimeSession?.settleRuntime(input) || false;
   }
 
-  retryEditAuthorRuntime() {
-    return this.#editRuntimeSession?.retry(this.#currentEditAuthorRuntimeInput()) || false;
+  async retryEditAuthorRuntime() {
+    if (!this.#editRuntimeSession?.snapshot.retryAvailable) return false;
+    const requested = this.#currentEditAuthorRuntimeInput();
+    // A failure may be displayed before the last autosave ACK arrives. Join
+    // the existing save flight, then retry only the same document/canvas using
+    // its latest authoritative bytes. Never queue a retry onto another file.
+    const saved = await this.flushDocument();
+    const current = this.#currentEditAuthorRuntimeInput();
+    if (saved?.status !== "succeeded"
+      || current.sourcePath !== requested.sourcePath
+      || current.canvasGeneration !== requested.canvasGeneration) return false;
+    return this.#editRuntimeSession?.retry(current) || false;
   }
 
   getCurrentProjectContext() {

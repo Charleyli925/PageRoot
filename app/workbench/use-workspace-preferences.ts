@@ -69,7 +69,6 @@ export function useWorkspacePreferences(
   });
   const loadedSessionRef = useRef<WorkspacePreferencesSession | null>(null);
   const defaultAgentAppliedRef = useRef("");
-  const initialDocumentDefaults = useRef(new Map<string, WorkspacePreferenceAgentId>());
 
   const handleSessionSnapshot = useCallback((nextSnapshot: WorkspacePreferencesSnapshot) => {
     setSnapshot(nextSnapshot);
@@ -124,13 +123,9 @@ export function useWorkspacePreferences(
   }, [session, snapshot.workspace.rememberPanelWidths]);
   useEffect(() => {
     if (!workspaceController || !snapshot.loaded || !agentCatalogSnapshot) return;
-    if (documentId && !initialDocumentDefaults.current.has(documentId)) {
-      initialDocumentDefaults.current.set(documentId, snapshot.workspace.defaultAgentProviderId);
-    }
-    const desiredProvider = documentId
-      ? snapshot.workspace.documentAgentSelections[documentId]
-        || initialDocumentDefaults.current.get(documentId)!
-      : snapshot.workspace.defaultAgentProviderId;
+    // New turns follow the explicit Settings default. A running Request owns
+    // its frozen Agent selection independently of this catalog preference.
+    const desiredProvider = snapshot.workspace.defaultAgentProviderId;
     const preferred = resolvePreferredAgentProvider({
       defaultAgentProviderId: desiredProvider,
       disabledAgentProviderIds: snapshot.workspace.disabledAgentProviderIds,
@@ -150,7 +145,7 @@ export function useWorkspacePreferences(
     if (agentCatalogSnapshot.selected?.providerId !== preferred.providerId) {
       workspaceController.selectAgent(preferred.selection);
     }
-  }, [agentCatalogSnapshot, documentId, session, snapshot.loaded, snapshot.workspace.documentAgentSelections, snapshot.workspace.defaultAgentProviderId, snapshot.workspace.disabledAgentProviderIds, workspaceController]);
+  }, [agentCatalogSnapshot, documentId, session, snapshot.loaded, snapshot.workspace.defaultAgentProviderId, snapshot.workspace.disabledAgentProviderIds, workspaceController]);
   useEffect(() => {
     if (!workspaceController || !snapshot.loaded) return;
     workspaceController.applyDisabledAgentProviders?.(snapshot.workspace.disabledAgentProviderIds);

@@ -1069,3 +1069,41 @@ test("a freshly decoded Working Copy timestamp replaces its old historical summa
   assert.equal(summary()[0].isActiveWorkingCopy, true);
   assert.equal(summary()[1].isLatestOfficial, true);
 });
+
+test("runtime retry awaits save authority and never follows a changed document", async (t) => {
+  for (const outcome of ["saved", "failed", "switched"]) await t.test(outcome, async () => {
+    const html = '<html><body><p>Original</p><script>console.log("chart")</script></body></html>';
+    const latest = html.replace('Original', 'Latest');
+    const harness = createHarness({ html, editRuntimePort: {
+      async prepare() { throw new Error('synthetic transient prepare failure'); },
+      async revoke() { return { revoked: true }; },
+    } });
+    try {
+      const initial = harness.controller.getSnapshot().editRuntime;
+      harness.controller.startEditAuthorRuntimePreparation({
+        sourceSha256: initial.sourceSha256, canvasGeneration: initial.canvasGeneration,
+      });
+      await settleAsyncRuntime();
+      assert.equal(harness.controller.getSnapshot().editRuntime.retryAvailable, true);
+      harness.documentSession.update({ html: latest, editRevision: 1, persistState: 'writing' });
+      let finishSave;
+      const save = new Promise(resolve => { finishSave = resolve; });
+      harness.controller.flushDocument = () => save;
+      const retried = harness.controller.retryEditAuthorRuntime();
+      await settleAsyncRuntime();
+      assert.equal(harness.controller.getSnapshot().editRuntime.phase, 'static-fallback');
+      if (outcome === 'switched') harness.projectSession.openLocator(NEXT_SOURCE_PATH);
+      if (outcome !== 'failed') harness.documentSession.update({
+        persistedSourceSha256: sha256(latest), lastPersistedRevision: 1, persistState: 'idle',
+      });
+      finishSave({ status: outcome === 'failed' ? 'blocked' : 'succeeded' });
+      assert.equal(await retried, outcome === 'saved');
+      if (outcome === 'saved') {
+        const retry = harness.controller.getSnapshot().editRuntime;
+        assert.equal(retry.phase, 'preparing');
+        assert.equal(retry.sourceSha256, sha256(latest));
+        assert.equal(retry.sourcePath, SOURCE_PATH);
+      }
+    } finally { harness.controller.dispose(); }
+  });
+});
