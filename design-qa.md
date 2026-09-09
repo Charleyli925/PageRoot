@@ -2953,3 +2953,16 @@ Remaining: full 200% zoom, long-history keyboard/scroll matrix, real accounts, a
 - Evidence applies to source Electron launched with isolated profiles; no installed app replacement or release is implied. Task-level gate results are recorded separately by the existing runner.
 
 - Recovery follow-through: a real Electron regression exposed a reload click arriving before autosave acknowledgement. Retry now joins the existing save flight, shows pending feedback and verifies the same document/canvas afterward. Electron recovery passes; controller negative cases cover save failure and document switching during the wait.
+
+## 2026-09-09 — Stemmio Product Design System V1 试跑
+
+- Scope：新增设计体系、审阅协议、历史设计倾向与仓库 Skill 路由；不修改产品运行代码。
+- Product source：`d6137b76c2fa6de7ac6f20a00dbc7dc58015398a`；隔离 Electron、合成 HTML 与 finalizer fixture。
+- Evidence：`output/design-qa/design-system/pilot-review.md`；既有 `ai-review-adoption.spec.mjs` 首用例
+  两次运行分别 1/1 passed（20.6s / 17.0s），零失败、跳过、flaky；第二次只为补 trace，不是失败重试。
+- 自动断言覆盖：评论提交、等待、Candidate 尚未采用、Review、明确采纳后的持久化与版本一致、
+  预览返回，以及新建项目入口。首个项目由 fixture 打开；不是完整首次使用或真实厂商验收。
+- 边界：成功 trace 未捕获 Electron 截图，未完成视觉审阅；拒绝、故障恢复、空态、重启与真实厂商调用未验证。
+- SD-001 / CONTRACT-CONFLICT，P2、高置信：DESIGN_LANGUAGE §2.2 的红绿变化禁用与
+  INTERACTION_FLOW §8.3 的文字删除红/新增绿规则冲突。记录待明确，不当成已重现的产品 bug，不扩大本次改动。
+- final result: partial（主链路自动断言通过；完整视觉/异常状态审计未完成）。

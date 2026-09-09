@@ -1,5 +1,6 @@
 # PageRoot 设计语言
 
+- 设计体系入口：[PRODUCT_DESIGN_SYSTEM](PRODUCT_DESIGN_SYSTEM.md)；审阅协议：[DESIGN_REVIEW_PROTOCOL](DESIGN_REVIEW_PROTOCOL.md)。
 - 状态：v1。全部原则从既有产品事实提炼——`app/globals.css` 级联入口导入的
   `app/styles/` 令牌与分层样式、根目录
   `design-qa.md` 的全部已通过条目、`docs/INTERACTION_FLOW.md` 的交互合同。
@@ -190,10 +191,10 @@ PageRoot 的设计只追求两件事：
    同时做全景对比（层级关系）和聚焦对比（控件细节）。
 3. **七个保真面逐一核对**：字体排印 / 间距节奏 / 颜色令牌 / 资产保真
    （Phosphor-only）/ 文案 / 图标与控件状态 / 无障碍与降级。
-4. **发现分级**：P0（阻断）、P1（必须修）、P2（应修后复核）；
+4. **发现分级**：P0（阻断）、P1（必须修）、P2（记录后续，不扩大已通过任务的范围）；
    P3 记录为后续打磨，不阻断验收。
 5. **修复后复拍**，在条目中保留对比历史——问题、修法、复核证据。
-6. **追加条目到根目录 `design-qa.md`**，以 `final result: passed` 收尾。
+6. **追加条目到根目录 `design-qa.md`**，以实际 `final result: passed / partial / blocked` 收尾，列明未验证项。
    截图证据放 `output/design-qa/`；用户提供的真相图不入库。
 
 用户提供的真实截图始终优先于生成稿；真相图中被用户后续标注否决的

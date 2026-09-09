@@ -55,6 +55,16 @@ Release, packaging, and Candidate publication: `docs/RELEASING.md`.
 - Node tests do not prove Enter, IME, caret or iframe continuity. Keep public-behavior evidence for those paths. Do not replace that evidence with private field names, method names or source-string checks.
 - Deliver the actual result, verification evidence and remaining limits. Do not widen the task into packaging, merge or release.
 
+## User-facing design changes
+
+For any change affecting what a Stemmio user sees, understands or operates, read
+`docs/PRODUCT_DESIGN_SYSTEM.md` and the relevant interaction contract, then use
+`.agents/skills/stemmio-product-design/SKILL.md`. This includes UI copy, states,
+navigation, keyboard behavior, Agent progress, Review and adoption. Pure internal
+changes without user-visible effects are exempt. Scale evidence to the change:
+one-copy/token edits retain DESIGN_LANGUAGE §5’s lightweight exception; this is
+not a requirement to run a full audit or add a new CI lane for every UI edit.
+
 ## Progressive disclosure
 
 Read only the documents needed for the task. Start architecture work at
@@ -73,6 +83,7 @@ Update the unique owner document when a contract changes; other files should kee
 | Cross-owner contracts, persistence, IPC | Only when the task crosses owners or changes commit, identity or IPC: `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/SECURITY_MODEL.md`. Broader architecture narrative: `docs/ARCHITECTURE.md`. Engineering/assertion form: `docs/ENGINEERING_STANDARDS.md` |
 | User-visible blocking guards | `docs/GUARD_LEDGER.md` |
 | User flows, state or UI behavior | Named `docs/INTERACTION_FLOW.md` sections from capability-context, plus the relevant focused policy document |
+| Product design principles, flow audit, design review | `docs/PRODUCT_DESIGN_SYSTEM.md`, `docs/DESIGN_REVIEW_PROTOCOL.md` |
 | UI visual language, styling standards, design QA process | `docs/DESIGN_LANGUAGE.md`, then the root `design-qa.md` log when recording QA evidence |
 | First-open import confirmation | `docs/IMPORT_CONFIRMATION_PRD.md`, then `docs/IMPORT_CONFIRMATION_PLAN.md` when implementing |
 | Change Request, schemas, AI completion or versions | `docs/CHANGE_REQUEST_PROTOCOL.md`, relevant files in `schemas/` and `fixtures/` |
