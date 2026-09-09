@@ -558,7 +558,9 @@ test("owned composition snapshots keep formatted source nodes editable but autho
     // Escape publishes the deferred runtime refresh. Inject into its completed
     // active document; a disposable clone in the retiring iframe should vanish.
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', retiringGeneration);
-    await expect(editor.locator('iframe[data-runtime-slot-role="inactive"]')).toHaveCount(0);
+    // Both physical slots persist. The retired document becomes the empty
+    // inactive slot only after promotion cleanup (it was `previous` before).
+    await expect(editor.locator('iframe[data-runtime-slot-role="inactive"]')).toHaveCount(1);
     await expect(editor).toHaveAttribute('data-render-verified', 'true');
     // Public attributes and source-identical bytes cannot grant authority.
     await paragraph.evaluate((node) => {
