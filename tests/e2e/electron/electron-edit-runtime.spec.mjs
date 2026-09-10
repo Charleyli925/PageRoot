@@ -241,6 +241,7 @@ async function armRuntimeHandoffSamples(page) {
         candidateVisibility: candidateFrame ? candidateStyle?.visibility : null,
         candidateOpacity: candidateFrame ? candidateStyle?.opacity : null,
         candidatePointerEvents: candidateFrame ? candidateStyle?.pointerEvents : null,
+        candidateOverflowAnchor: candidateFrame ? candidateStyle?.overflowAnchor : null,
         newFrameOpacity: candidateFrame ? candidateStyle?.opacity : null,
         newFramePointerEvents: candidateFrame ? candidateStyle?.pointerEvents : null,
         oldConnected: oldFrame.isConnected,
@@ -393,6 +394,7 @@ async function assertRuntimeHandoff(page, {
     && sample.candidateVisibility === "visible"
     && Number(sample.candidateOpacity) === 0
     && sample.candidatePointerEvents === "none"
+    && sample.candidateOverflowAnchor === "none"
     && sample.oldGeneration !== sample.candidateGeneration
   ));
   if (!activeFrameStayedManaged) {
