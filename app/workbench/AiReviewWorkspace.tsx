@@ -604,14 +604,12 @@ export default function AiReviewWorkspace({
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
   const independentTransport = hydrated && Boolean(window.htmlAIPreview);
-  const initialPresentationState = initialReviewState({
+  const [initialReview] = useState(() => initialReviewState({
     documents,
     reviewIdentity: sessionId,
     contextVisibility: changeContextVisibility,
     presentation: initialPresentation,
-  });
-  const initialPresentationStateRef = useRef(initialPresentationState);
-  const initialReview = initialPresentationStateRef.current;
+  }));
   const [reviewState, dispatchReviewState] = useReducer(
     reduceReviewState,
     initialReview.state,
@@ -1093,7 +1091,7 @@ export default function AiReviewWorkspace({
       value: { before: [], after: [] },
     });
     dispatchReviewState({ type: "set-active-focus", value: null });
-  }, [documents, sessionId]);
+  }, [documents, initialReview.restored, sessionId]);
 
   useEffect(() => {
     dispatchReviewState({

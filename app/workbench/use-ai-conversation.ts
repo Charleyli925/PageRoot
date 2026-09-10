@@ -125,14 +125,9 @@ export function useAiConversation({
     && Boolean(sourcePath)
     && (canvasMode === "preview" || reviewing);
   const visible = active && open && !commentComposerOpen;
-  if (documentPresented && (!active || commentComposerOpen) && open) {
-    setOpenDocuments((current) => {
-      if (!current.has(documentKey)) return current;
-      const next = new Set(current);
-      next.delete(documentKey);
-      return next;
-    });
-  }
+  // Edit, Start, Settings and comment composition temporarily hide the dock.
+  // They do not rewrite the Document's presentation preference: an explicit
+  // hide/toggle owns that decision, and a restored Review can reopen in place.
 
   // Load when the sidebar becomes visible for a Document and close it on any
   // identity change or when it stops being visible.

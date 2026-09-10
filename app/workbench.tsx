@@ -396,6 +396,7 @@ const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
 
 type ReadyReviewSession = {
   tabId: string;
+  presentation: ReviewPresentationSnapshot | null;
   operationKey: string;
   sessionId: string;
   documents: ReviewDocuments;
@@ -510,7 +511,6 @@ export default function Workbench() {
   );
   const reviewSessionSequenceRef = useRef(0);
   const reviewSessionsRef = useRef(new Map<string, ReadyReviewSession>());
-  const reviewPresentationsRef = useRef(new Map<string, ReviewPresentationSnapshot>());
   const [desktopHostReady, setDesktopHostReady] = useState(false);
   const [desktopHostIssue, setDesktopHostIssue] = useState<string | null>(null);
   const workspaceControllerRef = useRef<WorkspaceController | null>(null);
@@ -781,9 +781,8 @@ export default function Workbench() {
   const [readyReviewSession, setReadyReviewSession] =
     useState<ReadyReviewSession | null>(null);
   const presentedReadyReviewSession = activeWorkbenchTab?.kind === "document"
-    ? (readyReviewSession?.tabId === activeWorkbenchTab.tabId
-      ? readyReviewSession
-      : reviewSessionsRef.current.get(activeWorkbenchTab.tabId) || null)
+    && readyReviewSession?.tabId === activeWorkbenchTab.tabId
+    ? readyReviewSession
     : null;
 
   // The decision bar acts through a ref: its handlers are defined further down,
@@ -5238,6 +5237,7 @@ export default function Workbench() {
       setInterruption(null);
       const session: ReadyReviewSession = {
         tabId: reviewTabId,
+        presentation: null,
         operationKey,
         sessionId: preparedReview.sessionId,
         documents: preparedReview.documents,
@@ -5996,12 +5996,17 @@ export default function Workbench() {
       fileName={localFileNameFromSourcePath(presentedReadyReviewSession.sourcePath) || currentSourceFileName}
       changeContextVisibility={workspacePreferences.reviewChangeContextVisibility}
       commentContextVisibility={workspacePreferences.reviewCommentContextVisibility}
-      initialPresentation={reviewPresentationsRef.current.get(presentedReadyReviewSession.tabId) || null}
+      initialPresentation={presentedReadyReviewSession.presentation}
       onPresentationChange={(presentation) => {
         if (
           presentation.reviewIdentity !== presentedReadyReviewSession.sessionId
         ) return;
-        reviewPresentationsRef.current.set(presentedReadyReviewSession.tabId, presentation);
+        const cached = reviewSessionsRef.current.get(presentedReadyReviewSession.tabId);
+        if (cached?.sessionId !== presentedReadyReviewSession.sessionId) return;
+        reviewSessionsRef.current.set(presentedReadyReviewSession.tabId, {
+          ...cached,
+          presentation,
+        });
       }}
       accepting={openingReadyVersion || Boolean(activeRun?.adoptionPhase)}
       activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
