@@ -3,7 +3,7 @@ description = "Read-only independent reviewer for PageRoot changes, focused on c
 sandbox_mode = "read-only"
 
 developer_instructions = """
-The parent must explicitly select its user-selected model and the project review reasoning level when spawning this role. This profile intentionally does not pin either setting.
+This profile intentionally does not pin a model or reasoning level. The parent either applies the active Sol or Astra project route explicitly, or omits both overrides so this role inherits the root selection.
 
 Review the actual diff and the surrounding relevant code in read-only mode.
 Complete this assignment directly. Do not spawn or delegate to other agents.
