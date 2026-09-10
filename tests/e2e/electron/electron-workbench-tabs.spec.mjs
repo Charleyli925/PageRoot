@@ -812,7 +812,12 @@ for (const recoveryCase of ["pending", "rename", "superseded"]) {
       await mode.getByRole("button", { name: "编辑", exact: true }).click();
       await app.page.getByRole("dialog").getByRole("button", { name: "创建并编辑", exact: true }).click();
       if (recoveryCase === "pending") await expect(app.page.getByRole("button", { name: "打开已创建版本", exact: true })).toBeEnabled();
-      else await expect(app.page.getByRole("tab", { selected: true })).toContainText("-V9.html");
+      else {
+        await expect(app.page.getByRole("tab", { selected: true })).toContainText("-V9.html");
+        // The selected tab is published before the navigation owner releases
+        // its close guard. Wait for the public toolbar boundary before restart.
+        await expect(mode.getByRole("button", { name: "编辑", exact: true })).toBeEnabled();
+      }
       const receipt = await repository.queryHistoryCreation({ target, operationId });
       expect(receipt.versionId).toBe("ver_0009");
       expect(receipt.openedAt).toBeNull();
