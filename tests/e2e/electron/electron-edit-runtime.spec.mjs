@@ -2840,9 +2840,8 @@ test("a failed structural candidate after in-place text editing promotes static 
       .toHaveCount(0);
     await expect(target).toHaveAttribute("contenteditable", "true");
 
-    await armRuntimeHandoffSamples(page);
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(800);
+    await expect(target).not.toHaveAttribute("contenteditable", "true");
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
     await expect(editor.locator('iframe:not([data-frame-role])'))
       .toHaveAttribute("data-frame-generation", beforeGeneration);
@@ -2852,12 +2851,37 @@ test("a failed structural candidate after in-place text editing promotes static 
     frame = await currentEditorFrame(page);
     await frame.locator('[data-native-case="runtime-text-candidate-trigger"]').click();
     const duplicateButton = editor.getByRole("button", { name: "复制元素", exact: true });
-    const duplicateButtonBox = await duplicateButton.boundingBox();
+    await expect(duplicateButton).toBeVisible();
+    const duplicateButtonBox = await duplicateButton.evaluate((element) => (
+      new Promise((resolve) => {
+        let previousBox = null;
+        const sample = () => {
+          const rect = element.getBoundingClientRect();
+          const currentBox = {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          };
+          if (
+            previousBox
+            && Object.keys(currentBox).every((key) => currentBox[key] === previousBox[key])
+          ) {
+            resolve(currentBox);
+            return;
+          }
+          previousBox = currentBox;
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      })
+    ));
     expect(duplicateButtonBox).not.toBeNull();
     const scrollBeforeDuplicate = await reviewStage.evaluate((element) => element.scrollTop);
     // Click the already-visible toolbar control at its real screen coordinate.
     // Playwright locator.click() may scroll the shared stage before pointerdown,
     // which is not a user-visible Candidate side effect.
+    await armRuntimeHandoffSamples(page);
     await page.mouse.click(
       duplicateButtonBox.x + duplicateButtonBox.width / 2,
       duplicateButtonBox.y + duplicateButtonBox.height / 2,
