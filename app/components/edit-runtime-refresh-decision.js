@@ -49,10 +49,19 @@ export function decideEditRuntimeRefresh({
   if (
     mutationKind === "text"
     || mutationKind === "style"
-    || (
-      mutationKind === "attribute"
-      && isRuntimeInPlaceAttribute(attributeName)
-    )
+    || mutationKind === "reorder"
+  ) {
+    return Object.freeze({
+      action: "in-place",
+      reason: `runtime-${mutationKind}`,
+      synchronizeCurrentFrame: true,
+      markRuntimeRefreshPending: false,
+    });
+  }
+
+  if (
+    mutationKind === "attribute"
+    && isRuntimeInPlaceAttribute(attributeName)
   ) {
     return Object.freeze({
       action: "defer-until-boundary",

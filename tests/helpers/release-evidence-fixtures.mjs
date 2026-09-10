@@ -227,6 +227,18 @@ function fixtureExtraResources() {
       to: "edit-runtime-libraries/echarts/5.6.0/NOTICE",
     },
     {
+      from: "node_modules/echarts-5-4-3/dist/echarts.min.js",
+      to: "edit-runtime-libraries/echarts/5.4.3/echarts.min.js",
+    },
+    {
+      from: "node_modules/echarts-5-4-3/LICENSE",
+      to: "edit-runtime-libraries/echarts/5.4.3/LICENSE",
+    },
+    {
+      from: "node_modules/echarts-5-4-3/NOTICE",
+      to: "edit-runtime-libraries/echarts/5.4.3/NOTICE",
+    },
+    {
       from: "output/release-metadata/build-info.json",
       to: "build-info.json",
     },
@@ -655,6 +667,12 @@ export async function createSyntheticAppBundle(t, {
     writeFixtureFile(productRoot, "node_modules/echarts/dist/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
     writeFixtureFile(productRoot, "node_modules/echarts/LICENSE", "Apache License 2.0 fixture\n"),
     writeFixtureFile(productRoot, "node_modules/echarts/NOTICE", "Apache ECharts fixture notice\n"),
+    writeFixtureFile(productRoot, "node_modules/echarts-5-4-3/dist/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
+    writeFixtureFile(productRoot, "node_modules/echarts-5-4-3/LICENSE", "Apache License 2.0 fixture\n"),
+    writeFixtureFile(productRoot, "node_modules/echarts-5-4-3/NOTICE", "Apache ECharts fixture notice\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.4.3/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.4.3/LICENSE", "Apache License 2.0 fixture\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.4.3/NOTICE", "Apache ECharts fixture notice\n"),
     writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
     writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/LICENSE", "Apache License 2.0 fixture\n"),
     writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/NOTICE", "Apache ECharts fixture notice\n"),

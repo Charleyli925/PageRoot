@@ -340,38 +340,97 @@ export function reconcileRangeStyleInPlace(
   return imported;
 }
 
+function visibleRuntimeSurface(surface: Element, view: Window | null): boolean {
+  const rect = surface.getBoundingClientRect();
+  return rect.width > 0
+    && rect.height > 0
+    && (!view || (rect.bottom >= 0 && rect.top <= view.innerHeight));
+}
+
+function runtimeHostReady(
+  host: Element,
+  documentNode: Document,
+  {
+    allowAuthoredCanvas = false,
+    requireEchartsInstance = false,
+  }: {
+    allowAuthoredCanvas?: boolean;
+    requireEchartsInstance?: boolean;
+  } = {},
+): boolean {
+  const echarts = (documentNode.defaultView as unknown as {
+    echarts?: { getInstanceByDom?: (element: Element) => unknown };
+  } | null)?.echarts;
+  const hasEchartsInstance = host.hasAttribute("_echarts_instance_")
+    && typeof echarts?.getInstanceByDom === "function"
+    && Boolean(echarts.getInstanceByDom(host));
+  if (requireEchartsInstance) return hasEchartsInstance;
+  const surfaces = [
+    ...(host.matches("canvas, svg") ? [host] : []),
+    ...Array.from(host.querySelectorAll("canvas, svg")),
+  ].filter((surface) => (
+    !surface.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE)
+    || (allowAuthoredCanvas && surface.matches("canvas"))
+  ));
+  if (surfaces.some((surface) => visibleRuntimeSurface(surface, null))) return true;
+  return hasEchartsInstance;
+}
+
 /** A continuity check, not source authority or a general script-completion oracle.
- * An unchanged, visible chart host must regain its generated surfaces before
- * replacing the current document. The caller owns identity and the deadline.
+ * An unchanged visible runtime host must regain usable critical content before
+ * replacing the current document. Surface counts and renderer choice may
+ * legitimately change between equivalent ECharts renders.
  */
 export function runtimeSurfacesReady(
   active: Document | null,
   candidate: Document,
   nextIndex: SourceIndexValue,
+  {
+    requireCandidateSurface = false,
+    requireCandidateEchartsInstance = false,
+  }: {
+    requireCandidateSurface?: boolean;
+    requireCandidateEchartsInstance?: boolean;
+  } = {},
 ): boolean {
-  if (!active?.defaultView) return true;
-  const hosts = new Map<string, { canvas: number; svg: number }>();
-  for (const surface of Array.from(active.querySelectorAll("canvas, svg"))) {
-    const rect = surface.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0 || rect.bottom < 0 || rect.top > active.defaultView.innerHeight) continue;
-    const host = surface.closest(`[${SOURCE_ELEMENT_ATTRIBUTE}]`);
-    const id = host?.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
-    if (!id || !nextIndex.byPagerootId.has(id)) continue;
-    const expected = hosts.get(id) || { canvas: 0, svg: 0 };
-    expected[surface.tagName.toLowerCase() as "canvas" | "svg"] += 1;
-    hosts.set(id, expected);
-  }
-  for (const [id, expected] of hosts) {
-    const host = uniqueSourceElement(candidate, id);
-    if (!host) return false;
-    for (const kind of ["canvas", "svg"] as const) {
-      const surfaces = [ ...(host.matches(kind) ? [host] : []), ...Array.from(host.querySelectorAll(kind)) ];
-      const visible = surfaces.filter((surface) => {
-        const rect = surface.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-      });
-      if (visible.length < expected[kind]) return false;
+  const activeHostIds = new Map<string, {
+    allowAuthoredCanvas: boolean;
+    requireEchartsInstance: boolean;
+  }>();
+  if (active?.defaultView) {
+    for (const surface of Array.from(active.querySelectorAll("canvas, svg"))) {
+      if (!visibleRuntimeSurface(surface, active.defaultView)) continue;
+      const authoredCanvas = surface.matches(`canvas[${SOURCE_ELEMENT_ATTRIBUTE}]`);
+      if (surface.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE) && !authoredCanvas) continue;
+      const host = surface.closest(`[${SOURCE_ELEMENT_ATTRIBUTE}]`);
+      const id = host?.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+      if (id && host && nextIndex.byPagerootId.has(id)) {
+        const existing = activeHostIds.get(id);
+        activeHostIds.set(id, {
+          allowAuthoredCanvas: existing?.allowAuthoredCanvas === true || authoredCanvas,
+          requireEchartsInstance: existing?.requireEchartsInstance === true || runtimeHostReady(
+            host,
+            active,
+            { requireEchartsInstance: true },
+          ),
+        });
+      }
     }
   }
-  return true;
+  for (const [id, requirement] of activeHostIds) {
+    const host = uniqueSourceElement(candidate, id);
+    if (!host || !runtimeHostReady(host, candidate, requirement)) return false;
+  }
+  if (activeHostIds.size > 0 || !requireCandidateSurface) return true;
+  for (const host of Array.from(candidate.querySelectorAll(`[${SOURCE_ELEMENT_ATTRIBUTE}]`))) {
+    const id = host.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+    if (
+      id
+      && nextIndex.byPagerootId.has(id)
+      && runtimeHostReady(host, candidate, {
+        requireEchartsInstance: requireCandidateEchartsInstance,
+      })
+    ) return true;
+  }
+  return false;
 }

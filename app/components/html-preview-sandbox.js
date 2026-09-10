@@ -138,10 +138,31 @@ export function sanitizeScrollableDisplayDocument(source, baseUrl) {
   return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
 }
 
+function isolateRuntimeCandidateFocus(parsed, candidateInertOwnership) {
+  const root = parsed.documentElement;
+  // A replacement document is born as a hidden Candidate. Keep its controls
+  // outside the focus order until the existing handoff coordinator accepts it
+  // as Active. Ownership stays in the parent-side Candidate record because
+  // author markup and scripts can freely mutate every attribute in this DOM.
+  const injected = !root.hasAttribute("inert");
+  if (candidateInertOwnership) candidateInertOwnership.injected = injected;
+  if (injected) {
+    root.setAttribute("inert", "");
+  }
+  parsed.querySelectorAll("[autofocus]").forEach((element) => {
+    element.removeAttribute("autofocus");
+  });
+}
+
 export function prepareVerifiedFrameDocument(
   source,
   verificationToken,
-  { baseUrl, editorStyles } = {},
+  {
+    baseUrl,
+    editorStyles,
+    candidateInert = false,
+    candidateInertOwnership,
+  } = {},
 ) {
   const sanitized = sanitizePreviewDocument(source, baseUrl);
   if (typeof DOMParser === "undefined") return sanitized;
@@ -157,6 +178,9 @@ export function prepareVerifiedFrameDocument(
   marker.setAttribute(FRAME_VERIFICATION_ATTRIBUTE, verificationToken);
   marker.setAttribute("content", verificationToken);
   parsed.head.prepend(marker);
+  if (candidateInert) {
+    isolateRuntimeCandidateFocus(parsed, candidateInertOwnership);
+  }
   return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
 }
 
@@ -227,6 +251,7 @@ export function prepareDisposableRuntimeFrameDocument(
     documentBasePath,
     baseUrl,
     editorStyles,
+    candidateInertOwnership,
   } = {},
 ) {
   if (
@@ -246,6 +271,7 @@ export function prepareDisposableRuntimeFrameDocument(
   if (!parsed.documentElement || !parsed.head) return null;
   if (!addRuntimeResourceBase(parsed, sessionId, documentBasePath)) return null;
   const root = parsed.documentElement;
+  isolateRuntimeCandidateFocus(parsed, candidateInertOwnership);
   const sourceElements = [root, ...root.querySelectorAll("*")];
   const seenMarkers = new Set();
   for (const element of sourceElements) {

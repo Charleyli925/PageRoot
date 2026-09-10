@@ -340,6 +340,51 @@ test("a superseded disposable frame keeps the shared runtime grant alive", async
   assert.deepEqual(revoked, []);
 });
 
+test("a partial settled runtime remains explicitly retryable", async () => {
+  const requests = [];
+  const revoked = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request, {
+          sessionId: requests.length === 1
+            ? "0123456789abcdef0123456789abcdef"
+            : "fedcba9876543210fedcba9876543210",
+          executionId: requests.length === 1
+            ? "abcdefabcdefabcdefabcdef"
+            : "fedcbafedcbafedcbafedcba",
+        });
+      },
+      revoke: async (sessionId) => revoked.push(sessionId),
+    },
+  });
+
+  session.refresh(input());
+  assert.equal(session.startPreparation(input()), true);
+  await flushAsync();
+  const firstGrant = session.snapshot.grant;
+  assert.ok(firstGrant);
+  assert.equal(beginRuntime(session, firstGrant), true);
+  assert.equal(settleRuntime(session, firstGrant, "ready", undefined, {
+    runtimePartial: true,
+  }), true);
+  assert.equal(session.snapshot.phase, "settled");
+  assert.equal(session.snapshot.lastOutcome, "runtime-partial");
+  assert.equal(session.snapshot.retryAvailable, true);
+
+  assert.equal(session.retry(input()), true);
+  assert.equal(session.snapshot.phase, "preparing");
+  assert.equal(session.snapshot.grant, null);
+  assert.equal(session.startPreparation(input()), true);
+  await flushAsync();
+
+  assert.equal(requests.length, 2);
+  assert.deepEqual(revoked, [firstGrant.sessionId]);
+  assert.equal(session.snapshot.phase, "ready");
+  assert.equal(session.snapshot.retryAvailable, false);
+});
+
 test("an old candidate callback cannot settle a newer running attempt", async () => {
   const session = new EditAuthorRuntimeSession({
     port: {
@@ -489,8 +534,7 @@ test("an equivalent canvas keeps runtime failure through an authority wait", asy
   assert.equal(requests.length, 1);
 });
 
-test("the first successful compatible runtime locks the canvas without recovery", async () => {
-  let recoveries = 0;
+test("legacy compatible grants are rejected instead of running substituted bytes", async () => {
   const session = new EditAuthorRuntimeSession({
     port: {
       prepare: async (request) => success(request, {
@@ -498,10 +542,6 @@ test("the first successful compatible runtime locks the canvas without recovery"
         recoveryAvailable: true,
         libraryOrigins: ["bundled-compatible", "inline"],
       }),
-      recover: async () => {
-        recoveries += 1;
-        return null;
-      },
       revoke: async () => {},
     },
   });
@@ -509,136 +549,9 @@ test("the first successful compatible runtime locks the canvas without recovery"
   session.refresh(input());
   assert.equal(session.startPreparation(input()), true);
   await flushAsync();
-  const grant = session.snapshot.grant;
-  assert.equal(grant?.resourceMode, "compatible");
-  assert.equal(beginRuntime(session, grant), true);
-  assert.equal(settleRuntime(session, grant, "ready"), true);
-  await flushAsync();
-
-  assert.equal(session.snapshot.phase, "settled");
-  assert.equal(session.snapshot.grant?.sessionId, grant.sessionId);
-  assert.equal(recoveries, 0);
-});
-
-test("a failed compatible runtime consumes one exact recovery and then becomes the winner", async () => {
-  const exact = deferred();
-  const revoked = [];
-  let recoveries = 0;
-  const session = new EditAuthorRuntimeSession({
-    port: {
-      prepare: async (request) => success(request, {
-        resourceMode: "compatible",
-        recoveryAvailable: true,
-        libraryOrigins: ["bundled-compatible", "inline"],
-      }),
-      recover: async () => {
-        recoveries += 1;
-        return exact.promise;
-      },
-      revoke: async (sessionId) => revoked.push(sessionId),
-    },
-  });
-
-  session.refresh(input());
-  assert.equal(session.startPreparation(input()), true);
-  await flushAsync();
-  const compatible = session.snapshot.grant;
-  assert.ok(compatible);
-  assert.equal(beginRuntime(session, compatible), true);
-  assert.equal(settleRuntime(session, compatible, "failed"), true);
-  assert.equal(session.snapshot.phase, "recovering");
-  assert.equal(session.snapshot.grant, null);
-  assert.equal(recoveries, 1);
-  assert.equal(
-    settleRuntime(session, compatible, "failed"),
-    false,
-  );
-
-  exact.resolve(success({
-    sourceSha256: SOURCE_SHA,
-    canvasGeneration: 4,
-  }, {
-    sessionId: "11111111111111111111111111111111",
-    executionId: "222222222222222222222222",
-    resourceSha256: "sha256:" + "c".repeat(64),
-    resourceMode: "exact",
-    libraryOrigins: ["network", "inline"],
-  }));
-  await flushAsync();
-
-  assert.equal(session.snapshot.phase, "ready");
-  assert.equal(session.snapshot.grant?.resourceMode, "exact");
-  assert.equal(session.snapshot.lastOutcome, "recovery-ready");
-  assert.deepEqual(revoked, [compatible.sessionId]);
-  assert.equal(recoveries, 1);
-});
-
-test("a stale exact recovery is revoked after the canvas generation changes", async () => {
-  const exact = deferred();
-  const revoked = [];
-  const session = new EditAuthorRuntimeSession({
-    port: {
-      prepare: async (request) => success(request, {
-        resourceMode: "compatible",
-        recoveryAvailable: true,
-      }),
-      recover: async () => exact.promise,
-      revoke: async (sessionId) => revoked.push(sessionId),
-    },
-  });
-
-  session.refresh(input());
-  session.startPreparation(input());
-  await flushAsync();
-  const compatible = session.snapshot.grant;
-  beginRuntime(session, compatible);
-  settleRuntime(session, compatible, "rejected");
-  session.refresh(input({
-    canvasGeneration: 5,
-    sourceSha256: "sha256:" + "d".repeat(64),
-  }));
-
-  exact.resolve(success({
-    sourceSha256: SOURCE_SHA,
-    canvasGeneration: 4,
-  }, {
-    sessionId: "33333333333333333333333333333333",
-    executionId: "444444444444444444444444",
-    resourceMode: "exact",
-  }));
-  await flushAsync();
-
-  assert.notEqual(session.snapshot.canvasGeneration, 4);
-  assert.deepEqual(revoked, [
-    compatible.sessionId,
-    "33333333333333333333333333333333",
-  ]);
-});
-
-test("an unavailable compatible recovery terminates in static fallback", async () => {
-  const session = new EditAuthorRuntimeSession({
-    port: {
-      prepare: async (request) => success(request, {
-        resourceMode: "compatible",
-        recoveryAvailable: true,
-      }),
-      recover: async () => {
-        throw new Error("exact bytes unavailable");
-      },
-      revoke: async () => {},
-    },
-  });
-
-  session.refresh(input());
-  session.startPreparation(input());
-  await flushAsync();
-  const compatible = session.snapshot.grant;
-  beginRuntime(session, compatible);
-  settleRuntime(session, compatible, "failed");
-  await flushAsync();
-
   assert.equal(session.snapshot.phase, "static-fallback");
-  assert.equal(session.snapshot.lastOutcome, "recovery-failed");
+  assert.equal(session.snapshot.lastOutcome, "prepare-failed");
+  assert.equal(session.snapshot.grant, null);
 });
 
 test("failed preparation reaches an explicit static fallback", async () => {

@@ -956,12 +956,22 @@ export async function verifyAppBundle({
       fileName,
     );
   }
-  for (const fileName of ["echarts.min.js", "LICENSE", "NOTICE"]) {
-    await assertFilesEqual(
-      path.join(productRoot, "node_modules", "echarts", fileName === "echarts.min.js" ? "dist/echarts.min.js" : fileName),
-      path.join(resourcesPath, "edit-runtime-libraries", "echarts", "5.6.0", fileName),
-      `bundled ECharts 5.6.0 ${fileName}`,
-    );
+  for (const { packageName, version } of [
+    { packageName: "echarts-5-4-3", version: "5.4.3" },
+    { packageName: "echarts", version: "5.6.0" },
+  ]) {
+    for (const fileName of ["echarts.min.js", "LICENSE", "NOTICE"]) {
+      await assertFilesEqual(
+        path.join(
+          productRoot,
+          "node_modules",
+          packageName,
+          fileName === "echarts.min.js" ? "dist/echarts.min.js" : fileName,
+        ),
+        path.join(resourcesPath, "edit-runtime-libraries", "echarts", version, fileName),
+        `bundled ECharts ${version} ${fileName}`,
+      );
+    }
   }
 
   if (
