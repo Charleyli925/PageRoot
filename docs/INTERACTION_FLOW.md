@@ -727,7 +727,8 @@ Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<�
 
 设置页与 AI 对话侧栏共用同一份 `checking / ready / not-installed / auth-required /
 unavailable` 状态。打开设置只执行**当前方案**无副作用的 `diagnose`，不创建
-preflight ticket 或 Agent session；窗口从外部终端返回时，只在安装中或等待登录等
+preflight ticket 或执行会话；Qoder 诊断可启动无文件、终端与提示权限的短生命周期 ACP
+smoke session，仅验证 `initialize → session.new → identity/protocol` 并确认进程退出。窗口从外部终端返回时，只在安装中或等待登录等
 临时状态轻量刷新。并发的相同诊断共享一个 selection-keyed Promise，过期结果不能发布。
 对话侧栏只消费最近一次可信状态，未知、检测中、
 未安装、需要登录、额度用尽或连接失败时都提供进入设置的下一步，不把英文原文写进聊天。
@@ -1250,17 +1251,21 @@ A 项目 processing 时切换 B 项目：
 | completion 身份不符 | 不建版 | 检查正确 Attempt |
 | output Hash 不符 | 协议错误 | 重新生成并 finalizer |
 | completion 后 output 变化 | 协议违规 | 新 Attempt |
+| completion 已验证后 Agent 进程收尾未确认 | 保留有效 Candidate 并继续审阅；不得改写成执行失败 | 保持进程围栏，后续执行按 Bridge 恢复规则处理 |
 | no-change | 不建版 | 修改要求后再提交 |
 | AI 失败或取消 | 不建版、不创建工作文件 | 修改要求后再提交 |
 
 Agent 设置与执行状态均原位收口：设置页只执行无副作用的
-diagnose，不建立 preflight ticket 或 Agent session，只在 Bridge 真实诊断
+diagnose，不建立 preflight ticket 或执行会话；允许用无工具权限的短生命周期 ACP smoke
+session 证明协议、Agent 身份、建会话与进程清理，只在 Bridge 真实诊断
 成功后显示“已连接”。窗口重新获得焦点时，仅安装中或等待登录
 的临时状态轻量刷新。正式发送才执行 preflight 并冻结 Agent、模型与配置。
 
 执行过程按时间顺序留在对话流中。用户消息使用人物头像及“我”；Stemmio 的阶段事实使用
 品牌头像及名称，连续事实合为紧凑记录，默认展开，不能藏进“查看处理记录”。Agent 面向用户的
-公开说明逐条积累，实时状态位于消息流末尾，已接收字节直接可见。停止操作仍固定在底部。
+公开说明逐条积累，所有消息严格按 Conversation sequence 显示，最新事实位于最下面；不得按说话人
+重新分组。Agent 的实时状态、计时与已接收字节归属于同一条当前 Agent 消息，不另建一条常驻的
+Stemmio 状态压在其下。Agent 结束后，后续校验与 Candidate 事实再按发生顺序追加。停止操作仍固定在底部。
 审阅侧栏打开时，采用／不用本次只在侧栏行动区显示；侧栏关闭时顶栏提供对应决定入口。
 底部常驻“下一轮草稿”输入框，复用 ConversationSession / ConversationWorkflow 的文档草稿
 保存与切换/关闭 drain；退出核对的 preparing/ready 阶段同时锁定输入及草稿写命令，退出失败或取消后恢复，避免后续保存等待期间再输入而丢失。当前阶段仅记事，不发送、不修改冻结 Request、不自动采用 Candidate。

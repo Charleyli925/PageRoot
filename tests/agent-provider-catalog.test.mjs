@@ -1630,6 +1630,27 @@ test("Codex leaves automatic browser opening to native login and retains manual 
   catalog.dispose();
 });
 
+test("Qoder login opens the captured official URL once and retains manual reopen", async () => {
+  let opened = 0;
+  const catalog = new AgentCatalogState({ providers: [QODER_AGENT_PROVIDER],
+    handoffPort: { async openLogin() { opened += 1; return { opened: true }; } },
+    bridgeClient: {
+      async preflightAgent() {},
+      async loginAgent() { return { generation: 1, loginState: "waiting", loginUrlPresent: true }; },
+      async cancelAgentLogin() { return { generation: 1, loginState: "cancelled" }; },
+      async agentDiagnose() { return { diagnostic: { readiness: "auth-required" } }; },
+    },
+  });
+  const pending = catalog.startLogin();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(opened, 1);
+  await catalog.reopenOfficialLogin();
+  assert.equal(opened, 2);
+  await catalog.cancelAccessOperation(catalog.freezeSelected());
+  await pending.catch(() => null);
+  catalog.dispose();
+});
+
 
 test("known incompatible Codex components offer a different service without reinstalling or relogging", () => {
   const diagnostic = agentDiagnosticSnapshot({ readiness: "connection-failed", cause: "CODEX_EXECUTION_CONTRACT_UNSUPPORTED",

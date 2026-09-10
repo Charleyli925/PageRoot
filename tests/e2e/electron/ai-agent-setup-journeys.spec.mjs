@@ -79,12 +79,14 @@ test("non-default DeepSeek saves high through restart and sends high, with compa
       .workspace?.defaultAgentProviderId).toBe("pageroot");
     const original = readFileSync(workingPath);
     await sidebar.getByRole("button", { name: /交给.*修改/u }).click();
-    const progress = sidebar.getByTestId("ai-conversation-run-progress");
-    await expect(progress).toContainText("DeepSeek 正在生成");
-    await expect(progress).toContainText("正在接收结果");
+    const executionStatus = sidebar.getByTestId("ai-conversation-execution-status");
+    await expect(executionStatus).toContainText("DeepSeek 正在生成");
+    await expect(executionStatus).toContainText("正在接收结果");
+    await expect(sidebar.getByTestId("ai-conversation-run-progress")).toHaveCount(0);
     await expect(sidebar.getByTestId("ai-conversation-stop")).toBeVisible();
     await expect(sidebar.getByTestId("ai-conversation-action-bar")).toHaveCount(0);
     const narration = sidebar.getByTestId("ai-conversation-narration-message");
+    await expect(narration.getByTestId("ai-conversation-execution-status")).toBeVisible();
     await expect(narration).toContainText("我会先检查页面结构");
     await expect(narration).toContainText("标题与配色已调整");
     await expect(narration).not.toContainText("fixture-hidden");
