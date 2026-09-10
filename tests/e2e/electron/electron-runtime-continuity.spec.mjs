@@ -867,19 +867,36 @@ test("editing a published Undo projection remains available while its save recei
     let started;
     const saving = new Promise(resolve => { started = resolve; });
     const routePattern = /\/autosave(?:\?|$)/u;
-    await page.route(routePattern, async route => {
+    let finishRoute;
+    const routeDone = new Promise(resolve => { finishRoute = resolve; });
+    let routeStarted = false;
+    const routeHandler = async route => {
+      routeStarted = true;
       started();
-      await barrier;
-      await route.continue();
-    });
+      try {
+        await barrier;
+        await route.continue();
+      } finally {
+        finishRoute();
+      }
+    };
+    await page.route(routePattern, routeHandler);
     try {
       await page.keyboard.press(keyShortcut('z'));
       await saving;
       await expect(target).not.toContainText('BEFORE_UNDO');
+      await expect(editor).toHaveAttribute('data-render-verified', 'true');
+      await expect.poll(() => editor.getAttribute('data-runtime-handoff'))
+        .not.toBe('positioning');
       await target.dblclick();
+      await expect(target).toHaveAttribute('contenteditable', 'true');
       await target.press(keyShortcut('ArrowLeft'));
       for (let i = 0; i < 6; i++) await page.keyboard.press('Shift+ArrowRight');
       await editor.getByRole('button', { name: '加粗', exact: true }).click();
+      await expect(editor).toHaveAttribute(
+        'data-native-format-resume',
+        'source:requested:resumed',
+      );
       await expect(target).toHaveAttribute('contenteditable', 'true');
       await target.press(keyShortcut('ArrowRight'));
       await page.keyboard.insertText(' AFTER_UNDO');
@@ -889,7 +906,8 @@ test("editing a published Undo projection remains available while its save recei
       expect(await readPublishedWorkingCopy(working)).not.toContain('BEFORE_UNDO');
     } finally {
       release();
-      await page.unroute(routePattern);
+      if (routeStarted) await routeDone;
+      await page.unroute(routePattern, routeHandler);
     }
   });
 });
