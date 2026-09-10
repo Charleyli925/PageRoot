@@ -73,6 +73,11 @@ export type ReviewFocusGeometryMode =
   | "container-box"
   | "numbered-line-range";
 
+export type ReviewFocusOutlinePolicy =
+  | "never"
+  | "source-change"
+  | "visual-change";
+
 export type ReviewFocusGroupPlan = {
   id: string;
   kind: "text" | "style" | "structure";
@@ -80,6 +85,11 @@ export type ReviewFocusGroupPlan = {
   changeIds: string[];
   displayGroupId: string;
   displayScope: ReviewDisplayScope;
+  /**
+   * A source fact can remain visible and navigable without claiming that a
+   * visible outline is useful. Runtime geometry never upgrades this policy.
+   */
+  focusOutlinePolicy: ReviewFocusOutlinePolicy;
   /** changeId-scoped references whose fact portion is reviewProjectionFactKey. */
   atomKeys: string[];
   presentation: ReviewPresentation;
@@ -94,6 +104,8 @@ export type ReviewFocusGroup = ReviewFocusGroupPlan;
 export type ReviewFocusRegionPlan = {
   id: string;
   side: ReviewSide;
+  /** Stable reading-block cue identity; several selectable regions may share it. */
+  navigationClusterId: string;
   correlationKey: string;
   primaryChangeId: string;
   changeIds: string[];

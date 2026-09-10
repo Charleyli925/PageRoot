@@ -123,7 +123,7 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
     const noChangeBar = launched.page.getByTestId("ai-conversation-action-bar");
-    await expect(noChangeBar.getByText("这次没有产生有效变化", { exact: true }))
+    await expect(noChangeBar.getByText("未识别到明确的页面变化", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     await expect(noChangeBar.getByText(
       "原评论和附件都已保留，调整要求后可以重新发送。",
@@ -151,7 +151,7 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     // the conversation. A second AI-assistant click must not be required.
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
     const reopenedBar = launched.page.getByTestId("ai-conversation-action-bar");
-    await expect(reopenedBar.getByText("这次没有产生有效变化", { exact: true }))
+    await expect(reopenedBar.getByText("未识别到明确的页面变化", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     const aiTask = await launched.page.evaluate((sourcePath) => (
       window.htmlAIProjects?.revealAiTask({ sourcePath })

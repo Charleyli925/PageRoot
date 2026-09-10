@@ -756,7 +756,7 @@ export function sidebarActionBar({
   if (state === "no-change") {
     return {
       kind: "decision",
-      title: "这次没有产生有效变化",
+      title: "未识别到明确的页面变化",
       detail: "原评论和附件都已保留，调整要求后可以重新发送。",
       actions: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
     };

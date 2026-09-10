@@ -228,6 +228,7 @@ import {
   pageSourceOnlyReviewDiagnostics,
   type ReviewDocuments,
 } from "./workbench/review-document";
+import type { ReviewPresentationSnapshot } from "./workbench/review-state";
 import { useRuntimeBridgeConnectionReady } from "./workbench/runtime-bridge-connection";
 import { WorkbenchTabBarContainer } from "./workbench/workbench-navigation-container";
 import { WorkbenchResizer } from "./workbench/workbench-resizer";
@@ -394,6 +395,7 @@ const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
 };
 
 type ReadyReviewSession = {
+  tabId: string;
   operationKey: string;
   sessionId: string;
   documents: ReviewDocuments;
@@ -451,6 +453,7 @@ export default function Workbench() {
     exportCurrentHtml?: () => void;
     reloadCurrentSource?: () => void;
     reloadReview?: () => void;
+    requestReviewDecision?: (action: "return" | "accept") => void;
     requestUserFlush?: () => void;
     requestSourceHistoryAction?: (
       direction: SourceHistoryDirection,
@@ -506,6 +509,8 @@ export default function Workbench() {
     }),
   );
   const reviewSessionSequenceRef = useRef(0);
+  const reviewSessionsRef = useRef(new Map<string, ReadyReviewSession>());
+  const reviewPresentationsRef = useRef(new Map<string, ReviewPresentationSnapshot>());
   const [desktopHostReady, setDesktopHostReady] = useState(false);
   const [desktopHostIssue, setDesktopHostIssue] = useState<string | null>(null);
   const workspaceControllerRef = useRef<WorkspaceController | null>(null);
@@ -775,6 +780,11 @@ export default function Workbench() {
   // through review: useAiConversation reads this to keep the thread alive.
   const [readyReviewSession, setReadyReviewSession] =
     useState<ReadyReviewSession | null>(null);
+  const presentedReadyReviewSession = activeWorkbenchTab?.kind === "document"
+    ? (readyReviewSession?.tabId === activeWorkbenchTab.tabId
+      ? readyReviewSession
+      : reviewSessionsRef.current.get(activeWorkbenchTab.tabId) || null)
+    : null;
 
   // The decision bar acts through a ref: its handlers are defined further down,
   // and the conversation hook is composed before them.
@@ -813,9 +823,10 @@ export default function Workbench() {
     submissionPending: runSnapshot.submissionPending,
     // Review is the same workbench with a different Canvas: the thread stays
     // docked and read-only instead of disappearing and coming back.
-    reviewing: Boolean(readyReviewSession),
+    reviewing: Boolean(presentedReadyReviewSession),
     commentComposerOpen: commentCanvasPort.getSnapshot().composerOpen,
     canvasMode,
+    documentPresented: activeWorkbenchTab?.kind === "document",
     projectId: projectId ?? "",
     documentId: documentId ?? "",
     sourcePath: sourcePath ?? "",
@@ -1552,6 +1563,7 @@ export default function Workbench() {
           // scripts and comment targets. Once the Candidate is adopted, the
           // new source authority must release that comparison graph.
           reviewAnalysisSession.clear();
+          if (review) reviewSessionsRef.current.delete(review.tabId);
           setReadyReviewSession(null);
           performance.mark("pageroot:accept:overlay-closed");
         }
@@ -5064,6 +5076,7 @@ export default function Workbench() {
         // activateReadyVersion, so the overlay teardown and
         // mode switch below can land in one React commit: a single visual
         // cut instead of a multi-frame cascade.
+        reviewSessionsRef.current.delete(readyReviewSession.tabId);
         setReadyReviewSession(null);
         performance.mark("pageroot:accept:overlay-closed");
       }
@@ -5135,8 +5148,12 @@ export default function Workbench() {
 
   const reviewReadyResult = useCallback(async () => {
     const run = currentRunSessionSnapshot().activeRun;
+    const reviewTabId = activeWorkbenchTab?.kind === "document"
+      ? activeWorkbenchTab.tabId
+      : "";
     if (
       !run
+      || !reviewTabId
       || !workspaceController
       || !runCapability
       || run.status !== "ready-to-open"
@@ -5219,7 +5236,8 @@ export default function Workbench() {
       }
       revealAiConversation();
       setInterruption(null);
-      setReadyReviewSession({
+      const session: ReadyReviewSession = {
+        tabId: reviewTabId,
         operationKey,
         sessionId: preparedReview.sessionId,
         documents: preparedReview.documents,
@@ -5227,7 +5245,9 @@ export default function Workbench() {
         sourcePath: preparedReview.sourcePath,
         beforeLabel,
         afterLabel,
-      });
+      };
+      reviewSessionsRef.current.set(reviewTabId, session);
+      setReadyReviewSession(session);
     } catch (cause) {
       if (cause instanceof ReviewAnalysisCancelledError) return;
       reportInternalFailure({
@@ -5241,6 +5261,7 @@ export default function Workbench() {
       setReviewPreparing(false);
     }
   }, [
+    activeWorkbenchTab,
     captureProjectContext,
     currentCommentSessionSnapshot,
     currentRunSessionSnapshot,
@@ -5253,28 +5274,33 @@ export default function Workbench() {
     workspaceController,
   ]);
 
-  useEffect(() => {
-    if (!readyReviewSession) return;
+  useLayoutEffect(() => {
+    const activeTabId = activeWorkbenchTab?.kind === "document"
+      ? activeWorkbenchTab.tabId
+      : "";
     const currentRun = currentRunSessionSnapshot().activeRun;
-    if (
-      !currentRun
-      || currentRun.status !== "ready-to-open"
-      || activeRunOperationKey(currentRun) !== readyReviewSession.operationKey
-    ) {
-      if (openingReadyVersion) return;
-      const frame = window.requestAnimationFrame(() => {
-        reviewAnalysisSession.clear();
-        setReadyReviewSession(null);
-      });
-      return () => window.cancelAnimationFrame(frame);
+    const cached = activeTabId ? reviewSessionsRef.current.get(activeTabId) || null : null;
+    const candidate = readyReviewSession?.tabId === activeTabId
+      ? readyReviewSession
+      : cached;
+    const candidateMatches = Boolean(
+      candidate
+      && currentRun?.status === "ready-to-open"
+      && activeRunOperationKey(currentRun) === candidate.operationKey
+    );
+    if (candidateMatches) {
+      if (readyReviewSession !== candidate) setReadyReviewSession(candidate);
+      return;
     }
-    return undefined;
+    if (openingReadyVersion) return;
+    if (activeTabId && cached) reviewSessionsRef.current.delete(activeTabId);
+    if (readyReviewSession) setReadyReviewSession(null);
   }, [
+    activeWorkbenchTab,
     activeRun,
     currentRunSessionSnapshot,
     openingReadyVersion,
     readyReviewSession,
-    reviewAnalysisSession,
   ]);
 
   const cancelActiveRun = useCallback(async ({
@@ -5661,15 +5687,15 @@ export default function Workbench() {
   const presentation = useMemo(() => deriveWorkbenchPresentation({
     project: { projectId, documentId, sourcePath }, version: versionSnapshot,
     activeTab: activeWorkbenchTab || null, runtimeOwnerTabId: workbenchTabsSnapshot.runtimeOwnerTabId, canvasMode: displayedCanvasMode,
-    reviewActive: Boolean(readyReviewSession), activeRunStatus: activeRun?.status,
-    hasReadyPayload: Boolean(activeRun?.readyPayload), hasReadyReviewSession: Boolean(readyReviewSession),
+    reviewActive: Boolean(presentedReadyReviewSession), activeRunStatus: activeRun?.status,
+    hasReadyPayload: Boolean(activeRun?.readyPayload), hasReadyReviewSession: Boolean(presentedReadyReviewSession),
     reviewPreparing, canShowCurrentFileInFolder, canOpenCurrentHtmlInDefaultBrowser,
     persistState, editRevision, lastPersistedRevision, hasWorkspaceController: Boolean(workspaceController),
     projectHydrating, projectLoadError: Boolean(projectLoadError), viewTransitioning,
     runInProgress, workspaceIssue: Boolean(workspaceIssue), externalSourcePreview: Boolean(externalSourcePreview),
     hasDocumentHistoryAction, interactionLocked,
   }), [projectId, documentId, sourcePath, versionSnapshot, activeWorkbenchTab, workbenchTabsSnapshot.runtimeOwnerTabId, displayedCanvasMode,
-    activeRun?.status, activeRun?.readyPayload, readyReviewSession,
+    activeRun?.status, activeRun?.readyPayload, presentedReadyReviewSession,
     reviewPreparing, canShowCurrentFileInFolder, canOpenCurrentHtmlInDefaultBrowser,
     persistState, editRevision, lastPersistedRevision, workspaceController, projectHydrating,
     projectLoadError, viewTransitioning, runInProgress, workspaceIssue, externalSourcePreview, interactionLocked, hasDocumentHistoryAction]);
@@ -5785,8 +5811,19 @@ export default function Workbench() {
       return;
     }
     if (actionId === "review") { void reviewReadyResult(); return; }
-    if (actionId === "adopt") { void activateReadyResult({ reviewed: Boolean(readyReviewSession) }); return; }
+    if (actionId === "adopt") {
+      if (readyReviewSession) {
+        deferredEditorReplayRef.current.requestReviewDecision?.("accept");
+        return;
+      }
+      void activateReadyResult({ reviewed: false });
+      return;
+    }
     if (actionId === "discard") {
+      if (readyReviewSession) {
+        deferredEditorReplayRef.current.requestReviewDecision?.("return");
+        return;
+      }
       void cancelActiveRun().then((succeeded) => {
         if (!succeeded) return;
         setReadyReviewSession(null);
@@ -5842,6 +5879,7 @@ export default function Workbench() {
     <AgentDeliveryButton
       status={currentAgentHandoffStatus}
       attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
+      label={presentedReadyReviewSession && !aiConversation.visible ? "待决定" : undefined}
       disabled={!aiConversation.visible && (
         generating || projectHydrating || Boolean(projectLoadError)
         || viewTransitioning || viewMode === "history"
@@ -5952,10 +5990,19 @@ export default function Workbench() {
       if (activeRun) workspaceController?.beginAccessRepair(activeRun, field);
     },
   };
-  const readyReviewOverlay = readyReviewSession ? (
+  const readyReviewOverlay = presentedReadyReviewSession ? (
     <WorkbenchReviewOverlay
-      session={readyReviewSession}
-      fileName={localFileNameFromSourcePath(readyReviewSession.sourcePath) || currentSourceFileName}
+      session={presentedReadyReviewSession}
+      fileName={localFileNameFromSourcePath(presentedReadyReviewSession.sourcePath) || currentSourceFileName}
+      changeContextVisibility={workspacePreferences.reviewChangeContextVisibility}
+      commentContextVisibility={workspacePreferences.reviewCommentContextVisibility}
+      initialPresentation={reviewPresentationsRef.current.get(presentedReadyReviewSession.tabId) || null}
+      onPresentationChange={(presentation) => {
+        if (
+          presentation.reviewIdentity !== presentedReadyReviewSession.sessionId
+        ) return;
+        reviewPresentationsRef.current.set(presentedReadyReviewSession.tabId, presentation);
+      }}
       accepting={openingReadyVersion || Boolean(activeRun?.adoptionPhase)}
       activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
       onAbout={openAboutPageRoot}
@@ -5975,6 +6022,15 @@ export default function Workbench() {
           deliveryMode={currentAgentDeliveryMode}
         />
       ) : null}
+      registerDecisionRequest={(request) => {
+        const previous = deferredEditorReplayRef.current.requestReviewDecision;
+        deferredEditorReplayRef.current.requestReviewDecision = request;
+        return () => {
+          if (deferredEditorReplayRef.current.requestReviewDecision === request) {
+            deferredEditorReplayRef.current.requestReviewDecision = previous;
+          }
+        };
+      }}
       registerReload={(reload) => {
         const previous = deferredEditorReplayRef.current.reloadReview;
         deferredEditorReplayRef.current.reloadReview = reload;
@@ -6186,7 +6242,10 @@ export default function Workbench() {
             onOpenInBrowser: () => void openCurrentHtmlInDefaultBrowser(),
             canExportCurrentHtml,
             onExportCurrentHtml: () => void exportCurrentHtml(),
-            canReloadCurrentSource,
+            canReloadCurrentSource: canReloadCurrentSource && !readyReviewOverlay,
+            reloadCurrentSourceUnavailableReason: readyReviewOverlay
+              ? "请先采用或不用这次 AI 修改，再从磁盘重新载入"
+              : undefined,
             onReloadCurrentSource: () => void reloadCurrentSource(),
             onRetryDynamicContent: canReloadCurrentSource && editRuntimeSnapshot?.retryAvailable
               ? () => {

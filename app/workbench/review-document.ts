@@ -65,6 +65,7 @@ import type {
   ReviewDocuments,
   ReviewDisplayScope,
   ReviewFocusGeometryMode,
+  ReviewFocusOutlinePolicy,
   ReviewFocusGroup,
   ReviewOutlineItem,
   ReviewPresentation,
@@ -89,6 +90,7 @@ export type {
   ReviewRevealStep,
   ReviewFilter,
   ReviewFocusGeometryMode,
+  ReviewFocusOutlinePolicy,
   ReviewFocusGroup,
   ReviewFocusGroupPlan,
   ReviewFocusRegionPlan,
@@ -300,6 +302,7 @@ function reviewFocusGroupsForDocuments(
     displayGroupId: string;
     displayScope: ReviewDisplayScope;
     kinds: Set<"text" | "style" | "structure">;
+    focusOutlinePolicies: Set<ReviewFocusOutlinePolicy>;
     sideEntries: Record<"before" | "after", Array<{
       changeId: string;
       atomKey: string;
@@ -429,6 +432,7 @@ function reviewFocusGroupsForDocuments(
               displayGroupId,
               displayScope,
               kinds: new Set(),
+              focusOutlinePolicies: new Set(),
               sideEntries: { before: [], after: [] },
             };
             groups.set(key, group);
@@ -437,6 +441,13 @@ function reviewFocusGroupsForDocuments(
           group.kinds.add(fact.type === "text"
             ? "text"
             : fact.structureChange === "style" ? "style" : "structure");
+          group.focusOutlinePolicies.add(fact.type === "text"
+            ? "never"
+            : fact.structureChange === "style"
+              ? "visual-change"
+              : fact.structureChange === "attribute"
+                ? "never"
+                : "source-change");
           const factKey = reviewProjectionFactKey(fact);
           const atomKey = factKey ? `${changeId}\u001e${factKey}` : "";
           if (atomKey) group.sideEntries[side].push({
@@ -460,27 +471,27 @@ function reviewFocusGroupsForDocuments(
       const buckets = new Map<string, typeof group.sideEntries.before>();
       const sideEntries = group.sideEntries[side];
       sideEntries.forEach((entry) => {
-        const bucket = buckets.get(entry.locality) || [];
+        const regionLocality = `${entry.locality}\u001f${entry.ownerId}`;
+        const bucket = buckets.get(regionLocality) || [];
         bucket.push(entry);
-        buckets.set(entry.locality, bucket);
+        buckets.set(regionLocality, bucket);
       });
-      return [...buckets.entries()].map(([locality, entries]) => {
+      return [...buckets.entries()].map(([regionLocality, entries]) => {
+        const locality = entries[0]?.locality || regionLocality;
         const ownerIds = [...new Set(entries.map((entry) => entry.ownerId))].sort();
         const regionAtomKeys = [...new Set(entries.map((entry) => entry.atomKey))].sort();
         const regionChangeIds = [...new Set(entries.map((entry) => entry.changeId))].sort();
-        const styleContainerCandidate = group.kinds.has("style") && ownerIds.length >= 2;
         const presentationOwner = entries[0]?.element.ownerDocument.querySelector(
           `[data-pageroot-review-display-owner~="${entries[0]?.ownerId || ""}"]`,
         );
         return {
-          id: `region-${side}-${shortHash(`${group.displayGroupId}\u001f${locality}`)}`,
+          id: `region-${side}-${shortHash(`${group.displayGroupId}\u001f${regionLocality}`)}`,
           side,
-          correlationKey: `locality-${shortHash(locality)}`,
+          navigationClusterId: `reading-${shortHash(locality)}`,
+          correlationKey: `locality-${shortHash(regionLocality)}`,
           primaryChangeId: regionChangeIds[0] || changeId,
           changeIds: regionChangeIds,
-          geometryMode: styleContainerCandidate
-            ? "container-box" as const
-            : entries[0]?.geometryMode || "container-box" as const,
+          geometryMode: entries[0]?.geometryMode || "element-box" as const,
           displayOwnerIds: ownerIds,
           atomKeys: regionAtomKeys,
           presentation: revealStepsForElement(presentationOwner || entries[0]?.element || null),
@@ -498,6 +509,11 @@ function reviewFocusGroupsForDocuments(
       changeIds,
       displayGroupId: group.displayGroupId,
       displayScope: group.displayScope,
+      focusOutlinePolicy: group.focusOutlinePolicies.has("source-change")
+        ? "source-change" as const
+        : group.focusOutlinePolicies.has("visual-change")
+          ? "visual-change" as const
+          : "never" as const,
       atomKeys,
       presentation: {
         before: beforeRegions[0]?.presentation || [],

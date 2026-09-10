@@ -177,7 +177,9 @@ test("focus plans preserve scoped exact atom keys and reject malformed payloads 
   };
   const normalized = normalizeReviewFocusGroupPlans([plan]);
   assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].focusOutlinePolicy, "never");
   assert.deepEqual(normalized[0].atomKeys, [atomKey]);
+  assert.equal(normalized[0].regions.before[0].navigationClusterId, "region-before-1");
   assert.deepEqual(normalized[0].regions.before[0].displayOwnerIds, ["owner-1"]);
   assert.deepEqual(normalized[0].regions.before[0].atomKeys, [atomKey]);
 
@@ -186,6 +188,20 @@ test("focus plans preserve scoped exact atom keys and reject malformed payloads 
     ...plan,
     presence: { before: false, after: false },
   }]), [], "presence must match declared regions");
+  assert.deepEqual(normalizeReviewFocusGroupPlans([{
+    ...plan,
+    focusOutlinePolicy: "always",
+  }]), [], "an explicit unknown paint policy rejects the payload");
+  assert.equal(normalizeReviewFocusGroupPlans([{
+    ...plan,
+    regions: {
+      ...plan.regions,
+      before: [{
+        ...plan.regions.before[0],
+        navigationClusterId: "reading-locality-1",
+      }],
+    },
+  }])[0].regions.before[0].navigationClusterId, "reading-locality-1");
   assert.deepEqual(normalizeReviewFocusGroupPlans([{
     ...plan,
     regions: {

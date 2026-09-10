@@ -23,10 +23,10 @@ import {
   UPDATED_TEXT,
   addCommentAndSubmit,
   adoptReadyResult,
-  assertOverlayMaskEquivalence,
+  assertActiveFocusPaintBudget,
   assertProjectionGeometryCase,
   assertReviewAcceptPersistence,
-  assertReviewChangeOutline,
+  assertReviewFocusPaint,
   assertReviewControlDefaults,
   assertReviewHasNoRuntimeVisualSupplement,
   caseSelector,
@@ -424,13 +424,22 @@ ${REVIEW_MASK_UNION_BEFORE}
     const reviewReloadRevision = Number(
       await reviewWorkspace.getAttribute("data-reload-revision"),
     );
-    const reviewRefreshButton = launched.page.getByRole("button", { name: "刷新审阅画布" });
+    const reviewRefreshButton = launched.page.getByRole("button", { name: "刷新本页面" });
     await expect(reviewRefreshButton).toBeEnabled();
     await reviewRefreshButton.click();
     await expect(reviewWorkspace).toHaveAttribute(
       "data-reload-revision",
       String(reviewReloadRevision + 1),
     );
+    await launched.page.getByRole("button", { name: "更多", exact: true }).click();
+    const diskReloadItem = launched.page.getByRole("menuitem", {
+      name: /从磁盘重新载入 HTML/u,
+    });
+    await expect(diskReloadItem).toBeDisabled();
+    await expect(diskReloadItem).toContainText(
+      "请先采用或不用这次 AI 修改，再从磁盘重新载入",
+    );
+    await launched.page.keyboard.press("Escape");
     const reviewSidebar = reviewWorkspace.getByTestId("ai-conversation-sidebar");
     await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
     const reviewAiEntry = launched.page.getByRole("button", { name: "AI 助手" });
@@ -781,59 +790,24 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toHaveValue("反向动作同步");
     await launched.page.getByRole("button", { name: "同步滚动" }).click();
     await afterReviewFrame.locator("[data-pageroot-review-region-bar]").first().click();
-    await assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame);
+    await assertReviewFocusPaint(beforeReviewFrame, afterReviewFrame);
     await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="text-added"], [data-pageroot-review-overlay-box][data-tone="structure"], [data-pageroot-review-overlay-box][data-tone="style"], [data-pageroot-review-overlay-box][data-tone="mixed"]',
-    ).count()).toBeGreaterThan(0);
+      "[data-pageroot-review-mask-hole]",
+    ).count()).toBe(1);
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
         "[data-pageroot-review-overlay-box]",
       ).evaluateAll((boxes) => {
-        if (!boxes.length) return false;
-        const textGroups = new Map();
-        const standaloneBoxes = [];
-        boxes.forEach((box) => {
-          const textBox = (box.getAttribute("data-types") || "")
-            .split(/\s+/).includes("text");
-          const key = textBox
-            ? [
-              box.getAttribute("data-pageroot-review-overlay-box"),
-              box.getAttribute("data-tone"),
-              box.getAttribute("data-pageroot-review-semantic-owner"),
-              box.getAttribute("data-pageroot-review-geometry-owner"),
-              box.getAttribute("data-text-operation"),
-            ].join("|")
-            : "";
-          if (!key) {
-            standaloneBoxes.push(box);
-            return;
-          }
-          const grouped = textGroups.get(key) || [];
-          grouped.push(box);
-          textGroups.set(key, grouped);
-        });
         const validLabel = (label) => {
           const text = label?.textContent?.trim() || "";
           return text.length >= 2 && text.length <= 40 && !text.includes("×");
         };
-        // One active semantic group carries one public caption per page. Exact
-        // atoms and geometry fragments never leak into a visible multiplier.
-        const hasAnyLabel = boxes.some((box) => (
-          box.querySelector("[data-pageroot-review-overlay-label]")
-        ));
-        const valid = standaloneBoxes.every((box) => {
+        return boxes.length <= 1 && boxes.every((box) => {
           const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
           return labels.length <= 1 && (labels.length === 0 || validLabel(labels[0]));
-        }) && [...textGroups.values()].every((group) => group.every((box) => {
-          const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
-          return labels.length <= 1 && (labels.length === 0 || validLabel(labels[0]));
-        }));
-        return { hasAnyLabel, valid };
+        });
       })),
-    ).then((states) => (
-      states.every((state) => state.valid)
-      && states.some((state) => state.hasAnyLabel)
-    ))).toBe(true);
+    ).then((states) => states.every(Boolean))).toBe(true);
     const nestedOverlayPairs = await afterReviewFrame.locator(
       "[data-pageroot-review-overlay-box]",
     ).evaluateAll((boxes) => boxes.flatMap((outer, outerIndex) => {
@@ -927,7 +901,10 @@ ${REVIEW_MASK_UNION_BEFORE}
     await filteredFocusBar.evaluate((bar) => bar.click());
     await expect(beforeReviewFrame.locator(
       `[data-pageroot-review-overlay-box="${filteredFocusChangeId}"]`,
-    )).not.toHaveCount(0);
+    )).toHaveCount(0);
+    await expect(beforeReviewFrame.locator(
+      `[data-pageroot-review-mask-hole="${filteredFocusChangeId}"]`,
+    )).toHaveCount(1);
     // Re-selecting the same filter keeps the user's position; page markers
     // remain the explicit way to move to another change.
     await launched.page.getByRole("button", { name: "文字变化" }).click();
@@ -997,104 +974,16 @@ ${REVIEW_MASK_UNION_BEFORE}
           && maximumDelta < .25;
       })),
     ).then((results) => results.every(Boolean))).toBe(true);
-    await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="text-added"]',
-    ).count()).toBeGreaterThan(0);
-    await expect.poll(() => beforeReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="text-removed"]',
-    ).count()).toBeGreaterThan(0);
-    await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="text-added"]',
-    ).first().evaluate((element) => {
-      const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
-      return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
-    }))
-      .toBe("rgb(109, 92, 231)");
-    await expect.poll(() => beforeReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="text-removed"]',
-    ).first().evaluate((element) => {
-      const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
-      return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
-    }))
-      .toBe("rgb(109, 92, 231)");
-    await expect(beforeReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="text-removed"][data-shaped="true"]',
-    )).toHaveCount(0);
-    await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="text-added"][data-shaped="true"]',
-    )).toHaveCount(0);
-    await expect.poll(async () => Promise.all(
-      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
-        const tolerance = .75;
-        const contains = (outer, inner) => (
-          outer.left <= inner.left + tolerance
-          && outer.top <= inner.top + tolerance
-          && outer.right >= inner.right - tolerance
-          && outer.bottom >= inner.bottom - tolerance
-        );
-        const activeFocusGroupId = document.documentElement.dataset.pagerootReviewFocusGroup || "";
-        return [...document.querySelectorAll(
-          '[data-pageroot-review-text][data-pageroot-review-confirmed="true"]',
-        )].filter((marker) => {
-          const changeId = marker.getAttribute("data-pageroot-review-marker") || "";
-          const facts = JSON.parse(
-            marker.getAttribute("data-pageroot-review-projection-facts") || "[]",
-          );
-          return facts.some((fact) => (
-            fact.type === "text"
-            && `focus-${changeId}-${fact.displayGroupId || `display-fact-${fact.id}`}`
-              === activeFocusGroupId
-          ));
-        }).every((marker) => {
-          const groupId = marker.getAttribute("data-pageroot-review-text-group") || "";
-          const tone = marker.getAttribute("data-pageroot-review-text") === "removed"
-            ? "text-removed"
-            : "text-added";
-          const frames = [...document.querySelectorAll(
-            '[data-pageroot-review-overlay-box][data-tone="' + tone + '"]',
-          )].filter((box) => (
-            (box.getAttribute("data-text-groups") || box.getAttribute("data-text-group") || "")
-              .split(/\s+/).includes(groupId)
-          ));
-          const range = document.createRange();
-          range.selectNodeContents(marker);
-          const evidenceRects = [...range.getClientRects()]
-            .filter((rect) => rect.width > 1 && rect.height > 1)
-            .map((rect) => ({
-              left: rect.left,
-              top: rect.top,
-              right: rect.right,
-              bottom: rect.bottom,
-            }));
-          range.detach();
-          if (!evidenceRects.length) return true;
-          return frames.length > 0 && evidenceRects.every((evidence) => (
-            frames.some((box) => contains(box.getBoundingClientRect(), evidence))
-          ));
-        });
-      })),
-    ).then((states) => states.every(Boolean))).toBe(true);
-    await expect.poll(async () => Promise.all(
-      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
-        const tolerance = 2;
-        const contains = (outer, inner) => (
-          outer.left <= inner.left + tolerance
-          && outer.top <= inner.top + tolerance
-          && outer.right >= inner.right - tolerance
-          && outer.bottom >= inner.bottom - tolerance
-        );
-        return [...document.querySelectorAll("[data-pageroot-review-text-mark]")].every((mark) => {
-          const tone = mark.getAttribute("data-pageroot-review-text-mark") === "removed"
-            ? "text-removed"
-            : "text-added";
-          const boxes = [...document.querySelectorAll(
-            '[data-pageroot-review-overlay-box][data-tone="' + tone + '"]',
-          )];
-          const rect = mark.getBoundingClientRect();
-          return boxes.some((box) => contains(box.getBoundingClientRect(), rect));
-        });
-      })),
-    ).then((states) => states.every(Boolean))).toBe(true);
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect(frame.locator(
+        '[data-pageroot-review-overlay-box][data-tone^="text-"]',
+      )).toHaveCount(0);
+      await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+    }
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect.poll(() => frame.locator("[data-pageroot-review-text-mark]").count())
+        .toBeGreaterThan(0);
+    }
     const beforeRewriteMarker = beforeReviewFrame.locator(
       '[data-review-readable-rewrite] [data-pageroot-review-text="removed"]',
     ).first();
@@ -1118,42 +1007,17 @@ ${REVIEW_MASK_UNION_BEFORE}
     expect(beforeRewriteGroup).toBeTruthy();
     expect(afterRewriteGroup).toBeTruthy();
     await activateReviewMarkerGroup(beforeReviewFrame, beforeRewriteMarker);
-    const beforeRewriteFrame = beforeReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="text-removed"][data-text-group="${beforeRewriteGroup}"]`,
+    const beforeRewriteHole = beforeReviewFrame.locator(
+      `[data-pageroot-review-mask-hole][data-text-group="${beforeRewriteGroup}"]`,
     );
-    const afterRewriteFrame = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${afterRewriteGroup}"]`,
+    const afterRewriteHole = afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole][data-text-group="${afterRewriteGroup}"]`,
     );
-    await expect(beforeRewriteFrame).toHaveCount(1);
-    await expect(afterRewriteFrame).toHaveCount(1);
-    await expect(beforeRewriteFrame).toHaveAttribute("data-scope", "text-block");
-    await expect(afterRewriteFrame).toHaveAttribute("data-scope", "text-block");
-    await expect(beforeRewriteFrame).toHaveAttribute(
-      "data-pageroot-review-fragment-count",
-      "1",
-    );
-    await expect(afterRewriteFrame).toHaveAttribute(
-      "data-pageroot-review-fragment-count",
-      "1",
-    );
-    // The rewrite vocabulary is anchored on the per-record summary; the
-    // caption composes the kinds of its spatial stretch and may aggregate
-    // with same-caption neighbours, so caption presence and form are covered
-    // by the review-annotation-clarity contract instead of per-scenario text.
-    await expect(beforeRewriteFrame).toHaveAttribute("data-summary", "文本调整");
-    await expect(afterRewriteFrame).toHaveAttribute("data-summary", "文本调整");
-    // Only the active semantic group is rendered, and its outline is violet.
-    for (const rewriteFrame of [beforeRewriteFrame, afterRewriteFrame]) {
-      await expect.poll(() => rewriteFrame.evaluate((element) => {
-        const style = getComputedStyle(element);
-        const claimed = element.dataset.active === "true";
-        return {
-          style: style.borderTopStyle,
-          claimMatchesFocus: claimed
-            ? style.borderTopColor === "rgb(109, 92, 231)"
-            : style.borderTopColor === "rgba(0, 0, 0, 0)",
-        };
-      })).toEqual({ style: "solid", claimMatchesFocus: true });
+    await expect(beforeRewriteHole).toHaveCount(1);
+    await expect(afterRewriteHole).toHaveCount(1);
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect(frame.locator('[data-pageroot-review-overlay-box][data-tone^="text-"]'))
+        .toHaveCount(0);
     }
     for (const [frame, tone, evidenceCharacter] of [
       [beforeReviewFrame, "removed", "旧"],
@@ -1187,33 +1051,8 @@ ${REVIEW_MASK_UNION_BEFORE}
         `[data-pageroot-review-mask-hole]`
           + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
       );
-      await expect(lineFrame).toHaveCount(1);
+      await expect(lineFrame).toHaveCount(0);
       await expect(lineHole).toHaveCount(1);
-      await expect(lineFrame).toHaveAttribute("data-scope", "text-block");
-      await expect(lineFrame).not.toHaveAttribute("data-shaped", "true");
-      await expect(lineFrame).toHaveAttribute(
-        "data-pageroot-review-fragment-count",
-        "1",
-      );
-      await expect(lineFrame).toHaveAttribute("data-summary", "文本调整");
-      await expect(lineFrame.locator("[data-pageroot-review-overlay-label]")).toHaveCount(1);
-      await expect.poll(async () => {
-        const frameGeometry = await lineFrame.evaluate((element) => ({
-          left: Number(element.getAttribute("data-left")),
-          top: Number(element.getAttribute("data-top")),
-          width: Number(element.getAttribute("data-width")),
-          height: Number(element.getAttribute("data-height")),
-        }));
-        const holeGeometry = await lineHole.evaluate((element) => ({
-          left: Number(element.getAttribute("data-left")),
-          top: Number(element.getAttribute("data-top")),
-          width: Number(element.getAttribute("data-width")),
-          height: Number(element.getAttribute("data-height")),
-        }));
-        return Object.keys(frameGeometry).every((key) => (
-          Math.abs(frameGeometry[key] - holeGeometry[key]) < .01
-        ));
-      }).toBe(true);
     }
     for (const [frame, tone, evidenceCharacter] of [
       [beforeReviewFrame, "removed", "旧"],
@@ -1249,42 +1088,8 @@ ${REVIEW_MASK_UNION_BEFORE}
         `[data-pageroot-review-mask-hole]`
           + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
       );
-      await expect(promotionFrame).toHaveCount(1);
+      await expect(promotionFrame).toHaveCount(0);
       await expect(promotionHole).toHaveCount(1);
-      await expect(promotionFrame).toHaveAttribute("data-scope", "text-block");
-      await expect(promotionFrame).not.toHaveAttribute("data-shaped", "true");
-      await expect(promotionFrame).toHaveAttribute(
-        "data-pageroot-review-fragment-count",
-        "1",
-      );
-      await expect(promotionFrame).toHaveAttribute("data-summary", "文本调整");
-      await expect(promotionFrame.locator("[data-pageroot-review-overlay-label]")).toHaveCount(1);
-      await expect.poll(async () => {
-        const frameBox = await promotionFrame.boundingBox();
-        const ownerBox = await promotionOwner.boundingBox();
-        const frameGeometry = await promotionFrame.evaluate((element) => ({
-          left: Number(element.getAttribute("data-left")),
-          top: Number(element.getAttribute("data-top")),
-          width: Number(element.getAttribute("data-width")),
-          height: Number(element.getAttribute("data-height")),
-        }));
-        const holeGeometry = await promotionHole.evaluate((element) => ({
-          left: Number(element.getAttribute("data-left")),
-          top: Number(element.getAttribute("data-top")),
-          width: Number(element.getAttribute("data-width")),
-          height: Number(element.getAttribute("data-height")),
-        }));
-        return Boolean(
-          frameBox
-          && ownerBox
-          && frameBox.x >= ownerBox.x - 4
-          && frameBox.x + frameBox.width <= ownerBox.x + ownerBox.width + 4
-          && frameBox.height >= ownerBox.height * .75
-          && Object.keys(frameGeometry).every((key) => (
-            Math.abs(frameGeometry[key] - holeGeometry[key]) < .01
-          )),
-        );
-      }).toBe(true);
     }
     if (process.env.PAGEROOT_CAPTURE_REVIEW) {
       for (const frame of [beforeReviewFrame, afterReviewFrame]) {
@@ -1392,7 +1197,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     const numberedLineFrame = afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${numberedLineGroup}"]`,
     );
-    await expect(numberedLineFrame).toHaveCount(1);
+    await expect(numberedLineFrame).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
       `[data-pageroot-review-overlay-box][data-text-group="${numberedLineGroup}"]`,
     )).toHaveCount(0);
@@ -1402,17 +1207,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       `[data-pageroot-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
     )).toHaveCount(1);
-    await expect.poll(() => numberedLineFrame.locator(
-      "[data-pageroot-review-overlay-label]",
-    ).count()).toBeLessThanOrEqual(1);
-    await expect(numberedLineFrame).toHaveAttribute("data-summary", "新增内容");
-    await expect(numberedLineFrame).toHaveAttribute("data-scope", "text-block");
     await expect.poll(async () => {
-      const frameBox = await numberedLineFrame.boundingBox();
+      const holeBox = await afterReviewFrame.locator(
+        `[data-pageroot-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
+      ).boundingBox();
       const ownerBox = await afterReviewFrame.locator(
         "[data-review-numbered-lines]",
       ).boundingBox();
-      return Boolean(frameBox && ownerBox && frameBox.height < ownerBox.height * 0.55);
+      return Boolean(holeBox && ownerBox && holeBox.height < ownerBox.height * 0.55);
     }).toBe(true);
     await expect(beforeReviewFrame.locator(
       '[data-review-list-items] [data-pageroot-review-text]',
@@ -1471,36 +1273,11 @@ ${REVIEW_MASK_UNION_BEFORE}
     const crossLineFrames = afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`,
     );
-    // A wrapped insertion still presents as one reading-block rectangle. The
-    // exact marker geometry remains available as evidence inside that frame.
-    await expect(crossLineFrames).toHaveCount(1);
-    await expect(crossLineFrames).toHaveAttribute("data-scope", "text-block");
-    await expect.poll(() => crossLineFrames.evaluateAll((frames) => frames.every((frame) => (
-      frame.getAttribute("data-scope") === "text-block"
-      && frame.getAttribute("data-shaped") !== "true"
-      && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
-    )))).toBe(true);
-    // Collapsing several line rectangles into one is only safe while the single
-    // rectangle still contains every character of the wrapped marker.
-    await expect.poll(() => crossLineMarker.evaluate((element, selector) => {
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const rects = [...range.getClientRects()]
-        .filter((rect) => rect.width > 1 && rect.height > 1);
-      range.detach();
-      const boxes = [...document.querySelectorAll(selector)]
-        .map((box) => box.getBoundingClientRect());
-      return rects.length > 1 && rects.every((rect) => boxes.some((box) => (
-        rect.left >= box.left - 1
-        && rect.top >= box.top - 1
-        && rect.right <= box.right + 1
-        && rect.bottom <= box.bottom + 1
-      )));
-    }, `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`))
-      .toBe(true);
-    await expect.poll(() => crossLineFrames.locator(
-      "[data-pageroot-review-overlay-label]",
-    ).count()).toBeLessThanOrEqual(1);
+    const crossLineHole = afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole][data-text-group="${crossLineGroup}"]`,
+    );
+    await expect(crossLineFrames).toHaveCount(0);
+    await expect(crossLineHole).toHaveCount(1);
     for (const [frame, tone] of [
       [beforeReviewFrame, "removed"],
       [afterReviewFrame, "added"],
@@ -1508,71 +1285,20 @@ ${REVIEW_MASK_UNION_BEFORE}
       await activateReviewMarkerGroup(frame, frame.locator(
         `[data-review-stable-sentence-rewrite] [data-pageroot-review-text="${tone}"]`,
       ).first());
-      await expect.poll(() => frame.locator("html").evaluate((_documentElement, expectedTone) => {
-        const owner = document.querySelector("[data-review-stable-sentence-rewrite]");
-        if (!owner) return { matches: false, reason: "owner-missing" };
-        const markers = [...owner.querySelectorAll(
-          '[data-pageroot-review-text="' + expectedTone + '"]',
-        )];
-        if (!markers.length) return { matches: false, reason: "marker-missing" };
-        const semanticOwnerId = markers[0].getAttribute(
-          "data-pageroot-review-semantic-owner",
-        ) || "";
-        const markerRects = markers.flatMap((candidate) => {
-          const markerRange = document.createRange();
-          markerRange.selectNodeContents(candidate);
-          const rects = [...markerRange.getClientRects()]
-            .filter((rect) => rect.width > 1 && rect.height > 1)
-            .map((rect) => ({
-              left: rect.left,
-              top: rect.top,
-              right: rect.right,
-              bottom: rect.bottom,
-            }));
-          markerRange.detach();
-          return rects;
-        });
-        const frames = [...document.querySelectorAll(
-          '[data-pageroot-review-overlay-box][data-tone="text-' + expectedTone + '"]'
-            + '[data-pageroot-review-semantic-owner="' + semanticOwnerId + '"]',
-        )];
-        const holes = [...document.querySelectorAll(
-          '[data-pageroot-review-mask-hole]'
-            + '[data-pageroot-review-semantic-owner="' + semanticOwnerId + '"]',
-        )];
-        const overlaps = (left, right) => (
-          Math.min(left.right, right.right) - Math.max(left.left, right.left) > 1
-          && Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top) > 1
-        );
-        const matches = markerRects.length >= 3
-            && frames.length === 1
-            && holes.length === frames.length
-            && markerRects.every((rect) => frames.some((frame) => (
-              overlaps(rect, frame.getBoundingClientRect())
-            )))
-            && frames.every((frame) => markerRects.some((rect) => (
-              overlaps(frame.getBoundingClientRect(), rect)
-            )))
-            && frames.every((frame) => (
-              frame.getAttribute("data-scope") === "text-block"
-              && frame.getAttribute("data-shaped") !== "true"
-              && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
-            ))
-            && frames.filter((frame) => (
-              frame.querySelector("[data-pageroot-review-overlay-label]")
-            )).length <= 1
-            && ![...owner.querySelectorAll("[data-pageroot-review-text]")].some((candidate) => (
-              /稳定(?:前|后)句/u.test(candidate.textContent || "")
-            ));
-        return {
-          matches,
-          markerRectCount: markerRects.length,
-          markerCount: markers.length,
-          frameCount: frames.length,
-          holeCount: holes.length,
-          scopes: frames.map((candidate) => candidate.getAttribute("data-scope")),
-        };
-      }, tone)).toMatchObject({ matches: true });
+      const owner = frame.locator("[data-review-stable-sentence-rewrite]");
+      const semanticOwnerId = await owner.locator(
+        `[data-pageroot-review-text="${tone}"]`,
+      ).first().getAttribute("data-pageroot-review-semantic-owner");
+      expect(semanticOwnerId).toBeTruthy();
+      await expect(frame.locator(
+        `[data-pageroot-review-overlay-box][data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+      )).toHaveCount(0);
+      await expect(frame.locator(
+        `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+      )).toHaveCount(1);
+      await expect(owner.locator("[data-pageroot-review-text]").filter({
+        hasText: /稳定(?:前|后)句/u,
+      })).toHaveCount(0);
     }
     const warningRemovedText = await beforeReviewFrame.locator(
       '[data-review-warning] [data-pageroot-review-text="removed"]',
@@ -1628,7 +1354,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     );
     await expect(textMask).toBeAttached();
     await expect.poll(() => textMask.getAttribute("fill-opacity"))
-      .toBe("0.82");
+      .toBe("0.75");
     await expect.poll(() => afterReviewFrame.locator(
       '[data-pageroot-review-mask-layer]',
     ).evaluate((element) => ({
@@ -1659,14 +1385,15 @@ ${REVIEW_MASK_UNION_BEFORE}
         height: Number(element.getAttribute("data-height")),
         path: element.getAttribute("d"),
       })));
-      return boxes.length === holes.length && boxes.every((box, index) => (
-        Math.abs(box.left - holes[index].left) < 0.02
-        && Math.abs(box.top - holes[index].top) < 0.02
-        && Math.abs(box.width - holes[index].width) < 0.02
-        && Math.abs(box.height - holes[index].height) < 0.02
-        && Boolean(holes[index].path)
-        && box.path === holes[index].path
-      ));
+      return boxes.length === 0
+        && holes.length === 1
+        && holes.every((hole) => (
+          Number.isFinite(hole.left)
+          && Number.isFinite(hole.top)
+          && hole.width > 0
+          && hole.height > 0
+          && Boolean(hole.path)
+        ));
     }).toBe(true);
     await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
@@ -1676,19 +1403,6 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("text");
-    // The content map is removed, so its outline, group counts and drawer geometry have
-    // nothing left to assert. Page markers remain the explicit focus entry point.
-    await focusChangeById(launched.page, beforeReviewFrame, anchorOnlyChangeId);
-    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-focus",
-    )).toBe(anchorOnlyChangeId);
-    await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${anchorOnlyChangeId}"]`,
-    )).toHaveCount(0);
-    await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-mask-hole="${anchorOnlyChangeId}"]`,
-    )).toHaveCount(0);
-    await expect(afterReviewFrame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
     const ebitaMarker = afterReviewFrame.locator(
       '[data-review-ebita-copy] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "建议继续保留实验策略" });
@@ -1701,9 +1415,12 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(beforeReviewFrame.locator(
       `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
     )).toHaveCount(0);
-    await expect.poll(() => afterReviewFrame.locator(
+    await expect(afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
-    ).count()).toBeGreaterThan(0);
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      `[data-pageroot-review-mask-hole="${ebitaChangeId}"]`,
+    )).toHaveCount(1);
     await beforeCounter.evaluate((button) => button.click());
     await expect(afterCounter).toHaveAttribute("data-count", "3");
     // The authored counter is unrelated to the review sequence controls and
@@ -1714,7 +1431,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect(launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
-    })).toHaveValue("18");
+    })).toHaveCount(0);
     await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
@@ -1887,22 +1604,23 @@ ${REVIEW_MASK_UNION_BEFORE}
               "text-phrase",
               "text-line",
             ].includes(box.getAttribute("data-scope") || "")),
-            pathsMatch: boxes.length === holes.length
-              && boxes.map((box) => box.getAttribute("data-path") || "").sort().join("\n")
-                === holes.map((hole) => hole.getAttribute("d") || "").sort().join("\n"),
+            outlinedPathsMatch: boxes.every((box) => holes.some((hole) => (
+              box.getAttribute("data-path") === hole.getAttribute("d")
+            ))),
           };
         })
       )));
       return {
         matches: Boolean(sides[0].focusGroup)
           && sides[0].focusGroup === sides[1].focusGroup
-          && sides.some((side) => side.boxCount > 0)
+          && sides.some((side) => side.holeCount > 0)
           && sides.every((side) => (
-            side.boxCount === side.holeCount
+            side.holeCount <= 1
+            && side.boxCount <= 1
             && side.labelCount <= 1
             && side.noCountLabel
             && side.noPhraseOrLine
-            && side.pathsMatch
+            && side.outlinedPathsMatch
           )),
         sides,
       };
@@ -1911,7 +1629,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(launched.page.getByRole("button", { name: "适应画布", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect.poll(activeFocusPresentationState).toMatchObject({ matches: true });
-    await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);
+    await expect.poll(() => assertActiveFocusPaintBudget(afterReviewFrame)).toBe(true);
     await launched.page.getByRole("button", { name: "原始大小", exact: true }).click();
     await expect(launched.page.getByRole("button", { name: "原始大小", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
@@ -1937,7 +1655,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       originalViewportWidth,
     )).toBe(true);
     await expect.poll(activeFocusPresentationState).toMatchObject({ matches: true });
-    await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);
+    await expect.poll(() => assertActiveFocusPaintBudget(afterReviewFrame)).toBe(true);
     await launched.electronApp.evaluate(({ BrowserWindow }, bounds) => {
       BrowserWindow.getAllWindows().find((candidate) => (
         candidate.webContents.getURL().includes("/dist-desktop/renderer/")
@@ -2202,9 +1920,6 @@ ${REVIEW_MASK_UNION_BEFORE}
     if (process.env.PAGEROOT_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
-      await launched.page.getByRole("slider", {
-        name: "非修改区域上下文可见度",
-      }).fill("18");
       await wholePageButton.click();
       await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
         "data-pageroot-review-filter",
@@ -2221,8 +1936,19 @@ ${REVIEW_MASK_UNION_BEFORE}
       });
     }
     await launched.page.getByRole("button", { name: "收起会话面板" }).click();
+    const pendingDecisionEntry = launched.page.getByRole("button", {
+      name: "待决定",
+      exact: true,
+    });
+    await expect(pendingDecisionEntry).toHaveAttribute("aria-expanded", "false");
+    await expect(sharedHeader.getByRole("button", { name: "采纳修改", exact: true }))
+      .toHaveCount(0);
+    await expect(sharedHeader.getByRole("button", { name: "返回修改前", exact: true }))
+      .toHaveCount(0);
+    await pendingDecisionEntry.click();
+    await expect(reviewSidebar).toBeVisible();
     await launched.page.getByRole("button", {
-      name: "采纳修改",
+      name: "采用修改",
     }).click();
     await expect(launched.page.getByRole("dialog", {
       name: /采纳 AI 修改后（.+）？/u,
@@ -2446,6 +2172,14 @@ test("returning from review restores the editable pre-AI version and preserves t
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     await launched.page.getByRole("button", { name: "收起会话面板" }).click();
+    const pendingDecisionEntry = launched.page.getByRole("button", {
+      name: "待决定",
+      exact: true,
+    });
+    await expect(pendingDecisionEntry).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "返回修改前" }))
+      .toHaveCount(0);
+    await pendingDecisionEntry.click();
     await launched.page.getByRole("button", { name: "返回修改前" }).click();
     const dialog = launched.page.getByRole("dialog", {
       name: /返回 AI 修改前（版本 \d+）？/u,
@@ -2966,7 +2700,7 @@ test("CSS and Script comment-only changes stay out of Review", {
     await launched.page.getByRole("button", { name: "查看修改" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0);
     await expect(launched.page.locator(".toast"))
-      .toContainText("这次没有产生有效变化", { timeout: 30_000 });
+      .toContainText("未识别到明确的页面变化", { timeout: 30_000 });
     await expect(launched.page.locator(".toast"))
       .toContainText("没有找到能够定位到页面具体位置的内容、结构或视觉变化");
     // A repeated ready response must not erase the user's Review outcome.
@@ -2979,7 +2713,7 @@ test("CSS and Script comment-only changes stay out of Review", {
     );
     expect((await response.json()).status).toBe("ready-to-open");
     await expect(launched.page.locator(".toast"))
-      .toContainText("这次没有产生有效变化");
+      .toContainText("未识别到明确的页面变化");
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

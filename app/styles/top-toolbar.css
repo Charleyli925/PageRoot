@@ -258,24 +258,6 @@
   min-width: 36px;
 }
 
-.toolbar-transparency-control {
-  width: 50px;
-  height: 30px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  padding: 0 7px;
-  border: 1px solid rgb(43 40 53 / 7%);
-  border-radius: 8px;
-  background: rgb(43 40 53 / 2.5%);
-}
-
-.toolbar-transparency-control input {
-  width: 36px;
-  margin: 0;
-  accent-color: #625d9f;
-}
-
 .header-actions .recent-run-button,
 .workbench-review-tools-slot > .recent-run-button {
   height: 32px;

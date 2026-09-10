@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, KeyboardEvent } from "react";
+import type { KeyboardEvent } from "react";
 import {
   BrowsersIcon,
   CaretLeftIcon,
@@ -52,12 +52,10 @@ export type ReviewToolbarControlsProps = {
   disabled?: boolean;
   pageView?: ReviewPageView;
   changeFilter?: ReviewChangeFilter;
-  contextVisibility?: number;
   scrollMode?: ReviewScrollMode;
   zoomMode?: ReviewZoomMode;
   onPageViewChange?: (value: ReviewPageView) => void;
   onChangeFilter?: (value: ReviewChangeFilter) => void;
-  onContextVisibilityChange?: (value: number) => void;
   onScrollModeChange?: (value: ReviewScrollMode) => void;
   onZoomModeChange?: (value: ReviewZoomMode) => void;
 };
@@ -66,12 +64,10 @@ export function ReviewToolbarControls({
   disabled = false,
   pageView = "split",
   changeFilter = "all",
-  contextVisibility = 18,
   scrollMode = "linked",
   zoomMode = "actual",
   onPageViewChange,
   onChangeFilter,
-  onContextVisibilityChange,
   onScrollModeChange,
   onZoomModeChange,
 }: ReviewToolbarControlsProps) {
@@ -94,21 +90,6 @@ export function ReviewToolbarControls({
           <CaretRightIcon aria-hidden="true" size={13} weight="bold" />
         </button>
       </div>
-
-      <label className="toolbar-transparency-control" data-tooltip="上下文可见度">
-        <span className="sr-only">上下文可见度</span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          value={contextVisibility}
-          disabled={disabled}
-          aria-label="非修改区域上下文可见度"
-          style={{ "--mask-position": `${contextVisibility}%` } as CSSProperties}
-          onChange={(event) => onContextVisibilityChange?.(Number(event.currentTarget.value))}
-        />
-      </label>
 
       <div className="toolbar-control-group toolbar-filter-group" role="group" aria-label="变化审阅">
         {(["all", "text", "structure"] as ReviewChangeFilter[]).map((mode) => (

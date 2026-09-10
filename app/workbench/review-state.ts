@@ -8,6 +8,12 @@ export type ReviewPageView = "split" | ReviewSide;
 export type ReviewChangeFilter = ReviewFilter;
 export type ReviewScrollMode = "linked" | "independent";
 export type ReviewZoomMode = "fit" | "actual";
+export type ReviewFocusRegionSelection = Record<ReviewSide, string | null>;
+export type ReviewReadingPosition = Record<ReviewSide, Readonly<{
+  top: number;
+  left: number;
+  viewportLeft: number;
+}>>;
 
 export type ReviewState = {
   pageView: ReviewPageView;
@@ -15,10 +21,17 @@ export type ReviewState = {
   contextVisibility: number;
   navigationTarget: string;
   activeFocusGroupId: string | null;
+  activeFocusRegionIds: ReviewFocusRegionSelection;
   pagePresentation: ReviewPresentation;
   scrollMode: ReviewScrollMode;
   zoomMode: ReviewZoomMode;
 };
+
+export type ReviewPresentationSnapshot = Readonly<{
+  reviewIdentity: string;
+  state: Omit<ReviewState, "contextVisibility">;
+  positions: ReviewReadingPosition;
+}>;
 
 export type ReviewStateAction =
   | { type: "set-page-view"; value: ReviewPageView }
@@ -26,6 +39,13 @@ export type ReviewStateAction =
   | { type: "set-context-visibility"; value: number }
   | { type: "set-navigation-target"; value: string }
   | { type: "set-active-focus-group"; value: string | null }
+  | {
+    type: "set-active-focus";
+    value: null | {
+      groupId: string;
+      regionIds: ReviewFocusRegionSelection;
+    };
+  }
   | { type: "set-page-presentation"; value: ReviewPresentation }
   | { type: "set-scroll-mode"; value: ReviewScrollMode }
   | { type: "set-zoom-mode"; value: ReviewZoomMode };
@@ -33,9 +53,10 @@ export type ReviewStateAction =
 export const DEFAULT_REVIEW_STATE: ReviewState = {
   pageView: "split",
   changeFilter: "all",
-  contextVisibility: 18,
+  contextVisibility: 25,
   navigationTarget: "all",
   activeFocusGroupId: DEFAULT_ACTIVE_REVIEW_FOCUS_GROUP_ID,
+  activeFocusRegionIds: { before: null, after: null },
   pagePresentation: { before: [], after: [] },
   scrollMode: "linked",
   zoomMode: "actual",
@@ -69,7 +90,26 @@ export function reduceReviewState(
       );
       return state.activeFocusGroupId === activeFocusGroupId
         ? state
-        : { ...state, activeFocusGroupId };
+        : {
+          ...state,
+          activeFocusGroupId,
+          activeFocusRegionIds: { before: null, after: null },
+        };
+    }
+    case "set-active-focus": {
+      const activeFocusGroupId = nextActiveReviewFocusGroupId(
+        state.activeFocusGroupId,
+        action.value?.groupId,
+      );
+      const activeFocusRegionIds = action.value?.regionIds || { before: null, after: null };
+      const unchanged = state.activeFocusGroupId === activeFocusGroupId
+        && state.activeFocusRegionIds.before === activeFocusRegionIds.before
+        && state.activeFocusRegionIds.after === activeFocusRegionIds.after;
+      return unchanged ? state : {
+        ...state,
+        activeFocusGroupId,
+        activeFocusRegionIds,
+      };
     }
     case "set-page-presentation": {
       const normalize = (side: ReviewSide) => {

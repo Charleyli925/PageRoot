@@ -9,7 +9,6 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type CSSProperties,
   type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
@@ -59,8 +58,15 @@ import {
   reduceReviewState,
   type ReviewChangeFilter,
   type ReviewPageView,
+  type ReviewPresentationSnapshot,
+  type ReviewState,
   type ReviewZoomMode,
 } from "./review-state";
+import {
+  buildReviewPaintPlan,
+  EMPTY_REVIEW_PAINT_PLAN,
+  type ReviewPaintPlan,
+} from "./review-paint-plan";
 import {
   WorkbenchHeaderActions,
   WorkbenchHeaderShell,
@@ -68,7 +74,8 @@ import {
 import { ReviewToolbarControls } from "./review-toolbar-controls";
 import styles from "./ai-review-workspace.module.css";
 
-type ConfirmationAction = "return" | "accept";
+export type ReviewConfirmationAction = "return" | "accept";
+type ConfirmationAction = ReviewConfirmationAction;
 type ReviewDesktopSession = { sessionId: string; url: string };
 type ReviewDesktopSessions = Record<ReviewSide, ReviewDesktopSession>;
 type ReviewDesktopSessionResult = {
@@ -134,6 +141,87 @@ const PAGE_VIEW_LABELS: Record<ReviewPageView, string> = {
   before: "左页 · 修改前",
   after: "右页 · AI 修改后",
 };
+
+const EMPTY_REVIEW_READING_POSITIONS = Object.freeze({
+  before: Object.freeze({ top: 0, left: 0, viewportLeft: 0 }),
+  after: Object.freeze({ top: 0, left: 0, viewportLeft: 0 }),
+});
+
+function initialReviewState({
+  documents,
+  reviewIdentity,
+  contextVisibility,
+  presentation,
+}: Readonly<{
+  documents: ReviewDocuments;
+  reviewIdentity: string;
+  contextVisibility: number;
+  presentation?: ReviewPresentationSnapshot | null;
+}>): {
+  state: ReviewState;
+  positions: ReviewPresentationSnapshot["positions"];
+  restored: boolean;
+} {
+  const fallback = {
+    state: { ...DEFAULT_REVIEW_STATE, contextVisibility },
+    positions: EMPTY_REVIEW_READING_POSITIONS,
+    restored: false,
+  };
+  if (!presentation || presentation.reviewIdentity !== reviewIdentity) return fallback;
+  const candidate = presentation.state;
+  const pageView = ["split", "before", "after"].includes(candidate.pageView)
+    ? candidate.pageView
+    : "split";
+  const changeFilter = ["all", "text", "structure"].includes(candidate.changeFilter)
+    ? candidate.changeFilter
+    : "all";
+  const scrollMode = candidate.scrollMode === "independent" ? "independent" : "linked";
+  const zoomMode = candidate.zoomMode === "fit" ? "fit" : "actual";
+  const navigationTarget = candidate.navigationTarget === "all"
+    || documents.changes.some((change) => change.id === candidate.navigationTarget)
+    ? candidate.navigationTarget
+    : "all";
+  const focusGroup = documents.focusGroups.find((group) => (
+    group.id === candidate.activeFocusGroupId
+    && (changeFilter === "all"
+      || (changeFilter === "text" ? group.kind === "text" : group.kind !== "text"))
+  )) || null;
+  const regionId = (side: ReviewSide) => {
+    const requested = candidate.activeFocusRegionIds?.[side];
+    return focusGroup?.regions[side].some((region) => region.id === requested)
+      ? requested || null
+      : null;
+  };
+  const position = (side: ReviewSide) => {
+    const raw = presentation.positions?.[side];
+    const safe = (value: unknown) => Number.isFinite(Number(value))
+      ? Math.max(0, Number(value))
+      : 0;
+    return {
+      top: safe(raw?.top),
+      left: safe(raw?.left),
+      viewportLeft: safe(raw?.viewportLeft),
+    };
+  };
+  return {
+    state: {
+      pageView,
+      changeFilter,
+      contextVisibility,
+      navigationTarget,
+      activeFocusGroupId: focusGroup?.id || null,
+      activeFocusRegionIds: {
+        before: regionId("before"),
+        after: regionId("after"),
+      },
+      pagePresentation: candidate.pagePresentation || { before: [], after: [] },
+      scrollMode,
+      zoomMode,
+    },
+    positions: { before: position("before"), after: position("after") },
+    restored: true,
+  };
+}
 
 const subscribeHydration = () => () => {};
 
@@ -475,6 +563,11 @@ export default function AiReviewWorkspace({
   sidebar = null,
   embedded = false,
   reloadRevision = 0,
+  changeContextVisibility = 25,
+  commentContextVisibility = 15,
+  initialPresentation = null,
+  onPresentationChange,
+  registerDecisionRequest,
 }: {
   fileName: string;
   beforeLabel: string;
@@ -500,13 +593,28 @@ export default function AiReviewWorkspace({
   embedded?: boolean;
   /** Re-mounts both comparison frames without creating a second review state. */
   reloadRevision?: number;
+  changeContextVisibility?: number;
+  commentContextVisibility?: number;
+  initialPresentation?: ReviewPresentationSnapshot | null;
+  onPresentationChange?: (presentation: ReviewPresentationSnapshot) => void;
+  registerDecisionRequest?: (
+    request: (action: ReviewConfirmationAction) => void,
+  ) => () => void;
 }) {
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
   const independentTransport = hydrated && Boolean(window.htmlAIPreview);
+  const initialPresentationState = initialReviewState({
+    documents,
+    reviewIdentity: sessionId,
+    contextVisibility: changeContextVisibility,
+    presentation: initialPresentation,
+  });
+  const initialPresentationStateRef = useRef(initialPresentationState);
+  const initialReview = initialPresentationStateRef.current;
   const [reviewState, dispatchReviewState] = useReducer(
     reduceReviewState,
-    DEFAULT_REVIEW_STATE,
+    initialReview.state,
   );
   const {
     pageView: canvasView,
@@ -514,6 +622,7 @@ export default function AiReviewWorkspace({
     contextVisibility: transparency,
     navigationTarget: focus,
     activeFocusGroupId,
+    activeFocusRegionIds,
     pagePresentation,
     scrollMode,
     zoomMode: zoom,
@@ -522,6 +631,11 @@ export default function AiReviewWorkspace({
     ? document.getElementById("workbench-review-tools-slot")
     : null;
   const [toolbarPinned, setToolbarPinned] = useState(true);
+  const reviewDirectoryRef = useRef<HTMLDetailsElement>(null);
+  const initialNavigationSessionRef = useRef<string | null>(
+    initialReview.restored ? sessionId : null,
+  );
+  const [frameReadyRevision, setFrameReadyRevision] = useState(0);
   const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
   const [desktopSessionResult, setDesktopSessionResult] =
     useState<ReviewDesktopSessionResult | null>(null);
@@ -550,9 +664,21 @@ export default function AiReviewWorkspace({
   const horizontalFocusSidesRef = useRef(new Set<ReviewSide>());
   const scrollCoordinatorRef = useRef<ReviewScrollCoordinator | null>(null);
   const frameScrollPositionsRef = useRef<Record<ReviewSide, { top: number; left: number }>>({
-    before: { top: 0, left: 0 },
-    after: { top: 0, left: 0 },
+    before: {
+      top: initialReview.positions.before.top,
+      left: initialReview.positions.before.left,
+    },
+    after: {
+      top: initialReview.positions.after.top,
+      left: initialReview.positions.after.left,
+    },
   });
+  const restoredReadingPendingRef = useRef<Record<ReviewSide, boolean>>({
+    before: initialReview.restored,
+    after: initialReview.restored,
+  });
+  const restorationPositionsRef = useRef(initialReview.positions);
+  const restorationGenerationRef = useRef<string | null>(null);
   const presentationEpochRef = useRef(0);
   const presentationReadyRef = useRef<{
     epoch: number;
@@ -576,30 +702,120 @@ export default function AiReviewWorkspace({
   const reviewFrameLoadCountsRef = useRef(new WeakMap<HTMLIFrameElement, number>());
   const reviewVisualTimeoutRef = useRef<number | null>(null);
   const activeCommentKeysRef = useRef(new Set<string>());
-  const [, setVisualResolution] = useState<ReviewVisualResolution>(() => (
+  const [visualResolution, setVisualResolution] = useState<ReviewVisualResolution>(() => (
     initialVisualResolution(documents, reloadRevision, 0)
   ));
+  const reviewPaintPlan = useMemo(() => buildReviewPaintPlan({
+    focusGroups: documents.focusGroups,
+    changes: documents.changes,
+    visualVerdicts: visualResolution.documents === documents
+      && visualResolution.reloadRevision === reloadRevision
+      ? visualResolution.verdicts
+      : {},
+    activeFocusGroupId,
+    activeFocusRegionIds,
+  }), [
+    activeFocusGroupId,
+    activeFocusRegionIds,
+    documents,
+    reloadRevision,
+    visualResolution,
+  ]);
   const reviewCommentChannelChallengeRef = useRef<{
     challenge: string;
     frame: HTMLIFrameElement;
   } | null>(null);
   const reviewStateRef = useRef({
+    pageView: canvasView,
     filter,
     focus,
     activeFocusGroupId,
+    activeFocusRegionIds,
     transparency,
     pagePresentation,
+    scrollMode,
+    zoomMode: zoom,
+    paintPlan: EMPTY_REVIEW_PAINT_PLAN,
   });
   const scrollModeRef = useRef(scrollMode);
   useLayoutEffect(() => {
     reviewStateRef.current = {
+      pageView: canvasView,
       filter,
       focus,
       activeFocusGroupId,
+      activeFocusRegionIds,
       transparency,
       pagePresentation,
+      scrollMode,
+      zoomMode: zoom,
+      paintPlan: reviewPaintPlan,
     };
-  }, [activeFocusGroupId, filter, focus, pagePresentation, transparency]);
+  }, [
+    activeFocusGroupId,
+    activeFocusRegionIds,
+    canvasView,
+    filter,
+    focus,
+    pagePresentation,
+    reviewPaintPlan,
+    scrollMode,
+    transparency,
+    zoom,
+  ]);
+  const publishReviewPresentation = useCallback(() => {
+    if (!onPresentationChange) return;
+    const state = reviewStateRef.current;
+    const position = (side: ReviewSide) => ({
+      ...frameScrollPositionsRef.current[side],
+      viewportLeft: Math.max(0, viewportsRef.current[side]?.scrollLeft || 0),
+    });
+    onPresentationChange({
+      reviewIdentity: sessionId,
+      state: {
+        pageView: state.pageView,
+        changeFilter: state.filter,
+        navigationTarget: state.focus,
+        activeFocusGroupId: state.activeFocusGroupId,
+        activeFocusRegionIds: state.activeFocusRegionIds,
+        pagePresentation: state.pagePresentation,
+        scrollMode: state.scrollMode,
+        zoomMode: state.zoomMode,
+      },
+      positions: {
+        before: position("before"),
+        after: position("after"),
+      },
+    });
+  }, [onPresentationChange, sessionId]);
+  useEffect(() => {
+    publishReviewPresentation();
+  }, [
+    activeFocusGroupId,
+    activeFocusRegionIds,
+    canvasView,
+    filter,
+    focus,
+    pagePresentation,
+    publishReviewPresentation,
+    scrollMode,
+    zoom,
+  ]);
+  useLayoutEffect(() => {
+    if (initialReview.restored || reloadRevision > 0) {
+      restoredReadingPendingRef.current = { before: true, after: true };
+    }
+    return () => {
+      const position = (side: ReviewSide) => ({
+        ...frameScrollPositionsRef.current[side],
+        viewportLeft: Math.max(0, viewportsRef.current[side]?.scrollLeft || 0),
+      });
+      restorationPositionsRef.current = {
+        before: position("before"),
+        after: position("after"),
+      };
+    };
+  }, [initialReview.restored, reloadRevision]);
   const desktopSessions = desktopSessionResult?.documents === documents
     && desktopSessionResult.reloadRevision === reloadRevision
     ? desktopSessionResult.sessions
@@ -620,6 +836,23 @@ export default function AiReviewWorkspace({
   const reviewOutline = useMemo(() => documents.outline.filter((item) => (
     !item.changeId || confirmedChangeIds.has(item.changeId)
   )), [confirmedChangeIds, documents.outline]);
+  const reviewDirectoryItems = useMemo(() => reviewOutline.flatMap((item) => {
+    if (!item.changeId) return [];
+    const change = reviewChanges.find((candidate) => candidate.id === item.changeId);
+    if (!change || (filter !== "all" && !change.types.includes(filter))) return [];
+    const locations = documents.focusGroups.flatMap((group) => {
+      if (!group.changeIds.includes(change.id)) return [];
+      const locationSide: ReviewSide = group.regions.after.length ? "after" : "before";
+      return group.regions[locationSide]
+        .filter((region) => region.changeIds.includes(change.id))
+        .map((region) => ({
+          focusGroupId: group.id,
+          regionId: region.id,
+          side: locationSide,
+        }));
+    });
+    return [{ item, change, locations }];
+  }), [documents.focusGroups, filter, reviewChanges, reviewOutline]);
   const activeChange = focus === "all"
     ? null
     : reviewChanges.find((change) => change.id === focus) || null;
@@ -843,10 +1076,12 @@ export default function AiReviewWorkspace({
   }, [documents]);
 
   useLayoutEffect(() => {
+    if (initialReview.restored) return;
     reviewStateRef.current = {
       ...reviewStateRef.current,
       focus: "all",
       activeFocusGroupId: null,
+      activeFocusRegionIds: { before: null, after: null },
       pagePresentation: { before: [], after: [] },
     };
     dispatchReviewState({
@@ -857,8 +1092,15 @@ export default function AiReviewWorkspace({
       type: "set-page-presentation",
       value: { before: [], after: [] },
     });
-    dispatchReviewState({ type: "set-active-focus-group", value: null });
+    dispatchReviewState({ type: "set-active-focus", value: null });
   }, [documents, sessionId]);
+
+  useEffect(() => {
+    dispatchReviewState({
+      type: "set-context-visibility",
+      value: changeContextVisibility,
+    });
+  }, [changeContextVisibility]);
 
   const sendState = useCallback((side?: ReviewSide) => {
     const state = reviewStateRef.current;
@@ -870,6 +1112,8 @@ export default function AiReviewWorkspace({
           filter: state.filter,
           focus: state.focus,
           activeFocusGroupId: state.activeFocusGroupId,
+          activeFocusRegionId: state.activeFocusRegionIds[targetSide],
+          paintPlan: state.paintPlan[targetSide],
           transparency: state.transparency,
           scale: scalesRef.current[targetSide],
         },
@@ -1155,7 +1399,15 @@ export default function AiReviewWorkspace({
 
   useEffect(() => {
     sendState();
-  }, [activeFocusGroupId, filter, focus, sendState, transparency]);
+  }, [
+    activeFocusGroupId,
+    activeFocusRegionIds,
+    filter,
+    focus,
+    reviewPaintPlan,
+    sendState,
+    transparency,
+  ]);
 
   useEffect(() => {
     if (!confirmationAction) return undefined;
@@ -1165,11 +1417,64 @@ export default function AiReviewWorkspace({
     return () => window.cancelAnimationFrame(focusFrame);
   }, [confirmationAction]);
 
-  const selectChange = useCallback((
+  const clearFocus = useCallback(() => {
+    reviewStateRef.current = {
+      ...reviewStateRef.current,
+      activeFocusGroupId: null,
+      activeFocusRegionIds: { before: null, after: null },
+      paintPlan: EMPTY_REVIEW_PAINT_PLAN,
+    };
+    dispatchReviewState({ type: "set-active-focus", value: null });
+  }, []);
+
+  const activateFocus = useCallback((
+    groupId: string,
+    regionIds: { before: string | null; after: string | null },
+    paintPlan: ReviewPaintPlan,
+  ) => {
+    reviewStateRef.current = {
+      ...reviewStateRef.current,
+      activeFocusGroupId: groupId,
+      activeFocusRegionIds: regionIds,
+      paintPlan,
+    };
+    dispatchReviewState({
+      type: "set-active-focus",
+      value: { groupId, regionIds },
+    });
+  }, []);
+
+  const restoreReadingPositions = useCallback(() => {
+    (["before", "after"] as ReviewSide[]).forEach((side) => {
+      if (!restoredReadingPendingRef.current[side]) return;
+      restoredReadingPendingRef.current[side] = false;
+      const position = restorationPositionsRef.current[side];
+      frameScrollPositionsRef.current[side] = {
+        top: position.top,
+        left: position.left,
+      };
+      postToFrame(framesRef.current[side], sessionId, {
+        type: "set-scroll-position",
+        top: position.top,
+        left: position.left,
+        force: true,
+        commandId: `review-restore-${side}`,
+      });
+      const viewport = viewportsRef.current[side];
+      if (viewport) {
+        viewport.scrollLeft = Math.min(
+          Math.max(0, position.viewportLeft),
+          Math.max(0, viewport.scrollWidth - viewport.clientWidth),
+        );
+      }
+    });
+  }, [sessionId]);
+
+  const navigateToChange = useCallback((
     changeId: string,
     behavior: ScrollBehavior = "smooth",
     requestedFocusGroupId?: string,
-    activateFocusGroup = true,
+    activateVisualFocus = true,
     requestedRegionId?: string,
     requestedSide?: ReviewSide,
   ) => {
@@ -1191,23 +1496,6 @@ export default function AiReviewWorkspace({
       )) || null
       : null;
     if (requestedRegionId && !selectedRegion) return;
-    const nextActiveFocusGroupId = requestedGroup
-      ? activeFocusGroupId === requestedGroup.id ? null : requestedGroup.id
-      : changeGroups.length === 1 ? changeGroups[0].id : null;
-    reviewStateRef.current = {
-      ...reviewStateRef.current,
-      focus: changeId,
-      ...(activateFocusGroup ? { activeFocusGroupId: nextActiveFocusGroupId } : {}),
-    };
-    dispatchReviewState({ type: "set-navigation-target", value: changeId });
-    if (activateFocusGroup) dispatchReviewState({
-        type: "set-active-focus-group",
-        value: nextActiveFocusGroupId,
-      });
-    // Re-selecting the active group is the explicit exit to overview. Keep the
-    // current scroll and disclosure state untouched while the overlay state is
-    // cleared by the normal state broadcast.
-    if (activateFocusGroup && requestedGroup && nextActiveFocusGroupId === null) return;
     const regionForSide = (side: ReviewSide) => {
       if (!selectedFocusGroup) return null;
       if (selectedRegion) {
@@ -1218,6 +1506,50 @@ export default function AiReviewWorkspace({
       }
       return selectedFocusGroup.regions[side][0] || null;
     };
+    const nextActiveFocusGroupId = selectedFocusGroup?.id || null;
+    const nextActiveFocusRegionIds = {
+      before: regionForSide("before")?.id || null,
+      after: regionForSide("after")?.id || null,
+    };
+    const nextPaintPlan = nextActiveFocusGroupId
+      ? buildReviewPaintPlan({
+        focusGroups: documents.focusGroups,
+        changes: documents.changes,
+        visualVerdicts: visualResolution.documents === documents
+          && visualResolution.reloadRevision === reloadRevision
+          ? visualResolution.verdicts
+          : {},
+        activeFocusGroupId: nextActiveFocusGroupId,
+        activeFocusRegionIds: nextActiveFocusRegionIds,
+      })
+      : EMPTY_REVIEW_PAINT_PLAN;
+    reviewStateRef.current = {
+      ...reviewStateRef.current,
+      focus: changeId,
+    };
+    dispatchReviewState({ type: "set-navigation-target", value: changeId });
+    if (activateVisualFocus && nextActiveFocusGroupId) {
+      activateFocus(nextActiveFocusGroupId, nextActiveFocusRegionIds, nextPaintPlan);
+      // Publish paint state before navigation. The runtime can then navigate by
+      // the focused mask geometry even when policy deliberately emits no box.
+      (["before", "after"] as ReviewSide[]).forEach((side) => {
+        const state = reviewStateRef.current;
+        postToFrame(framesRef.current[side], sessionId, {
+          type: "state",
+          state: {
+            filter: state.filter,
+            focus: state.focus,
+            activeFocusGroupId: state.activeFocusGroupId,
+            activeFocusRegionId: state.activeFocusRegionIds[side],
+            paintPlan: state.paintPlan[side],
+            transparency: state.transparency,
+            scale: scalesRef.current[side],
+          },
+        });
+      });
+    } else if (activateVisualFocus) {
+      clearFocus();
+    }
     const presentation: ReviewPresentation = selectedFocusGroup
       ? {
         before: selectedRegion
@@ -1233,7 +1565,7 @@ export default function AiReviewWorkspace({
         const region = regionForSide(side);
         if (selectedFocusGroup && !region) return;
         postToFrame(framesRef.current[side], sessionId, {
-          type: "focus-change",
+          type: "navigate-change",
           changeId: region?.primaryChangeId || changeId,
           focusGroupId: selectedFocusGroup?.id,
           regionId: region?.id,
@@ -1247,7 +1579,52 @@ export default function AiReviewWorkspace({
     } else {
       focusChange();
     }
-  }, [activeFocusGroupId, coordinatePagePresentation, documents.focusGroups, reviewChanges, sessionId]);
+  }, [
+    activateFocus,
+    clearFocus,
+    coordinatePagePresentation,
+    documents,
+    reloadRevision,
+    reviewChanges,
+    sessionId,
+    visualResolution,
+  ]);
+
+  useEffect(() => {
+    if (!initialReview.restored && reloadRevision === 0) return;
+    const restorationGeneration = `${sessionId}:${reloadRevision}`;
+    if (restorationGenerationRef.current === restorationGeneration) return;
+    const bothFramesReady = (["before", "after"] as ReviewSide[]).every((side) => {
+      const ready = reviewFrameReadyRef.current[side];
+      return ready?.documents === documents && ready.frame === framesRef.current[side];
+    });
+    if (!bothFramesReady) return;
+    restorationGenerationRef.current = restorationGeneration;
+    coordinatePagePresentation(reviewStateRef.current.pagePresentation, () => {
+      window.requestAnimationFrame(restoreReadingPositions);
+    });
+  }, [
+    coordinatePagePresentation,
+    documents,
+    frameReadyRevision,
+    initialReview.restored,
+    reloadRevision,
+    restoreReadingPositions,
+    sessionId,
+  ]);
+
+  useEffect(() => {
+    if (initialNavigationSessionRef.current === sessionId) return;
+    const bothFramesReady = (["before", "after"] as ReviewSide[]).every((side) => {
+      const ready = reviewFrameReadyRef.current[side];
+      return ready?.documents === documents && ready.frame === framesRef.current[side];
+    });
+    if (!bothFramesReady) return;
+    initialNavigationSessionRef.current = sessionId;
+    if (focus !== "all") return;
+    const firstChangeId = reviewDirectoryItems[0]?.change.id;
+    if (firstChangeId) navigateToChange(firstChangeId, "auto", undefined, false);
+  }, [documents, focus, frameReadyRevision, navigateToChange, reviewDirectoryItems, sessionId]);
 
   useLayoutEffect(() => {
     const handleMessage = (event: MessageEvent<ReviewMessage>) => {
@@ -1366,6 +1743,7 @@ export default function AiReviewWorkspace({
         const frame = framesRef.current[message.side];
         if (frame) {
           reviewFrameReadyRef.current[message.side] = { documents, frame };
+          setFrameReadyRevision((revision) => revision + 1);
           prepareReviewCommentFrame(message.side, frame);
           requestReviewVisualFrame(message.side, frame);
         }
@@ -1437,6 +1815,7 @@ export default function AiReviewWorkspace({
           left,
           commandId: message.commandId,
         });
+        publishReviewPresentation();
         return;
       }
       if (message.type === "comment-layout") {
@@ -1462,11 +1841,7 @@ export default function AiReviewWorkspace({
       ) {
         if (message.panelControl) return;
         if (message.type === "action" && reviewStateRef.current.activeFocusGroupId) {
-          reviewStateRef.current = {
-            ...reviewStateRef.current,
-            activeFocusGroupId: null,
-          };
-          dispatchReviewState({ type: "set-active-focus-group", value: null });
+          clearFocus();
         }
         const follower: ReviewSide = message.side === "before" ? "after" : "before";
         postToFrame(framesRef.current[follower], sessionId, {
@@ -1482,11 +1857,7 @@ export default function AiReviewWorkspace({
       }
       if (message.type === "panel-change") {
         if (reviewStateRef.current.activeFocusGroupId) {
-          reviewStateRef.current = {
-            ...reviewStateRef.current,
-            activeFocusGroupId: null,
-          };
-          dispatchReviewState({ type: "set-active-focus-group", value: null });
+          clearFocus();
         }
         const panelPath = message.panelPath?.length
           ? message.panelPath
@@ -1517,30 +1888,32 @@ export default function AiReviewWorkspace({
             ? message.focusGroupId
             : undefined;
           const regionId = typeof message.regionId === "string" ? message.regionId : undefined;
-          selectChange(changeId, "smooth", focusGroupId, true, regionId, message.side);
+          navigateToChange(changeId, "smooth", focusGroupId, true, regionId, message.side);
         }
         return;
       }
       if (message.type === "leave-focus" && reviewStateRef.current.activeFocusGroupId) {
-        dispatchReviewState({ type: "set-active-focus-group", value: null });
+        clearFocus();
         return;
       }
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [
+    clearFocus,
     coordinatePagePresentation,
     documents,
     finishPagePresentation,
     focusHorizontalFootprint,
     observeReviewVisualSide,
     prepareReviewCommentFrame,
+    publishReviewPresentation,
     requestReviewVisualFrame,
     relayHorizontalWheel,
     reviewChanges,
     reviewOutline,
     reloadRevision,
-    selectChange,
+    navigateToChange,
     sendState,
     sessionId,
     updateCommentScrollTransform,
@@ -1570,6 +1943,9 @@ export default function AiReviewWorkspace({
       state: {
         filter: state.filter,
         focus: state.focus,
+        activeFocusGroupId: state.activeFocusGroupId,
+        activeFocusRegionId: state.activeFocusRegionIds[side],
+        paintPlan: state.paintPlan[side],
         transparency: state.transparency,
         scale,
       },
@@ -1595,9 +1971,10 @@ export default function AiReviewWorkspace({
         side,
         active: stableIds.length > 0,
         stableIds,
+        contextVisibility: commentContextVisibility,
       });
     });
-  }, [documents.commentTargets, sessionId]);
+  }, [commentContextVisibility, documents.commentTargets, sessionId]);
 
   useEffect(() => {
     (["before", "after"] as ReviewSide[]).forEach((side) => {
@@ -1614,6 +1991,7 @@ export default function AiReviewWorkspace({
   }, [reviewChanges, sessionId]);
 
   const handleHorizontalScroll = useCallback((side: ReviewSide) => {
+    publishReviewPresentation();
     if (scrollModeRef.current !== "linked" || horizontalFocusSidesRef.current.has(side)) return;
     const source = viewportsRef.current[side];
     const followerSide: ReviewSide = side === "before" ? "after" : "before";
@@ -1627,7 +2005,7 @@ export default function AiReviewWorkspace({
     });
     if (target === null) return;
     follower.scrollLeft = target;
-  }, []);
+  }, [publishReviewPresentation]);
 
   const selectReviewMode = useCallback((mode: ReviewChangeFilter) => {
     dispatchReviewState({ type: "set-change-filter", value: mode });
@@ -1639,14 +2017,21 @@ export default function AiReviewWorkspace({
       || (mode === "text" ? group.kind === "text" : group.kind !== "text")
     );
     if (activeFocusGroup && !groupMatches(activeFocusGroup)) {
-      dispatchReviewState({ type: "set-active-focus-group", value: null });
+      clearFocus();
     }
     const matching = mode === "all"
       ? reviewChanges
       : reviewChanges.filter((change) => change.types.includes(mode));
     if (!matching.length || matching.some((change) => change.id === focus)) return;
-    selectChange(matching[0].id, "smooth", undefined, false);
-  }, [activeFocusGroupId, documents.focusGroups, focus, reviewChanges, selectChange]);
+    navigateToChange(matching[0].id, "smooth", undefined, false);
+  }, [
+    activeFocusGroupId,
+    clearFocus,
+    documents.focusGroups,
+    focus,
+    navigateToChange,
+    reviewChanges,
+  ]);
 
   useEffect(() => {
     if (!activeFocusGroupId) return;
@@ -1655,8 +2040,8 @@ export default function AiReviewWorkspace({
       filter === "all"
       || (filter === "text" ? activeGroup.kind === "text" : activeGroup.kind !== "text")
     );
-    if (!matchesFilter) dispatchReviewState({ type: "set-active-focus-group", value: null });
-  }, [activeFocusGroupId, documents.focusGroups, filter]);
+    if (!matchesFilter) clearFocus();
+  }, [activeFocusGroupId, clearFocus, documents.focusGroups, filter]);
 
   useEffect(() => {
     const leaveFocus = (event: KeyboardEvent) => {
@@ -1678,11 +2063,11 @@ export default function AiReviewWorkspace({
         || !reviewStateRef.current.activeFocusGroupId
       ) return;
       event.preventDefault();
-      dispatchReviewState({ type: "set-active-focus-group", value: null });
+      clearFocus();
     };
     window.addEventListener("keydown", leaveFocus);
     return () => window.removeEventListener("keydown", leaveFocus);
-  }, [confirmationAction]);
+  }, [clearFocus, confirmationAction]);
 
   const selectPreviewMode = useCallback((mode: ReviewPageView) => {
     dispatchReviewState({ type: "set-page-view", value: mode });
@@ -1724,6 +2109,18 @@ export default function AiReviewWorkspace({
     const trigger = confirmationTriggerRef.current;
     window.requestAnimationFrame(() => trigger?.focus());
   }, []);
+
+  const requestConfirmationFromHost = useCallback((action: ReviewConfirmationAction) => {
+    confirmationTriggerRef.current = document.activeElement instanceof HTMLButtonElement
+      ? document.activeElement
+      : null;
+    setConfirmationAction(action);
+  }, []);
+
+  useEffect(() => {
+    if (!registerDecisionRequest) return undefined;
+    return registerDecisionRequest(requestConfirmationFromHost);
+  }, [registerDecisionRequest, requestConfirmationFromHost]);
 
   const confirmAndContinue = useCallback(() => {
     const action = confirmationAction;
@@ -1815,15 +2212,10 @@ export default function AiReviewWorkspace({
           <ReviewToolbarControls
             pageView={canvasView}
             changeFilter={filter}
-            contextVisibility={transparency}
             scrollMode={scrollMode}
             zoomMode={zoom}
             onPageViewChange={selectPreviewMode}
             onChangeFilter={selectReviewMode}
-            onContextVisibilityChange={(value) => dispatchReviewState({
-              type: "set-context-visibility",
-              value,
-            })}
             onScrollModeChange={(value) => dispatchReviewState({
               type: "set-scroll-mode",
               value,
@@ -1833,26 +2225,6 @@ export default function AiReviewWorkspace({
               value,
             })}
           />
-          {!sidebar ? <>
-          <button
-            className="recent-run-button review-return-button"
-            type="button"
-            disabled={accepting}
-            onClick={(event) => openConfirmation("return", event.currentTarget)}
-          >
-            <ClockCounterClockwiseIcon aria-hidden="true" size={16} weight="duotone" />
-            返回修改前
-          </button>
-          <button
-            className="header-send-button review-accept-button"
-            type="button"
-            disabled={accepting}
-            onClick={(event) => openConfirmation("accept", event.currentTarget)}
-          >
-            <CheckCircleIcon aria-hidden="true" size={14} weight="fill" />
-            {accepting ? "正在采纳…" : "采纳修改"}
-          </button>
-          </> : null}
         </>
       ), toolbarHost) : null}
 
@@ -1921,28 +2293,6 @@ export default function AiReviewWorkspace({
                     <span className={styles.previewButtonLabel}><span>右页</span><small>修改后</small></span>
                   </button>
                 </div>
-              </div>
-
-              <div className={styles.transparencyField}>
-                <span className={styles.toolbarFieldLabel}>
-                  <span>上下文可见度</span><output>{transparency}%</output>
-                </span>
-                <label className={styles.transparencyControl}>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={transparency}
-                    aria-label="非修改区域上下文可见度"
-                    title="调整非修改区域的可见度"
-                    style={{ "--mask-position": `${transparency}%` } as CSSProperties}
-                    onInput={(event) => dispatchReviewState({
-                      type: "set-context-visibility",
-                      value: Number(event.currentTarget.value),
-                    })}
-                  />
-                </label>
               </div>
 
               <div className={styles.reviewModeControl}>
@@ -2016,6 +2366,63 @@ export default function AiReviewWorkspace({
           </div> : null}
 
           <div className={styles.canvasReviewBody}>
+            <header className={styles.reviewDirectoryHeader}>
+              <details ref={reviewDirectoryRef} className={styles.reviewDirectory}>
+                <summary aria-label={`变化目录，共 ${reviewDirectoryItems.length} 处`}>
+                  <GitDiffIcon aria-hidden="true" size={14} weight="duotone" />
+                  <span>变化 {reviewDirectoryItems.length} 处</span>
+                  <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
+                </summary>
+                <div className={styles.reviewDirectoryMenu} aria-label="变化目录">
+                  {reviewDirectoryItems.map(({ item, change, locations }) => {
+                    const navigate = (location?: typeof locations[number]) => {
+                      navigateToChange(
+                        change.id,
+                        "smooth",
+                        location?.focusGroupId,
+                        true,
+                        location?.regionId,
+                        location?.side,
+                      );
+                      if (reviewDirectoryRef.current) reviewDirectoryRef.current.open = false;
+                    };
+                    if (locations.length <= 1) {
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={styles.reviewDirectoryItem}
+                          aria-current={focus === change.id ? "location" : undefined}
+                          onClick={() => navigate(locations[0])}
+                        >
+                          <span>{item.group}</span>
+                          <strong>{item.label}</strong>
+                          <small>{item.helper}</small>
+                        </button>
+                      );
+                    }
+                    return (
+                      <div className={styles.reviewDirectoryItem} key={item.id}>
+                        <span>{item.group}</span>
+                        <strong>{item.label}</strong>
+                        <small>{item.helper}</small>
+                        <div className={styles.reviewDirectoryLocations}>
+                          {locations.map((location, index) => (
+                            <button
+                              key={`${location.focusGroupId}-${location.regionId}`}
+                              type="button"
+                              onClick={() => navigate(location)}
+                            >
+                              位置 {index + 1}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
+            </header>
             <div className={styles.canvasGrid} data-view={canvasView}>
               <ReviewDocumentPane
                 side="before"

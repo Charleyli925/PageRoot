@@ -120,6 +120,7 @@ export function normalizeReviewProjectionFact(value) {
 export function normalizeReviewFocusGroupPlans(value) {
   const idPattern = /^[a-z0-9:_-]{1,160}$/iu;
   const displayScopes = new Set(["paragraph", "list-item", "cell", "component", "container"]);
+  const outlinePolicies = new Set(["never", "source-change", "visual-change"]);
   const geometryModes = new Set([
     "text-content",
     "element-box",
@@ -189,6 +190,12 @@ export function normalizeReviewFocusGroupPlans(value) {
     if (totalAtoms > maxTotalAtoms) return [];
     if (!displayScopes.has(group.displayScope)
       || !["text", "style", "structure"].includes(group.kind)) return [];
+    if (group.focusOutlinePolicy != null && !outlinePolicies.has(group.focusOutlinePolicy)) return [];
+    const focusOutlinePolicy = group.focusOutlinePolicy == null
+      ? group.kind === "text"
+        ? "never"
+        : group.kind === "style" ? "visual-change" : "source-change"
+      : group.focusOutlinePolicy;
     const presentation = {
       before: safePresentation(group.presentation?.before),
       after: safePresentation(group.presentation?.after),
@@ -203,6 +210,7 @@ export function normalizeReviewFocusGroupPlans(value) {
         if (regionCount > maxRegions || !region || typeof region !== "object") return [];
         if (!safeId(region.id) || regionIds.has(region.id) || region.side !== side) return [];
         if (!geometryModes.has(region.geometryMode)) return [];
+        if (region.navigationClusterId != null && !safeId(region.navigationClusterId)) return [];
         if (!safeId(region.correlationKey)) return [];
         if (!safeId(region.primaryChangeId)
           || !Array.isArray(region.changeIds)
@@ -231,6 +239,7 @@ export function normalizeReviewFocusGroupPlans(value) {
         regions[side].push({
           id: region.id,
           side,
+          navigationClusterId: region.navigationClusterId || region.id,
           correlationKey: region.correlationKey,
           primaryChangeId: region.primaryChangeId,
           changeIds: regionChangeIds,
@@ -249,6 +258,7 @@ export function normalizeReviewFocusGroupPlans(value) {
       changeIds,
       displayGroupId: group.displayGroupId,
       displayScope: group.displayScope,
+      focusOutlinePolicy,
       atomKeys,
       presentation,
       regions,

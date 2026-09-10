@@ -23,6 +23,8 @@ const DEFAULT_WORKSPACE = {
   inspectorWidth: 376,
   motion: "system",
   restoreTabsOnLaunch: true,
+  reviewChangeContextVisibility: 25,
+  reviewCommentContextVisibility: 15,
   defaultAgentProviderId: "qoder",
   disabledAgentProviderIds: [],
   agentConfigurations: {},
@@ -116,6 +118,8 @@ test("workspace preference decoding clamps damaged values and strict writes reje
       inspectorWidth: 1,
       motion: "unknown",
       restoreTabsOnLaunch: "yes",
+      reviewChangeContextVisibility: 999,
+      reviewCommentContextVisibility: -10,
       defaultAgentProviderId: "unknown",
     },
   });
@@ -123,9 +127,12 @@ test("workspace preference decoding clamps damaged values and strict writes reje
   assert.equal(decoded.workspace.inspectorWidth, 280);
   assert.equal(decoded.workspace.motion, "system");
   assert.equal(decoded.workspace.restoreTabsOnLaunch, true);
+  assert.equal(decoded.workspace.reviewChangeContextVisibility, 100);
+  assert.equal(decoded.workspace.reviewCommentContextVisibility, 0);
   assert.equal(decoded.workspace.defaultAgentProviderId, "qoder");
   assert.deepEqual(decoded.workspace.disabledAgentProviderIds, []);
   assert.throws(() => normalizeWorkspacePatch({ sidebarWidth: 999 }), /范围/u);
+  assert.throws(() => normalizeWorkspacePatch({ reviewChangeContextVisibility: 101 }), /范围/u);
   assert.throws(() => normalizeWorkspacePatch({ unknown: true }), /未知字段/u);
   assert.throws(() => normalizeWorkspacePatch({ defaultAgentProviderId: "gemini" }), /默认 Agent/u);
   assert.throws(() => normalizeWorkspacePatch({ disabledAgentProviderIds: ["gemini"] }), /停用的 AI 服务/u);
