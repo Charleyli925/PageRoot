@@ -421,6 +421,30 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(launched.page.getByRole("tab", { selected: true })).toContainText("审阅");
     await expect(launched.page.getByRole("group", { name: "工作模式", exact: true })
       .getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
+    const beforeReviewFrame = launched.page.frameLocator(
+      'iframe[title^="修改前"]',
+    );
+    const afterReviewFrame = launched.page.frameLocator(
+      'iframe[title^="修改后"]',
+    );
+    // Fresh Review performs one successful reading-position guide without
+    // turning it into an explicit visual focus or outline.
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect.poll(async () => frame.locator("html").getAttribute(
+        "data-pageroot-review-focus",
+      ), { timeout: 30_000 }).toMatch(/^change-[a-z0-9-]+$/u);
+      await expect(frame.locator("html"))
+        .toHaveAttribute("data-pageroot-review-focus-group", "");
+      await expect(frame.locator("[data-pageroot-review-overlay-box]"))
+        .toHaveCount(0);
+      await expect(frame.locator("[data-pageroot-review-mask-hole]"))
+        .toHaveCount(0);
+    }
+    const initialNavigationTarget = await beforeReviewFrame.locator("html")
+      .getAttribute("data-pageroot-review-focus");
+    expect(initialNavigationTarget).toMatch(/^change-[a-z0-9-]+$/u);
+    await expect(afterReviewFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-review-focus", initialNavigationTarget);
     const reviewReloadRevision = Number(
       await reviewWorkspace.getAttribute("data-reload-revision"),
     );
@@ -468,13 +492,11 @@ ${REVIEW_MASK_UNION_BEFORE}
       if (!sharedHeaderBox || !beforePaneHeaderBox) return -1;
       return beforePaneHeaderBox.y - (sharedHeaderBox.y + sharedHeaderBox.height);
     }).toBeGreaterThanOrEqual(0);
-    const beforeReviewFrame = launched.page.frameLocator(
-      'iframe[title^="修改前"]',
+    await assertReviewControlDefaults(
+      launched.page,
+      beforeReviewFrame,
+      initialNavigationTarget,
     );
-    const afterReviewFrame = launched.page.frameLocator(
-      'iframe[title^="修改后"]',
-    );
-    await assertReviewControlDefaults(launched.page, beforeReviewFrame);
     const reviewDirectorySummary = reviewWorkspace.locator(
       'summary[aria-label^="变化目录，共"]',
     );

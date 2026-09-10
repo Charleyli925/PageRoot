@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { closePageRootGracefully } from "./helpers/electron-safe-cleanup.mjs";
 import {
-  addComment, candidateHtmlFiles, chooseModifyIntent, createCodexAcpE2ECommand,
+  addComment, adoptReadyResult, candidateHtmlFiles, chooseModifyIntent, createCodexAcpE2ECommand,
   createSourceFixture, expandSettingsAgent, launchPageRoot, mkdirSync,
   openAgentSettingsPage, pagerootHttpAgentEnv, path, productRoot, readFileSync,
   removeSourceFixture, setDefaultSettingsAgent, startPagerootHttpAgent, stopPageRoot,
@@ -251,7 +251,7 @@ test("Codex authenticated component failure repairs in Settings, then reviews an
     await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("修改已准备好，尚未采用", { timeout: 60_000 });
     expect(readFileSync(workingPath, "utf8")).not.toContain('data-pageroot-codex-acp="e2e"');
     await sidebar.getByRole("button", { name: "查看修改" }).click();
-    await sidebar.getByRole("button", { name: "采用修改", exact: true }).click();
+    await adoptReadyResult(launched.page);
     await expect.poll(async () => (await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject()))?.sourcePath)
       .toMatch(/-V2\.html$/u);
     const first = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());

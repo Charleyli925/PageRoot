@@ -883,13 +883,17 @@ export const REVIEW_PROJECTION_CASES = Object.freeze([
   },
 ]);
 
-export async function assertReviewControlDefaults(page, beforeReviewFrame) {
+export async function assertReviewControlDefaults(
+  page,
+  beforeReviewFrame,
+  expectedNavigationTarget,
+) {
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
     "data-pageroot-review-filter",
   ), { timeout: 30_000 }).toBe("all");
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
     "data-pageroot-review-focus",
-  )).toMatch(/^change-[a-z0-9-]+$/u);
+  )).toBe(expectedNavigationTarget);
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
     "data-pageroot-review-focus-group",
   )).toBe("");
