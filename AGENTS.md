@@ -4,6 +4,30 @@ This repository is the complete public source boundary for PageRoot. Keep this
 file short: follow the rules below, then read only the task-specific documents
 listed under Progressive disclosure.
 
+## Model and multi-agent routing
+
+- Preserve the model and reasoning level selected by the user for the root agent. No `AGENTS.md`, skill, project default or child profile may replace, upgrade or downgrade it.
+- When the user selects GPT-5.6 Sol Ultra, keep ordinary child agents on GPT-5.6 Sol: use `low` for narrow read-only scouts, `medium` for routine workers, and `high` for difficult workers or independent review. The shared tester remains the explicit `gpt-5.6-luna` / `max` exception. Do not apply the Terra-Luna workflow to Sol Ultra.
+- When the user selects GPT-5.6 Terra Max for a routine scoped engineering task, use `$terra-luna-standard`. The Terra root retains requirements, architecture, product decisions, decomposition and final acceptance.
+- For every other user-selected model or effort, preserve that selection and do not silently apply either routing pattern.
+- Every spawned agent must receive an explicit model and reasoning effort using fresh or limited context. Do not rely on `.codex/config.toml` defaults for project routing. Use `gpt-5.6-luna` / `max` for the tester; follow `$terra-luna-standard` for Terra Max; use GPT-5.6 Sol at the levels above for Sol Ultra; otherwise pass the user's selected model and effort.
+- Delegate only bounded work that adds value. Independent read-only investigations may run in parallel, but only one agent may write a worktree at a time and no agents may receive overlapping files or shared interfaces.
+- Prefer `fork_turns: "none"` with a self-contained task when a child does not need full history. Leaf agents complete their assignment directly and do not spawn more agents.
+- The root agent remains available to the user, integrates results and retains all approval and final-decision authority.
+
+## Shared testing and independent review
+
+- For task-level validation, longer existing test batches or CI evidence collection, use `luna_tester` with explicit `gpt-5.6-luna` / `max`. A short focused edit-time check may remain with the implementer or root when delegation would add no value.
+- The implementer runs short checks and hands off source identity, commands and results. The root owns coverage, gate level, failure classification and acceptance; the tester runs existing deterministic gates and collects version-bound evidence. `task:finish` already owns `gate:task`, so never run both as separate completion gates.
+- Give the tester the absolute checkout, source identity or working-tree hash, base, acceptance goal, gate entrypoint, report location and stop conditions. Use `tests/TEST_STRATEGY.md` and existing `gate:plan`, `gate:edit` and `gate:task` selection rather than inventing a replacement matrix.
+- Freeze tested source while the tester owns build or test resources. The tester may write existing build output, isolated data and reports, but must not edit product code, tests, assertions, snapshots, gate rules or dependencies, and must not commit, push, change PR state, merge, install or publish.
+- Reuse the same tester for an authorized retest. Preserve first-failure evidence, follow existing retry policy and use `--resume` only when the gate confirms compatible source, base, environment and command.
+- Keep full logs, traces and screenshots in the report directory. The tester returns source/base, commands, exit status, planned/discovered/executed/pass/fail/skip/not-run counts where available, retry facts, failure classification, evidence paths and coverage gaps. Unknown counts remain unknown rather than becoming zero.
+- The root reviews the actual evidence and expands validation only for changed source, missing coverage, a failure or a specific unresolved risk. Do not repeat a passed applicable gate as extra insurance.
+- Use the model-neutral `reviewer` profile for independent review and explicitly pass the user's root model. Use Terra Max with `max`, Sol Ultra with `high`, and otherwise preserve the user's effort. Give it the original acceptance goal, actual diff and relevant source; the root retains final acceptance.
+- `luna_reviewer` remains compatibility-only. Verified P0/P1 defects and required deterministic gate failures block delivery; P2/P3 and unclassified minor findings follow the scope-stop rule and do not expand the task without explicit user escalation.
+- These are delegation rules, not a background scheduler or authorization expansion. When handing off to a fresh checkout, repeat the applicable user constraints and routing explicitly.
+
 ## Repository and authorization boundary
 
 - Work only in this repository. Any parent workspace directory is outside the Git repository and is not a source fallback.
