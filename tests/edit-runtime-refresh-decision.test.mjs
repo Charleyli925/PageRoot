@@ -21,7 +21,6 @@ test("Runtime text, style and sibling reorder edits end after in-place projectio
   for (const mutationKind of ["text", "style", "reorder"]) {
     assert.deepEqual(decideEditRuntimeRefresh({
       hasRuntime: true,
-      nativeEditActive: mutationKind === "text",
       mutationKind,
     }), {
       action: "in-place",
@@ -49,26 +48,44 @@ test("Runtime structure and program changes prepare a candidate now", () => {
   });
 });
 
-test("ordinary Runtime attributes defer while script-sensitive attributes rebuild", () => {
+test("ordinary Runtime attributes finish in place without a deferred rebuild", () => {
   for (const name of ["class", "title", "aria-label", "data-report-kind"]) {
-    assert.equal(isRuntimeInPlaceAttribute(name), true);
+    assert.equal(isRuntimeInPlaceAttribute(name, "section"), true);
     assert.deepEqual(decideEditRuntimeRefresh({
       hasRuntime: true,
       mutationKind: "attribute",
       attributeName: name,
+      elementTagName: "section",
     }), {
-      action: "defer-until-boundary",
+      action: "in-place",
       reason: "runtime-attribute",
       synchronizeCurrentFrame: true,
-      markRuntimeRefreshPending: true,
+      markRuntimeRefreshPending: false,
     });
   }
-  for (const name of ["onclick", "src", "srcset", "href", "action", "integrity"]) {
-    assert.equal(isRuntimeInPlaceAttribute(name), false);
+});
+
+test("attribute safety follows element purpose and resource impact", () => {
+  for (const [tagName, name] of [
+    ["img", "src"],
+    ["source", "srcset"],
+    ["a", "href"],
+    ["form", "action"],
+    ["script", "integrity"],
+    ["section", "onclick"],
+  ]) {
+    assert.equal(isRuntimeInPlaceAttribute(name, tagName), false);
     assert.equal(decideEditRuntimeRefresh({
       hasRuntime: true,
       mutationKind: "attribute",
       attributeName: name,
+      elementTagName: tagName,
     }).action, "candidate-now");
   }
+  for (const [tagName, name] of [
+    ["div", "src"],
+    ["section", "href"],
+    ["p", "data-report-kind"],
+  ]) assert.equal(isRuntimeInPlaceAttribute(name, tagName), true);
+  assert.equal(isRuntimeInPlaceAttribute("data-pageroot-id", "div"), false);
 });

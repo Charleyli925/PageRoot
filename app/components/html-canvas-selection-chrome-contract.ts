@@ -21,6 +21,7 @@ import type {
   HtmlCanvasInteractionMode,
   HtmlCanvasSelection,
 } from "./HtmlCanvasEditor.types";
+import type { ElementCopyAvailability } from "./html-canvas-pointer-proof.js";
 
 export type HtmlCanvasCommentMarker = {
   key: string;
@@ -86,6 +87,7 @@ export type SelectionChromeModel = {
   textFormatRequiresSelection: boolean;
   enableReorder: boolean;
   moveAvailability: MoveAvailability;
+  elementCopyAvailability: ElementCopyAvailability;
   deleteCommentCount: number;
   deleteCommentDraftIncluded: boolean;
   spacingMenuRef: RefObject<HTMLDetailsElement | null>;

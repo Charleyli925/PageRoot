@@ -527,10 +527,16 @@ Authored structure edits use the same boundary. Insert accepts one identity-free
 source element and allocates IDs for its whole subtree; duplicate first removes
 the selected subtree's IDs; delete retires them; same-parent and cross-parent
 move preserve them. Only current `SourceIndex` elements are eligible. Script-
-generated nodes and preview DOM are never structural inputs. The visible toolbar
-keeps this deliberately small: duplicate, delete and sibling up/down; the Canvas
-port exposes raw insertion and cross-parent move for product workflows without
-adding a component or layout system. See ADR 0064.
+generated nodes and preview DOM are never structural inputs. Duplicate additionally
+compares the complete selected live subtree with its current canonical source
+subtree; a generated descendant, opaque runtime surface or authored program makes
+the parent selection unsupported. Known-unsupported copy is absent from the
+toolbar and rejected again at the common command boundary, while independent
+source-backed siblings, delete/move, text copy and complete-HTML save/export keep
+their existing contracts. The visible toolbar keeps this deliberately small:
+duplicate, delete and sibling up/down; the Canvas port exposes raw insertion and
+cross-parent move for product workflows without adding a component or layout
+system. See ADR 0064 and ADR 0065.
 
 Undo and redo first checkpoint any active editable island and drain the source
 queue. The renderer applies the exact inverse or forward patches locally, then

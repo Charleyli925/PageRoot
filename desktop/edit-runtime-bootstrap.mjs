@@ -51,6 +51,7 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
       })
     : null;
   const registerProved = registration?.registerProved;
+  const registerRuntimeShadowHost = registration?.registerRuntimeShadowHost;
   const reportActivationOutcome = registration?.reportActivationOutcome;
   const canAcceptFocus = registration?.canAcceptFocus;
 
@@ -83,6 +84,32 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     installFocusGuard(SVGElement.prototype, "focus");
   }
   installFocusGuard(window, "focus");
+
+  // Closed shadow roots are intentionally invisible through host.shadowRoot.
+  // Record only their hosts through the same frame-bound private capability so
+  // element-copy checks cannot mistake hidden generated content for source.
+  const attachShadowDescriptor = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "attachShadow",
+  );
+  const nativeAttachShadow = attachShadowDescriptor?.value;
+  if (typeof nativeAttachShadow === "function") {
+    try {
+      Object.defineProperty(Element.prototype, "attachShadow", {
+        ...attachShadowDescriptor,
+        value: function trackedRuntimeAttachShadow(...args) {
+          const root = Reflect.apply(nativeAttachShadow, this, args);
+          if (typeof registerRuntimeShadowHost === "function") {
+            registerRuntimeShadowHost(this);
+          }
+          return root;
+        },
+      });
+    } catch {
+      // If the platform forbids wrapping attachShadow, the ordinary open-root
+      // proof remains available and copy fails closed for observable drift.
+    }
+  }
 
   const candidates = (root) => {
     if (!root || root.nodeType !== Node.ELEMENT_NODE) return [];

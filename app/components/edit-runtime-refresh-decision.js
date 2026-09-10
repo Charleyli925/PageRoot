@@ -1,8 +1,39 @@
-const IN_PLACE_ATTRIBUTE = /^(?!(?:on|src$|srcset$|href$|xlink:href$|action$|formaction$|data$|codebase$|integrity$|crossorigin$|referrerpolicy$))/iu;
+const RESOURCE_BOUNDARY_ATTRIBUTES_BY_ELEMENT = Object.freeze({
+  a: new Set(["href", "ping", "target"]),
+  area: new Set(["href", "ping", "target"]),
+  audio: new Set(["autoplay", "crossorigin", "preload", "src"]),
+  base: new Set(["href", "target"]),
+  button: new Set(["formaction", "formenctype", "formmethod", "formtarget"]),
+  embed: new Set(["src", "type"]),
+  form: new Set(["action", "enctype", "method", "target"]),
+  iframe: new Set(["allow", "referrerpolicy", "sandbox", "src", "srcdoc"]),
+  image: new Set(["href", "xlink:href"]),
+  img: new Set(["crossorigin", "decoding", "fetchpriority", "referrerpolicy", "sizes", "src", "srcset"]),
+  input: new Set(["formaction", "formenctype", "formmethod", "formtarget", "src", "type"]),
+  link: new Set(["as", "crossorigin", "fetchpriority", "href", "integrity", "media", "referrerpolicy", "rel", "type"]),
+  meta: new Set(["charset", "content", "http-equiv"]),
+  object: new Set(["classid", "codebase", "data", "type"]),
+  script: new Set(["async", "crossorigin", "defer", "fetchpriority", "integrity", "nomodule", "nonce", "referrerpolicy", "src", "type"]),
+  source: new Set(["media", "sizes", "src", "srcset", "type"]),
+  track: new Set(["default", "kind", "src", "srclang"]),
+  use: new Set(["href", "xlink:href"]),
+  video: new Set(["autoplay", "crossorigin", "poster", "preload", "src"]),
+});
 
-export function isRuntimeInPlaceAttribute(attributeName) {
+const RESOURCE_BOUNDARY_ATTRIBUTE_NAMES = new Set(
+  Object.values(RESOURCE_BOUNDARY_ATTRIBUTES_BY_ELEMENT).flatMap((names) => [...names]),
+);
+
+export function isRuntimeInPlaceAttribute(attributeName, elementTagName = null) {
   const normalized = String(attributeName ?? "").trim().toLowerCase();
-  return normalized !== "" && IN_PLACE_ATTRIBUTE.test(normalized);
+  if (
+    normalized === ""
+    || normalized.startsWith("on")
+    || normalized.startsWith("data-pageroot-")
+  ) return false;
+  const tagName = String(elementTagName ?? "").trim().toLowerCase();
+  if (!tagName) return !RESOURCE_BOUNDARY_ATTRIBUTE_NAMES.has(normalized);
+  return !RESOURCE_BOUNDARY_ATTRIBUTES_BY_ELEMENT[tagName]?.has(normalized);
 }
 
 /**
@@ -12,10 +43,10 @@ export function isRuntimeInPlaceAttribute(attributeName) {
  */
 export function decideEditRuntimeRefresh({
   hasRuntime = false,
-  nativeEditActive = false,
   mutationKind,
   programIdentityChanged = false,
   attributeName = null,
+  elementTagName = null,
 } = {}) {
   if (programIdentityChanged) {
     return Object.freeze({
@@ -31,7 +62,7 @@ export function decideEditRuntimeRefresh({
     || mutationKind === "reorder"
     || (
       mutationKind === "attribute"
-      && isRuntimeInPlaceAttribute(attributeName)
+      && isRuntimeInPlaceAttribute(attributeName, elementTagName)
     );
 
   if (!hasRuntime) {
@@ -61,15 +92,13 @@ export function decideEditRuntimeRefresh({
 
   if (
     mutationKind === "attribute"
-    && isRuntimeInPlaceAttribute(attributeName)
+    && isRuntimeInPlaceAttribute(attributeName, elementTagName)
   ) {
     return Object.freeze({
-      action: "defer-until-boundary",
-      reason: nativeEditActive
-        ? "continuous-native-edit"
-        : `runtime-${mutationKind}`,
+      action: "in-place",
+      reason: `runtime-${mutationKind}`,
       synchronizeCurrentFrame: true,
-      markRuntimeRefreshPending: true,
+      markRuntimeRefreshPending: false,
     });
   }
 

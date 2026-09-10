@@ -1,3 +1,4 @@
+import { parse as parseJavaScript } from "acorn";
 import { parse as parseHtmlDocument } from "parse5";
 
 /**
@@ -280,229 +281,37 @@ export function editRuntimeProgramIdentity(html) {
   });
 }
 
-function skipJavaScriptQuotedLiteral(source, start, quote) {
-  let cursor = start + 1;
-  while (cursor < source.length) {
-    const character = source[cursor];
-    if (character === "\\") {
-      cursor += 2;
-      continue;
-    }
-    cursor += 1;
-    if (character === quote) break;
-  }
-  return cursor;
-}
-
-function skipJavaScriptComment(source, start) {
-  if (source[start + 1] === "/") {
-    let cursor = start + 2;
-    while (cursor < source.length && source[cursor] !== "\n" && source[cursor] !== "\r") {
-      cursor += 1;
-    }
-    return cursor;
-  }
-  if (source[start + 1] === "*") {
-    const end = source.indexOf("*/", start + 2);
-    return end < 0 ? source.length : end + 2;
-  }
-  return start;
-}
-
-function skipJavaScriptTrivia(source, start) {
-  let cursor = start;
-  while (cursor < source.length) {
-    if (/\s/u.test(source[cursor])) {
-      cursor += 1;
-      continue;
-    }
-    const commentEnd = source[cursor] === "/"
-      ? skipJavaScriptComment(source, cursor)
-      : cursor;
-    if (commentEnd === cursor) break;
-    cursor = commentEnd;
-  }
-  return cursor;
-}
-
-function skipJavaScriptRegexLiteral(source, start) {
-  let cursor = start + 1;
-  let inCharacterClass = false;
-  while (cursor < source.length) {
-    const character = source[cursor];
-    if (character === "\\") {
-      cursor += 2;
-      continue;
-    }
-    if (character === "[") inCharacterClass = true;
-    if (character === "]") inCharacterClass = false;
-    cursor += 1;
-    if (character === "/" && !inCharacterClass) break;
-    if (character === "\n" || character === "\r") break;
-  }
-  while (cursor < source.length && /[a-z]/iu.test(source[cursor])) cursor += 1;
-  return cursor;
-}
-
 function containsJavaScriptImportSyntax(source) {
-  let found = false;
-  const expressionKeywords = new Set([
-    "await", "case", "delete", "do", "else", "in", "instanceof", "new",
-    "of", "return", "throw", "typeof", "void", "yield",
-  ]);
-  const blockOpeningKeywords = new Set(["do", "else", "finally", "try"]);
-  let scanCode;
-
-  const scanTemplate = (start) => {
-    let cursor = start + 1;
-    while (cursor < source.length && !found) {
-      const character = source[cursor];
-      if (character === "\\") {
-        cursor += 2;
-        continue;
+  try {
+    const root = parseJavaScript(source, {
+      ecmaVersion: "latest",
+      sourceType: "script",
+      allowImportExportEverywhere: true,
+      allowAwaitOutsideFunction: true,
+    });
+    const pending = [root];
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (!node || typeof node !== "object") continue;
+      if (
+        node.type === "ImportDeclaration"
+        || node.type === "ImportExpression"
+        || (
+          (node.type === "ExportAllDeclaration" || node.type === "ExportNamedDeclaration")
+          && node.source
+        )
+      ) return true;
+      for (const value of Object.values(node)) {
+        if (Array.isArray(value)) pending.push(...value);
+        else if (value && typeof value === "object") pending.push(value);
       }
-      if (character === "`") return cursor + 1;
-      if (character === "$" && source[cursor + 1] === "{") {
-        cursor = scanCode(cursor + 2, true);
-        continue;
-      }
-      cursor += 1;
     }
-    return cursor;
-  };
-
-  scanCode = (start, stopAtClosingBrace = false) => {
-    let cursor = start;
-    const braceKinds = [];
-    let parenthesisDepth = 0;
-    let bracketDepth = 0;
-    let pendingClassBody = null;
-    let expressionExpected = true;
-    let previousToken = "";
-    while (cursor < source.length && !found) {
-      const character = source[cursor];
-      if (/\s/u.test(character)) {
-        cursor += 1;
-        continue;
-      }
-      if (character === "'" || character === '"') {
-        cursor = skipJavaScriptQuotedLiteral(source, cursor, character);
-        expressionExpected = false;
-        previousToken = "literal";
-        continue;
-      }
-      if (character === "`") {
-        cursor = scanTemplate(cursor);
-        expressionExpected = false;
-        previousToken = "literal";
-        continue;
-      }
-      if (character === "/") {
-        const commentEnd = skipJavaScriptComment(source, cursor);
-        if (commentEnd !== cursor) {
-          cursor = commentEnd;
-          continue;
-        }
-        if (expressionExpected) {
-          cursor = skipJavaScriptRegexLiteral(source, cursor);
-          expressionExpected = false;
-          previousToken = "literal";
-        } else {
-          cursor += source[cursor + 1] === "=" ? 2 : 1;
-          expressionExpected = true;
-          previousToken = "/";
-        }
-        continue;
-      }
-      if (/[A-Za-z_$]/u.test(character)) {
-        const match = /^[A-Za-z_$][\w$]*/u.exec(source.slice(cursor));
-        const identifier = match?.[0] || character;
-        const next = skipJavaScriptTrivia(source, cursor + identifier.length);
-        const memberPrefix = ["{", ",", "}", ";", "*", "get", "set", "async", "static"]
-          .includes(previousToken);
-        const importPropertyMethod = source[next] === "("
-          && (
-            (braceKinds.at(-1) === "object" && memberPrefix)
-            || (braceKinds.at(-1) === "class" && memberPrefix)
-          );
-        const importClassMember = identifier === "import"
-          && braceKinds.at(-1) === "class"
-          && memberPrefix;
-        if (
-          identifier === "import"
-          && previousToken !== "."
-          && previousToken !== "?."
-          && source[next] !== ":"
-          && !importPropertyMethod
-          && !importClassMember
-        ) {
-          found = true;
-          return source.length;
-        }
-        cursor += identifier.length;
-        if (identifier === "class" && previousToken !== "." && previousToken !== "?.") {
-          pendingClassBody = { parenthesisDepth, bracketDepth };
-        }
-        expressionExpected = expressionKeywords.has(identifier);
-        previousToken = identifier;
-        continue;
-      }
-      if (/[0-9]/u.test(character)) {
-        const match = /^(?:0[xob][0-9a-f]+|(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)/iu.exec(
-          source.slice(cursor),
-        );
-        cursor += match?.[0].length || 1;
-        expressionExpected = false;
-        previousToken = "literal";
-        continue;
-      }
-      if (character === "{") {
-        const opensClassBody = pendingClassBody
-          && pendingClassBody.parenthesisDepth === parenthesisDepth
-          && pendingClassBody.bracketDepth === bracketDepth;
-        braceKinds.push(
-          opensClassBody
-            ? "class"
-            : !expressionExpected
-          || previousToken === "=>"
-          || blockOpeningKeywords.has(previousToken)
-            ? "block"
-            : "object",
-        );
-        if (opensClassBody) pendingClassBody = null;
-        cursor += 1;
-        expressionExpected = true;
-        previousToken = "{";
-        continue;
-      }
-      if (character === "}") {
-        if (stopAtClosingBrace && braceKinds.length === 0) return cursor + 1;
-        const braceKind = braceKinds.pop();
-        cursor += 1;
-        expressionExpected = braceKind === "block";
-        previousToken = "}";
-        continue;
-      }
-      const threeCharacters = source.slice(cursor, cursor + 3);
-      const twoCharacters = source.slice(cursor, cursor + 2);
-      const token = threeCharacters === "..."
-        ? threeCharacters
-        : ["?.", "=>"].includes(twoCharacters)
-          ? twoCharacters
-          : character;
-      cursor += token.length;
-      if (token === "(") parenthesisDepth += 1;
-      if (token === ")") parenthesisDepth = Math.max(0, parenthesisDepth - 1);
-      if (token === "[") bracketDepth += 1;
-      if (token === "]") bracketDepth = Math.max(0, bracketDepth - 1);
-      expressionExpected = ![")", "]"].includes(token);
-      previousToken = token;
-    }
-    return cursor;
-  };
-
-  scanCode(0);
-  return found;
+  } catch {
+    // Syntax errors are Runtime Script failures, not proof of an unsupported
+    // loading dependency. Acorn owns lexical distinctions such as Annex-B HTML
+    // comments, regular expressions, strings, property names and import.meta.
+  }
+  return false;
 }
 
 /**

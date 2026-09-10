@@ -1,4 +1,5 @@
 import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
+import { EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE } from "../domain/edit-runtime-contract.js";
 import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
   isValidPagerootElementId,
@@ -35,18 +36,281 @@ import {
   selectionForElement,
 } from "./html-canvas-selection";
 import { moduleHasSubstance } from "./html-canvas-pointer-hit.js";
-import { canvasPointerCapabilityFromProof } from "./html-canvas-pointer-proof.js";
+import {
+  canvasPointerCapabilityFromProof,
+  elementCopyAvailabilityFromProof,
+  type ElementCopyAvailability,
+} from "./html-canvas-pointer-proof.js";
 
 export {
   CANVAS_POINTER_CAPABILITY_KINDS,
   CANVAS_POINTER_CAPABILITIES,
   canvasPointerCapabilityFromProof,
+  elementCopyAvailabilityFromProof,
 } from "./html-canvas-pointer-proof.js";
 export { moduleHasSubstance } from "./html-canvas-pointer-hit.js";
 export type {
   CanvasPointerCapability,
   CanvasPointerCapabilityKind,
+  ElementCopyAvailability,
 } from "./html-canvas-pointer-proof.js";
+
+const OPAQUE_OR_PROGRAM_COPY_TAGS = new Set([
+  "canvas",
+  "embed",
+  "iframe",
+  "object",
+  "script",
+]);
+
+type TrustedDomInspection = Readonly<{
+  attributeNames: (element: Element) => string[];
+  attributeValue: (element: Element, name: string) => string | null;
+  child: (node: Node) => ChildNode | null;
+  connected: (node: Node) => boolean;
+  localName: (element: Element) => string;
+  namespace: (element: Element) => string | null;
+  next: (node: Node) => ChildNode | null;
+  nodeType: (node: Node) => number;
+  nodeValue: (node: Node) => string | null;
+  parse: (source: string) => Document;
+  query: (documentNode: Document, selector: string) => Element[];
+  shadowRoot: (element: Element) => ShadowRoot | null;
+}>;
+
+function captureTrustedDomInspection(): TrustedDomInspection | null {
+  if (
+    typeof Node === "undefined"
+    || typeof Element === "undefined"
+    || typeof Document === "undefined"
+    || typeof DOMParser === "undefined"
+    || typeof NodeList === "undefined"
+  ) return null;
+  const apply = Reflect.apply;
+  const getter = (prototype: object, name: string) => (
+    Object.getOwnPropertyDescriptor(prototype, name)?.get ?? null
+  );
+  const nodeType = getter(Node.prototype, "nodeType");
+  const nodeValue = getter(Node.prototype, "nodeValue");
+  const firstChild = getter(Node.prototype, "firstChild");
+  const nextSibling = getter(Node.prototype, "nextSibling");
+  const isConnected = getter(Node.prototype, "isConnected");
+  const localName = getter(Element.prototype, "localName");
+  const namespaceURI = getter(Element.prototype, "namespaceURI")
+    ?? getter(Node.prototype, "namespaceURI");
+  const shadowRoot = getter(Element.prototype, "shadowRoot");
+  const nodeListLength = getter(NodeList.prototype, "length");
+  const getAttributeNames = Element.prototype.getAttributeNames;
+  const getAttribute = Element.prototype.getAttribute;
+  const querySelectorAll = Document.prototype.querySelectorAll;
+  const nodeListItem = NodeList.prototype.item;
+  const parseFromString = DOMParser.prototype.parseFromString;
+  const TrustedDOMParser = DOMParser;
+  if (
+    !nodeType
+    || !nodeValue
+    || !firstChild
+    || !nextSibling
+    || !isConnected
+    || !localName
+    || !namespaceURI
+    || !shadowRoot
+    || !nodeListLength
+  ) return null;
+  return Object.freeze({
+    attributeNames: (element) => apply(getAttributeNames, element, []),
+    attributeValue: (element, name) => apply(getAttribute, element, [name]),
+    child: (node) => apply(firstChild, node, []),
+    connected: (node) => apply(isConnected, node, []),
+    localName: (element) => apply(localName, element, []),
+    namespace: (element) => apply(namespaceURI, element, []),
+    next: (node) => apply(nextSibling, node, []),
+    nodeType: (node) => apply(nodeType, node, []),
+    nodeValue: (node) => apply(nodeValue, node, []),
+    parse: (source) => apply(
+      parseFromString,
+      new TrustedDOMParser(),
+      [source, "text/html"],
+    ),
+    query: (documentNode, selector) => {
+      const matches = apply(querySelectorAll, documentNode, [selector]);
+      const length = apply(nodeListLength, matches, []);
+      const elements: Element[] = [];
+      for (let index = 0; index < length; index += 1) {
+        const element = apply(nodeListItem, matches, [index]);
+        if (element) elements.push(element as Element);
+      }
+      return elements;
+    },
+    shadowRoot: (element) => apply(shadowRoot, element, []),
+  });
+}
+
+// Captured before any authored iframe runs. Copy authority must not depend on
+// DOM getters or selector methods that the authored realm can replace.
+const TRUSTED_DOM_INSPECTION = captureTrustedDomInspection();
+
+function isOpaqueOrProgramCopyElement(localName: string): boolean {
+  return OPAQUE_OR_PROGRAM_COPY_TAGS.has(localName) || localName.includes("-");
+}
+
+function isProjectionOnlyAttribute(name: string, sourceHasAttribute: boolean): boolean {
+  const normalized = name.toLowerCase();
+  return normalized === EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE
+    || normalized.startsWith("data-html-canvas-")
+    || normalized.startsWith("data-pageroot-edit-runtime-")
+    || (
+      ["contenteditable", "role", "spellcheck"].includes(normalized)
+      && !sourceHasAttribute
+    );
+}
+
+function normalizedAttributes(
+  inspection: TrustedDomInspection,
+  element: Element,
+): Array<readonly [string, string]> {
+  const names = inspection.attributeNames(element);
+  const result: Array<readonly [string, string]> = [];
+  for (let index = 0; index < names.length; index += 1) {
+    const name = names[index];
+    result.push([name.toLowerCase(), inspection.attributeValue(element, name) ?? ""]);
+  }
+  return result;
+}
+
+function attributesMatch(
+  inspection: TrustedDomInspection,
+  liveElement: Element,
+  canonicalElement: Element,
+): boolean {
+  const canonical = normalizedAttributes(inspection, canonicalElement);
+  const live = normalizedAttributes(inspection, liveElement);
+  let authoredCount = 0;
+  for (const [name, value] of live) {
+    const sourceAttribute = canonical.find(([candidate]) => candidate === name);
+    if (isProjectionOnlyAttribute(name, Boolean(sourceAttribute))) continue;
+    authoredCount += 1;
+    if (!sourceAttribute || sourceAttribute[1] !== value) return false;
+  }
+  return authoredCount === canonical.length;
+}
+
+function runtimeNodeMatchesSource(
+  liveNode: Node,
+  canonicalNode: Node,
+  isProvenRuntimeSourceElement: ((element: HTMLElement) => boolean) | null,
+  hasRuntimeShadowRoot: ((element: HTMLElement) => boolean) | null,
+): boolean {
+  const inspection = TRUSTED_DOM_INSPECTION;
+  if (!inspection) return false;
+  const liveNodeType = inspection.nodeType(liveNode);
+  if (liveNodeType !== inspection.nodeType(canonicalNode)) return false;
+  if (liveNodeType !== Node.ELEMENT_NODE) {
+    return inspection.nodeValue(liveNode) === inspection.nodeValue(canonicalNode);
+  }
+  const liveElement = liveNode as HTMLElement;
+  const canonicalElement = canonicalNode as HTMLElement;
+  const liveLocalName = inspection.localName(liveElement);
+  if (
+    liveLocalName !== inspection.localName(canonicalElement)
+    || inspection.namespace(liveElement) !== inspection.namespace(canonicalElement)
+    || inspection.shadowRoot(liveElement)
+    || hasRuntimeShadowRoot?.(liveElement)
+    || isOpaqueOrProgramCopyElement(liveLocalName)
+    || (isProvenRuntimeSourceElement && !isProvenRuntimeSourceElement(liveElement))
+  ) return false;
+  if (!attributesMatch(inspection, liveElement, canonicalElement)) return false;
+  let liveChild = inspection.child(liveElement);
+  let canonicalChild = inspection.child(canonicalElement);
+  while (liveChild && canonicalChild) {
+    if (!runtimeNodeMatchesSource(
+      liveChild,
+      canonicalChild,
+      isProvenRuntimeSourceElement,
+      hasRuntimeShadowRoot,
+    )) return false;
+    liveChild = inspection.next(liveChild);
+    canonicalChild = inspection.next(canonicalChild);
+  }
+  return liveChild === null && canonicalChild === null;
+}
+
+function runtimeSubtreeMatchesSource(
+  root: HTMLElement,
+  sourceIndex: SourceIndexValue,
+  isProvenRuntimeSourceElement: ((element: HTMLElement) => boolean) | null,
+  hasRuntimeShadowRoot: ((element: HTMLElement) => boolean) | null,
+): boolean {
+  const inspection = TRUSTED_DOM_INSPECTION;
+  if (!inspection) return false;
+  try {
+    const pagerootId = inspection.attributeValue(root, PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+    if (!pagerootId) return false;
+    const canonicalDocument = inspection.parse(sourceIndex.source);
+    const selector = `[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${pagerootId}"]`;
+    const matches = inspection.query(canonicalDocument, selector);
+    const canonicalRoot = matches.length === 1 ? matches[0] as HTMLElement : null;
+    return Boolean(
+      canonicalRoot
+      && runtimeNodeMatchesSource(
+        root,
+        canonicalRoot,
+        isProvenRuntimeSourceElement,
+        hasRuntimeShadowRoot,
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function elementCopyAvailabilityForTarget({
+  element,
+  sourceIndex,
+  runtimeGenerated = false,
+  runtimeExpected = false,
+  transientBusy = false,
+  isProvenRuntimeSourceElement = null,
+  hasRuntimeShadowRoot = null,
+}: {
+  element: HTMLElement | null;
+  sourceIndex: SourceIndexValue | null;
+  runtimeGenerated?: boolean;
+  runtimeExpected?: boolean;
+  transientBusy?: boolean;
+  isProvenRuntimeSourceElement?: ((element: HTMLElement) => boolean) | null;
+  hasRuntimeShadowRoot?: ((element: HTMLElement) => boolean) | null;
+}): ElementCopyAvailability {
+  const inspection = TRUSTED_DOM_INSPECTION;
+  if (
+    runtimeGenerated
+    || !element
+    || !inspection
+    || !inspection.connected(element)
+    || !sourceIndex
+  ) {
+    return "unsupported";
+  }
+  if (runtimeExpected && !isProvenRuntimeSourceElement) {
+    return elementCopyAvailabilityFromProof({ transientBusy: true });
+  }
+  const sourceMutationAuthority = runtimeExpected
+    ? Boolean(isProvenRuntimeSourceElement?.(element))
+    : Boolean(inspection.attributeValue(element, PAGEROOT_ELEMENT_ID_ATTRIBUTE));
+  const containsRuntimeGeneratedContent = sourceMutationAuthority
+    ? !runtimeSubtreeMatchesSource(
+        element,
+        sourceIndex,
+        runtimeExpected ? isProvenRuntimeSourceElement : null,
+        runtimeExpected ? hasRuntimeShadowRoot : null,
+      )
+    : false;
+  return elementCopyAvailabilityFromProof({
+    sourceMutationAuthority,
+    containsRuntimeGeneratedContent,
+    transientBusy,
+  });
+}
 
 export function canStartNativeTextEditAtTarget({
   documentNode,

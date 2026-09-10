@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   canvasPointerCapabilityFromProof,
+  elementCopyAvailabilityFromProof,
 } from "../app/components/html-canvas-pointer-proof.js";
 import { moduleHasSubstance } from "../app/components/html-canvas-pointer-hit.js";
 
@@ -47,6 +48,24 @@ test("unmapped targets stay comment-only", () => {
   });
   assert.equal(capability.hint, "可添加评论交给 AI");
   assert.equal(capability.cursor, "default");
+});
+
+test("element copy distinguishes unsupported subtrees from transient busy state", () => {
+  assert.equal(elementCopyAvailabilityFromProof({
+    sourceMutationAuthority: true,
+  }), "available");
+  assert.equal(elementCopyAvailabilityFromProof({
+    sourceMutationAuthority: true,
+    transientBusy: true,
+  }), "busy");
+  assert.equal(elementCopyAvailabilityFromProof({
+    sourceMutationAuthority: true,
+    containsRuntimeGeneratedContent: true,
+    transientBusy: true,
+  }), "unsupported");
+  assert.equal(elementCopyAvailabilityFromProof({
+    sourceMutationAuthority: false,
+  }), "unsupported");
 });
 
 test("empty modules have no substance and filled modules do", () => {

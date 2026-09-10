@@ -78,15 +78,24 @@ source or be reconciled node by node.
 - PageRoot directly edits only nodes still proven to be authored source
   elements. A runtime-generated node is display-only: it may be commented on
   through its nearest source host but cannot be text-edited, styled, reordered,
-  moved, duplicated or deleted as source.
+  moved, duplicated or deleted as source. Element duplication additionally
+  proves the complete selected live subtree against the current SourceIndex;
+  generated descendants, opaque runtime surfaces and authored programs make
+  that whole selection unsupported. The toolbar hides a known-unsupported copy
+  action, uses disabled only for a transient Candidate/connection interval, and
+  the command boundary repeats the same proof so alternate callers cannot
+  bypass it. Ordinary text copy and complete-HTML save/export are unaffected.
 - Every accepted semantic source change still produces complete next HTML.
   Structural and other non-native changes rebuild the disposable iframe and
-  rerun the author program. Successful direct text and common-style source
-  changes update the proved current DOM projection and end there; finishing the
-  edit, changing selection, waiting or saving does not create a deferred author
-  program rerun. Local projection failure, stale source identity and explicit
-  recovery remain rebuild boundaries. Comments, save and source echoes without
-  an HTML change do not require a rebuild.
+  rerun the author program. Successful direct text, common-style and same-parent
+  reorder changes update the proved current DOM projection and end there;
+  finishing the edit, changing selection, waiting or saving does not create a
+  deferred author program rerun. Local projection failure, stale source identity
+  and explicit recovery remain rebuild boundaries. A necessary pending recovery advances to
+  the latest accepted source revision and clears only after that exact revision
+  is successfully connected and promoted; an unrelated ordinary edit cannot
+  erase it. Comments, save and source echoes without an HTML change do not
+  require a rebuild.
 - One scoped resource session may serve repeated disposable frames only while
   the authored script markup and bodies have the same exact program identity.
   A script change requires a new Canvas generation and a newly authorized
@@ -127,6 +136,11 @@ saved fact.**
   authored DOM projection and must not replace the iframe for every keystroke.
   Once that synchronization succeeds it must not replace the iframe during
   input or after the ordinary edit boundary.
+- The activation and critical-surface phase limits terminate only unfinished
+  waits. A current result that has already settled and passed the necessary
+  identity/readiness checks is not rejected after the fact for exceeding a
+  performance target. Cancelled, terminated, superseded and lease-expired
+  results remain permanently ineligible.
 - The implementation preserves the current page whenever it can still prove a
   local source-backed update. A structure change or a change whose result
   requires author Script may rebuild the disposable iframe, but rebuilds are
@@ -136,7 +150,9 @@ saved fact.**
 - A necessary rebuild should restore the shared scroll position, any exposed
   zoom context, and the selection resolved by stable element ID when those
   facts still have a valid target. Restoration is best-effort presentation;
-  failure never permits runtime DOM to become source authority.
+  failure never permits runtime DOM to become source authority. The rebuild may
+  show a brief loading interval and never interrupts active input; legal
+  structure changes do not promise pixel-identical position afterward.
 - When a rebuild replaces a settled Runtime iframe, the editor keeps a
   presentation-only handoff: iframe and shared-workspace scroll, a stable-ID
   visual anchor and screen offset, and zoom. It must not restore Caret, Range,
@@ -188,6 +204,11 @@ runtime-only state after reopen.
 - The supported compatibility surface includes parser-blocking classic scripts,
   inline classic scripts, `defer`, import-free modules, author
   `DOMContentLoaded` listeners, and a first contained relative `<base href>`.
+  The bounded maintained parser distinguishes actual static/dynamic imports from comments,
+  strings, regular expressions, property/private names and module metadata;
+  `import.meta` is checked as supported metadata rather than treated as a module
+  dependency. Parsing is used only for this dependency classification and does
+  not provide a new module-loader implementation.
   Program identity and Main resource preparation must derive that base from the
   same first live-document `base[href]`: an earlier base without `href` does not
   win, inert `<template>` contents and foreign-namespace lookalikes do not
@@ -218,9 +239,20 @@ runtime-only state after reopen.
   through edit completion, target changes, waiting and ordinary save; author
   Script is not rerun for those successful local projections. The completed
   common edit survives close and reopen from HTML.
+- Same-parent reorder has the same in-place end state. Failed local synchronization
+  and stale source mapping still rebuild.
+- A settled, identity-current Candidate that has passed the required checks may
+  promote even when its reported elapsed time exceeds the performance target.
+  The phase limits still terminate unfinished waiting; cancelled, terminated,
+  superseded or lease-expired results never regain authority.
 - A required rebuild preserves shared scroll and stable-ID selection when the
   target remains valid, without serializing runtime output.
 - Switching away and back creates a fresh runtime page without replaying an old
   request identity or reusing an inactive live Script DOM.
 - Generated descendants map to a source host for comments and expose no source
-  edit or structure commands.
+  edit or structure commands. Copy is also absent for any selected parent whose
+  subtree contains them, while a separate proved source subtree remains copyable.
+- Reports containing many supported charts retain their Runtime display and
+  comment path while ordinary source-backed regions remain directly editable.
+  Editing prose does not promise to recalculate every chart. Complex apps may
+  limit direct editing by region without disabling the whole page's Script.
