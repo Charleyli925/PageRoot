@@ -7,36 +7,28 @@ listed under Progressive disclosure.
 ## Model and multi-agent routing
 
 - Preserve the model and reasoning level selected by the user for the root agent. No `AGENTS.md`, skill, project default or child profile may replace, upgrade or downgrade it.
-- This repository opts into Codex multi-agent V2. The feature flag is project-scoped, so it selects the multi-agent runtime for every root model used in this checkout; the explicit child-model routing below applies only to non-Ultra Sol and Astra.
-- Use Codex's built-in `explorer` and `worker` roles. Keep `explorer` read-only. Use the project-defined, model-neutral `reviewer` and `tester` roles. Do not create model-named copies of these roles.
-- For a `gpt-5.6-sol` root below Ultra, spawn `explorer`, `worker` and `tester` with `gpt-5.6-luna` / `max`. Spawn `reviewer` with `gpt-5.6-sol`; use `high` for a Low, Medium or High root, `xhigh` for an XHigh root and `max` for a Max root.
-- For a `gpt-6-astra` root below Ultra, spawn `explorer`, `worker` and `tester` with `gpt-5.6-luna` / `max`. Spawn `reviewer` with `gpt-6-astra`; use `high` for a Low, Medium or High root, `xhigh` for an XHigh root and `max` for a Max root.
-- For Sol Ultra or Astra Ultra, keep Codex's native delegation and model-selection behavior. Do not apply the non-Ultra routing tables or require a project `reviewer` or `tester`.
-- For every other root model, omit child model and reasoning overrides so the child inherits the root selection.
-- If an explicit child model or effort is unavailable, record the original route failure and retry that spawn once without model or reasoning overrides so the child inherits the root. The inherited root route becomes the authorized fallback expectation for that retry; accept it only when exposed metadata matches. Report the fallback; do not silently substitute a third model.
-- The route-evidence, dependency-wave, spawn-brief, lifecycle and result-acceptance rules below apply only to non-Ultra project-managed delegation. `docs/CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5 is their detailed owner; read it before the first spawn in a substantial task.
-- For each non-Ultra spawn, have the root record the expected role, model, reasoning effort and explicit-or-inherited status, then verify the actual route through exposed client or child-runtime metadata. Natural-language self-report is not proof. Follow the mismatch, retry and `unverified` outcomes in the owner document without converting an inherited route into an explicit override.
-- For non-Ultra Sol and Astra, the root agent decides proactively whether to delegate; it does not wait for a separate user request. Before starting substantial work, identify the immediate critical path and any concrete, bounded side tasks that can run independently while the root continues useful work. Delegate those side tasks when parallel execution is likely to save meaningful time or improve quality.
-- Prefer subagents for read-heavy or high-noise work such as exploration, test execution, log analysis, issue triage and summarization so raw intermediate output does not crowd the root context. Keep decisions, integration and the final answer on the root agent.
-- Keep short tasks, tightly coupled decisions and immediate blockers on the root agent. Do not duplicate a delegated task. Continue non-overlapping root work while children run and wait only when a child result is needed.
-- Use the same delegation trigger for non-Ultra Sol and Astra; their child-model routing remains different as listed above. For a multi-step task, track bounded task IDs, `depends_on`, source identity and file ownership, then spawn only the ready wave and unlock later waves only after root verification. At most three child agents may be open concurrently. Independent read-only investigations may run in parallel, but only one agent may write a worktree at a time, including generated test artifacts, and concurrently active write assignments may not overlap files or shared interfaces. Read-only exploration, testing or review may inspect frozen writer-owned source and diffs without taking write ownership.
-- Every non-Ultra spawn brief must carry the task packet defined in the owner document, including an exact checkout and source fingerprint, acceptance and validation, stop conditions and expected result. Provide a report path when raw logs or durable artifacts are required; otherwise request only the concise thread result. Prefer `fork_turns: "none"` with a self-contained task when a child does not need full history. Leaf agents complete their assignment directly and do not spawn more agents.
-- The root owns lifecycle actions. Inspect progress without repeatedly polling unchanged state; steer or stop only for the conditions in the owner document. Completed children normally release through the runtime. If a completed thread still consumes a slot, use only a documented client close/release control when available; otherwise report the limitation instead of inventing an action.
-- Treat a child summary as a lead, not as acceptance proof. The root must inspect cited source and evidence before a result unlocks a dependent task or affects delivery, and must publish the result record defined in the owner document.
-- The root agent remains available to the user, integrates results and retains all approval and final-decision authority.
+- This repository uses Codex multi-agent V2. Use the built-in read-only `explorer` and built-in `worker`; use the project-defined, model-neutral `reviewer` and `tester`. Do not create model-named role copies.
+
+| Root selection | `explorer` / `worker` / `tester` | `reviewer` |
+| --- | --- | --- |
+| Sol below Ultra | `gpt-5.6-luna` / `max` | `gpt-5.6-sol`; High floor, then match XHigh or Max |
+| Astra below Ultra | `gpt-5.6-luna` / `max` | `gpt-6-astra`; High floor, then match XHigh or Max |
+| Sol or Astra Ultra | Codex native routing | Codex native routing |
+| Any other root | Inherit root model and effort | Inherit root model and effort |
+
+- For non-Ultra Sol and Astra, the root proactively delegates concrete, bounded work when parallel execution is likely to save meaningful time or improve quality. Prefer read-heavy or noisy exploration, tests, logs, triage and summaries; keep short, tightly coupled or critical-path work on the root.
+- Before the first non-Ultra spawn in a substantial task, the root must read `docs/CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5 and follow its route-evidence, fallback, dependency-wave, task-packet, lifecycle and result-acceptance rules. Children receive only their self-contained task packet unless they need that document to perform the assigned task.
+- At most three children may be open concurrently. Only one agent may write a worktree at a time, including test artifacts; read-only work may inspect frozen source and diffs. Leaf agents do not spawn children.
+- The root remains available to the user, owns steering, stopping, integration and final decisions, and verifies cited evidence before accepting a child result.
 
 ## Shared testing and independent review
 
-- For task-level validation, longer existing test batches or CI evidence collection, use `tester` with the model and effort selected by the routing rules above. A short focused edit-time check may remain with the implementer or root when delegation would add no value.
-- The implementer runs short checks and hands off source identity, commands and results. The root owns coverage, gate level, failure classification and acceptance; the tester runs existing deterministic gates and collects version-bound evidence. `task:finish` already owns `gate:task`, so never run both as separate completion gates.
-- Give the tester the absolute checkout, source identity or working-tree hash, base, acceptance goal, gate entrypoint, report location and stop conditions. Use `tests/TEST_STRATEGY.md` and existing `gate:plan`, `gate:edit` and `gate:task` selection rather than inventing a replacement matrix.
-- Freeze tested source while the tester owns build or test resources. The tester may write existing build output, isolated data and reports, but must not edit product code, tests, assertions, snapshots, gate rules or dependencies, and must not commit, push, change PR state, merge, install or publish.
-- Reuse the same tester for an authorized retest. Preserve first-failure evidence, follow existing retry policy and use `--resume` only when the gate confirms compatible source, base, environment and command.
-- Keep full logs, traces and screenshots in the report directory. The tester returns source/base, commands, exit status, planned/discovered/executed/pass/fail/skip/not-run counts where available, retry facts, failure classification, evidence paths and coverage gaps. Unknown counts remain unknown rather than becoming zero.
-- The root reviews the actual evidence and expands validation only for changed source, missing coverage, a failure or a specific unresolved risk. Do not repeat a passed applicable gate as extra insurance.
-- Use the model-neutral `reviewer` profile for independent review with the model and effort selected by the routing rules above. Give it the original acceptance goal, actual diff and relevant source; the root retains final acceptance.
+- Use `tester` for longer existing test batches or CI evidence collection and `reviewer` for independent review; short focused checks may stay with the implementer or root. The root owns coverage, gate level, failure classification and acceptance.
+- Follow `tests/TEST_STRATEGY.md` and the existing gate selection. `task:finish` already owns `gate:task`; never run both as separate completion gates or repeat a passed applicable gate without changed source, missing coverage, a failure or a specific unresolved risk.
+- Freeze the tested source. The tester may create existing build/test output and reports, but must not edit source, tests, assertions, snapshots, gates or dependencies, or commit, push, change PR state, merge, install or publish. Preserve full logs and first-failure evidence in the report directory.
+- Give the reviewer the acceptance goal, actual diff and relevant source. A tester or reviewer summary is evidence to inspect, not final acceptance.
 - Verified P0/P1 defects and required deterministic gate failures block delivery; P2/P3 and unclassified minor findings follow the scope-stop rule and do not expand the task without explicit user escalation.
-- These are delegation rules, not a background scheduler or authorization expansion. When handing off to a fresh checkout, repeat the applicable user constraints and routing explicitly.
+- Delegation is not a background scheduler or authorization expansion. Repeat applicable user constraints and routing in every fresh-context handoff.
 
 ## Repository and authorization boundary
 
@@ -84,7 +76,6 @@ Release, packaging, and Candidate publication: `docs/RELEASING.md`.
 - Expand reading only when a dependency, a failing check or a contract change requires it. A smaller reading set is not permission to skip persistence, authority or cross-owner checks.
 - If guidance conflicts, name the files, quote the sentences and state the affected decision. Distinguish living contracts, historical ADR text and your own inference. Do not silently pick the stricter sentence.
 - Living ADR status lives in `docs/decisions/README.md`. Use that index and `ARCHITECTURE_MAP.md` for today's contract; do not reconstruct current architecture from historical ADR paragraphs.
-- Preserve the user-selected root model and reasoning level. Delegate only bounded work that adds value, using the applicable session routing; local profiles do not authorize model substitution. Independent read-only investigations may run in parallel; only one agent may write a given worktree at a time.
 - After the checks required by this change pass, enlarge or repeat verification only for new code, a new failure or a specific unresolved risk. Do not rerun the complete matrix, Browser, Electron or packaging as extra insurance. Environment flakes resume only through the existing fingerprint / `--resume` rules.
 - Node tests do not prove Enter, IME, caret or iframe continuity. Keep public-behavior evidence for those paths. Do not replace that evidence with private field names, method names or source-string checks.
 - Deliver the actual result, verification evidence and remaining limits. Do not widen the task into packaging, merge or release.
@@ -110,6 +101,7 @@ Update the unique owner document when a contract changes; other files should kee
 
 | Task area | Source for relevant sections |
 | --- | --- |
+| Subagent routing, task packets, runtime evidence and lifecycle | `docs/CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5 |
 | Git, branches, commits, recovery, multi-PR package composition | `docs/GIT_WORKFLOW.md` |
 | Ordinary Codex task commands and final reports | `docs/CODEX_WORKFLOW.md` (`## Standard commands`); installer composition stays in that file's installer section and `docs/RELEASING.md` |
 | Development environment and test lanes | `docs/DEVELOPMENT.md`, then `tests/TEST_STRATEGY.md` when test ownership changes |
