@@ -18,6 +18,7 @@ import { flushSync } from "react-dom";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
+  EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
   EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
   editRuntimeProgramIdentity,
   editRuntimeRegistrationProperty,
@@ -505,6 +506,10 @@ type RuntimeCandidateTransfer = {
 type RuntimeCandidateStartOptions = {
   kind?: RuntimeFrameIdentity["kind"];
 };
+
+function runtimeActivationUsable(frame: RuntimeFrameContext): boolean {
+  return frame.activation === "ready" || frame.activation === "partial";
+}
 
 type DeferredRuntimeCandidate = {
   lease: number;
@@ -1792,7 +1797,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     syncRuntimeCandidateDiagnostics();
     if (!settlement.accepted) return settlement;
     frame.settled = true;
-    if (outcome === "ready") publishRuntimeDegradation("none");
+    if (outcome === "ready") {
+      publishRuntimeDegradation(
+        frame.activation === "partial" ? "runtime-partial" : "none",
+      );
+    }
     onEditRuntimeLoadOutcomeRef.current?.(
       frame.grant,
       outcome,
@@ -2234,6 +2243,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             verificationToken: runtimeToken,
             elementGeneration: candidateGeneration,
             activation: "pending",
+            activationSettledAt: null,
+            authorErrorCount: 0,
+            resourceFailureCount: 0,
+            activationElapsedMs: null,
             settled: false,
           };
         }
@@ -2247,6 +2260,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           verificationToken,
           elementGeneration: candidateGeneration,
           activation: "failed",
+          activationSettledAt: performance.now(),
+          authorErrorCount: 0,
+          resourceFailureCount: 1,
+          activationElapsedMs: null,
           settled: false,
         }, "rejected");
         scheduleLatestStaticFallbackAfterFailure(attempt.candidateId);
@@ -2368,11 +2385,62 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               || runtimeFrame.activation !== "pending"
               || sourceWindow !== activeIframe?.contentWindow
             ) return false;
-            if (outcome === "activation-ready") {
-              runtimeFrame.activation = "ready";
+            if (!outcome || typeof outcome !== "object") return false;
+            const detail = outcome as Record<string, unknown>;
+            const status = detail.status;
+            const authorErrorCount = detail.authorErrorCount;
+            const resourceFailureCount = detail.resourceFailureCount;
+            const elapsedMs = detail.elapsedMs;
+            if (
+              ![
+                "activation-ready",
+                "activation-author-error",
+                "activation-resource-failed",
+              ].includes(String(status))
+              || !Number.isSafeInteger(authorErrorCount)
+              || Number(authorErrorCount) < 0
+              || Number(authorErrorCount) > 10_000
+              || !Number.isSafeInteger(resourceFailureCount)
+              || Number(resourceFailureCount) < 0
+              || Number(resourceFailureCount) > 10_000
+              || !Number.isSafeInteger(elapsedMs)
+              || Number(elapsedMs) < 0
+              || Number(elapsedMs) > EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS
+              || (status === "activation-ready"
+                && (authorErrorCount !== 0 || resourceFailureCount !== 0))
+              || (status === "activation-author-error"
+                && (Number(authorErrorCount) < 1 || resourceFailureCount !== 0))
+              || (status === "activation-resource-failed" && Number(resourceFailureCount) < 1)
+            ) return false;
+            runtimeFrame.activationSettledAt = performance.now();
+            runtimeFrame.authorErrorCount = Number(authorErrorCount);
+            runtimeFrame.resourceFailureCount = Number(resourceFailureCount);
+            runtimeFrame.activationElapsedMs = Number(elapsedMs);
+            containerRef.current?.setAttribute("data-runtime-activation", String(status));
+            containerRef.current?.setAttribute(
+              "data-runtime-author-error-count",
+              String(authorErrorCount),
+            );
+            containerRef.current?.setAttribute(
+              "data-runtime-resource-failure-count",
+              String(resourceFailureCount),
+            );
+            containerRef.current?.setAttribute("data-runtime-activation-ms", String(elapsedMs));
+            const activationExceededBudget = Number(elapsedMs)
+              >= EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs;
+            if (activationExceededBudget) {
+              containerRef.current?.setAttribute("data-runtime-activation-budget", "exceeded");
+              runtimeFrame.activation = "failed";
+              queueMicrotask(() => {
+                failRuntimeCandidateActivationRef.current(candidate, "failed");
+              });
               return true;
             }
-            if (outcome !== "activation-failed") return false;
+            containerRef.current?.removeAttribute("data-runtime-activation-budget");
+            if (status === "activation-ready" || status === "activation-author-error") {
+              runtimeFrame.activation = status === "activation-ready" ? "ready" : "partial";
+              return true;
+            }
             runtimeFrame.activation = "failed";
             queueMicrotask(() => {
               failRuntimeCandidateActivationRef.current(candidate, "failed");
@@ -2396,6 +2464,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     runtimeCandidateRef.current = candidate;
     if (candidateKind === "dynamic") {
+      containerRef.current?.removeAttribute("data-runtime-activation-budget");
+      containerRef.current?.removeAttribute("data-runtime-surface-budget");
       lastRuntimeCandidateFailureRef.current = null;
     }
     deferredRuntimeCandidateRef.current = null;
@@ -2700,7 +2770,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (
       candidate.runtimeFrame
       && (
-        candidate.runtimeFrame.activation !== "ready"
+        !runtimeActivationUsable(candidate.runtimeFrame)
         || !candidate.sourceElements
       )
     ) return false;
@@ -2822,7 +2892,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || marker?.getAttribute(FRAME_VERIFICATION_ATTRIBUTE) !== candidate.verificationToken
       || marker.getAttribute("content") !== candidate.verificationToken
       || (candidate.runtimeFrame && !candidate.loaded)
-      || (candidate.runtimeFrame && candidate.runtimeFrame.activation !== "ready")
+      || (candidate.runtimeFrame && !runtimeActivationUsable(candidate.runtimeFrame))
       || (candidate.runtimeFrame && !candidate.sourceElements)
     ) return false;
     if (!runtimeFrameCoordinatorRef.current!.canPromote(candidate.attempt)) {
@@ -2839,9 +2909,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       iframe.contentWindow?.dispatchEvent(new Event("resize"));
       return false;
     }
+    const sameRuntimeProgram = Boolean(
+      candidate.runtimeFrame
+      && runtimeFrameRef.current?.grant.programIdentity
+        === candidate.runtimeFrame.grant.programIdentity,
+    );
+    const partialRuntime = candidate.runtimeFrame?.activation === "partial";
+    const runtimeUsesEcharts = Boolean(
+      candidate.runtimeFrame?.grant.runtimeLibraries?.includes("echarts"),
+    );
+    const connectedRuntimeFrame = runtimeFrameRef.current;
+    const activeRuntimeDocument = connectedRuntimeFrame
+      && runtimeActivationUsable(connectedRuntimeFrame)
+      ? iframeRef.current?.contentDocument ?? null
+      : null;
     if (candidate.runtimeFrame
-      && runtimeFrameRef.current?.grant.programIdentity === candidate.runtimeFrame.grant.programIdentity
-      && !runtimeSurfacesReady(iframeRef.current?.contentDocument ?? null, documentNode, candidate.sourceIndex)) {
+      && (sameRuntimeProgram || partialRuntime)
+      && !runtimeSurfacesReady(
+        activeRuntimeDocument,
+        documentNode,
+        candidate.sourceIndex,
+        {
+          requireCandidateSurface: partialRuntime,
+          requireCandidateEchartsInstance: partialRuntime && runtimeUsesEcharts,
+        },
+      )) {
       return false;
     }
     // Runtime-generated Canvas/SVG surfaces are presentation state, not edit
@@ -3245,21 +3337,59 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const nextParent = nextTarget.parentId
           ? result.sourceIndex.byNodeId.get(nextTarget.parentId)
           : null;
-        const nextSiblingIndex = nextParent?.type === "element"
-          ? nextParent.childElementIds.indexOf(nextTarget.nodeId)
-          : -1;
         if (
-          nextSiblingIndex < 0
-          || sourceBackedSiblings.length !== nextParent?.childElementIds.length
+          nextParent?.type !== "element"
+          || nextParent.childElementIds.indexOf(nextTarget.nodeId) < 0
+          || sourceBackedSiblings.length !== nextParent.childElementIds.length
+          || sourceBackedSiblings.length !== liveParent.children.length
           || !sourceBackedSiblings.includes(liveTarget)
-        ) return false;
-        const siblingsWithoutTarget = sourceBackedSiblings.filter(
-          (element) => element !== liveTarget,
+        ) return failPreviewSync("reorder-sibling-surface");
+        const desiredPagerootIds: Array<string | null> = nextParent.childElementIds.map(
+          (nodeId: string) => {
+            const element = result.sourceIndex.byNodeId.get(nodeId);
+            return element?.type === "element" ? element.pagerootId : null;
+          },
         );
-        liveParent.insertBefore(
-          liveTarget,
-          siblingsWithoutTarget[nextSiblingIndex] || null,
+        if (desiredPagerootIds.some((pagerootId: string | null) => !pagerootId)) {
+          return failPreviewSync("reorder-next-identity");
+        }
+        const liveByPagerootId = new Map<string, Element>();
+        const sourceProof = targetedRuntimeSync ? currentRuntimeSourceProof() : null;
+        for (const sibling of sourceBackedSiblings) {
+          const pagerootId = sibling.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+          if (
+            !pagerootId
+            || liveByPagerootId.has(pagerootId)
+            || (targetedRuntimeSync && (
+              !(sibling instanceof LiveHTMLElement)
+              || sourceProof?.(sibling) !== true
+            ))
+          ) return failPreviewSync("reorder-live-identity");
+          liveByPagerootId.set(pagerootId, sibling);
+        }
+        const desiredSiblings: Array<Element | null> = desiredPagerootIds.map(
+          (pagerootId: string | null) => (
+            pagerootId ? liveByPagerootId.get(pagerootId) ?? null : null
+          ),
         );
+        if (desiredSiblings.some((sibling: Element | null) => !sibling)) {
+          return failPreviewSync("reorder-identity-mismatch");
+        }
+        for (let index = 0; index < desiredSiblings.length; index += 1) {
+          const currentSibling = Array.from(liveParent.children).filter(
+            (element) => element.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE),
+          )[index];
+          const desiredSibling = desiredSiblings[index]!;
+          if (currentSibling !== desiredSibling) {
+            liveParent.insertBefore(desiredSibling, currentSibling ?? null);
+          }
+        }
+        const finalPagerootIds = Array.from(liveParent.children)
+          .filter((element) => element.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE))
+          .map((element) => element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE));
+        if (finalPagerootIds.some((pagerootId, index) => (
+          pagerootId !== desiredPagerootIds[index]
+        ))) return failPreviewSync("reorder-final-order");
       } else if (originalMutation.kind === "style") {
         if (isTextRangeStyle) {
           const imported = reconcileRangeStyleInPlace(liveTarget, detachedTarget, previousIndex, result.sourceIndex);
@@ -3427,6 +3557,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       updateSelectedStyle();
       updateMoveAvailability();
       observeSelectedElement(stableSelectionElement);
+      if (originalMutation.kind === "reorder" && targetedRuntimeSync) {
+        requestAnimationFrame(() => documentNode.defaultView?.dispatchEvent(new Event("resize")));
+      }
       requestAnimationFrame(() => updateOverlayPosition());
       containerRef.current?.setAttribute("data-native-preview-sync", "ready");
       return true;
@@ -6702,7 +6835,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       const runtimeSourceElements = runtimeSourceElementsRef.current;
       if (
-        runtimeFrame.activation !== "ready"
+        !runtimeActivationUsable(runtimeFrame)
         || !runtimeSourceElements
         || runtimeSourceElements.elementGeneration !== runtimeFrame.elementGeneration
         || runtimeSourceElements.executionId !== runtimeFrame.grant.executionId
@@ -7289,7 +7422,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingStaticPresentationAnchorRef.current = null;
     const positionRuntimeHandoff = (candidate: RuntimeCandidate) => {
       const anchor = candidate.presentationAnchor;
-      if (candidate.runtimeFrame?.activation === "ready") {
+      if (candidate.runtimeFrame && runtimeActivationUsable(candidate.runtimeFrame)) {
         candidate.runtimeFrame.settled = true;
         containerRef.current?.setAttribute(
           "data-runtime-bootstrap-count",
@@ -7347,7 +7480,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const connectedRuntimeFrame = runtimeFrameRef.current;
         if (
           connectedRuntimeFrame?.elementGeneration === connectedFrameGeneration
-          && connectedRuntimeFrame.activation === "ready"
+          && runtimeActivationUsable(connectedRuntimeFrame)
         ) {
           if (!runtimeReadyReportedRef.current.has(connectedRuntimeFrame)) {
             const settlement = completeRuntimeAttempt(connectedRuntimeFrame, "ready");
@@ -7496,7 +7629,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && connectedRuntimeFrame.verificationToken === expectedToken,
       );
       if (connectedRuntimeFrameIsCurrent && connectedRuntimeFrame) {
-        if (connectedRuntimeFrame.activation !== "ready") return;
+        if (!runtimeActivationUsable(connectedRuntimeFrame)) return;
         connectedRuntimeFrame.settled = true;
         containerRef.current?.setAttribute(
           "data-runtime-bootstrap-count",
@@ -7513,7 +7646,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       if (
         connectedRuntimeFrameIsCurrent
-        && connectedRuntimeFrame?.activation === "ready"
+        && connectedRuntimeFrame
+        && runtimeActivationUsable(connectedRuntimeFrame)
       ) {
         if (!runtimeReadyReportedRef.current.has(connectedRuntimeFrame)) {
           const settlement = completeRuntimeAttempt(connectedRuntimeFrame, "ready");
@@ -7633,8 +7767,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || candidate.render.html !== candidateRender.html
     ) return undefined;
     let animationFrame = 0;
-    let attempts = 0;
-    let startedAt = performance.now();
+    let staticAttempts = 0;
+    let phaseStartedAt = performance.now();
+    let observedActivation = candidate.runtimeFrame?.activation ?? null;
     const connectParsedCandidate = () => {
       const current = runtimeCandidateRef.current;
       const iframe = runtimeCandidateIframeRef.current;
@@ -7648,31 +7783,60 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         // A browser-native edit transaction owns the active Document until its
         // checkpoint has produced complete source HTML. Candidate readiness is
         // allowed to wait, but its deadline must not charge time to the user.
-        startedAt = performance.now();
+        phaseStartedAt = performance.now();
+        observedActivation = candidate.runtimeFrame?.activation ?? null;
         animationFrame = requestAnimationFrame(connectParsedCandidate);
+        return;
+      }
+      const currentActivation = candidate.runtimeFrame?.activation ?? null;
+      if (currentActivation !== observedActivation) {
+        const activationSettledAt = candidate.runtimeFrame?.activationSettledAt
+          ?? performance.now();
+        if (
+          candidate.runtimeFrame
+          && observedActivation === "pending"
+          && currentActivation !== "pending"
+          && activationSettledAt - phaseStartedAt
+            >= EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
+        ) {
+          containerRef.current?.setAttribute("data-runtime-activation-budget", "exceeded");
+          failRuntimeCandidate(candidate, "failed");
+          return;
+        }
+        observedActivation = currentActivation;
+        phaseStartedAt = activationSettledAt;
+      }
+      const runtimeDeadlineMs = currentActivation === "pending"
+        ? EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
+        : EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs;
+      if (
+        candidate.runtimeFrame
+        && !candidate.runtimeFrame.settled
+        && performance.now() - phaseStartedAt >= runtimeDeadlineMs
+      ) {
+        containerRef.current?.setAttribute(
+          currentActivation === "pending"
+            ? "data-runtime-activation-budget"
+            : "data-runtime-surface-budget",
+          "exceeded",
+        );
+        failRuntimeCandidate(candidate, "failed");
         return;
       }
       if (connectRuntimeCandidateRef.current(
         iframe,
         candidateRender.elementGeneration,
       )) return;
-      if (
-        candidate.runtimeFrame
-        && !candidate.runtimeFrame.settled
-        && performance.now() - startedAt >= EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
-      ) {
-        failRuntimeCandidate(candidate, "failed");
+      if (candidate.runtimeFrame) {
+        animationFrame = requestAnimationFrame(connectParsedCandidate);
         return;
       }
-      attempts += 1;
-      const retryLimit = candidate.runtimeFrame
-        ? Math.ceil(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs / 16) + 30
-        : 120;
-      if (attempts < retryLimit) {
+      staticAttempts += 1;
+      if (staticAttempts < 120) {
         animationFrame = requestAnimationFrame(connectParsedCandidate);
-      } else {
-        failRuntimeCandidate(candidate, "failed");
+        return;
       }
+      failRuntimeCandidate(candidate, "failed");
     };
     animationFrame = requestAnimationFrame(connectParsedCandidate);
     return () => cancelAnimationFrame(animationFrame);
@@ -8611,6 +8775,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       data-locked={interactionLocked ? "true" : undefined}
       data-runtime-degradation={runtimeDegradation === "none" ? undefined : runtimeDegradation}
       data-interaction-mode={renderedMode} data-runtime-library-origins={editRuntimeGrant?.libraryOrigins?.join(",") || undefined}
+      data-runtime-libraries={editRuntimeGrant?.runtimeLibraries?.join(",") || undefined}
       aria-readonly={effectiveReadOnly || interactionLocked}
     >
       {renderRuntimeSlot("a")}

@@ -24,6 +24,7 @@ export default function EditRuntimeStaticFallbackNotice({
   const [retryFailed, setRetryFailed] = useState(false);
   const directStaticVisible = state === "direct-static-visible";
   const lastKnownGoodReadOnly = state === "last-known-good-readonly";
+  const runtimePartial = state === "runtime-partial";
   // A verified static projection is an ordinary editable surface. Keep the
   // chrome quiet and expose the optional dynamic retry through the More menu.
   if (state === "none" || state === "static-visible" || directStaticVisible) return null;
@@ -41,7 +42,9 @@ export default function EditRuntimeStaticFallbackNotice({
         : "部分动态内容未加载"}</strong>
       <span>{lastKnownGoodReadOnly
         ? "仍显示上一次可用预览，你的修改已保留。请重新加载后继续。"
-        : "正在恢复页面，完成后即可继续编辑。"}</span>
+        : runtimePartial
+          ? "页面仍可编辑，关键图表已保留；少量脚本功能可能未完成。"
+          : "正在恢复页面，完成后即可继续编辑。"}</span>
       {onRetry ? (
         <button
           type="button"

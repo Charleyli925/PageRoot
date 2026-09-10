@@ -17,35 +17,26 @@ test("static text, style and sibling reorder stay in the mounted frame", () => {
   }
 });
 
-test("Runtime text and style edits end after a successful in-place projection", () => {
-  assert.deepEqual(decideEditRuntimeRefresh({
-    hasRuntime: true,
-    nativeEditActive: true,
-    mutationKind: "text",
-  }), {
-    action: "in-place",
-    reason: "runtime-text",
-    synchronizeCurrentFrame: true,
-    markRuntimeRefreshPending: false,
-  });
-  assert.deepEqual(decideEditRuntimeRefresh({
-    hasRuntime: true,
-    mutationKind: "style",
-  }), {
-    action: "in-place",
-    reason: "runtime-style",
-    synchronizeCurrentFrame: true,
-    markRuntimeRefreshPending: false,
-  });
+test("Runtime text, style and sibling reorder edits end after in-place projection", () => {
+  for (const mutationKind of ["text", "style", "reorder"]) {
+    assert.deepEqual(decideEditRuntimeRefresh({
+      hasRuntime: true,
+      nativeEditActive: mutationKind === "text",
+      mutationKind,
+    }), {
+      action: "in-place",
+      reason: `runtime-${mutationKind}`,
+      synchronizeCurrentFrame: true,
+      markRuntimeRefreshPending: false,
+    });
+  }
 });
 
-test("Runtime structure, reorder and program changes prepare a candidate now", () => {
-  for (const mutationKind of ["structure", "reorder"]) {
-    assert.equal(decideEditRuntimeRefresh({
-      hasRuntime: true,
-      mutationKind,
-    }).action, "candidate-now");
-  }
+test("Runtime structure and program changes prepare a candidate now", () => {
+  assert.equal(decideEditRuntimeRefresh({
+    hasRuntime: true,
+    mutationKind: "structure",
+  }).action, "candidate-now");
   assert.deepEqual(decideEditRuntimeRefresh({
     hasRuntime: true,
     mutationKind: "style",

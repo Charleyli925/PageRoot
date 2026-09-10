@@ -141,6 +141,7 @@ export type HtmlCanvasEditRuntimeLoadOutcome =
 
 export type HtmlCanvasRuntimeDegradation =
   | "none"
+  | "runtime-partial"
   | "static-preparing"
   | "static-visible"
   | "last-known-good-readonly";

@@ -46,7 +46,11 @@ export function decideEditRuntimeRefresh({
     });
   }
 
-  if (mutationKind === "text" || mutationKind === "style") {
+  if (
+    mutationKind === "text"
+    || mutationKind === "style"
+    || mutationKind === "reorder"
+  ) {
     return Object.freeze({
       action: "in-place",
       reason: `runtime-${mutationKind}`,

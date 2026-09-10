@@ -574,30 +574,27 @@ presentation only and is discarded when its target or source text segments no
 longer match, without blocking a fresh native edit session on the current exact
 target.
 The same one-time private capability returns an activation-result callback bound
-to the source window, session, execution and frame token. Resource errors,
-synchronous author errors and immediate unhandled rejections through the
-deferred `DOMContentLoaded` task report `activation-failed`; only a complete
-error-free activation reports `activation-ready`. Frame load, source proof and
-the verification token remain necessary but are not sufficient for Runtime
-success. This is an execution-failure signal, not a visual or Canvas probe.
-When the exact query-free 5.4.3 ECharts core URL is not cached, has no authored
-integrity constraint, and the executable program contains no other `src`
-attribute, Main may freeze packaged 5.6.0 bytes as a
-separate compatible resource variant while downloading exact bytes in the
-background. The current resource set never mutates. The first successful
-runtime wins the Canvas generation; exact bytes arriving after compatible
-success only update the byte store. A compatible load failure may consume the
-same initial preparation's exact promise once and receive a new immutable
-session/execution identity. Main binds that recovery to the original canonical
-source path, source Hash, authored-program identity and Canvas generation. No
-other retry or resource promotion is permitted. Every redirect used to obtain
-an exact immutable library must preserve its version, core filename and query
-identity before those bytes can enter the exact cache.
+to the source window, session, execution and frame token. Resource/bootstrap
+errors report `activation-resource-failed`; synchronous author errors and
+immediate unhandled rejections through the deferred `DOMContentLoaded` task
+report `activation-author-error`; only an error-free activation reports
+`activation-ready`. An author-error Candidate may promote only after its
+source-host runtime-generated critical content is ready, and remains explicitly
+`runtime-partial`; a source-authored SVG icon is not such proof, and a recognized
+ECharts Candidate must expose the matching live ECharts instance.
+Frame load, source proof and the verification token remain necessary but are
+not sufficient for Runtime success. Reviewed query-free 5.4.3 and 5.6.0
+ECharts core URLs resolve to their same-version SHA-pinned packaged bytes.
+Other exact immutable versions use only their exact cache or bounded network
+request. No cross-version substitution or second recovery session exists.
+Every redirect used to obtain an exact immutable library must preserve its
+version, core filename and query identity before those bytes can enter the
+exact cache.
 Main enforces two concurrent preparations and a bounded recent request-ID replay
 window. Completed identities age out, so repeated ordinary use never exhausts a
 permanent application-lifetime allowance or requires PageRoot to restart. An
 unavailable resource remains a recoverable preparation state while its
-independent bounded download is active. A terminal preparation, exact recovery,
+independent bounded download is active. A terminal preparation, exact-resource
 load, provenance or execution-deadline failure selects an explicit
 script-disabled static Edit projection. A dynamic Candidate failure prepares
 the latest Working HTML once more with Script disabled while the prior frame
@@ -610,8 +607,8 @@ Working back. The severe notice cannot be dismissed and retains reload plus
 export actions. Direct unsupported, desktop-unavailable or preparation-failed
 static pages use the distinct `direct-static-visible` projection and say that
 the current static page is already displayed; they never imply a Candidate is
-still preparing. Only transient preparation, execution or exact-recovery
-failures expose an effective retry. Retry always freezes the latest persisted
+still preparing. Only transient preparation or execution failures expose an
+effective retry. Retry always freezes the latest persisted
 Working HTML/SHA observed at the click, never the failure-time request. A
 successful retry removes the notice. The Workbench must not interpret iframe
 `load` alone as Runtime success.
@@ -654,11 +651,11 @@ run in real Electron. Program identity and Main resource preparation use the
 same first live-document `base[href]`; href-less base elements, inert
 `<template>` contents and foreign-namespace lookalikes cannot win, while
 absolute or escaping bases fail closed.
-The dependency compatibility surface is separately finite: only the three
-standard, query-free ECharts 5.4.3 minified core CDN URLs may use packaged
-5.6.0, only when all other executable scripts are inline. Near matches,
-version ranges, unknown paths and additional plugin/library scripts never use
-that substitution.
+The dependency surface is separately finite: the three standard, query-free
+ECharts 5.4.3 and 5.6.0 minified core CDN URLs may use only their respective
+same-version packaged files. Near matches, version ranges, unknown paths,
+integrity-constrained tags and plugin/library scripts use exact cache/network
+resolution or fail closed; they never use a version substitution.
 The bootstrap may hold and redeliver `DOMContentLoaded`
 after the supported non-async activation sequence. Module import graphs,
 external/source-root-escaping bases and other non-equivalent programs must enter

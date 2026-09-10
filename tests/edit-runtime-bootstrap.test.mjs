@@ -30,8 +30,12 @@ test("disposable runtime bootstrap proves the parsed source set before author wo
   assert.match(source, /script\.addEventListener\("error"/u);
   assert.match(source, /window\.addEventListener\("error"/u);
   assert.match(source, /window\.addEventListener\("unhandledrejection"/u);
-  assert.match(source, /activation-failed/u);
+  assert.match(source, /activation-resource-failed/u);
+  assert.match(source, /activation-author-error/u);
   assert.match(source, /activation-ready/u);
+  assert.match(source, /authorErrorCount/u);
+  assert.match(source, /resourceFailureCount/u);
+  assert.match(source, /elapsedMs/u);
   assert.match(source, /activationReported/u);
   assert.match(source, /activateAuthorScripts\(asyncSettlements\)/u);
   assert.ok(

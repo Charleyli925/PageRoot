@@ -89,7 +89,6 @@ const previewChannels = Object.freeze({
 });
 const editRuntimeChannels = Object.freeze({
   prepare: "html-edit-runtime:prepare",
-  recover: "html-edit-runtime:recover",
   revoke: "html-edit-runtime:revoke",
 });
 const editChannels = Object.freeze({
@@ -433,7 +432,6 @@ const previewApi = Object.freeze({
 
 const editRuntimeApi = Object.freeze({
   prepare: (payload) => invokeProject(editRuntimeChannels.prepare, payload),
-  recover: (payload) => invokeProject(editRuntimeChannels.recover, payload),
   revoke: (sessionId) => invokeProject(editRuntimeChannels.revoke, sessionId),
 });
 

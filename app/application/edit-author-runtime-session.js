@@ -115,9 +115,8 @@ function sameRuntimeAttempt(left, right) {
 
 function normalizedGrant(value, request) {
   const allowedLibraryOrigins = new Set([
-    "bundled", "bundled-compatible", "disk-cache", "network", "local", "inline",
+    "bundled", "disk-cache", "network", "local", "inline",
   ]);
-  const resourceMode = value?.resourceMode === undefined ? "exact" : value.resourceMode;
   if (
     !isRecord(value)
     || value.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
@@ -134,18 +133,20 @@ function normalizedGrant(value, request) {
     || value.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.aggregateScriptBytes
     || value.canvasGeneration !== request.canvasGeneration
     || typeof request.programIdentity !== "string"
-    || !["exact", "compatible"].includes(resourceMode)
-    || (
-      value.recoveryAvailable !== undefined
-      && typeof value.recoveryAvailable !== "boolean"
-    )
-    || (resourceMode === "compatible" && value.recoveryAvailable !== true)
-    || (resourceMode === "exact" && value.recoveryAvailable === true)
+    || (value.resourceMode !== undefined && value.resourceMode !== "exact")
+    || value.recoveryAvailable !== undefined
     || (
       value.libraryOrigins !== undefined
       && (
         !Array.isArray(value.libraryOrigins)
         || value.libraryOrigins.some((origin) => !allowedLibraryOrigins.has(origin))
+      )
+    )
+    || (
+      value.runtimeLibraries !== undefined
+      && (
+        !Array.isArray(value.runtimeLibraries)
+        || value.runtimeLibraries.some((library) => library !== "echarts")
       )
     )
   ) return null;
@@ -159,8 +160,8 @@ function normalizedGrant(value, request) {
     scriptCount: value.scriptCount,
     byteLength: value.byteLength,
     libraryOrigins: Object.freeze([...(value.libraryOrigins || [])]),
-    resourceMode,
-    recoveryAvailable: resourceMode === "compatible",
+    runtimeLibraries: Object.freeze([...(value.runtimeLibraries || [])]),
+    resourceMode: "exact",
     canvasGeneration: request.canvasGeneration,
     programIdentity: request.programIdentity,
   });
@@ -182,8 +183,6 @@ export class EditAuthorRuntimeSession {
   #latestSourceAuthoritative = false;
   #pendingPreparation = null;
   #activeRequest = null;
-  #recoveryGrant = null;
-  #recoveryConsumed = false;
   #runtimeAttempt = null;
   #attemptGeneration = 0;
   #requestSequence = 0;
@@ -195,7 +194,6 @@ export class EditAuthorRuntimeSession {
       && (
         !isRecord(port)
         || typeof port.prepare !== "function"
-        || (port.recover !== undefined && typeof port.recover !== "function")
         || typeof port.revoke !== "function"
       )
     ) {
@@ -234,14 +232,7 @@ export class EditAuthorRuntimeSession {
   }
 
   #revokeActiveGrants() {
-    const grants = [this.#snapshot.grant, this.#recoveryGrant];
-    const revoked = new Set();
-    for (const grant of grants) {
-      if (!grant?.sessionId || revoked.has(grant.sessionId)) continue;
-      revoked.add(grant.sessionId);
-      this.#revoke(grant);
-    }
-    this.#recoveryGrant = null;
+    this.#revoke(this.#snapshot.grant);
   }
 
   #transitionToStatic(
@@ -362,7 +353,6 @@ export class EditAuthorRuntimeSession {
     this.#attemptGeneration += 1;
     this.#pendingPreparation = null;
     this.#activeRequest = null;
-    this.#recoveryConsumed = false;
     this.#runtimeAttempt = null;
     this.#revokeActiveGrants();
     this.#identity = identity;
@@ -534,73 +524,6 @@ export class EditAuthorRuntimeSession {
     return true;
   }
 
-  #recoverCompatibleRuntime(grant, outcome) {
-    const request = this.#activeRequest;
-    const identity = this.#identity;
-    if (
-      this.#recoveryConsumed
-      || !request
-      || !identity
-      || grant.resourceMode !== "compatible"
-      || grant.recoveryAvailable !== true
-      || typeof this.#port?.recover !== "function"
-    ) {
-      this.#transitionToStatic(
-        "static-fallback",
-        outcome === "rejected" ? "rejected" : "runtime-failed",
-      );
-      return;
-    }
-    this.#recoveryConsumed = true;
-    this.#recoveryGrant = grant;
-    const attemptGeneration = this.#attemptGeneration;
-    this.#emit({
-      phase: "recovering",
-      sourceSha256: grant.sourceSha256,
-      sourcePath: identity.sourcePath,
-      canvasGeneration: grant.canvasGeneration,
-      lastOutcome: outcome === "rejected" ? "compatible-rejected" : "compatible-failed",
-    });
-    void Promise.resolve(this.#port.recover({
-      sessionId: grant.sessionId,
-      sourceSha256: grant.sourceSha256,
-      programIdentity: grant.programIdentity,
-      canvasGeneration: grant.canvasGeneration,
-    })).then((result) => {
-      if (
-        this.#disposed
-        || attemptGeneration !== this.#attemptGeneration
-        || !sameExactIdentity(this.#identity, identity)
-      ) {
-        this.#revoke(result);
-        return;
-      }
-      const exactGrant = normalizedGrant(result, request);
-      if (!exactGrant || exactGrant.resourceMode !== "exact") {
-        this.#revoke(result);
-        this.#transitionToStatic("static-fallback", "recovery-failed", identity);
-        return;
-      }
-      this.#revoke(this.#recoveryGrant);
-      this.#recoveryGrant = null;
-      this.#emit({
-        phase: "ready",
-        sourceSha256: identity.sourceSha256,
-        sourcePath: identity.sourcePath,
-        canvasGeneration: identity.canvasGeneration,
-        grant: exactGrant,
-        lastOutcome: "recovery-ready",
-      });
-    }).catch(() => {
-      if (
-        this.#disposed
-        || attemptGeneration !== this.#attemptGeneration
-        || !sameExactIdentity(this.#identity, identity)
-      ) return;
-      this.#transitionToStatic("static-fallback", "recovery-failed", identity);
-    });
-  }
-
   settleRuntime({
     sessionId,
     sourceSha256,
@@ -656,10 +579,6 @@ export class EditAuthorRuntimeSession {
         "static-fallback",
         outcome === "rejected" ? "candidate-rejected" : "candidate-failed",
       );
-      return true;
-    }
-    if (grant.resourceMode === "compatible") {
-      this.#recoverCompatibleRuntime(grant, outcome);
       return true;
     }
     this.#transitionToStatic(

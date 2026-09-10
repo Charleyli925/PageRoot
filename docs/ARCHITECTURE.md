@@ -93,17 +93,18 @@ the historical synthetic-spike decision.
   program may receive one Main-authorized resource closure. The visible Edit
   iframe parses source with author scripts inert, proves the complete parser-
   authored object set, then activates those scripts in source order; PageRoot does not
-  wait for visual paint, freeze activity or audit Runtime DOM against source.
+  wait for arbitrary script completion, freeze activity or audit Runtime DOM against source.
   Same-origin `window.parent` access, including renderer-exposed preload APIs,
   remains the accepted in-place-editing cost. Unsupported programs fail closed
-  to static Edit. An exact cached ECharts library wins; the narrowly reviewed
-  5.4.3 core CDN mapping may render immediately with packaged 5.6.0 while the
-  exact bytes download into a verified content-addressed store. The first
-  successful runtime locks the current Canvas generation. Exact bytes never
-  replace a successful compatible page; only a failed compatible run may
-  consume one exact recovery. Semantic source changes rebuild the disposable iframe and
-  rerun the unchanged author program; native input may defer that one rebuild
-  until composition/editing finishes. Generated descendants are display-only
+  to static Edit. Reviewed 5.4.3 and 5.6.0 core CDN mappings render from their
+  respective same-version SHA-pinned packaged files; other immutable versions
+  use only exact cache/network bytes. No cross-version substitution or recovery
+  session exists. Resource failures reject the Candidate; noncritical author
+  errors may keep a critical-content-ready page as an explicit partial Runtime.
+  Structural or author-program changes that cannot be proven in place rebuild
+  the disposable iframe and rerun the author program; successful ordinary text,
+  common-style and same-parent reorder projections end in the mounted document.
+  Generated descendants are display-only
   and map to the nearest still-proven authored source host for comments. Runtime
   DOM has no persistence authority and Edit screenshot/capture/projection count
   remains 0.

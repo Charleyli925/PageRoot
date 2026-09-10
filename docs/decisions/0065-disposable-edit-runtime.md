@@ -28,7 +28,8 @@ source or be reconciled node by node.
 - Main verifies the active source path, exact HTML Hash, Canvas generation and
   resource budgets before preparing a scoped `pageroot-edit-runtime:` resource
   closure. Inline and contained local scripts are supported. Exact reviewed
-  ECharts 5.6.0 CDN URLs may resolve to pinned packaged bytes. Module import
+  ECharts 5.4.3 and 5.6.0 CDN URLs may resolve only to their same-version,
+  SHA-pinned packaged bytes. Module import
   graphs remain unsupported and fail closed to an explicit static Edit state.
   Main admits at most two concurrent preparations and retains only a bounded
   recent request-ID replay window. Completed identities age out; ordinary use
@@ -37,24 +38,24 @@ source or be reconciled node by node.
   CSP-disabled because worker bytes are outside the frozen author-script
   closure and its Hash/budget checks.
 - Exact-version allowlisted ECharts core bytes may be retained in a bounded,
-  content-addressed Main store. The exact three 5.4.3 minified core URLs may
-  use packaged 5.6.0 only when the tag has no integrity constraint and every
-  other executable script has no `src` attribute. Version, filename and query
-  identity remain fixed across redirects before exact bytes enter the store. This
-  compatible variant starts the background exact download but never mutates
-  its resource session. First successful runtime wins; compatible success
-  locks the current generation, while compatible failure may consume one new
-  immutable exact session from the same initial preparation after Main confirms
-  the original source path, Hash, program identity and Canvas generation.
+  content-addressed Main store. Reviewed 5.4.3 and 5.6.0 core URLs use their
+  exact packaged versions without network or compatibility substitution. Other
+  immutable versions use only an exact cache hit or the exact bounded network
+  request. Version, filename and query identity remain fixed across redirects
+  before bytes enter the store; a missing or corrupted packaged pin fails
+  closed instead of silently switching version.
 - Before author scripts execute, the fixed bootstrap opens one parent-owned
   registration capability. The parent editor deletes that entry after the
   bootstrap captures its private batch and activation-result ports, each bound
   to the source window, session, execution and frame token. Once parsing reaches the complete
   document, while every author-script placeholder is still inert, the bootstrap
   registers the complete parsed set once and only then activates author
-  programs. Script resource errors, synchronous author errors and immediate
-  unhandled rejections through deferred `DOMContentLoaded` report activation
-  failure; iframe load alone never reports success. An early
+  programs. Script resource/bootstrap failures reject the Candidate. A
+  synchronous author error or immediate unhandled rejection instead reports a
+  partial activation: it may remain editable only after required source-host
+  runtime-generated critical content is ready. A static authored SVG is not
+  readiness proof; recognized ECharts must expose its live instance. Iframe load
+  alone never reports success. An early
   authored script therefore cannot preclaim the identity of a later parser
   element. The parent keeps registered DOM references in a parent-realm `WeakSet`;
   public attributes and author-realm expandos are never edit authority. Changing

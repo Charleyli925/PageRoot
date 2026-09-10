@@ -6,7 +6,11 @@ export type RuntimeFrameContext = {
   verificationToken: string;
   grant: EditRuntimeGrant;
   elementGeneration: number;
-  activation: "pending" | "ready" | "failed";
+  activation: "pending" | "ready" | "partial" | "failed";
+  activationSettledAt: number | null;
+  authorErrorCount: number;
+  resourceFailureCount: number;
+  activationElapsedMs: number | null;
   settled: boolean;
 };
 

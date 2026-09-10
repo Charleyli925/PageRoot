@@ -87,6 +87,7 @@
     "@noble/hashes": "2.4.0",
     "@phosphor-icons/react": "2.1.10",
     "echarts": "5.6.0",
+    "echarts-5-4-3": "npm:echarts@5.4.3",
     "electron-updater": "6.8.9",
     "entities": "8.0.0",
     "next": "16.3.3",
@@ -225,6 +226,18 @@
       {
         "from": "node_modules/echarts/NOTICE",
         "to": "edit-runtime-libraries/echarts/5.6.0/NOTICE"
+      },
+      {
+        "from": "node_modules/echarts-5-4-3/dist/echarts.min.js",
+        "to": "edit-runtime-libraries/echarts/5.4.3/echarts.min.js"
+      },
+      {
+        "from": "node_modules/echarts-5-4-3/LICENSE",
+        "to": "edit-runtime-libraries/echarts/5.4.3/LICENSE"
+      },
+      {
+        "from": "node_modules/echarts-5-4-3/NOTICE",
+        "to": "edit-runtime-libraries/echarts/5.4.3/NOTICE"
       },
       {
         "from": "bridge/workspace-bridge.mjs",

@@ -484,6 +484,19 @@ test("the app-bundle gate reports each mutated closure boundary", async (t) => {
       expected: /build provenance mismatch for version/u,
     },
     {
+      name: "ECharts 5.4.3 packaged byte drift",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ resourcesPath }) => writeFile(
+        path.join(
+          resourcesPath,
+          "edit-runtime-libraries/echarts/5.4.3/echarts.min.js",
+        ),
+        "stale ECharts 5.4.3 bytes\n",
+      ),
+      expected: /bundled ECharts 5\.4\.3 echarts\.min\.js does not match source/u,
+    },
+    {
       name: "missing fresh renderer oracle",
       profile: "candidate",
       allowUnsigned: true,

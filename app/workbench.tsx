@@ -372,7 +372,6 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
 };
 const EDIT_RUNTIME_PENDING_PHASES = new Set([
   "preparing",
-  "recovering",
   "ready",
   "running",
 ]);
@@ -856,7 +855,10 @@ export default function Workbench() {
   const runtimeNoticeState: HtmlCanvasRuntimeDegradation | "direct-static-visible" = (
     editRuntimePhase === "static-fallback" && runtimeDegradation === "none"
   ) ? "direct-static-visible" : runtimeDegradation;
-  const staticFallbackNoticeIdentity = editRuntimePhase === "static-fallback"
+  const staticFallbackNoticeIdentity = (
+    editRuntimePhase === "static-fallback"
+    || runtimeNoticeState === "runtime-partial"
+  )
     ? [
         editRuntimeSnapshot?.sourcePath || sourcePath || "no-source",
         editRuntimeSnapshot?.canvasGeneration ?? canvasGeneration,
@@ -966,7 +968,6 @@ export default function Workbench() {
         ...(editRuntimeApi ? {
           editRuntime: {
             prepare: (request) => editRuntimeApi.prepare(request),
-            recover: (request) => editRuntimeApi.recover?.(request) ?? Promise.resolve(null),
             revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
           },
         } : {}),

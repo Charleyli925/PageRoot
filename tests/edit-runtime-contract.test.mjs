@@ -62,6 +62,45 @@ test("disposable Edit runtime preserves native script scheduling attributes", ()
   );
 });
 
+test("import detection ignores authored prose and JavaScript literal content", () => {
+  for (const program of [
+    'const heading = "How to import data";',
+    "const heading = 'import( is documentation';",
+    "// import('./commented.js')\nwindow.ready = true;",
+    "/* import value from './commented.js' */\nwindow.ready = true;",
+    "const matcher = /import\\s*\\(/u;",
+    "if (ready) {} /import\\s*\\(/u.test(source);",
+    "const prose = `How to import data`;",
+    "viewer.import('./method.js');",
+    "viewer?.import('./optional-method.js');",
+    "const options = { import: 'data' };",
+    "const options = { import() { return 'data'; } };",
+    "class Loader { import() {} }",
+    "class Loader { static import() {} }",
+    "class Loader { import = () => 'data'; }",
+    "const options = { *import() { yield 'data'; } };",
+    "const options = { get import() { return 'data'; } };",
+    "const options = { set import(value) { this.value = value; } };",
+    "const options = { async import() { return 'data'; } };",
+  ]) assert.equal(unsupportedEditRuntimeProgramReason(program), null, program);
+
+  for (const program of [
+    "import value from './module.js';",
+    "import './side-effect.js';",
+    "const module = import('./dynamic.js');",
+    "const url = import.meta.url;",
+    "const template = `value: ${import('./nested.js')}`;",
+    "const module = import /* webpackIgnore: true */ ('./comment-gap.js');",
+    "const modules = { ...import('./spread-dynamic.js') };",
+  ]) {
+    assert.equal(
+      unsupportedEditRuntimeProgramReason(program),
+      "dynamic-or-module-import",
+      program,
+    );
+  }
+});
+
 test("program identity changes only when authored script markup changes", () => {
   const first = '<main>A</main><script defer>window.ready = true</script>';
   const semanticEdit = '<main>B</main><script defer>window.ready = true</script>';
@@ -120,9 +159,10 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(
     EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
     EDIT_AUTHOR_RUNTIME_BUDGET.remoteLibraryDeadlineMs
-      + (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2)
+      + EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
+      + EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs
       + 1_000,
-    "canvas acknowledgement permits remote acquisition and one fail-safe visible-iframe deadline",
+    "canvas acknowledgement permits exact remote acquisition, activation, and surface readiness",
   );
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs, 60_000);
   assert.equal("cacheEntries" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
