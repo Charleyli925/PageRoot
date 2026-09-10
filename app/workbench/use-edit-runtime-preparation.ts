@@ -15,9 +15,9 @@ export function useEditRuntimePreparation({
 }) {
   const runtimePhase = editRuntimeSnapshot?.phase ?? "static";
   const runtimePreparing = canvasMode === "edit"
-    && ["preparing", "recovering"].includes(runtimePhase);
+    && runtimePhase === "preparing";
   const runtimeRenderPending = canvasMode === "edit"
-    && ["preparing", "recovering", "ready", "running"].includes(runtimePhase);
+    && ["preparing", "ready", "running"].includes(runtimePhase);
   const runtimeGrant = canvasMode === "edit"
     && ["ready", "running", "settled"].includes(runtimePhase)
     ? editRuntimeSnapshot?.grant ?? null

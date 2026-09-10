@@ -3125,7 +3125,7 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
       geometry: undefined,
     });
     const unlocked = await readActiveAcceptSnapshot(launched.page);
-    expect(["preparing", "static", "recovering"]).toContain(unlocked.runtimePhase);
+    expect(["preparing", "static"]).toContain(unlocked.runtimePhase);
     expect(unlocked.sourcePath).toMatch(/\/accept-static-first-V2\.html$/u);
     const expectedSha256 = sha256(readFileSync(unlocked.sourcePath));
     expect(unlocked.workingSha256).toBe(expectedSha256);

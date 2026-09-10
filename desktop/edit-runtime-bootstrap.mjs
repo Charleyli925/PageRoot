@@ -52,6 +52,37 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     : null;
   const registerProved = registration?.registerProved;
   const reportActivationOutcome = registration?.reportActivationOutcome;
+  const canAcceptFocus = registration?.canAcceptFocus;
+
+  // Author scripts execute while this document is still a hidden Candidate.
+  // Keep their explicit focus calls private until the parent coordinator has
+  // accepted this exact frame as Active. The wrappers remain transparent once
+  // accepted and do not add a second lifecycle authority inside the iframe.
+  const installFocusGuard = (owner, property) => {
+    const descriptor = Object.getOwnPropertyDescriptor(owner, property);
+    const nativeFocus = descriptor?.value;
+    if (typeof nativeFocus !== "function") return;
+    try {
+      Object.defineProperty(owner, property, {
+        ...descriptor,
+        value: function guardedRuntimeFocus(...args) {
+          if (
+            typeof canAcceptFocus !== "function"
+            || canAcceptFocus() !== true
+          ) return undefined;
+          return Reflect.apply(nativeFocus, this, args);
+        },
+      });
+    } catch {
+      // The document root is also inert during preparation. A non-configurable
+      // focus implementation therefore degrades to that platform boundary.
+    }
+  };
+  installFocusGuard(HTMLElement.prototype, "focus");
+  if (typeof SVGElement !== "undefined") {
+    installFocusGuard(SVGElement.prototype, "focus");
+  }
+  installFocusGuard(window, "focus");
 
   const candidates = (root) => {
     if (!root || root.nodeType !== Node.ELEMENT_NODE) return [];
@@ -132,7 +163,7 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
         asyncSettlements.push(settled);
       }
     }
-    return !scriptLoadFailed;
+    return scriptLoadFailed ? 1 : 0;
   };
 
   let activationStarted = false;
@@ -148,7 +179,9 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
   const start = async () => {
     if (activationStarted) return;
     activationStarted = true;
-    let activationFailed = false;
+    const activationStartedAt = performance.now();
+    let authorErrorCount = 0;
+    let resourceFailureCount = 0;
     let activationReported = false;
     const asyncSettlements = [];
     const reportOnce = (outcome) => {
@@ -157,18 +190,18 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
       reportActivationOutcome(outcome);
     };
     const captureActivationError = (event) => {
-      if (event instanceof ErrorEvent) activationFailed = true;
+      if (event instanceof ErrorEvent) authorErrorCount += 1;
     };
     const captureActivationRejection = () => {
-      activationFailed = true;
+      authorErrorCount += 1;
     };
     window.addEventListener("error", captureActivationError, true);
     window.addEventListener("unhandledrejection", captureActivationRejection, true);
     try {
       proveParsedSource();
-      if (!await activateAuthorScripts(asyncSettlements)) activationFailed = true;
+      resourceFailureCount += await activateAuthorScripts(asyncSettlements);
     } catch {
-      activationFailed = true;
+      resourceFailureCount += 1;
     } finally {
       activationComplete = true;
       window.removeEventListener("DOMContentLoaded", holdDomContentLoaded, true);
@@ -177,17 +210,26 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
           document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
         }
         const asyncResults = await Promise.all(asyncSettlements);
-        if (asyncResults.some((loaded) => !loaded)) activationFailed = true;
+        resourceFailureCount += asyncResults.filter((loaded) => !loaded).length;
         // Keep the activation window open through the next task so an
         // immediately rejected author promise, including one created by a
         // deferred DOMContentLoaded handler, reaches unhandledrejection.
         await new Promise((resolve) => setTimeout(resolve, 0));
       } catch {
-        activationFailed = true;
+        resourceFailureCount += 1;
       } finally {
         window.removeEventListener("error", captureActivationError, true);
         window.removeEventListener("unhandledrejection", captureActivationRejection, true);
-        reportOnce(activationFailed ? "activation-failed" : "activation-ready");
+        reportOnce(Object.freeze({
+          status: resourceFailureCount > 0
+            ? "activation-resource-failed"
+            : authorErrorCount > 0
+              ? "activation-author-error"
+              : "activation-ready",
+          authorErrorCount,
+          resourceFailureCount,
+          elapsedMs: Math.max(0, Math.round(performance.now() - activationStartedAt)),
+        }));
       }
     }
   };

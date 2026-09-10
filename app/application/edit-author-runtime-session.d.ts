@@ -6,7 +6,6 @@ import type {
 export type EditAuthorRuntimePhase =
   | "static"
   | "preparing"
-  | "recovering"
   | "ready"
   | "running"
   | "settled"
@@ -56,6 +55,7 @@ export class EditAuthorRuntimeSession {
     candidateSourceRevision?: string;
     outcome?: "ready" | "rejected" | "failed" | "superseded";
     preserveLastKnownGood?: boolean;
+    runtimePartial?: boolean;
   }): boolean;
   retry(input?: {
     html?: string;

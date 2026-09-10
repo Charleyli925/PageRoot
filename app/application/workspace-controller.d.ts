@@ -453,6 +453,7 @@ export class WorkspaceController {
     candidateSourceRevision: string;
     outcome: "ready" | "rejected" | "failed" | "superseded";
     preserveLastKnownGood: boolean;
+    runtimePartial: boolean;
   }): boolean;
   retryEditAuthorRuntime(): Promise<boolean>;
   getCurrentProjectContext(): ProjectContext | null;

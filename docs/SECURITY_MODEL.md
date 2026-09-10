@@ -120,30 +120,26 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   copied public markers remain non-authoritative. The bootstrap does not
   freeze author activity or audit Runtime DOM. Its one-shot private capability
   also reports author activation outcome only after validating source window,
-  session, execution and frame token; script resource errors, synchronous
-  activation errors and immediate unhandled rejections fail the activation.
+  session, execution and frame token. Script resource/bootstrap failures reject
+  the Candidate; synchronous author errors and immediate unhandled rejections
+  mark it partial and still require critical-content readiness before promotion.
   This signal does not inspect pixels, Canvas contents or later Runtime
-  behavior. Exact ECharts 5.6.0 minified CDN
-  references use the packaged SHA-verified library. Exact-version allowlisted
+  behavior. Exact ECharts 5.4.3 and 5.6.0 minified CDN
+  references use their same-version packaged SHA-verified libraries. Exact-version allowlisted
   ECharts core URLs may be retained in a private content-addressed byte store:
   canonical URL metadata never replaces SHA-256 verification, corrupted entries
   fail open to the bounded network loader, and the store owns neither source nor
   execution authority. Exact immutable redirects must retain version, core
   filename and query identity before their bytes may be cached under the
-  requested URL. Only the three standard query-free 5.4.3 core URLs, without an
-  integrity attribute or any additional executable `src` attribute, may
-  temporarily resolve to packaged 5.6.0. That compatible resource set is
-  immutable; exact bytes arriving later
-  only update the store unless the compatible runtime failed and consumes its
-  one authorized recovery. Recovery is re-authorized in Main against the bound
-  canonical source path, source Hash, authored-program identity and Canvas
-  generation before it can inherit the original resource root.
+  requested URL. There is no cross-version compatibility substitution or
+  recovery session. An unavailable or corrupted packaged pin fails closed;
+  other immutable versions use only their exact cache entry or bounded exact
+  network request.
   Under the accepted product risk in ADR 0065, author scripts in that iframe can reach
   renderer-exposed contextBridge APIs on the parent. The iframe itself still
-  has no Node integration and no preload or IPC sender of its own. Capture
-  Terminal preparation, provenance, recovery or load failure revokes the session
-  and renders static Edit. A still-running exact resource download is recoverable
-  coordination, not a terminal security decision. Edit must not answer a security
+  has no Node integration and no preload or IPC sender of its own. Terminal
+  preparation, provenance or resource load failure revokes the session and
+  renders static Edit. Edit must not answer a security
   concern by converting to PNG.
   Main admits two concurrent preparations and retains a bounded recent request-
   ID replay window. Completed IDs age out, so renderer IDs cannot grow memory

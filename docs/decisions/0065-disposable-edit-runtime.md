@@ -28,7 +28,8 @@ source or be reconciled node by node.
 - Main verifies the active source path, exact HTML Hash, Canvas generation and
   resource budgets before preparing a scoped `pageroot-edit-runtime:` resource
   closure. Inline and contained local scripts are supported. Exact reviewed
-  ECharts 5.6.0 CDN URLs may resolve to pinned packaged bytes. Module import
+  ECharts 5.4.3 and 5.6.0 CDN URLs may resolve only to their same-version,
+  SHA-pinned packaged bytes. Module import
   graphs remain unsupported and fail closed to an explicit static Edit state.
   Main admits at most two concurrent preparations and retains only a bounded
   recent request-ID replay window. Completed identities age out; ordinary use
@@ -37,24 +38,24 @@ source or be reconciled node by node.
   CSP-disabled because worker bytes are outside the frozen author-script
   closure and its Hash/budget checks.
 - Exact-version allowlisted ECharts core bytes may be retained in a bounded,
-  content-addressed Main store. The exact three 5.4.3 minified core URLs may
-  use packaged 5.6.0 only when the tag has no integrity constraint and every
-  other executable script has no `src` attribute. Version, filename and query
-  identity remain fixed across redirects before exact bytes enter the store. This
-  compatible variant starts the background exact download but never mutates
-  its resource session. First successful runtime wins; compatible success
-  locks the current generation, while compatible failure may consume one new
-  immutable exact session from the same initial preparation after Main confirms
-  the original source path, Hash, program identity and Canvas generation.
+  content-addressed Main store. Reviewed 5.4.3 and 5.6.0 core URLs use their
+  exact packaged versions without network or compatibility substitution. Other
+  immutable versions use only an exact cache hit or the exact bounded network
+  request. Version, filename and query identity remain fixed across redirects
+  before bytes enter the store; a missing or corrupted packaged pin fails
+  closed instead of silently switching version.
 - Before author scripts execute, the fixed bootstrap opens one parent-owned
   registration capability. The parent editor deletes that entry after the
   bootstrap captures its private batch and activation-result ports, each bound
   to the source window, session, execution and frame token. Once parsing reaches the complete
   document, while every author-script placeholder is still inert, the bootstrap
   registers the complete parsed set once and only then activates author
-  programs. Script resource errors, synchronous author errors and immediate
-  unhandled rejections through deferred `DOMContentLoaded` report activation
-  failure; iframe load alone never reports success. An early
+  programs. Script resource/bootstrap failures reject the Candidate. A
+  synchronous author error or immediate unhandled rejection instead reports a
+  partial activation: it may remain editable only after required source-host
+  runtime-generated critical content is ready. A static authored SVG is not
+  readiness proof; recognized ECharts must expose its live instance. Iframe load
+  alone never reports success. An early
   authored script therefore cannot preclaim the identity of a later parser
   element. The parent keeps registered DOM references in a parent-realm `WeakSet`;
   public attributes and author-realm expandos are never edit authority. Changing
@@ -80,9 +81,12 @@ source or be reconciled node by node.
   moved, duplicated or deleted as source.
 - Every accepted semantic source change still produces complete next HTML.
   Structural and other non-native changes rebuild the disposable iframe and
-  rerun the author program. Native text input may remain in the current frame
-  while composing and rebuilds once when the edit finishes. Comments, save and
-  source echoes without an HTML change do not require a rebuild.
+  rerun the author program. Successful direct text and common-style source
+  changes update the proved current DOM projection and end there; finishing the
+  edit, changing selection, waiting or saving does not create a deferred author
+  program rerun. Local projection failure, stale source identity and explicit
+  recovery remain rebuild boundaries. Comments, save and source echoes without
+  an HTML change do not require a rebuild.
 - One scoped resource session may serve repeated disposable frames only while
   the authored script markup and bodies have the same exact program identity.
   A script change requires a new Canvas generation and a newly authorized
@@ -121,11 +125,14 @@ saved fact.**
 - Direct text and common-style edits must be visible in the current Canvas
   without a manual refresh. Safe high-frequency input updates the current
   authored DOM projection and must not replace the iframe for every keystroke.
+  Once that synchronization succeeds it must not replace the iframe during
+  input or after the ordinary edit boundary.
 - The implementation preserves the current page whenever it can still prove a
   local source-backed update. A structure change or a change whose result
   requires author Script may rebuild the disposable iframe, but rebuilds are
-  coalesced at semantic/checkpoint boundaries rather than driven by individual
-  input events.
+  reserved for those explicit boundaries and for failed/stale local projection,
+  rather than being a default follow-up to an already successful text/style
+  edit.
 - A necessary rebuild should restore the shared scroll position, any exposed
   zoom context, and the selection resolved by stable element ID when those
   facts still have a valid target. Restoration is best-effort presentation;
@@ -207,8 +214,10 @@ runtime-only state after reopen.
 - `location.assign()` and `location.replace()` cannot navigate the Edit frame.
 - A semantic structure edit rebuilds the iframe, reruns the program and saves
   only the complete semantic HTML result.
-- Continuous direct text input is visible immediately without repeated iframe
-  replacement; a completed common edit survives close and reopen from HTML.
+- Continuous direct text input and common formatting stay in the same document
+  through edit completion, target changes, waiting and ordinary save; author
+  Script is not rerun for those successful local projections. The completed
+  common edit survives close and reopen from HTML.
 - A required rebuild preserves shared scroll and stable-ID selection when the
   target remains valid, without serializing runtime output.
 - Switching away and back creates a fresh runtime page without replaying an old

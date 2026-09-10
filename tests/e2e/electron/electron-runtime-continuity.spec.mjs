@@ -1,6 +1,8 @@
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { expect, test } from "@playwright/test";
 
+import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-contract.js";
+
 import {
   activateNativeEdit,
   closePageRootGracefully,
@@ -153,6 +155,8 @@ const CHART_PAGE = `<!doctype html>
   <div aria-hidden="true" style="height:1800px"></div>
   <script src="echarts.js"></script>
   <script>
+    parent.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ =
+      (parent.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0) + 1;
     echarts.init(document.querySelector('#chart')).setOption({series:[{type:'bar',data:[1,2,3]}]});
   </script>
 </body></html>`;
@@ -328,7 +332,7 @@ test("comment rail and canvas width stay visually continuous while typing in a n
   });
 });
 
-test("double-clicking the sixth blank line after a Runtime refresh places the caret on that br", {
+test("ending Runtime text editing keeps the document and the sixth blank-line caret", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const marker = "SIXTH_BLANK_LINE_MARKER";
@@ -351,22 +355,24 @@ test("double-clicking the sixth blank line after a Runtime refresh places the ca
     const beforeGeneration = await page.getByTestId("html-canvas-editor")
       .locator('iframe:not([data-frame-role])')
       .getAttribute("data-frame-generation");
+    const beforeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0
+    ));
 
     await page.keyboard.press("Escape");
     await expect(target).not.toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
-    await expect.poll(async () => {
-      const generation = await page.getByTestId("html-canvas-editor")
-        .locator('iframe:not([data-frame-role])')
-        .getAttribute("data-frame-generation");
-      const token = await documentToken(page);
-      const summary = await continuitySummary(page);
-      return generation !== beforeGeneration
-        || token !== beforeDocument
-        || summary.frameCreated > 0
-        || summary.framePromoted > 0;
-    }).toBe(true);
-    await expect.poll(() => page.locator(".canvas-edit-surface")
-      .getAttribute("data-edit-runtime-outcome")).toBe("ready");
+    await page.waitForTimeout(900);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0
+    ))).toBe(beforeScriptCount);
+    const afterBoundary = await continuitySummary(page);
+    expect(afterBoundary.frameCreated).toBe(0);
+    expect(afterBoundary.framePromoted).toBe(0);
+    expect(afterBoundary.candidateCreated).toBe(0);
     frame = await currentEditorFrame(page);
     target = frame.locator('[data-native-case="continuity-blank-caret"]');
     await expect(target.locator(":scope > br")).toHaveCount(8);
@@ -409,8 +415,14 @@ const DELAYED_CHART_PAGE = `<!doctype html><html><head><title>Continuous report<
 <style>body{font:18px system-ui;padding:32px;color:#25232a}main{display:grid;grid-template-columns:1fr 1fr;gap:24px}#chart{height:180px}canvas{width:320px;height:180px}</style></head>
 <body><h1>Quarterly report</h1><main><p data-native-case="format-chart">Revenue grew steadily this quarter.</p><div id="chart"></div></main>
 <script>
+ parent.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ =
+   (parent.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0) + 1;
  const text = document.querySelector('[data-native-case="format-chart"]').textContent;
- if (text.includes('FAIL_CHART')) throw new Error('synthetic chart initialization failure');
+ if (text.includes('FAIL_CHART')) {
+   parent.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ =
+     (parent.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0) + 1;
+   throw new Error('synthetic chart initialization failure');
+ }
  setTimeout(() => {
    const canvas = document.createElement('canvas'); canvas.width=320; canvas.height=180;
    document.querySelector('#chart').append(canvas);
@@ -419,7 +431,7 @@ const DELAYED_CHART_PAGE = `<!doctype html><html><head><title>Continuous report<
  }, text.includes('UPDATED') ? 700 : 30);
 </script></body></html>`;
 
-test("formatting preserves charts and a delayed replacement never presents missing surfaces", {
+test("formatting preserves charts without an edit-boundary Runtime rebuild", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({}, testInfo) => {
   await withRuntimeProject("pageroot-chart-format-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
@@ -427,6 +439,10 @@ test("formatting preserves charts and a delayed replacement never presents missi
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     const editor = page.getByTestId('html-canvas-editor');
     const generation = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+    const beforeDocument = await documentToken(page);
+    const beforeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ));
     await activateNativeEdit(frame, 'format-chart');
     const target = frame.locator('[data-native-case="format-chart"]');
     await target.press('End');
@@ -447,7 +463,14 @@ test("formatting preserves charts and a delayed replacement never presents missi
       }, 16);
     });
     await page.keyboard.press('Escape');
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', generation);
+    await page.keyboard.press(keyShortcut('s'));
+    await page.waitForTimeout(1_100);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', generation);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ))).toBe(beforeScriptCount);
+    await expect(editor).not.toHaveAttribute('data-runtime-refresh-pending', '');
     frame = await currentEditorFrame(page);
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     const samples = await page.evaluate(() => { clearInterval(window.__chartContinuityTimer); return window.__chartContinuitySamples; });
@@ -459,42 +482,87 @@ test("formatting preserves charts and a delayed replacement never presents missi
   });
 });
 
-test("failed chart refresh retains the usable frame and identifies it as an older preview", async ({}, testInfo) => {
+test("failed chart refresh keeps the latest static source quietly editable across repeated retries", async ({}, testInfo) => {
   await withRuntimeProject("pageroot-chart-failure-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
-    const { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
+    let { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
+    const editor = page.getByTestId('html-canvas-editor').filter({ visible: true }).first();
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     await activateNativeEdit(frame, 'format-chart');
     await frame.locator('[data-native-case="format-chart"]').press('End');
     await page.keyboard.insertText(' FAIL_CHART');
     await page.keyboard.press('Escape');
-    const notice = page.getByTestId('edit-runtime-static-fallback');
-    await expect(notice).toContainText('上一次可用预览');
-    await expect(notice.getByRole('button', { name: '重新加载', exact: true })).toBeVisible();
-    await expect((await currentEditorFrame(page)).locator('#chart canvas')).toHaveCount(1);
     const working = await managedWorkingCopyPath(page, sourcePath);
-    expect(await readPublishedWorkingCopy(working, 'utf8')).toContain('FAIL_CHART');
-    await page.screenshot({ path: testInfo.outputPath('chart-failed-refresh.png') });
+    await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('FAIL_CHART');
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    const failuresBeforeFirstRetry = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    ));
+    await editor.getByRole('button', { name: '复制元素', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeFirstRetry);
+    await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
+    await expect(editor).toHaveAttribute(
+      'data-runtime-degradation',
+      'static-visible',
+      { timeout: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs + 8_000 },
+    );
+    await expect(editor).toHaveAttribute('data-runtime-surface-budget', 'exceeded');
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('#chart canvas')).toHaveCount(0);
+
+    let target = frame.locator('[data-native-case="format-chart"]').first();
+    await target.dblclick();
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    await target.press('End');
+    await page.keyboard.insertText('        CONTINUED');
+    await page.keyboard.press(keyShortcut('s'));
+    await page.keyboard.press('Escape');
+    await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('CONTINUED');
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+
+    const failuresBeforeRetry = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    ));
+    await page.getByRole('button', { name: '更多', exact: true }).click();
+    await page.getByRole('menuitem', { name: '重新加载动态内容', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeRetry);
+    await expect(editor).toHaveAttribute(
+      'data-runtime-degradation',
+      'static-visible',
+      { timeout: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs + 8_000 },
+    );
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+    frame = await currentEditorFrame(page);
+    target = frame.locator('[data-native-case="format-chart"]').first();
+    await target.dblclick();
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    await target.press('End');
+    await page.keyboard.insertText(' STILL_EDITABLE');
+    await page.keyboard.press('Escape');
+    await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('STILL_EDITABLE');
+    await page.screenshot({ path: testInfo.outputPath('chart-failed-refresh-editable.png') });
   });
 });
 
 const HIDDEN_TAB_CHART_PAGE = `<!doctype html><html><head><title>Tabbed report</title>
 <style>body{font:18px system-ui;padding:32px}.panel[hidden]{display:none}#chart{width:500px;height:240px}</style>
 <script src="echarts.js"></script></head><body>
-<nav role="tablist"><button role="tab" aria-controls="overview" aria-selected="true" class="tab active" data-p="overview">Overview</button><button role="tab" aria-controls="details" aria-selected="false" class="tab" data-p="details">Details</button></nav>
-<section role="tabpanel" id="overview" class="panel active"><p data-native-case="overview-copy">Report overview</p></section>
+<nav role="tablist"><button role="tab" aria-controls="overview" aria-selected="true" class="tab" data-p="overview">Overview</button><button role="tab" aria-controls="details" aria-selected="false" class="tab" data-p="details">Details</button></nav>
+<section role="tabpanel" id="overview" class="panel"><p data-native-case="overview-copy">Report overview</p></section>
 <section role="tabpanel" id="details" class="panel" hidden><p data-native-case="hidden-chart-copy">Revenue grew this quarter.</p><div id="chart"></div></section>
 <script>
+parent.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ =
+ (parent.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0) + 1;
 const chart = echarts.init(document.querySelector('#chart'));
 chart.setOption({animation:false,xAxis:{data:['A','B']},yAxis:{},series:[{type:'bar',data:[30,60]}]});
 window.addEventListener('resize',()=>chart.resize());
-document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{
- document.querySelectorAll('.tab,.panel').forEach(el=>el.classList.remove('active'));
- document.querySelectorAll('.panel').forEach(el=>el.hidden=true);
- tab.classList.add('active');document.getElementById(tab.dataset.p).classList.add('active');document.getElementById(tab.dataset.p).hidden=false;chart.resize();
-}));
 </script></body></html>`;
 
-test("restored hidden tabs initialize real charts with visible geometry before frame promotion", {
+test("an active hidden tab keeps chart geometry without ordinary edit promotion", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({}, testInfo) => {
   await withRuntimeProject('pageroot-hidden-chart-e2e-', {
@@ -502,20 +570,31 @@ test("restored hidden tabs initialize real charts with visible geometry before f
     'echarts.js': readFileSync(new URL('../../../node_modules/echarts/dist/echarts.min.js', import.meta.url), 'utf8'),
   }, async ({ page, sourcePath }) => {
     let { frame, editor } = await loadedDiskFrame(page, sourcePath, 'overview-copy');
-    await page.getByRole('button', { name: '预览', exact: true }).click();
-    const preview = page.frameLocator('iframe[title="HTML 交互预览"]');
-    await preview.locator('.tab[data-p="details"]').click();
-    await page.getByRole('button', { name: '编辑', exact: true }).click();
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    await frame.locator('.tab[data-p="details"]').click();
+    await editor.getByRole('button', { name: '切换到此页签', exact: true }).click();
     frame = await currentEditorFrame(page);
+    await expect(frame.locator('#details')).toBeVisible();
     const chartWidth = () => frame.locator('#chart canvas').first().evaluate(canvas => canvas.width);
     await expect.poll(chartWidth).toBeGreaterThan(400);
+    const initialDocument = await documentToken(page);
+    const initialGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute('data-frame-generation');
+    const initialScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0
+    ));
     for (const marker of [' First edit.', ' Second edit.']) {
-      const generation = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
       await activateNativeEdit(frame, 'hidden-chart-copy');
       await frame.locator('[data-native-case="hidden-chart-copy"]').press('End');
       await page.keyboard.insertText(marker);
       await page.keyboard.press('Escape');
-      await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', generation);
+      await page.waitForTimeout(700);
+      await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', initialGeneration);
+      await expect.poll(() => documentToken(page)).toBe(initialDocument);
+      expect(await page.evaluate(() => (
+        window.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0
+      ))).toBe(initialScriptCount);
+      await expect(editor).not.toHaveAttribute('data-runtime-refresh-pending', '');
       frame = await currentEditorFrame(page);
       await expect(frame.locator('#details')).toBeVisible();
       await expect.poll(chartWidth).toBeGreaterThan(400);
@@ -552,15 +631,23 @@ test("owned composition snapshots keep formatted source nodes editable but autho
     await page.keyboard.press(keyShortcut("s"));
     const working = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(async () => await readPublishedWorkingCopy(working, "utf8")).toContain("CONTINUED");
-    const retiringGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+    const activeGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+    const activeDocument = await documentToken(page);
+    const activeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ));
     await page.keyboard.press("Escape");
     await expect(paragraph).not.toHaveAttribute("contenteditable", "true");
-    // Escape publishes the deferred runtime refresh. Inject into its completed
-    // active document; a disposable clone in the retiring iframe should vanish.
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', retiringGeneration);
-    // Both physical slots persist. The retired document becomes the empty
-    // inactive slot only after promotion cleanup (it was `previous` before).
+    await page.waitForTimeout(900);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', activeGeneration);
+    await expect.poll(() => documentToken(page)).toBe(activeDocument);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ))).toBe(activeScriptCount);
+    // Both physical slots persist, but an ordinary successful text/style edit
+    // leaves the second slot empty instead of preparing a deferred Candidate.
     await expect(editor.locator('iframe[data-runtime-slot-role="inactive"]')).toHaveCount(1);
+    await expect(editor.locator('iframe[data-runtime-slot-role="candidate"]')).toHaveCount(0);
     await expect(editor).toHaveAttribute('data-render-verified', 'true');
     // Public attributes and source-identical bytes cannot grant authority.
     await paragraph.evaluate((node) => {
@@ -575,18 +662,25 @@ test("owned composition snapshots keep formatted source nodes editable but autho
   });
 });
 
-test("source reload recovers editing from a read-only frame even when dynamic preparation fails", async ({}, testInfo) => {
+test("the read-only recovery notice reloads source authority even when dynamic preparation fails", async ({}, testInfo) => {
   await withRuntimeProject("pageroot-static-reload-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, electronApp, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, 'format-chart');
     const editor = page.getByTestId('html-canvas-editor');
     const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
-    const target = frame.locator('[data-native-case="format-chart"]');
+    const target = frame.locator('[data-native-case="format-chart"]').first();
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     await target.dblclick();
     await expect(target).toHaveAttribute('contenteditable', 'true');
     await target.press(keyShortcut('ArrowRight'));
     await page.keyboard.insertText(' FAIL_CHART');
     await page.keyboard.press('Escape');
+    const failuresBeforeReload = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    ));
+    await editor.getByRole('button', { name: '复制元素', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeReload);
     await expect(editor).toHaveAttribute('aria-readonly', 'true', { timeout: 20_000 });
     await expect(page.getByTestId('edit-runtime-static-fallback')).toContainText('页面暂时无法编辑');
     const working = await managedWorkingCopyPath(page, sourcePath);
@@ -597,8 +691,8 @@ test("source reload recovers editing from a read-only frame even when dynamic pr
       ipcMain.removeHandler('html-edit-runtime:prepare');
       ipcMain.handle('html-edit-runtime:prepare', () => { throw new Error('synthetic preparation unavailable'); });
     });
-    await page.getByRole('button', { name: '更多', exact: true }).click();
-    await page.getByRole('menuitem', { name: '从磁盘重新载入 HTML', exact: true }).click();
+    await page.getByTestId('edit-runtime-static-fallback')
+      .getByRole('button', { name: '重新载入当前 HTML', exact: true }).click();
     await expect(page.locator('.workbench-chrome-status')).toHaveText('页面已重新加载，可以继续编辑');
     await expect(editor).toHaveAttribute('aria-readonly', 'false');
     await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
@@ -609,6 +703,10 @@ test("source reload recovers editing from a read-only frame even when dynamic pr
     await page.keyboard.press(keyShortcut('s'));
     await expect.poll(() => readPublishedWorkingCopy(working)).toContain('RECOVERED');
     await page.screenshot({ path: testInfo.outputPath('reload-editing-restored.png') });
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_STATIC_CANDIDATE_FAILURE: "1",
+    },
   });
 });
 
@@ -645,6 +743,69 @@ test("Canvas shortcuts follow the promoted frame and same-source reload keeps ch
     await target.dblclick();
     await expect(target).toHaveAttribute("contenteditable", "true");
     await page.screenshot({ path: testInfo.outputPath("history-focus-and-reload-chart.png") });
+  });
+});
+
+test("a layout-safe format refusal keeps the Runtime text session active", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const source = `<!doctype html><html><head><title>Flex format refusal</title></head><body>
+  <p style="display:inline-flex;gap:8px" data-native-case="flex-format-refusal">Flexible source text</p>
+  <script>
+    parent.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ =
+      (parent.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0) + 1;
+  </script></body></html>`;
+  await withRuntimeProject("pageroot-flex-format-refusal-e2e-", {
+    "runtime-report.html": source,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "flex-format-refusal");
+    const editor = page.getByTestId("html-canvas-editor");
+    const target = frame.locator('[data-native-case="flex-format-refusal"]');
+    const beforeDocument = await documentToken(page);
+    const beforeGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute("data-frame-generation");
+    const beforeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0
+    ));
+
+    await activateNativeEdit(frame, "flex-format-refusal");
+    await target.evaluate((element) => {
+      const text = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
+      if (!(text instanceof Text) || text.data.length < 4) {
+        throw new Error("Flex formatting fixture text is missing.");
+      }
+      const range = element.ownerDocument.createRange();
+      range.setStart(text, text.data.length - 4);
+      range.setEnd(text, text.data.length);
+      const selection = element.ownerDocument.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.ownerDocument.dispatchEvent(new Event("selectionchange"));
+    });
+    const bold = editor.getByRole("button", { name: "加粗", exact: true });
+    await expect(bold).toBeEnabled();
+    await bold.click();
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "rejected:requested:resumed",
+    );
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await target.press("End");
+    await page.keyboard.insertText(" STILL_TYPING_AFTER_REFUSAL");
+    await page.keyboard.press(keyShortcut("s"));
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("STILL_TYPING_AFTER_REFUSAL");
+    expect(await readPublishedWorkingCopy(working, "utf8")).not.toMatch(/font-weight\s*:/u);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(800);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0
+    ))).toBe(beforeScriptCount);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
   });
 });
 

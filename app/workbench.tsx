@@ -373,7 +373,6 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
 };
 const EDIT_RUNTIME_PENDING_PHASES = new Set([
   "preparing",
-  "recovering",
   "ready",
   "running",
 ]);
@@ -866,7 +865,10 @@ export default function Workbench() {
   const runtimeNoticeState: HtmlCanvasRuntimeDegradation | "direct-static-visible" = (
     editRuntimePhase === "static-fallback" && runtimeDegradation === "none"
   ) ? "direct-static-visible" : runtimeDegradation;
-  const staticFallbackNoticeIdentity = editRuntimePhase === "static-fallback"
+  const staticFallbackNoticeIdentity = (
+    editRuntimePhase === "static-fallback"
+    || runtimeNoticeState === "runtime-partial"
+  )
     ? [
         editRuntimeSnapshot?.sourcePath || sourcePath || "no-source",
         editRuntimeSnapshot?.canvasGeneration ?? canvasGeneration,
@@ -976,7 +978,6 @@ export default function Workbench() {
         ...(editRuntimeApi ? {
           editRuntime: {
             prepare: (request) => editRuntimeApi.prepare(request),
-            recover: (request) => editRuntimeApi.recover?.(request) ?? Promise.resolve(null),
             revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
           },
         } : {}),
@@ -3609,15 +3610,15 @@ export default function Workbench() {
     externalAuthorityAccepted?: boolean;
   } = {}) => {
     const context = captureProjectContext();
-    if (!context || projectLoadError || !workspaceController) return;
-    if (requiredWorkspaceController(workspaceController).hasDocumentHistoryAction) return;
+    if (!context || projectLoadError || !workspaceController) return false;
+    if (requiredWorkspaceController(workspaceController).hasDocumentHistoryAction) return false;
     if (
       !fromDeferred
       && deferEditorCommand(
         "external-refresh",
         () => deferredEditorReplayRef.current.reloadCurrentSource?.(),
       )
-    ) return;
+    ) return false;
     const hasUnwrittenLocalChanges = Boolean(
       editorRef.current?.hasPendingNativeEdit()
       || currentDocumentSessionSnapshot().hasPendingWrite
@@ -3631,15 +3632,15 @@ export default function Workbench() {
       !skipConfirmation
       && persistState === "conflict"
       && !window.confirm("确定要用外部版本覆盖当前编辑吗？此操作不可撤销。")
-    ) return;
+    ) return false;
     if (
       !skipConfirmation
       && persistState !== "conflict"
       && hasUnwrittenLocalChanges
       && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出 HTML 副本，仍要继续吗？")
-    ) return;
+    ) return false;
     const operationId = beginSourceTransition();
-    if (operationId === null) return;
+    if (operationId === null) return false;
     const previousFrameGeneration = editorRef.current?.getRenderedFrameGeneration() ?? null;
     let restored = false;
     try {
@@ -3653,7 +3654,7 @@ export default function Workbench() {
         outcome.status === "stale"
         || sourceTransitionOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
-      ) return;
+      ) return false;
       if (outcome.status !== "succeeded") {
         throw new Error(outcome.reason);
       }
@@ -3661,14 +3662,14 @@ export default function Workbench() {
       if (
         sourceTransitionOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
-      ) return;
+      ) return false;
       setFileStatusNotice("已重新读取文件，正在恢复页面…");
       const reloadedDocument = currentDocumentSessionSnapshot();
       await verifyCanvasRendered(reloadedDocument.html, reloadedDocument.workingHtmlSha256 || await browserSha256(reloadedDocument.html), context, previousFrameGeneration);
-      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return;
+      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return false;
       restored = true;
     } catch (cause) {
-      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return;
+      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return false;
       setFileStatusNotice("页面未能重新加载，请重试");
       reportInternalFailure({
         area: "document",
@@ -3684,11 +3685,14 @@ export default function Workbench() {
       // Let the completed transition release its imperative and controlled
       // locks before reporting editor readiness, rather than disk-read success.
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return;
-      setFileStatusNotice(editorRef.current?.isCurrentProjectionEditable()
+      if (sourceTransitionOperationRef.current !== operationId || !isCurrentProjectContext(context)) return false;
+      const editable = Boolean(editorRef.current?.isCurrentProjectionEditable());
+      setFileStatusNotice(editable
         ? "页面已重新加载，可以继续编辑"
         : "文件已重新读取，但页面暂时无法编辑，请重试");
+      return editable;
     }
+    return false;
   }, [
     beginSourceTransition,
     captureProjectContext,
@@ -3701,6 +3705,27 @@ export default function Workbench() {
     refreshWorkspace,
     workspaceController,
     verifyCanvasRendered,
+  ]);
+  const reloadFailedCanvas = useCallback(async (): Promise<boolean> => {
+    const context = captureProjectContext();
+    const controller = workspaceControllerRef.current;
+    if (!context || !controller || projectLoadError || persistState === "conflict") {
+      return false;
+    }
+    // The recovery notice must never discard a save that is merely still in
+    // flight. Join the existing Document queue, re-check its project identity,
+    // then perform the same verified source reload exposed by the More menu.
+    const saved = await controller.flushDocument();
+    if (saved.status !== "succeeded" || !isCurrentProjectContext(context)) {
+      return false;
+    }
+    return reloadCurrentSource({ skipConfirmation: true });
+  }, [
+    captureProjectContext,
+    isCurrentProjectContext,
+    persistState,
+    projectLoadError,
+    reloadCurrentSource,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.reloadCurrentSource = () => {
@@ -6639,7 +6664,9 @@ export default function Workbench() {
                     state={runtimeNoticeState}
                     {...(editRuntimeSnapshot?.retryAvailable
                       ? {
-                          onRetry: () => workspaceControllerRef.current?.retryEditAuthorRuntime() ?? false,
+                          onRetry: runtimeNoticeState === "last-known-good-readonly"
+                            ? reloadFailedCanvas
+                            : () => workspaceControllerRef.current?.retryEditAuthorRuntime() ?? false,
                         }
                       : {})}
                     onExport={() => {
@@ -6686,6 +6713,7 @@ export default function Workbench() {
                       candidateSourceRevision: attempt.sourceRevision,
                       outcome,
                       preserveLastKnownGood: settlement.preserveLastKnownGood,
+                      runtimePartial: settlement.runtimePartial,
                     });
                   }}
                   onRuntimeDegradationChange={(state) => {

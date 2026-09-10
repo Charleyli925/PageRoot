@@ -24,7 +24,7 @@ test("HtmlCanvasEditor draft canary includes all three runtime continuity scenar
     "continuous editing keeps the Runtime document through type, Enter, style and save",
     "continuous editing on a Script page keeps the Runtime document",
     "comment rail and canvas width stay visually continuous while typing in a nested scroller",
-    "double-clicking the sixth blank line after a Runtime refresh places the caret on that br",
+    "ending Runtime text editing keeps the document and the sixth blank-line caret",
   ]) {
     assert.match(source, new RegExp(`${title}[\\s\\S]{0,80}@smoke-editing`, "u"));
   }
