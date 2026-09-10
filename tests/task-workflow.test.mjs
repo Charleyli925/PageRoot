@@ -21,6 +21,12 @@ import {
 
 const agentGuidance = await readFile(new URL("../AGENTS.md", import.meta.url), "utf8");
 const codexWorkflow = await readFile(new URL("../docs/CODEX_WORKFLOW.md", import.meta.url), "utf8");
+const subagentRouting = await readFile(
+  new URL("../docs/CODEX_SUBAGENT_ROUTING_WORKSHEET.md", import.meta.url),
+  "utf8",
+);
+const reviewerProfile = await readFile(new URL("../.codex/agents/reviewer.toml", import.meta.url), "utf8");
+const testerProfile = await readFile(new URL("../.codex/agents/tester.toml", import.meta.url), "utf8");
 
 async function run(root, command, args) {
   const child = spawn(command, args, {
@@ -94,6 +100,11 @@ test("durable agent guidance keeps progressive disclosure and review boundaries"
   assert.match(agentGuidance, /^## Code Review Rules$/mu);
   assert.match(agentGuidance, /update that document in the same PR/u);
   assert.match(agentGuidance, /ENGINEERING_STANDARDS\.md/u);
+  assert.match(agentGuidance, /read gates, not optional references/u);
+  assert.match(agentGuidance, /required_reading/u);
+  assert.match(subagentRouting, /required_reading/u);
+  assert.match(reviewerProfile, /required_reading/u);
+  assert.match(testerProfile, /required_reading/u);
   assert.match(agentGuidance, /Do not merge, create or move a tag, publish a Release/u);
   assert.doesNotMatch(agentGuidance, /\/Users\/|[A-Za-z]:\\/u);
   assert.doesNotMatch(codexWorkflow, /\/Users\/|[A-Za-z]:\\/u);
