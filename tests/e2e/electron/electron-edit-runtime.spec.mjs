@@ -2096,6 +2096,8 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await heading.dblclick({ force: true });
     await expect(heading).toHaveAttribute("contenteditable", "true");
     await heading.press("End");
+    const revisionBeforeFailure = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
     await page.keyboard.insertText("        候选失败");
     const pendingResolverCount = await page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
@@ -2124,6 +2126,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await expect(editor).toHaveAttribute("aria-readonly", "true");
     frame = await currentEditorFrame(page);
     await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    await expectCheckpointPersisted(page, revisionBeforeFailure);
     const latestSource = await readPublishedWorkingCopy(workingCopyPath, "utf8");
     expect(latestSource).toContain("候选失败");
     expect(latestSource).toContain("你好");
