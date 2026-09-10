@@ -97,7 +97,15 @@ test("a pre-load review navigation falls back without trusting the replacement p
     });
     await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
     await launched.page.getByRole("button", { name: "收起会话面板" }).click();
-    await launched.page.getByRole("button", { name: "采纳修改" }).click();
+    const pendingDecisionEntry = launched.page.getByRole("button", {
+      name: "待决定",
+      exact: true,
+    });
+    await expect(pendingDecisionEntry).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "采纳修改" }))
+      .toHaveCount(0);
+    await pendingDecisionEntry.click();
+    await launched.page.getByRole("button", { name: "采用修改", exact: true }).click();
     await expect(launched.page.getByRole("dialog"))
       .not.toContainText("无法视觉验证");
     await launched.page.getByRole("button", { name: "继续审阅" }).click();

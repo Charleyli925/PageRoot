@@ -2180,7 +2180,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     await expect(launched.page.getByRole("button", { name: "返回修改前" }))
       .toHaveCount(0);
     await pendingDecisionEntry.click();
-    await launched.page.getByRole("button", { name: "返回修改前" }).click();
+    await launched.page.getByRole("button", { name: "不用这次", exact: true }).click();
     const dialog = launched.page.getByRole("dialog", {
       name: /返回 AI 修改前（版本 \d+）？/u,
     });
@@ -3016,9 +3016,6 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     });
     await holdEditRuntimePrepare(launched.electronApp);
     await adoptReadyResult(launched.page);
-    await launched.page.getByRole("button", { name: "确认并采纳" })
-      .click({ timeout: 5_000 })
-      .catch(() => undefined);
     // Adoption returns to Edit automatically. The Document keeps its AI
     // history, while the visible inspector goes back to editing comments.
     await expect(launched.page.getByRole("button", { name: "AI 助手", exact: true }))
@@ -3123,6 +3120,7 @@ test("two lost committed adoption replies stay pending and recover one decision 
       else await route.fulfill({ response });
     });
     await launched.page.getByRole("button", { name: "采用修改", exact: true }).click();
+    await launched.page.getByRole("button", { name: "确认并采纳" }).click();
     await committed;
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(sidebar.getByTestId("ai-conversation-action-bar")).toContainText("正在采用");

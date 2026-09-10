@@ -856,6 +856,11 @@ export async function adoptReadyResult(page) {
   const review = page.getByRole("button", { name: "查看修改", exact: true });
   if (!await page.getByTestId("ai-review-workspace").isVisible()) await review.click();
   await page.getByRole("button", { name: "采用修改", exact: true }).click();
+  const confirmation = page.getByRole("dialog", {
+    name: /采纳 AI 修改后（.+）？/u,
+  });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "确认并采纳" }).click();
 }
 
 export const REVIEW_PROJECTION_CASES = Object.freeze([
