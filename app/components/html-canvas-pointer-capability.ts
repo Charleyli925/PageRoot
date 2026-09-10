@@ -160,6 +160,16 @@ function isProjectionOnlyAttribute(name: string, sourceHasAttribute: boolean): b
     || normalized.startsWith("data-html-canvas-")
     || normalized.startsWith("data-pageroot-edit-runtime-")
     || (
+      !sourceHasAttribute
+      && (
+        // Native Edit owns the first two. Page runtime readiness/diagnostic
+        // markers do not become part of the canonical source subtree copied.
+        normalized === "aria-label"
+        || normalized === "data-pageroot-v2-editing"
+        || normalized.startsWith("data-runtime-")
+      )
+    )
+    || (
       ["contenteditable", "role", "spellcheck"].includes(normalized)
       && !sourceHasAttribute
     );
@@ -195,6 +205,24 @@ function attributesMatch(
   return authoredCount === canonical.length;
 }
 
+function comparableChild(
+  inspection: TrustedDomInspection,
+  node: ChildNode | null,
+): ChildNode | null {
+  // Range.deleteContents()/insertNode() can leave zero-length Text objects
+  // that have no source bytes or rendered content. All non-empty nodes still
+  // participate in the exact subtree proof.
+  let candidate = node;
+  while (
+    candidate
+    && inspection.nodeType(candidate) === Node.TEXT_NODE
+    && inspection.nodeValue(candidate) === ""
+  ) {
+    candidate = inspection.next(candidate);
+  }
+  return candidate;
+}
+
 function runtimeNodeMatchesSource(
   liveNode: Node,
   canonicalNode: Node,
@@ -220,8 +248,8 @@ function runtimeNodeMatchesSource(
     || (isProvenRuntimeSourceElement && !isProvenRuntimeSourceElement(liveElement))
   ) return false;
   if (!attributesMatch(inspection, liveElement, canonicalElement)) return false;
-  let liveChild = inspection.child(liveElement);
-  let canonicalChild = inspection.child(canonicalElement);
+  let liveChild = comparableChild(inspection, inspection.child(liveElement));
+  let canonicalChild = comparableChild(inspection, inspection.child(canonicalElement));
   while (liveChild && canonicalChild) {
     if (!runtimeNodeMatchesSource(
       liveChild,
@@ -229,8 +257,8 @@ function runtimeNodeMatchesSource(
       isProvenRuntimeSourceElement,
       hasRuntimeShadowRoot,
     )) return false;
-    liveChild = inspection.next(liveChild);
-    canonicalChild = inspection.next(canonicalChild);
+    liveChild = comparableChild(inspection, inspection.next(liveChild));
+    canonicalChild = comparableChild(inspection, inspection.next(canonicalChild));
   }
   return liveChild === null && canonicalChild === null;
 }
