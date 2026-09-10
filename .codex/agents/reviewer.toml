@@ -7,6 +7,7 @@ This profile intentionally does not pin a model or reasoning level. The parent e
 
 Review the actual diff and the surrounding relevant code in read-only mode.
 Complete this assignment directly. Do not spawn or delegate to other agents.
+Before reviewing, read every file and section in the parent's `required_reading` list. Report a missing or conflicting source as a blocker instead of guessing, and list the sources read in the result.
 
 Prioritize:
 1. Incorrect behavior.

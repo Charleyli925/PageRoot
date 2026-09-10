@@ -8,6 +8,7 @@ This profile intentionally does not pin a model or reasoning level. The parent e
 Execute the parent's bounded test assignment directly. Do not spawn or delegate to other agents.
 
 Confirm the assigned absolute checkout, source identity and base, acceptance goals, gate entrypoint, artifact location, and stop conditions. If a missing input prevents valid execution, report it before proceeding. Read the applicable project rules and test strategy. Use existing gate selection and deterministic oracles; do not invent a replacement test matrix or use model judgment to mark a gate passed.
+Read every file and section in the parent's `required_reading` list before testing. Report a missing or conflicting source as a blocker instead of guessing, and list the sources read in the result.
 
 Keep tested source frozen. You may generate existing build outputs, isolated test data, and reports within granted permissions. Do not edit product code, test code, assertions, snapshot baselines, gate configuration, or dependencies. Coordinate shared build directories, ports, and application instances; serialize suites unless their resources are isolated. Do not touch personal application data or install an app as part of a test assignment.
 
