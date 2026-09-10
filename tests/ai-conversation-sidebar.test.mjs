@@ -1079,19 +1079,19 @@ test("adoption uncertainty takes precedence over Review and exposes no opposite 
   }
 });
 
-test("turn presentation prioritizes requirements, sealed public summary, result and decision while preserving chronological feed blocks", async () => {
+test("turn presentation preserves Conversation sequence across Agent and Stemmio facts", async () => {
   const { sidebarTurnPresentation } = await import("../app/workbench/ai-conversation-model.js");
   const requirements = factMessage({ actor: "user", text: "调整标题" });
   const progress = factMessage({ kind: "progress", text: "正在生成修改。" });
-  const legacy = factMessage({ actor: "pageroot", kind: "text", text: "已发出本轮修改要求。" });
-  const result = factMessage({ kind: "result-summary", text: "修改已准备好，尚未采用。" });
   const summary = factMessage({ actor: "agent", kind: "result-summary", text: "标题已缩短。" });
+  const result = factMessage({ kind: "result-summary", text: "修改已准备好，尚未采用。" });
+  const ended = factMessage({ actor: "agent", kind: "progress", text: "本轮执行已结束。" });
   const decision = factMessage({ kind: "decision-outcome", text: "已采用本次修改。" });
-  const presentation = sidebarTurnPresentation([requirements, progress, legacy, result, summary, decision]);
+  const presentation = sidebarTurnPresentation([requirements, progress, summary, result, ended, decision]);
   assert.deepEqual(presentation.primary, [requirements, summary, result, decision]);
-  assert.deepEqual(presentation.process, [progress, legacy]);
+  assert.deepEqual(presentation.process, [progress, ended]);
   assert.deepEqual(presentation.timeline.map((block) => block.messages), [
-    [requirements], [progress, legacy], [result], [summary], [decision],
+    [requirements], [progress], [summary], [result], [ended], [decision],
   ]);
 });
 

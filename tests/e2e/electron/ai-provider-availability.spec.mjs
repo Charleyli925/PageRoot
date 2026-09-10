@@ -518,7 +518,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     await expect(sidebar.getByRole("button", { name: /交给 源页 修改/u }))
       .toBeEnabled();
     await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
-    const streamingProgress = launched.page.getByTestId("ai-conversation-run-progress");
+    const streamingProgress = launched.page.getByTestId("ai-conversation-execution-status");
     await expect(streamingProgress).toContainText("DeepSeek 正在生成", { timeout: 30_000 });
     await expect.poll(() => streamingProgress.textContent()).toMatch(
       /正在接收结果 · 已用时 \d{2}:\d{2}/u,
@@ -526,6 +526,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     await expect(streamingProgress.locator("details")).toHaveCount(0);
     await expect(streamingProgress).toContainText(/已接收 [1-9]\d* KB/u);
     await expect(streamingProgress).not.toContainText("fixture-hidden");
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")).toHaveCount(0);
     releaseStream();
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))

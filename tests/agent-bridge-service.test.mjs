@@ -942,6 +942,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
     outputPath: path.join(root, "attempt", "output", "candidate.html"),
     completionPath: path.join(root, "attempt", "completion.json"),
   };
+  await mkdir(path.dirname(policy.outputPath), { recursive: true });
   let runCalls = 0;
   let releaseCalls = 0;
   const service = createService(command, {
@@ -955,6 +956,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
     },
     runTask: async () => {
       runCalls += 1;
+      await writeFile(policy.outputPath, "<!doctype html><html><body>partial</body></html>\n");
       const error = new Error("private process-group detail");
       error.code = "ACP_PROCESS_CLEANUP_UNCONFIRMED";
       throw error;
@@ -991,6 +993,60 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
   await assert.rejects(
     service.dispose(),
     (error) => error?.code === "AGENT_SHUTDOWN_UNCONFIRMED",
+  );
+});
+
+test("Agent Bridge preserves a verified Candidate when ACP teardown is unconfirmed", async (t) => {
+  const command = await createFakeCommand(t);
+  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-verified-cleanup-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const facts = [];
+  const policy = {
+    ...fakePolicy(),
+    outputPath: path.join(root, "attempt", "output", "candidate.html"),
+    completionPath: path.join(root, "attempt", "completion.json"),
+  };
+  const service = createService(command, {
+    policyLoader: async () => policy,
+    recordExecutionFact: async (_identity, event) => {
+      facts.push(event);
+    },
+    runTask: async ({ onEvent }) => {
+      onEvent({ kind: "visible-text", messageId: "result", text: "Candidate finalized successfully." });
+      onEvent({ kind: "completion-verified", status: "completed" });
+      const error = new Error("private process-group detail after completion");
+      error.code = "ACP_PROCESS_CLEANUP_UNCONFIRMED";
+      throw error;
+    },
+  });
+  t.after(() => service.dispose().catch(() => {}));
+  const ticket = await preflight(service);
+  await service.submit({
+    ...IDENTITY,
+    selection: QODER_SELECTION,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
+  });
+
+  const completed = await waitForState(service, "completed");
+  assert.equal(completed.state, "completed");
+  assert.equal(completed.phase, "preparing-review");
+  assert.equal(completed.errorCode, null);
+  assert.equal(completed.errorMessage, null);
+  assert.equal(completed.retryable, false);
+  assert.equal(completed.safeToRetry, false);
+  for (let index = 0; index < 50 && !facts.some((fact) => fact.kind === "execution-ended"); index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(facts.some((fact) => fact.kind === "failed"), false);
+  assert.deepEqual(
+    facts.filter((fact) => ["public-summary", "execution-ended"].includes(fact.kind))
+      .map((fact) => [fact.kind, fact.publicSummary || null]),
+    [
+      ["public-summary", "Candidate finalized successfully."],
+      ["execution-ended", null],
+    ],
   );
 });
 

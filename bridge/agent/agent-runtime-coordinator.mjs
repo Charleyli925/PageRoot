@@ -745,6 +745,13 @@ export class AgentRuntimeCoordinator {
       entry.agentName = cleanAgentText(reduced.event.agentName) || "Local Agent";
       entry.agentVersion = cleanAgentText(reduced.event.agentVersion) || entry.agentVersion;
     }
+    if (reduced.event.kind === "completion-verified") {
+      // This fact is emitted only after the restricted Host has re-read the
+      // Candidate and completion record and verified their task identity and
+      // output hash. A later transport teardown error cannot revoke that
+      // already-established Candidate authority.
+      entry.completionVerified = true;
+    }
     if (reduced.event.kind === "activity") {
       entry.lastActivityAt = nowIso(this.#clock);
       if (reduced.event.channel === "html"
@@ -970,6 +977,7 @@ export class AgentRuntimeCoordinator {
       visibleText: "",
       visibleTextUpdates: [],
       textTruncated: false,
+      completionVerified: false,
     };
     try {
       await this.#recordExecutionFact?.(identity, {
@@ -1039,23 +1047,48 @@ export class AgentRuntimeCoordinator {
       this.#touch(entry);
     }).catch(async (cause) => {
       if (this.#executionSessions.get(key) !== entry) return;
-      const residue = await taskHasResidue(policy);
+      // A short-lived runtime can emit its verified terminal fact and reject
+      // during teardown before the scheduled projection flush runs. Classify
+      // only after those already-emitted facts are visible to the coordinator.
+      projectionActive = true;
+      for (const event of pendingEvents.splice(0)) publishEvent(event);
+      await entry.factWrites;
       const cleanupUnconfirmed = cause?.code === "AGENT_PROCESS_CLEANUP_UNCONFIRMED";
-      const code = residue
-        ? "AGENT_RETRY_OUTPUT_PRESENT"
-        : cleanupUnconfirmed
+      const completedBeforeTeardownFailure = entry.completionVerified === true
+        && !controller.signal.aborted
+        && !entry.historyFailure;
+      if (completedBeforeTeardownFailure) {
+        entry.state = "completed";
+        entry.phase = "preparing-review";
+        entry.errorCode = null;
+        entry.errorMessage = null;
+        entry.safeToRetry = false;
+        entry.retryable = false;
+        entry.recoveryKind = "end";
+        // Keep the global process fence when ACP teardown is uncertain, while
+        // preserving the independently verified Candidate as a successful
+        // result for Review.
+        entry.keepLease = cleanupUnconfirmed;
+      } else {
+        const residue = await taskHasResidue(policy);
+        // Process ownership outranks output residue. The latter is expected
+        // after a finalizer attempt and must not hide an uncertain teardown.
+        const code = cleanupUnconfirmed
           ? "AGENT_RESTART_RECOVERY_REQUIRED"
-          : this.#providerRegistry.classifyRunFailure(ticket, cause);
-      entry.state = controller.signal.aborted ? "cancelled" : "failed";
-      entry.phase = controller.signal.aborted ? "cancelled" : "failed";
-      entry.errorCode = code;
-      entry.errorMessage = this.#providerRegistry.failureMessage(ticket, code);
-      entry.safeToRetry = !controller.signal.aborted && !residue && !cleanupUnconfirmed;
-      entry.retryable = entry.safeToRetry;
-      entry.recoveryKind = agentRecoveryKindForError(code, {
-        safeToRetry: entry.safeToRetry,
-      });
-      entry.keepLease = cleanupUnconfirmed;
+          : residue
+            ? "AGENT_RETRY_OUTPUT_PRESENT"
+            : this.#providerRegistry.classifyRunFailure(ticket, cause);
+        entry.state = controller.signal.aborted ? "cancelled" : "failed";
+        entry.phase = controller.signal.aborted ? "cancelled" : "failed";
+        entry.errorCode = code;
+        entry.errorMessage = this.#providerRegistry.failureMessage(ticket, code);
+        entry.safeToRetry = !controller.signal.aborted && !residue && !cleanupUnconfirmed;
+        entry.retryable = entry.safeToRetry;
+        entry.recoveryKind = agentRecoveryKindForError(code, {
+          safeToRetry: entry.safeToRetry,
+        });
+        entry.keepLease = cleanupUnconfirmed;
+      }
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
     }).finally(async () => {

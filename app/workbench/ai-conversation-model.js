@@ -368,20 +368,12 @@ export function sidebarTurnPresentation(messages = []) {
     if (message.kind === "progress" || (message.actor === "pageroot" && LEGACY_EXECUTION_PROGRESS.has(message.text))) process.push(message);
     else primary.push(message);
   }
-  const order = (message) => message.actor === "user" ? 0
-    : message.actor === "agent" ? 1
-    : message.kind === "decision-outcome" || ["已采用本次修改。", "未采用本次修改，修改要求与历史已保留。"].includes(message.text) ? 3 : 2;
-  primary.sort((a, b) => order(a) - order(b));
   const timeline = [];
-  // Receipts can arrive before buffered tool facts. Keep the handoff readable:
-  // preparation, the Agent's complete execution, then host verification and decision.
-  const firstAgent = messages.findIndex((message) => message.actor === "agent");
-  const ordered = firstAgent < 0 ? messages : [
-    ...messages.slice(0, firstAgent),
-    ...messages.slice(firstAgent).filter((message) => message.actor === "agent"),
-    ...messages.slice(firstAgent).filter((message) => message.actor !== "agent"),
-  ];
-  for (const message of ordered) {
+  // Conversation messages already carry a strictly increasing sequence from
+  // the single Repository writer. Preserve that chronology across speakers:
+  // regrouping by actor made older Agent narration jump below newer Stemmio
+  // facts and left the live status detached at the bottom.
+  for (const message of messages) {
     const isProcess = process.includes(message);
     const previous = timeline.at(-1);
     if (isProcess && previous?.process && previous.messages[0].actor === message.actor

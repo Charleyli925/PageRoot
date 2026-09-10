@@ -616,18 +616,11 @@
 }
 
 
-/*
- * The round in flight. It is status, not conversation, so it reads as a quieter
- * block set slightly apart from the messages rather than a second message with an
- * author. One accent, no icons, no borders per row.
- */
-/* Shape comes from .message; this only tightens the stage list against its label. */
+/* Shape comes from .message; this only tightens a later Stemmio verification
+ * fact against its label. The live timer belongs to the Agent article above. */
 .runActivity {
   row-gap: 4px;
 }
-
-
-.runActivity[data-execution="true"] .runSummaryDetail { font-size: 11px; color: var(--muted); }
 
 .runSummary {
   row-gap: 3px;
@@ -650,6 +643,13 @@
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: break-word;
+}
+
+.executionStatus {
+  display: grid;
+  gap: 1px;
+  color: #8a8797;
+  font-size: 11px;
 }
 
 .narrationLine {

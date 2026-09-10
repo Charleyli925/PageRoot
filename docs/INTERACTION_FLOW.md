@@ -1251,6 +1251,7 @@ A 项目 processing 时切换 B 项目：
 | completion 身份不符 | 不建版 | 检查正确 Attempt |
 | output Hash 不符 | 协议错误 | 重新生成并 finalizer |
 | completion 后 output 变化 | 协议违规 | 新 Attempt |
+| completion 已验证后 Agent 进程收尾未确认 | 保留有效 Candidate 并继续审阅；不得改写成执行失败 | 保持进程围栏，后续执行按 Bridge 恢复规则处理 |
 | no-change | 不建版 | 修改要求后再提交 |
 | AI 失败或取消 | 不建版、不创建工作文件 | 修改要求后再提交 |
 
@@ -1262,7 +1263,9 @@ session 证明协议、Agent 身份、建会话与进程清理，只在 Bridge �
 
 执行过程按时间顺序留在对话流中。用户消息使用人物头像及“我”；Stemmio 的阶段事实使用
 品牌头像及名称，连续事实合为紧凑记录，默认展开，不能藏进“查看处理记录”。Agent 面向用户的
-公开说明逐条积累，实时状态位于消息流末尾，已接收字节直接可见。停止操作仍固定在底部。
+公开说明逐条积累，所有消息严格按 Conversation sequence 显示，最新事实位于最下面；不得按说话人
+重新分组。Agent 的实时状态、计时与已接收字节归属于同一条当前 Agent 消息，不另建一条常驻的
+Stemmio 状态压在其下。Agent 结束后，后续校验与 Candidate 事实再按发生顺序追加。停止操作仍固定在底部。
 审阅侧栏打开时，采用／不用本次只在侧栏行动区显示；侧栏关闭时顶栏提供对应决定入口。
 底部常驻“下一轮草稿”输入框，复用 ConversationSession / ConversationWorkflow 的文档草稿
 保存与切换/关闭 drain；退出核对的 preparing/ready 阶段同时锁定输入及草稿写命令，退出失败或取消后恢复，避免后续保存等待期间再输入而丢失。当前阶段仅记事，不发送、不修改冻结 Request、不自动采用 Candidate。
