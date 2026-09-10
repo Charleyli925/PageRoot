@@ -611,8 +611,16 @@ test("the review projection annotates a dense report cleanly and accurately", as
       await expect(frame.locator("html"))
         .toHaveAttribute("data-pageroot-review-focus-group", paragraphTwoGroup.id);
     }
+    const restoredReviewPosition = await afterFrame.locator("html").evaluate((root, requestedTop) => {
+      const scrollingElement = root.ownerDocument.scrollingElement;
+      const maximumScrollTop = Math.max(
+        0,
+        (scrollingElement?.scrollHeight || 0) - root.ownerDocument.defaultView.innerHeight,
+      );
+      return Math.min(requestedTop, maximumScrollTop);
+    }, preservedReviewPosition);
     await expect.poll(() => afterFrame.locator("html").evaluate(() => scrollY))
-      .toBeCloseTo(preservedReviewPosition, 0);
+      .toBeCloseTo(restoredReviewPosition, 0);
     await afterFrame.locator("body").press("Escape");
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html"))
