@@ -1,4 +1,9 @@
-import type { ReviewFilter, ReviewPresentation, ReviewSide } from "./review-document";
+import type {
+  ReviewDocuments,
+  ReviewFilter,
+  ReviewPresentation,
+  ReviewSide,
+} from "./review-document";
 import {
   DEFAULT_ACTIVE_REVIEW_FOCUS_GROUP_ID,
   nextActiveReviewFocusGroupId,
@@ -61,6 +66,87 @@ export const DEFAULT_REVIEW_STATE: ReviewState = {
   scrollMode: "linked",
   zoomMode: "actual",
 };
+
+export const EMPTY_REVIEW_READING_POSITIONS: ReviewReadingPosition = Object.freeze({
+  before: Object.freeze({ top: 0, left: 0, viewportLeft: 0 }),
+  after: Object.freeze({ top: 0, left: 0, viewportLeft: 0 }),
+});
+
+export function restoreReviewPresentation({
+  documents,
+  reviewIdentity,
+  contextVisibility,
+  presentation,
+}: Readonly<{
+  documents: Pick<ReviewDocuments, "changes" | "focusGroups">;
+  reviewIdentity: string;
+  contextVisibility: number;
+  presentation?: ReviewPresentationSnapshot | null;
+}>): {
+  state: ReviewState;
+  positions: ReviewPresentationSnapshot["positions"];
+  restored: boolean;
+} {
+  const fallback = {
+    state: { ...DEFAULT_REVIEW_STATE, contextVisibility },
+    positions: EMPTY_REVIEW_READING_POSITIONS,
+    restored: false,
+  };
+  if (!presentation || presentation.reviewIdentity !== reviewIdentity) return fallback;
+  const candidate = presentation.state;
+  const pageView = (["split", "before", "after"] as string[]).includes(candidate.pageView)
+    ? candidate.pageView
+    : "split";
+  const changeFilter = (["all", "text", "structure"] as string[]).includes(candidate.changeFilter)
+    ? candidate.changeFilter
+    : "all";
+  const scrollMode = candidate.scrollMode === "independent" ? "independent" : "linked";
+  const zoomMode = candidate.zoomMode === "fit" ? "fit" : "actual";
+  const navigationTarget = candidate.navigationTarget === "all"
+    || documents.changes.some((change) => change.id === candidate.navigationTarget)
+    ? candidate.navigationTarget
+    : "all";
+  const focusGroup = documents.focusGroups.find((group) => (
+    group.id === candidate.activeFocusGroupId
+    && (changeFilter === "all"
+      || (changeFilter === "text" ? group.kind === "text" : group.kind !== "text"))
+  )) || null;
+  const regionId = (side: ReviewSide) => {
+    const requested = candidate.activeFocusRegionIds?.[side];
+    return focusGroup?.regions[side].some((region) => region.id === requested)
+      ? requested || null
+      : null;
+  };
+  const position = (side: ReviewSide) => {
+    const raw = presentation.positions?.[side];
+    const safe = (value: unknown) => Number.isFinite(Number(value))
+      ? Math.max(0, Number(value))
+      : 0;
+    return {
+      top: safe(raw?.top),
+      left: safe(raw?.left),
+      viewportLeft: safe(raw?.viewportLeft),
+    };
+  };
+  return {
+    state: {
+      pageView: pageView as ReviewPageView,
+      changeFilter: changeFilter as ReviewChangeFilter,
+      contextVisibility,
+      navigationTarget,
+      activeFocusGroupId: focusGroup?.id || null,
+      activeFocusRegionIds: {
+        before: regionId("before"),
+        after: regionId("after"),
+      },
+      pagePresentation: candidate.pagePresentation || { before: [], after: [] },
+      scrollMode,
+      zoomMode,
+    },
+    positions: { before: position("before"), after: position("after") },
+    restored: true,
+  };
+}
 
 export function reduceReviewState(
   state: ReviewState,

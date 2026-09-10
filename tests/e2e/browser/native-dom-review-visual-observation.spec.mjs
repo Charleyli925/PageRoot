@@ -551,6 +551,75 @@ test("one exact text atom may span several markers but remains one borderless fo
   expect(await hole.getAttribute("d")).toBeTruthy();
 });
 
+test("review navigation acknowledges only locatable geometry and honors cancellation", async ({ page }) => {
+  await page.goto("about:blank");
+  const { atomKey, factValue, plan } = exactTextFocusFixture();
+  const bootstrap = generatedReviewBootstrap(
+    [], "after", [], [plan], [{ atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script>
+    <p id="owner" style="display:none" data-pageroot-review-display-owner="display-owner-1">
+      <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1"
+        data-pageroot-review-projection-facts="${fact}">new</span>
+    </p>`);
+  await page.evaluate(() => {
+    window.__reviewNavigationResults = [];
+    addEventListener("message", (event) => {
+      if (event.data?.source === "pageroot-ai-review"
+        && event.data?.type === "navigation-result") {
+        window.__reviewNavigationResults.push(event.data);
+      }
+    });
+  });
+  const navigate = (commandId) => page.evaluate(({ commandId, plan }) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "navigate-change",
+    commandId,
+    changeId: plan.changeId,
+    focusGroupId: plan.id,
+    regionId: plan.regions.after[0].id,
+    revealSteps: [],
+    behavior: "auto",
+  }, "*"), { commandId, plan });
+
+  await navigate("initial-nav-hidden");
+  await expect.poll(() => page.evaluate(() => window.__reviewNavigationResults))
+    .toContainEqual(expect.objectContaining({ commandId: "initial-nav-hidden", located: false }));
+
+  await page.locator("#owner").evaluate((element) => { element.style.display = "block"; });
+  await navigate("initial-nav-visible");
+  await expect.poll(() => page.evaluate(() => window.__reviewNavigationResults))
+    .toContainEqual(expect.objectContaining({ commandId: "initial-nav-visible", located: true }));
+
+  await page.evaluate((planValue) => {
+    postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "navigate-change",
+      commandId: "initial-nav-cancelled",
+      changeId: planValue.changeId,
+      focusGroupId: planValue.id,
+      regionId: planValue.regions.after[0].id,
+      revealSteps: [],
+      behavior: "auto",
+    }, "*");
+    postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "cancel-navigation",
+      commandId: "initial-nav-cancelled",
+    }, "*");
+  }, plan);
+  await page.locator("html").evaluate(() => new Promise((resolve) => (
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  )));
+  expect(await page.evaluate(() => window.__reviewNavigationResults.some(
+    (result) => result.commandId === "initial-nav-cancelled",
+  ))).toBe(false);
+});
+
 test("Escape inside every valid contenteditable form stays with the editor", async ({ page }) => {
   await page.goto("about:blank");
   const { atomKey, factValue, plan } = exactTextFocusFixture();
@@ -746,6 +815,117 @@ test("a style locality stays on one visible owner and never promotes to its pare
     gridWidth: document.querySelector("#grid").getBoundingClientRect().width,
   }));
   expect(geometry.holeWidth).toBeLessThan(geometry.gridWidth / 2);
+});
+
+test("multi-screen table, list, and section owners keep navigation masks without giant outlines", async ({ page }) => {
+  await page.goto("about:blank");
+  const cases = ["table", "list", "section"].map((name, index) => {
+    const changeId = `change-${index + 1}`;
+    const ownerId = `owner-${name}`;
+    const fact = {
+      id: `structure-${name}`,
+      type: "structure",
+      semanticOwnerId: `semantic-${name}`,
+      geometryOwnerId: `geometry-${name}`,
+      structureChange: "reordered",
+      displayGroupId: `display-${name}`,
+      displayOwnerId: ownerId,
+      displayScope: "container",
+      geometryMode: "container-box",
+      summary: "结构调整",
+    };
+    const atomKey = `${changeId}\u001e${[
+      fact.type, fact.id, fact.semanticOwnerId, fact.geometryOwnerId,
+    ].join("\u001f")}`;
+    const regionId = `region-after-${name}`;
+    return {
+      name,
+      changeId,
+      ownerId,
+      fact,
+      atomKey,
+      regionId,
+      plan: {
+        id: `focus-${name}`,
+        kind: "structure",
+        changeId,
+        changeIds: [changeId],
+        displayGroupId: `display-${name}`,
+        displayScope: "container",
+        focusOutlinePolicy: "source-change",
+        atomKeys: [atomKey],
+        presentation: { before: [], after: [] },
+        regions: {
+          before: [],
+          after: [{
+            id: regionId,
+            side: "after",
+            navigationClusterId: `reading-${name}`,
+            contentCue: `${name} owner`,
+            correlationKey: `locality-${name}`,
+            primaryChangeId: changeId,
+            changeIds: [changeId],
+            geometryMode: "container-box",
+            displayOwnerIds: [ownerId],
+            visualEvidenceStableIds: [],
+            atomKeys: [atomKey],
+            presentation: [],
+          }],
+        },
+        presence: { before: false, after: true },
+      },
+    };
+  });
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [],
+    cases.map((entry) => entry.plan),
+    cases.map((entry) => ({ atomKey: entry.atomKey, count: 1 })),
+  );
+  const attributes = (entry) => `data-pageroot-review-display-owner="${entry.ownerId}"
+    data-pageroot-review-geometry-owner="geometry-${entry.name}"
+    data-pageroot-review-marker="${entry.changeId}"
+    data-pageroot-review-projection-facts="${JSON.stringify([entry.fact]).replaceAll('"', "&quot;")}"`;
+  await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<style>
+    .multi-screen-owner { box-sizing:border-box; min-height:1300px; width:760px; }
+  </style><script>${bootstrap}</script>
+  <table><tbody class="multi-screen-owner" ${attributes(cases[0])}>
+    <tr style="height:1300px"><td>long table body</td></tr>
+  </tbody></table>
+  <ul class="multi-screen-owner" ${attributes(cases[1])}><li>long list</li></ul>
+  <section class="multi-screen-owner" ${attributes(cases[2])}>long section</section>`);
+  for (const entry of cases) {
+    await page.evaluate(({ changeId, focusGroupId, regionId }) => postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "state",
+      state: {
+        filter: "all",
+        focus: changeId,
+        activeFocusGroupId: focusGroupId,
+        activeFocusRegionId: regionId,
+        paintPlan: {
+          contextMask: { regionId },
+          focusOutline: { regionId },
+        },
+        transparency: 25,
+        scale: 1,
+      },
+    }, "*"), {
+      changeId: entry.changeId,
+      focusGroupId: entry.plan.id,
+      regionId: entry.regionId,
+    });
+    const hole = page.locator(
+      `[data-pageroot-review-mask-hole][data-pageroot-review-focus-group="${entry.plan.id}"]`,
+    );
+    await expect(hole).toHaveCount(1);
+    await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+    expect(Number(await hole.getAttribute("data-height"))).toBeGreaterThan(
+      await page.evaluate(() => innerHeight),
+    );
+  }
 });
 
 test("moving exact atom attributes to a parser-time decoy fails closed", async ({ page }) => {

@@ -133,6 +133,8 @@ export function normalizeReviewFocusGroupPlans(value) {
   const maxPayloadLength = 131_072;
   const maxAtomsPerGroup = 512;
   const maxOwnersPerRegion = 256;
+  const maxEvidencePerRegion = 256;
+  const maxTotalEvidence = 4_096;
   const maxTotalAtoms = 8_192;
   const maxTotalOwners = 4_096;
   const safeId = (candidate) => typeof candidate === "string" && idPattern.test(candidate);
@@ -172,6 +174,7 @@ export function normalizeReviewFocusGroupPlans(value) {
   let regionCount = 0;
   let totalAtoms = 0;
   let totalOwners = 0;
+  let totalEvidence = 0;
   const normalized = [];
   for (const group of value) {
     if (!group || typeof group !== "object" || Array.isArray(group)) return [];
@@ -222,10 +225,21 @@ export function normalizeReviewFocusGroupPlans(value) {
         if (!Array.isArray(region.displayOwnerIds) || !region.displayOwnerIds.length
           || region.displayOwnerIds.length > maxOwnersPerRegion
           || region.displayOwnerIds.some((entry) => !safeId(entry))) return [];
+        if (region.visualEvidenceStableIds != null && (
+          !Array.isArray(region.visualEvidenceStableIds)
+          || region.visualEvidenceStableIds.length > maxEvidencePerRegion
+          || region.visualEvidenceStableIds.some((entry) => !safeId(entry))
+        )) return [];
+        if (region.contentCue != null && (
+          typeof region.contentCue !== "string"
+          || region.contentCue.length > 80
+          || /[\u0000-\u001f\u007f]/u.test(region.contentCue)
+        )) return [];
         if (!Array.isArray(region.atomKeys) || !region.atomKeys.length
           || region.atomKeys.length > maxAtomsPerGroup
           || region.atomKeys.some((entry) => !safeAtomKey(entry))) return [];
         const displayOwnerIds = [...new Set(region.displayOwnerIds)];
+        const visualEvidenceStableIds = [...new Set(region.visualEvidenceStableIds || [])];
         const regionAtomKeys = [...new Set(region.atomKeys)];
         if (regionAtomKeys.some((entry) => !atomKeys.includes(entry))) return [];
         if (regionAtomKeys.some((entry) => !changeIds.includes(entry.split("\u001e")[0]))) return [];
@@ -233,18 +247,23 @@ export function normalizeReviewFocusGroupPlans(value) {
         const regionPresentation = safePresentation(region.presentation);
         if (!regionPresentation) return [];
         totalOwners += displayOwnerIds.length;
+        totalEvidence += visualEvidenceStableIds.length;
         totalAtoms += regionAtomKeys.length;
-        if (totalOwners > maxTotalOwners || totalAtoms > maxTotalAtoms) return [];
+        if (totalOwners > maxTotalOwners
+          || totalEvidence > maxTotalEvidence
+          || totalAtoms > maxTotalAtoms) return [];
         regionIds.add(region.id);
         regions[side].push({
           id: region.id,
           side,
           navigationClusterId: region.navigationClusterId || region.id,
+          contentCue: region.contentCue || "",
           correlationKey: region.correlationKey,
           primaryChangeId: region.primaryChangeId,
           changeIds: regionChangeIds,
           geometryMode: region.geometryMode,
           displayOwnerIds,
+          visualEvidenceStableIds,
           atomKeys: regionAtomKeys,
           presentation: regionPresentation,
         });

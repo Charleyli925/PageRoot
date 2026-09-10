@@ -540,6 +540,7 @@ button.reviewDirectoryItem[aria-current="location"] {
 }
 
 .reviewDirectoryLocations button {
+  max-width: 100%;
   min-height: 24px;
   padding: 0 8px;
   border: 1px solid #e1dfe8;
@@ -548,9 +549,13 @@ button.reviewDirectoryItem[aria-current="location"] {
   color: #625c78;
   font-size: 9px;
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.reviewDirectoryLocations button:hover {
+.reviewDirectoryLocations button:hover,
+.reviewDirectoryLocations button[aria-current="location"] {
   border-color: #cfcbe0;
   background: #f7f5fb;
 }

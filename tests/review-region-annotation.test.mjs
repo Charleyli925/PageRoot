@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { reviewRegionAnnotations } from "../app/lib/review-region-annotation.js";
+import {
+  reviewFocusOutlineIsUseful,
+  reviewRegionAnnotations,
+  reviewTargetScrollTop,
+} from "../app/lib/review-region-annotation.js";
 
 const record = (overrides) => ({
   changeId: "c1",
@@ -179,6 +183,46 @@ test("a wrapped paragraph still clusters across its own lines", () => {
     [regions[0].left, regions[0].top, regions[0].right, regions[0].bottom],
     [90, 100, 700, 158],
   );
+});
+
+test("focus outline applicability suppresses multi-screen and page-level owners only", () => {
+  const geometry = {
+    left: 80,
+    top: 120,
+    right: 720,
+    bottom: 520,
+    viewportWidth: 900,
+    viewportHeight: 800,
+    documentWidth: 900,
+    documentHeight: 2400,
+  };
+  assert.equal(reviewFocusOutlineIsUseful(geometry), true);
+  assert.equal(reviewFocusOutlineIsUseful({ ...geometry, bottom: 1200 }), false,
+    "a long tbody/list/section keeps navigation and mask but has no giant outline");
+  assert.equal(reviewFocusOutlineIsUseful({
+    ...geometry,
+    left: 0,
+    top: 0,
+    right: 900,
+    bottom: 2400,
+  }), false, "a whole-page owner is never a focus box");
+});
+
+test("review navigation centers short targets and exposes the start of tall targets", () => {
+  assert.equal(reviewTargetScrollTop({
+    scrollTop: 100,
+    rectTop: 500,
+    rectHeight: 80,
+    viewportHeight: 800,
+    maximumScrollTop: 3000,
+  }), 240);
+  assert.equal(reviewTargetScrollTop({
+    scrollTop: 100,
+    rectTop: 500,
+    rectHeight: 700,
+    viewportHeight: 800,
+    maximumScrollTop: 3000,
+  }), 536);
 });
 
 test("a later record joins the column it overlaps, not the nearest one", () => {

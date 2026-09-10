@@ -164,10 +164,12 @@ test("focus plans preserve scoped exact atom keys and reject malformed payloads 
         id: "region-before-1",
         side: "before",
         correlationKey: "locality-1",
+        contentCue: "第一项",
         primaryChangeId: "change-1",
         changeIds: ["change-1"],
         geometryMode: "text-content",
         displayOwnerIds: ["owner-1", "owner-1"],
+        visualEvidenceStableIds: ["stable-1", "stable-1"],
         atomKeys: [atomKey, atomKey],
         presentation: [],
       }],
@@ -180,7 +182,9 @@ test("focus plans preserve scoped exact atom keys and reject malformed payloads 
   assert.equal(normalized[0].focusOutlinePolicy, "never");
   assert.deepEqual(normalized[0].atomKeys, [atomKey]);
   assert.equal(normalized[0].regions.before[0].navigationClusterId, "region-before-1");
+  assert.equal(normalized[0].regions.before[0].contentCue, "第一项");
   assert.deepEqual(normalized[0].regions.before[0].displayOwnerIds, ["owner-1"]);
+  assert.deepEqual(normalized[0].regions.before[0].visualEvidenceStableIds, ["stable-1"]);
   assert.deepEqual(normalized[0].regions.before[0].atomKeys, [atomKey]);
 
   assert.deepEqual(normalizeReviewFocusGroupPlans([plan, plan]), [], "duplicate groups reject payload");
@@ -285,6 +289,19 @@ test("focus plan capacity, duplicate-region, and presentation ceilings fail clos
     ...regionFor(1),
     displayOwnerIds: Array.from({ length: 257 }, (_, index) => `o${index}`),
   }])]), [], "region owner references are bounded before deduplication");
+  const evidenceHeavyRegions = Array.from({ length: 17 }, (_, regionIndex) => ({
+    ...regionFor(regionIndex),
+    visualEvidenceStableIds: Array.from(
+      { length: 256 },
+      (_, evidenceIndex) => `e${regionIndex}-${evidenceIndex}`,
+    ),
+  }));
+  assert.equal(normalizeReviewFocusGroupPlans([
+    withRegions(evidenceHeavyRegions.slice(0, 16)),
+  ])[0]?.regions.before.length, 16, "the total visual-evidence ceiling remains accepted");
+  assert.deepEqual(normalizeReviewFocusGroupPlans([
+    withRegions(evidenceHeavyRegions),
+  ]), [], "visual-evidence references are bounded across all regions");
 });
 
 test("exact atom occurrence plans are bounded independently from semantic focus plans", () => {

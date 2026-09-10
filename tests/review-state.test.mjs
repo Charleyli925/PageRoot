@@ -27,7 +27,11 @@ async function loadReviewState() {
   return import(`data:text/javascript;base64,${Buffer.from(output, "utf8").toString("base64")}`);
 }
 
-const { DEFAULT_REVIEW_STATE, reduceReviewState } = await loadReviewState();
+const {
+  DEFAULT_REVIEW_STATE,
+  reduceReviewState,
+  restoreReviewPresentation,
+} = await loadReviewState();
 
 test("Review enters in overview without an active focus group", () => {
   assert.equal(DEFAULT_ACTIVE_REVIEW_FOCUS_GROUP_ID, null);
@@ -69,4 +73,100 @@ test("focus group and side-local regions activate and clear atomically", () => {
   assert.equal(overview.activeFocusGroupId, null);
   assert.deepEqual(overview.activeFocusRegionIds, { before: null, after: null });
   assert.equal(overview.navigationTarget, focused.navigationTarget);
+});
+
+function recoveryDocuments(suffix) {
+  return {
+    changes: [{ id: `change-${suffix}` }],
+    focusGroups: [{
+      id: `focus-${suffix}`,
+      kind: "structure",
+      regions: {
+        before: [{ id: `region-before-${suffix}` }],
+        after: [{ id: `region-after-${suffix}` }],
+      },
+    }],
+  };
+}
+
+function presentation(suffix, overrides = {}) {
+  return {
+    reviewIdentity: `review-${suffix}`,
+    state: {
+      pageView: suffix === "a" ? "split" : "after",
+      changeFilter: "all",
+      navigationTarget: `change-${suffix}`,
+      activeFocusGroupId: `focus-${suffix}`,
+      activeFocusRegionIds: {
+        before: `region-before-${suffix}`,
+        after: `region-after-${suffix}`,
+      },
+      pagePresentation: { before: [], after: [] },
+      scrollMode: suffix === "a" ? "linked" : "independent",
+      zoomMode: suffix === "a" ? "actual" : "fit",
+      ...overrides,
+    },
+    positions: {
+      before: { top: suffix === "a" ? 120 : 920, left: 7, viewportLeft: 13 },
+      after: { top: suffix === "a" ? 220 : 1020, left: 9, viewportLeft: 17 },
+    },
+  };
+}
+
+test("per-tab recovery restores two independent Review identities without cross-state", () => {
+  const restoredA = restoreReviewPresentation({
+    documents: recoveryDocuments("a"),
+    reviewIdentity: "review-a",
+    contextVisibility: 25,
+    presentation: presentation("a"),
+  });
+  const restoredB = restoreReviewPresentation({
+    documents: recoveryDocuments("b"),
+    reviewIdentity: "review-b",
+    contextVisibility: 25,
+    presentation: presentation("b"),
+  });
+  assert.equal(restoredA.restored, true);
+  assert.equal(restoredA.state.activeFocusGroupId, "focus-a");
+  assert.deepEqual(restoredA.state.activeFocusRegionIds, {
+    before: "region-before-a",
+    after: "region-after-a",
+  });
+  assert.equal(restoredA.positions.before.top, 120);
+  assert.equal(restoredA.state.zoomMode, "actual");
+  assert.equal(restoredB.state.activeFocusGroupId, "focus-b");
+  assert.equal(restoredB.positions.before.top, 920);
+  assert.equal(restoredB.state.zoomMode, "fit");
+  assert.equal(restoredB.state.scrollMode, "independent");
+});
+
+test("resolved or replaced candidates cannot restore a stale Review object", () => {
+  const identityMismatch = restoreReviewPresentation({
+    documents: recoveryDocuments("b"),
+    reviewIdentity: "review-b",
+    contextVisibility: 25,
+    presentation: presentation("a"),
+  });
+  assert.equal(identityMismatch.restored, false);
+  assert.equal(identityMismatch.state.navigationTarget, "all");
+  assert.equal(identityMismatch.state.activeFocusGroupId, null);
+  assert.equal(identityMismatch.positions.before.top, 0);
+
+  const stalePlan = restoreReviewPresentation({
+    documents: recoveryDocuments("b"),
+    reviewIdentity: "review-b",
+    contextVisibility: 25,
+    presentation: presentation("b", {
+      navigationTarget: "change-gone",
+      activeFocusGroupId: "focus-gone",
+      activeFocusRegionIds: {
+        before: "region-before-gone",
+        after: "region-after-gone",
+      },
+    }),
+  });
+  assert.equal(stalePlan.restored, true);
+  assert.equal(stalePlan.state.navigationTarget, "all");
+  assert.equal(stalePlan.state.activeFocusGroupId, null);
+  assert.deepEqual(stalePlan.state.activeFocusRegionIds, { before: null, after: null });
 });

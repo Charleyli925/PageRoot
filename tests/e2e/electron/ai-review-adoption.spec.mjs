@@ -475,6 +475,23 @@ ${REVIEW_MASK_UNION_BEFORE}
       'iframe[title^="修改后"]',
     );
     await assertReviewControlDefaults(launched.page, beforeReviewFrame);
+    const reviewDirectorySummary = reviewWorkspace.locator(
+      'summary[aria-label^="变化目录，共"]',
+    );
+    const reviewDirectoryMenu = launched.page.getByLabel("变化目录", { exact: true });
+    await reviewDirectorySummary.click();
+    await expect(reviewDirectoryMenu).toBeVisible();
+    await launched.page.keyboard.press("Escape");
+    await expect(reviewDirectoryMenu).toBeHidden();
+    await expect(reviewDirectorySummary).toBeFocused();
+    await reviewDirectorySummary.click();
+    const firstDirectoryTarget = reviewDirectoryMenu.getByRole("button").first();
+    await firstDirectoryTarget.click();
+    await expect(reviewDirectoryMenu).toBeHidden();
+    await expect(reviewDirectorySummary).toBeFocused();
+    // The second Escape leaves the explicit Review focus, after the directory
+    // itself has already consumed the first one.
+    await launched.page.keyboard.press("Escape");
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-author-script-ran", "true");
     await expect(beforeReviewFrame.locator("html"))
@@ -622,6 +639,8 @@ ${REVIEW_MASK_UNION_BEFORE}
       return bubbleBox.x >= viewportBox.x + 4
         && bubbleBox.x + bubbleBox.width <= viewportBox.x + viewportBox.width - 4;
     }).toBe(true);
+    await reviewCommentBubble.hover();
+    await expect(reviewCommentBubble).toBeVisible();
     if (process.env.PAGEROOT_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
@@ -648,6 +667,15 @@ ${REVIEW_MASK_UNION_BEFORE}
         animations: "disabled",
       });
     }
+    await reviewCommentMarker.click();
+    await expect(reviewCommentBubble).toBeHidden();
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(0);
+    await expect(afterReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(0);
+    await launched.page.locator('section[data-side="before"] > header').hover();
+    await reviewCommentMarker.hover();
+    await expect(reviewCommentBubble).toBeVisible();
     await launched.page.locator('section[data-side="before"] > header').hover();
     await expect(reviewCommentBubble).toBeHidden();
 
@@ -661,6 +689,22 @@ ${REVIEW_MASK_UNION_BEFORE}
     // 只读标记不响应 Enter/Space，不进入编辑、不打开编辑工具栏。
     await launched.page.keyboard.press("Enter");
     await launched.page.keyboard.press("Space");
+    await expect(reviewCommentBubble).toBeVisible();
+    const focusGroupsBeforeCommentEscape = await Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => (
+        frame.locator("html").getAttribute("data-pageroot-review-focus-group")
+      )),
+    );
+    await launched.page.keyboard.press("Escape");
+    await expect(reviewCommentBubble).toBeHidden();
+    await expect.poll(() => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => (
+        frame.locator("html").getAttribute("data-pageroot-review-focus-group")
+      )),
+    )).toEqual(focusGroupsBeforeCommentEscape);
+    await reviewCommentMarker.blur();
+    await launched.page.keyboard.press("Tab");
+    await reviewCommentMarker.focus();
     await expect(reviewCommentBubble).toBeVisible();
     await ordinaryReviewCommentMarker.hover();
     await expect.poll(() => beforeReviewFrame.locator(

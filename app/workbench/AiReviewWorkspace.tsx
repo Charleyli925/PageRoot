@@ -54,12 +54,11 @@ import {
   relayedReviewScrollLeft,
 } from "../lib/review-scroll-sync.js";
 import {
-  DEFAULT_REVIEW_STATE,
+  restoreReviewPresentation,
   reduceReviewState,
   type ReviewChangeFilter,
   type ReviewPageView,
   type ReviewPresentationSnapshot,
-  type ReviewState,
   type ReviewZoomMode,
 } from "./review-state";
 import {
@@ -142,87 +141,6 @@ const PAGE_VIEW_LABELS: Record<ReviewPageView, string> = {
   after: "右页 · AI 修改后",
 };
 
-const EMPTY_REVIEW_READING_POSITIONS = Object.freeze({
-  before: Object.freeze({ top: 0, left: 0, viewportLeft: 0 }),
-  after: Object.freeze({ top: 0, left: 0, viewportLeft: 0 }),
-});
-
-function initialReviewState({
-  documents,
-  reviewIdentity,
-  contextVisibility,
-  presentation,
-}: Readonly<{
-  documents: ReviewDocuments;
-  reviewIdentity: string;
-  contextVisibility: number;
-  presentation?: ReviewPresentationSnapshot | null;
-}>): {
-  state: ReviewState;
-  positions: ReviewPresentationSnapshot["positions"];
-  restored: boolean;
-} {
-  const fallback = {
-    state: { ...DEFAULT_REVIEW_STATE, contextVisibility },
-    positions: EMPTY_REVIEW_READING_POSITIONS,
-    restored: false,
-  };
-  if (!presentation || presentation.reviewIdentity !== reviewIdentity) return fallback;
-  const candidate = presentation.state;
-  const pageView = ["split", "before", "after"].includes(candidate.pageView)
-    ? candidate.pageView
-    : "split";
-  const changeFilter = ["all", "text", "structure"].includes(candidate.changeFilter)
-    ? candidate.changeFilter
-    : "all";
-  const scrollMode = candidate.scrollMode === "independent" ? "independent" : "linked";
-  const zoomMode = candidate.zoomMode === "fit" ? "fit" : "actual";
-  const navigationTarget = candidate.navigationTarget === "all"
-    || documents.changes.some((change) => change.id === candidate.navigationTarget)
-    ? candidate.navigationTarget
-    : "all";
-  const focusGroup = documents.focusGroups.find((group) => (
-    group.id === candidate.activeFocusGroupId
-    && (changeFilter === "all"
-      || (changeFilter === "text" ? group.kind === "text" : group.kind !== "text"))
-  )) || null;
-  const regionId = (side: ReviewSide) => {
-    const requested = candidate.activeFocusRegionIds?.[side];
-    return focusGroup?.regions[side].some((region) => region.id === requested)
-      ? requested || null
-      : null;
-  };
-  const position = (side: ReviewSide) => {
-    const raw = presentation.positions?.[side];
-    const safe = (value: unknown) => Number.isFinite(Number(value))
-      ? Math.max(0, Number(value))
-      : 0;
-    return {
-      top: safe(raw?.top),
-      left: safe(raw?.left),
-      viewportLeft: safe(raw?.viewportLeft),
-    };
-  };
-  return {
-    state: {
-      pageView,
-      changeFilter,
-      contextVisibility,
-      navigationTarget,
-      activeFocusGroupId: focusGroup?.id || null,
-      activeFocusRegionIds: {
-        before: regionId("before"),
-        after: regionId("after"),
-      },
-      pagePresentation: candidate.pagePresentation || { before: [], after: [] },
-      scrollMode,
-      zoomMode,
-    },
-    positions: { before: position("before"), after: position("after") },
-    restored: true,
-  };
-}
-
 const subscribeHydration = () => () => {};
 
 type ReviewMessage = {
@@ -252,6 +170,7 @@ type ReviewMessage = {
   regionId?: string;
   behavior?: ScrollBehavior;
   right?: number;
+  located?: boolean;
 };
 
 const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
@@ -333,6 +252,7 @@ function ReviewDocumentPane({
   onViewport,
   onHorizontalScroll,
   onCommentActive,
+  commentDismissRevision,
   independentTransport,
   frameUrl,
   loadFailed,
@@ -351,6 +271,7 @@ function ReviewDocumentPane({
   onViewport: (side: ReviewSide, viewport: HTMLDivElement | null) => void;
   onHorizontalScroll: (side: ReviewSide) => void;
   onCommentActive: (keys: readonly string[], active: boolean) => void;
+  commentDismissRevision: number;
   independentTransport: boolean;
   frameUrl?: string;
   loadFailed: boolean;
@@ -471,6 +392,7 @@ function ReviewDocumentPane({
         testId="review-comment-marker"
         bubbleTestId="review-comment-bubble"
         onActiveChange={(active) => onCommentActive(cluster.keys, active)}
+        dismissRevision={commentDismissRevision}
       />
     );
   };
@@ -604,7 +526,7 @@ export default function AiReviewWorkspace({
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
   const independentTransport = hydrated && Boolean(window.htmlAIPreview);
-  const [initialReview] = useState(() => initialReviewState({
+  const [initialReview] = useState(() => restoreReviewPresentation({
     documents,
     reviewIdentity: sessionId,
     contextVisibility: changeContextVisibility,
@@ -630,9 +552,28 @@ export default function AiReviewWorkspace({
     : null;
   const [toolbarPinned, setToolbarPinned] = useState(true);
   const reviewDirectoryRef = useRef<HTMLDetailsElement>(null);
+  const reviewDirectorySummaryRef = useRef<HTMLElement>(null);
+  const [commentDismissRevision, setCommentDismissRevision] = useState(0);
   const initialNavigationSessionRef = useRef<string | null>(
     initialReview.restored ? sessionId : null,
   );
+  const initialNavigationAttemptRef = useRef<{
+    sessionId: string;
+    candidates: Array<{
+      changeId: string;
+      focusGroupId?: string;
+      regionId?: string;
+      side?: ReviewSide;
+    }>;
+    nextIndex: number;
+    commandId: string;
+    changeId: string;
+    expected: Set<ReviewSide>;
+    results: Map<ReviewSide, boolean>;
+  } | null>(null);
+  const initialNavigationCancelledRef = useRef(initialReview.restored);
+  const initialNavigationSequenceRef = useRef(0);
+  const startNextInitialNavigationRef = useRef<() => void>(() => {});
   const [frameReadyRevision, setFrameReadyRevision] = useState(0);
   const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
   const [desktopSessionResult, setDesktopSessionResult] =
@@ -706,6 +647,7 @@ export default function AiReviewWorkspace({
   const reviewPaintPlan = useMemo(() => buildReviewPaintPlan({
     focusGroups: documents.focusGroups,
     changes: documents.changes,
+    visualEvidence: documents.visualEvidence,
     visualVerdicts: visualResolution.documents === documents
       && visualResolution.reloadRevision === reloadRevision
       ? visualResolution.verdicts
@@ -847,6 +789,8 @@ export default function AiReviewWorkspace({
           focusGroupId: group.id,
           regionId: region.id,
           side: locationSide,
+          contentCue: region.contentCue,
+          kind: group.kind,
         }));
     });
     return [{ item, change, locations }];
@@ -1475,6 +1419,7 @@ export default function AiReviewWorkspace({
     activateVisualFocus = true,
     requestedRegionId?: string,
     requestedSide?: ReviewSide,
+    navigationRequest?: Readonly<{ commandId: string; deferCommit?: boolean }>,
   ) => {
     const selectedChange = reviewChanges.find((change) => change.id === changeId);
     const changeGroups = documents.focusGroups.filter((group) => group.changeIds.includes(changeId));
@@ -1484,8 +1429,10 @@ export default function AiReviewWorkspace({
     // Explicit region navigation is a capability carried by the formal plan.
     // An unknown group or region must fail closed instead of silently focusing
     // a different group that happens to belong to the same change.
-    if (requestedFocusGroupId && !requestedGroup) return;
-    if ((requestedRegionId && !requestedSide) || (!requestedRegionId && requestedSide)) return;
+    if (requestedFocusGroupId && !requestedGroup) return [] as ReviewSide[];
+    if ((requestedRegionId && !requestedSide) || (!requestedRegionId && requestedSide)) {
+      return [] as ReviewSide[];
+    }
     const selectedFocusGroup = requestedGroup || changeGroups[0] || null;
     const selectedRegion = requestedGroup && requestedRegionId && requestedSide
       ? requestedGroup.regions[requestedSide].find((region) => (
@@ -1493,7 +1440,7 @@ export default function AiReviewWorkspace({
         && region.primaryChangeId === changeId
       )) || null
       : null;
-    if (requestedRegionId && !selectedRegion) return;
+    if (requestedRegionId && !selectedRegion) return [] as ReviewSide[];
     const regionForSide = (side: ReviewSide) => {
       if (!selectedFocusGroup) return null;
       if (selectedRegion) {
@@ -1513,6 +1460,7 @@ export default function AiReviewWorkspace({
       ? buildReviewPaintPlan({
         focusGroups: documents.focusGroups,
         changes: documents.changes,
+        visualEvidence: documents.visualEvidence,
         visualVerdicts: visualResolution.documents === documents
           && visualResolution.reloadRevision === reloadRevision
           ? visualResolution.verdicts
@@ -1521,11 +1469,13 @@ export default function AiReviewWorkspace({
         activeFocusRegionIds: nextActiveFocusRegionIds,
       })
       : EMPTY_REVIEW_PAINT_PLAN;
-    reviewStateRef.current = {
-      ...reviewStateRef.current,
-      focus: changeId,
-    };
-    dispatchReviewState({ type: "set-navigation-target", value: changeId });
+    if (!navigationRequest?.deferCommit) {
+      reviewStateRef.current = {
+        ...reviewStateRef.current,
+        focus: changeId,
+      };
+      dispatchReviewState({ type: "set-navigation-target", value: changeId });
+    }
     if (activateVisualFocus && nextActiveFocusGroupId) {
       activateFocus(nextActiveFocusGroupId, nextActiveFocusRegionIds, nextPaintPlan);
       // Publish paint state before navigation. The runtime can then navigate by
@@ -1569,14 +1519,19 @@ export default function AiReviewWorkspace({
           regionId: region?.id,
           revealSteps: presentation[side],
           behavior,
+          commandId: navigationRequest?.commandId,
         });
       });
     };
+    const expectedSides = (["before", "after"] as ReviewSide[]).filter((side) => (
+      !selectedFocusGroup || Boolean(regionForSide(side))
+    ));
     if (presentation.before.length || presentation.after.length) {
       coordinatePagePresentation(presentation, focusChange);
     } else {
       focusChange();
     }
+    return expectedSides;
   }, [
     activateFocus,
     clearFocus,
@@ -1587,6 +1542,50 @@ export default function AiReviewWorkspace({
     sessionId,
     visualResolution,
   ]);
+
+  const startNextInitialNavigation = useCallback(() => {
+    const attempt = initialNavigationAttemptRef.current;
+    if (!attempt || attempt.sessionId !== sessionId || initialNavigationCancelledRef.current) return;
+    const candidate = attempt.candidates[attempt.nextIndex];
+    if (!candidate) {
+      initialNavigationAttemptRef.current = null;
+      initialNavigationSessionRef.current = sessionId;
+      return;
+    }
+    attempt.nextIndex += 1;
+    attempt.commandId = `initial-nav-${++initialNavigationSequenceRef.current}`;
+    attempt.changeId = candidate.changeId;
+    attempt.results = new Map();
+    const expected = navigateToChange(
+      candidate.changeId,
+      "auto",
+      candidate.focusGroupId,
+      false,
+      candidate.regionId,
+      candidate.side,
+      { commandId: attempt.commandId, deferCommit: true },
+    );
+    attempt.expected = new Set(expected);
+    if (!expected.length) queueMicrotask(() => startNextInitialNavigationRef.current());
+  }, [navigateToChange, sessionId]);
+  useLayoutEffect(() => {
+    startNextInitialNavigationRef.current = startNextInitialNavigation;
+  }, [startNextInitialNavigation]);
+
+  const cancelInitialNavigation = useCallback(() => {
+    if (initialNavigationSessionRef.current === sessionId) return;
+    initialNavigationCancelledRef.current = true;
+    initialNavigationSessionRef.current = sessionId;
+    const commandId = initialNavigationAttemptRef.current?.commandId || "";
+    initialNavigationAttemptRef.current = null;
+    if (!commandId) return;
+    (["before", "after"] as ReviewSide[]).forEach((side) => {
+      postToFrame(framesRef.current[side], sessionId, {
+        type: "cancel-navigation",
+        commandId,
+      });
+    });
+  }, [sessionId]);
 
   useEffect(() => {
     if (!initialReview.restored && reloadRevision === 0) return;
@@ -1618,11 +1617,45 @@ export default function AiReviewWorkspace({
       return ready?.documents === documents && ready.frame === framesRef.current[side];
     });
     if (!bothFramesReady) return;
-    initialNavigationSessionRef.current = sessionId;
     if (focus !== "all") return;
-    const firstChangeId = reviewDirectoryItems[0]?.change.id;
-    if (firstChangeId) navigateToChange(firstChangeId, "auto", undefined, false);
-  }, [documents, focus, frameReadyRevision, navigateToChange, reviewDirectoryItems, sessionId]);
+    const candidates = reviewDirectoryItems.flatMap(({ change, locations }) => (
+      locations.length
+        ? locations.map((location) => ({
+          changeId: change.id,
+          focusGroupId: location.focusGroupId,
+          regionId: location.regionId,
+          side: location.side,
+        }))
+        : [{ changeId: change.id }]
+    ));
+    initialNavigationAttemptRef.current = {
+      sessionId,
+      candidates,
+      nextIndex: 0,
+      commandId: "",
+      changeId: "",
+      expected: new Set(),
+      results: new Map(),
+    };
+    startNextInitialNavigation();
+  }, [documents, focus, frameReadyRevision, reviewDirectoryItems, sessionId, startNextInitialNavigation]);
+
+  useEffect(() => {
+    if (initialNavigationSessionRef.current === sessionId) return undefined;
+    const cancelForUser = (event: Event) => {
+      if (event.isTrusted) cancelInitialNavigation();
+    };
+    window.addEventListener("pointerdown", cancelForUser, true);
+    window.addEventListener("wheel", cancelForUser, { capture: true, passive: true });
+    window.addEventListener("touchstart", cancelForUser, { capture: true, passive: true });
+    window.addEventListener("keydown", cancelForUser, true);
+    return () => {
+      window.removeEventListener("pointerdown", cancelForUser, true);
+      window.removeEventListener("wheel", cancelForUser, true);
+      window.removeEventListener("touchstart", cancelForUser, true);
+      window.removeEventListener("keydown", cancelForUser, true);
+    };
+  }, [cancelInitialNavigation, frameReadyRevision, sessionId]);
 
   useLayoutEffect(() => {
     const handleMessage = (event: MessageEvent<ReviewMessage>) => {
@@ -1766,11 +1799,30 @@ export default function AiReviewWorkspace({
         }
         return;
       }
+      if (message.type === "navigation-result") {
+        const attempt = initialNavigationAttemptRef.current;
+        if (!attempt
+          || attempt.sessionId !== sessionId
+          || message.commandId !== attempt.commandId
+          || !attempt.expected.has(message.side)) return;
+        attempt.results.set(message.side, message.located === true);
+        if (![...attempt.expected].every((side) => attempt.results.has(side))) return;
+        if ([...attempt.expected].every((side) => attempt.results.get(side) === true)) {
+          initialNavigationAttemptRef.current = null;
+          initialNavigationSessionRef.current = sessionId;
+          reviewStateRef.current = { ...reviewStateRef.current, focus: attempt.changeId };
+          dispatchReviewState({ type: "set-navigation-target", value: attempt.changeId });
+        } else {
+          queueMicrotask(startNextInitialNavigation);
+        }
+        return;
+      }
       if (message.type === "scroll-geometry") {
         scrollCoordinatorRef.current?.updateGeometry(message.side, message.scrollGeometry);
         return;
       }
       if (message.type === "scroll-intent") {
+        cancelInitialNavigation();
         scrollCoordinatorRef.current?.handleIntent(message.side);
         return;
       }
@@ -1832,6 +1884,7 @@ export default function AiReviewWorkspace({
         || message.type === "action"
         || message.type === "control-state"
       ) {
+        cancelInitialNavigation();
       }
       if (
         (message.type === "action" || message.type === "control-state")
@@ -1900,6 +1953,7 @@ export default function AiReviewWorkspace({
   }, [
     clearFocus,
     coordinatePagePresentation,
+    cancelInitialNavigation,
     documents,
     finishPagePresentation,
     focusHorizontalFootprint,
@@ -1914,6 +1968,7 @@ export default function AiReviewWorkspace({
     navigateToChange,
     sendState,
     sessionId,
+    startNextInitialNavigation,
     updateCommentScrollTransform,
   ]);
 
@@ -1973,6 +2028,14 @@ export default function AiReviewWorkspace({
       });
     });
   }, [commentContextVisibility, documents.commentTargets, sessionId]);
+
+  const dismissReviewComments = useCallback(() => {
+    const activeKeys = [...activeCommentKeysRef.current];
+    if (!activeKeys.length) return false;
+    setReviewCommentHighlight(activeKeys, false);
+    setCommentDismissRevision((revision) => revision + 1);
+    return true;
+  }, [setReviewCommentHighlight]);
 
   useEffect(() => {
     (["before", "after"] as ReviewSide[]).forEach((side) => {
@@ -2053,19 +2116,26 @@ export default function AiReviewWorkspace({
         || activeElement?.closest("input, textarea, select")
         || activeElement?.isContentEditable,
       );
-      if (
-        event.key !== "Escape"
-        || event.defaultPrevented
-        || confirmationAction
-        || editableTarget
-        || !reviewStateRef.current.activeFocusGroupId
-      ) return;
+      if (event.key !== "Escape" || event.defaultPrevented || confirmationAction || editableTarget) {
+        return;
+      }
+      if (reviewDirectoryRef.current?.open) {
+        event.preventDefault();
+        reviewDirectoryRef.current.open = false;
+        window.requestAnimationFrame(() => reviewDirectorySummaryRef.current?.focus());
+        return;
+      }
+      if (dismissReviewComments()) {
+        event.preventDefault();
+        return;
+      }
+      if (!reviewStateRef.current.activeFocusGroupId) return;
       event.preventDefault();
       clearFocus();
     };
     window.addEventListener("keydown", leaveFocus);
     return () => window.removeEventListener("keydown", leaveFocus);
-  }, [clearFocus, confirmationAction]);
+  }, [clearFocus, confirmationAction, dismissReviewComments]);
 
   const selectPreviewMode = useCallback((mode: ReviewPageView) => {
     dispatchReviewState({ type: "set-page-view", value: mode });
@@ -2366,7 +2436,10 @@ export default function AiReviewWorkspace({
           <div className={styles.canvasReviewBody}>
             <header className={styles.reviewDirectoryHeader}>
               <details ref={reviewDirectoryRef} className={styles.reviewDirectory}>
-                <summary aria-label={`变化目录，共 ${reviewDirectoryItems.length} 处`}>
+                <summary
+                  ref={reviewDirectorySummaryRef}
+                  aria-label={`变化目录，共 ${reviewDirectoryItems.length} 处`}
+                >
                   <GitDiffIcon aria-hidden="true" size={14} weight="duotone" />
                   <span>变化 {reviewDirectoryItems.length} 处</span>
                   <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
@@ -2383,6 +2456,7 @@ export default function AiReviewWorkspace({
                         location?.side,
                       );
                       if (reviewDirectoryRef.current) reviewDirectoryRef.current.open = false;
+                      window.requestAnimationFrame(() => reviewDirectorySummaryRef.current?.focus());
                     };
                     if (locations.length <= 1) {
                       return (
@@ -2409,9 +2483,18 @@ export default function AiReviewWorkspace({
                             <button
                               key={`${location.focusGroupId}-${location.regionId}`}
                               type="button"
+                              aria-current={activeFocusGroupId === location.focusGroupId
+                                && activeFocusRegionIds[location.side] === location.regionId
+                                ? "location"
+                                : undefined}
+                              title={location.contentCue || undefined}
                               onClick={() => navigate(location)}
                             >
-                              位置 {index + 1}
+                              {location.side === "after" ? "修改后" : "修改前"}
+                              {" · "}
+                              {location.contentCue || (location.kind === "style"
+                                ? "样式位置"
+                                : location.kind === "text" ? "文字位置" : `元素位置 ${index + 1}`)}
                             </button>
                           ))}
                         </div>
@@ -2433,6 +2516,7 @@ export default function AiReviewWorkspace({
                 onViewport={registerViewport}
                 onHorizontalScroll={handleHorizontalScroll}
                 onCommentActive={setReviewCommentHighlight}
+                commentDismissRevision={commentDismissRevision}
                 independentTransport={independentTransport}
                 frameUrl={desktopSessions?.before.url}
                 loadFailed={reviewLoadFailed}
@@ -2452,6 +2536,7 @@ export default function AiReviewWorkspace({
                 onViewport={registerViewport}
                 onHorizontalScroll={handleHorizontalScroll}
                 onCommentActive={setReviewCommentHighlight}
+                commentDismissRevision={commentDismissRevision}
                 independentTransport={independentTransport}
                 frameUrl={desktopSessions?.after.url}
                 loadFailed={reviewLoadFailed}

@@ -630,19 +630,12 @@ test("the review projection annotates a dense report cleanly and accurately", as
       const cssBox = frame.locator(
         `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${cssGroup.id}"]`,
       );
-      await expect(cssBox).toHaveCount(1);
-      await expect(cssBox.locator("[data-pageroot-review-overlay-label]")).toHaveCount(1);
+      // A stylesheet rule identifies candidate targets but does not itself
+      // provide region-local computed-style evidence. Keep navigation/masking
+      // and fail closed on the optional outline until that Stable host has a
+      // current pure-style visual verdict.
+      await expect(cssBox).toHaveCount(0);
       await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
-      await expect.poll(() => cssBox.evaluate((box) => {
-        const target = document.querySelector('.metric[data-report-metric="overall"]');
-        if (!target) return false;
-        const boxRect = box.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        return Math.abs(boxRect.left - (targetRect.left - 3)) < .75
-          && Math.abs(boxRect.top - (targetRect.top - 3)) < .75
-          && Math.abs(boxRect.width - (targetRect.width + 6)) < .75
-          && Math.abs(boxRect.height - (targetRect.height + 6)) < .75;
-      })).toBe(true);
     }
     await launched.page.screenshot({
       path: path.join(captureDirectory, "review-focus-css-grid.png"),
@@ -670,9 +663,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       const localityBoxes = frame.locator(
         `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${firstLocalityGroup.id}"]`,
       );
-      await expect(localityBoxes).toHaveCount(1);
-      await expect(localityBoxes.locator("[data-pageroot-review-overlay-label]"))
-        .toHaveCount(1);
+      await expect(localityBoxes).toHaveCount(0);
       await expect(frame.locator("[data-pageroot-review-mask-hole]"))
         .toHaveCount(1);
     }

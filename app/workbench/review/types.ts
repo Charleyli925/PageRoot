@@ -106,11 +106,15 @@ export type ReviewFocusRegionPlan = {
   side: ReviewSide;
   /** Stable reading-block cue identity; several selectable regions may share it. */
   navigationClusterId: string;
+  /** Short authored-content cue used to distinguish repeated localities in the directory. */
+  contentCue: string;
   correlationKey: string;
   primaryChangeId: string;
   changeIds: string[];
   geometryMode: ReviewFocusGeometryMode;
   displayOwnerIds: string[];
+  /** Stable visual candidates owned by this exact region; empty means no visual proof. */
+  visualEvidenceStableIds: string[];
   atomKeys: string[];
   presentation: ReviewRevealStep[];
 };

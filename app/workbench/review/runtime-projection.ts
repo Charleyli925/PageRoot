@@ -11,6 +11,10 @@ import {
   reviewTextEvidenceMarkGeometry,
 } from "../../lib/review-text-evidence-marks.js";
 import {
+  reviewFocusOutlineIsUseful,
+  reviewTargetScrollTop,
+} from "../../lib/review-region-annotation.js";
+import {
   REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT,
   REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES,
 } from "./constants";
@@ -129,6 +133,8 @@ function reviewBootstrap(
   const reviewTextEvidenceIsPunctuationCode = ${reviewTextEvidenceIsPunctuationCode.toString()};
   const reviewTextEvidenceMarkGeometry = ${reviewTextEvidenceMarkGeometry.toString()};
   const alignReviewTextEvidenceDotRows = ${alignReviewTextEvidenceDotRows.toString()};
+  const reviewFocusOutlineIsUseful = ${reviewFocusOutlineIsUseful.toString()};
+  const reviewTargetScrollTop = ${reviewTargetScrollTop.toString()};
   const reviewProjectionFactsSerializedLengthLimit = ${REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT};
   const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
   const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
@@ -2054,11 +2060,14 @@ function reviewBootstrap(
   const scrollToReviewRect = (rect, behavior = "auto") => {
     if (!rect || rect.height <= 0 || !Number.isFinite(rect.top)) return false;
     const token = "focus-" + Date.now() + "-" + Math.random();
-    const top = clamp(
-      scrollY + rect.top - Math.max(18, innerHeight * .12),
-      0,
-      maximumScrollTop(),
-    );
+    const top = reviewTargetScrollTop({
+      scrollTop: scrollY,
+      rectTop: rect.top,
+      rectHeight: rect.height,
+      viewportHeight: innerHeight,
+      maximumScrollTop: maximumScrollTop(),
+    });
+    if (top === null) return false;
     const command = recordFocusScrollCommand(token, top, scrollX);
     scrollTo({ top: command.top, left: command.left, behavior });
     return true;
@@ -2174,9 +2183,15 @@ function reviewBootstrap(
     behavior = "auto",
     regionId = "",
     focusGroupId = "",
+    commandId = "",
   ) => {
     revealTarget(target, panelPath);
     requestAnimationFrame(() => {
+      if (commandId && cancelledNavigationCommandId === commandId) return;
+      const reportNavigationResult = (located) => {
+        if (!commandId || cancelledNavigationCommandId === commandId) return;
+        post("navigation-result", { commandId, changeId, located });
+      };
       if (focusGroupId && currentState.activeFocusGroupId === focusGroupId) {
         renderReviewOverlays();
       }
@@ -2218,7 +2233,10 @@ function reviewBootstrap(
             + Number(visibleFocusGeometry.getAttribute("data-width")),
         }, true);
         reportedFocusGeometry = true;
-        if (scrollToReviewRect(visibleFocusGeometry.getBoundingClientRect(), behavior)) return;
+        if (scrollToReviewRect(visibleFocusGeometry.getBoundingClientRect(), behavior)) {
+          reportNavigationResult(true);
+          return;
+        }
       }
       if (!regionId) {
         const anchors = [...document.querySelectorAll(
@@ -2228,14 +2246,28 @@ function reviewBootstrap(
           const rect = collapsedAnchorRect(anchor, changeId);
           if (!rect) continue;
           reportHorizontalFootprint(rect);
-          if (scrollToReviewRect(rect, behavior)) return;
+          if (scrollToReviewRect(rect, behavior)) {
+            reportNavigationResult(true);
+            return;
+          }
         }
       }
       if (target) {
         const rect = target.getBoundingClientRect();
         if (!reportedFocusGeometry) reportHorizontalFootprint(rect);
-        if (!scrollToReviewRect(rect, behavior)) scrollIntoReviewTarget(target, behavior);
+        if (scrollToReviewRect(rect, behavior)) {
+          reportNavigationResult(true);
+          return;
+        }
+        // A command that promises a location result must fail closed here.
+        // Legacy navigation has no acknowledgement contract, so preserve its
+        // historical element-level fallback for zero-sized/transient boxes.
+        if (!commandId) {
+          scrollIntoReviewTarget(target, behavior);
+          return;
+        }
       }
+      reportNavigationResult(false);
     });
   };
   const applyScrollOwner = (message) => {
@@ -2977,7 +3009,20 @@ function reviewBootstrap(
       },
     );
     const contextMaskRecords = contextMaskRegionId ? preparedActiveRecords : [];
-    const focusOutlineRecords = focusOutlineRegionId ? preparedActiveRecords : [];
+    const focusOutlineRecords = focusOutlineRegionId
+      ? runtimeVisualArrayFilter(preparedActiveRecords, (record) => (
+        reviewFocusOutlineIsUseful({
+          left: record.left,
+          top: record.top,
+          right: record.right,
+          bottom: record.bottom,
+          viewportWidth: innerWidth,
+          viewportHeight: innerHeight,
+          documentWidth,
+          documentHeight: height,
+        })
+      ))
+      : [];
     activeFocusReadingBounds = preparedActiveRecords[0]
       ? {
         top: preparedActiveRecords[0].top,
@@ -3440,6 +3485,7 @@ function reviewBootstrap(
     if (projectionTransitioning) renderTransitionMask();
     else scheduleOverlayRender();
   };
+  let cancelledNavigationCommandId = "";
   runtimeVisualAddEventListener("message", (event) => {
     const message = event.data;
     if (
@@ -3464,6 +3510,9 @@ function reviewBootstrap(
       schedulePresentationReady(message.presentationEpoch);
     }
     if (message.type === "commit-presentation") commitProjectionTransition(message.presentationEpoch);
+    if (message.type === "cancel-navigation") {
+      cancelledNavigationCommandId = safeProjectionFactKey(message.commandId);
+    }
     if (message.type === "mirror-action") mirrorAction(message);
     if (message.type === "navigate-change" || message.type === "focus-change") {
       const changeId = String(message.changeId || "").replace(/[^a-z0-9-]/gi, "");
@@ -3476,12 +3525,18 @@ function reviewBootstrap(
       const focusRegion = focusPlan ? runtimeVisualArrayFind(focusPlan.regions[side], (region) => (
         region.id === regionId && region.primaryChangeId === changeId
       )) : null;
+      const commandId = safeProjectionFactKey(message.commandId);
       const target = focusRegion
         ? reviewFocusOwnerElement(focusRegion.displayOwnerIds[0])
         : !focusGroupId && !regionId
           ? document.querySelector('[data-pageroot-review-id="' + changeId + '"]')
           : null;
-      if ((focusGroupId || regionId) && (!focusRegion || !target)) return;
+      if ((focusGroupId || regionId) && (!focusRegion || !target)) {
+        if (commandId && cancelledNavigationCommandId !== commandId) {
+          post("navigation-result", { commandId, changeId, located: false });
+        }
+        return;
+      }
       // Legacy focus-change messages still activate; the current parent sends
       // navigation and paint state independently so restoration cannot behave
       // like a second click.
@@ -3505,6 +3560,7 @@ function reviewBootstrap(
         message.behavior === "smooth" ? "smooth" : "auto",
         focusRegion?.id || "",
         focusPlan?.id || "",
+        commandId,
       );
     }
     if (message.type === "focus-outline") {

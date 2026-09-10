@@ -310,6 +310,8 @@ function reviewFocusGroupsForDocuments(
       element: Element;
       geometryMode: ReviewFocusGeometryMode;
       locality: string;
+      stableId: string;
+      contentCue: string;
     }>>;
   };
   const shortHash = (value: string) => {
@@ -457,6 +459,9 @@ function reviewFocusGroupsForDocuments(
             element,
             geometryMode,
             locality: sharedStyleGroup ? styleLocality(element) : displayGroupId,
+            stableId: element.closest("[data-pageroot-id]")
+              ?.getAttribute("data-pageroot-id") || "",
+            contentCue: (element.textContent || "").replace(/\s+/gu, " ").trim().slice(0, 80),
           });
         });
       });
@@ -481,6 +486,9 @@ function reviewFocusGroupsForDocuments(
         const ownerIds = [...new Set(entries.map((entry) => entry.ownerId))].sort();
         const regionAtomKeys = [...new Set(entries.map((entry) => entry.atomKey))].sort();
         const regionChangeIds = [...new Set(entries.map((entry) => entry.changeId))].sort();
+        const visualEvidenceStableIds = [...new Set(
+          entries.map((entry) => entry.stableId).filter(Boolean),
+        )].sort();
         const presentationOwner = entries[0]?.element.ownerDocument.querySelector(
           `[data-pageroot-review-display-owner~="${entries[0]?.ownerId || ""}"]`,
         );
@@ -488,11 +496,13 @@ function reviewFocusGroupsForDocuments(
           id: `region-${side}-${shortHash(`${group.displayGroupId}\u001f${regionLocality}`)}`,
           side,
           navigationClusterId: `reading-${shortHash(locality)}`,
+          contentCue: entries.find((entry) => entry.contentCue)?.contentCue || "",
           correlationKey: `locality-${shortHash(regionLocality)}`,
           primaryChangeId: regionChangeIds[0] || changeId,
           changeIds: regionChangeIds,
           geometryMode: entries[0]?.geometryMode || "element-box" as const,
           displayOwnerIds: ownerIds,
+          visualEvidenceStableIds,
           atomKeys: regionAtomKeys,
           presentation: revealStepsForElement(presentationOwner || entries[0]?.element || null),
         };

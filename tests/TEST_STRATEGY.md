@@ -353,17 +353,19 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   移动、普通属性、内联样式和 CSS/Script 源码变化进入元素事实，纯换行及
   Canvas/SVG Runtime 绘制仍为零变化。Node 必须分别覆盖事实、几何与 paint plan：总览只启用
   `evidenceMarks/navigationCues`；文字聚焦启用一个局部 mask 但 outline 恒为空；来源明确的新增、删除、
-  移动可以有一个局部 outline；style 只有 `changed` 视觉结论才有 outline，`unchanged/unverified` 均无；
+  移动可以有一个局部 outline；style 只有当前 region 自己的纯样式 Stable host 得到 `changed` 视觉结论才有 outline，
+  另一 region 的 `changed` 不能外借，混合文字/属性证据、`unchanged/unverified` 均无；
   每侧至多一个 mask hole 和一个 outline。两个远距离段落是两个 focus group，点击各自位置后必须揭示
   并滚动到对应段落，但不得出现文字框。同一 CSS 规则可以共享 group，却按阅读局部与 owner 保留精确
-  region；页边可聚合为密度提示，目录仍列出全部位置，任何命中数量都不得提升成父容器框。相同 inline
+  region；页边可聚合为密度提示，目录仍列出带内容线索的全部位置，任何命中数量都不得提升成父容器框。相同 inline
   delta 即使同父级也必须是不同 group。Node 继续覆盖 `displayScope`/`geometryMode` 分离、change-scoped
   atom key、group/region/payload 上限和重复 ID 拒绝；Browser 必须证明 257-group 或畸形 plan 只关闭
   mask/outline 而不删除精确红绿证据、multi-host atom 合法聚合、parser-time decoy 与 live prototype
-  篡改失败关闭。
-  Electron 必须覆盖首次自动定位不聚焦、目录选择原子写入 group 与两侧 region、再次点击保持激活、
+  篡改失败关闭；长 `tbody`、列表和 multi-screen section 必须保留完整 mask 与导航但无巨型 outline，也不能裁成视口框。
+  Electron 必须覆盖首次自动定位收到可定位回执后才提交、不聚焦、失败顺延及用户输入取消；短目标居中、长目标展示开头；
+  目录选择原子写入 group 与两侧 region、关闭后焦点回到 summary、目录先消费 Escape、再次点击保持激活、
   Escape/手动滚出/手动换 Tab 返回总览、筛选不激活、单侧新增/删除另一侧无 mask/scroll、评论态优先并
-  在离开时恢复变化 focus，以及每个文档标签分别恢复页面、筛选、focus、Tab/折叠、双页滚动、横向位置
+  在点击、移出或 Escape 后恢复变化 focus，marker 到自适应气泡可连续 hover，以及每个文档标签分别恢复页面、筛选、focus、Tab/折叠、双页滚动、横向位置
   与缩放。顶栏“刷新本页面”必须在同一 Review 身份下恢复这些状态；“从磁盘重新载入 HTML”在待决定
   Review 中可见但禁用。50%–200% 缩放、resize 与字体变化后，前后页保持同一 group/region；mask 与
   可选 outline 各自遵守每侧一个的预算，outline 存在时才与 mask 复用 canonical path。
