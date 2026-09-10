@@ -263,6 +263,7 @@ export type {
   NativeDeferredCommandOptions,
 } from "./HtmlCanvasEditor.types";
 import {
+  EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE,
   EDITOR_STYLE_ATTRIBUTE,
   FRAME_VERIFICATION_ATTRIBUTE,
   baseHrefFromSourcePath,
@@ -2231,10 +2232,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           mode: "static",
           baseUrl: staticAssetBaseHref,
           editorStyles: EDITOR_DOCUMENT_STYLES,
+          candidateInert: true,
         },
       ) || prepareVerifiedFrameDocument(instrumentedSource, verificationToken, {
         baseUrl: staticAssetBaseHref,
         editorStyles: EDITOR_DOCUMENT_STYLES,
+        candidateInert: true,
       });
       if (
         prepared
@@ -2474,7 +2477,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             });
             return true;
           };
-          return { registerProved, reportActivationOutcome };
+          const canAcceptFocus = () => Boolean(
+            candidate.runtimeFrame?.settled
+            && runtimeFrameRef.current === candidate.runtimeFrame
+            && iframeRef.current?.contentWindow === sourceWindow
+          );
+          return { registerProved, reportActivationOutcome, canAcceptFocus };
         };
         Object.defineProperty(parentGlobals, registrationProperty, {
           configurable: true,
@@ -2603,6 +2611,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [scheduleRuntimeInactiveSlotClear, syncRuntimeCandidateDiagnostics]);
   finalizeRuntimePromotionRef.current = finalizeRuntimeCandidatePromotion;
 
+  const refreshRuntimeHandoffContextFromActive = useCallback((
+    handoffContext: RuntimeHandoffContext,
+  ) => {
+    handoffContext.presentationAnchor = captureRuntimePresentationAnchor({
+      iframe: iframeRef.current,
+      outerScrollElement: containerRef.current?.closest<HTMLElement>(
+        ".review-scroll-stage",
+      ) ?? null,
+      sourceIndex: sourceIndexRef.current,
+      selectedElement: selectedElementRef.current,
+      selectedSourceSelection: selectedSourceSelectionRef.current,
+    });
+    handoffContext.pendingSelection = selectedSourceSelectionRef.current;
+    handoffContext.pendingToolbarVisible = Boolean(
+      selectedSourceSelectionRef.current && toolbarVisibleRef.current,
+    );
+    pendingSelectionRef.current = handoffContext.pendingSelection;
+    pendingToolbarVisibleRef.current = handoffContext.pendingToolbarVisible;
+  }, []);
+
   const commitRuntimeCandidate = useCallback((
     candidate: RuntimeCandidate,
     iframe: HTMLIFrameElement,
@@ -2620,6 +2648,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || cancelRuntimeCandidateRef.current(candidate, "superseded");
       return false;
     }
+    // The Candidate may have waited through size checks or a commit hold while
+    // the still-authoritative Active accepted a new selection or scroll. Take
+    // the final intent snapshot in the same task that begins positioning; an
+    // older preparation snapshot must not win the handoff.
+    refreshRuntimeHandoffContextFromActive(candidate.handoffContext);
     if (!runtimeFrameCoordinatorRef.current!.beginPositioning(candidate.attempt)) {
       syncRuntimeCandidateDiagnostics();
       failRuntimeCandidateActivationRef.current(candidate, "superseded")
@@ -2752,6 +2785,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       abortCommit("failed");
       return false;
     }
+    const promotedRoot = promotedDocument.documentElement;
+    if (promotedRoot.getAttribute(EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE) === "true") {
+      promotedRoot.removeAttribute(EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE);
+      promotedRoot.removeAttribute("inert");
+    }
     applyReadingPosition({
       iframe: promotedIframe,
       documentNode: promotedDocument,
@@ -2789,6 +2827,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     activeRuntimeSlotId,
     clearRuntimeRefreshPending,
     frameRender,
+    refreshRuntimeHandoffContextFromActive,
     syncRuntimeCandidateDiagnostics,
   ]);
   commitRuntimeCandidateRef.current = commitRuntimeCandidate;
@@ -2823,26 +2862,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } catch {
       return false;
     }
-    const recaptureAnchor = () => {
-      const activeFrame = iframeRef.current;
-      const activeOuterScrollElement = containerRef.current?.closest<HTMLElement>(
-        ".review-scroll-stage",
-      ) ?? null;
-      candidate.handoffContext.presentationAnchor = captureRuntimePresentationAnchor({
-        iframe: activeFrame,
-        outerScrollElement: activeOuterScrollElement,
-        sourceIndex: sourceIndexRef.current,
-        selectedElement: selectedElementRef.current,
-        selectedSourceSelection: selectedSourceSelectionRef.current,
-      });
-      candidate.handoffContext.pendingSelection = selectedSourceSelectionRef.current;
-      candidate.handoffContext.pendingToolbarVisible = Boolean(
-        selectedSourceSelectionRef.current && toolbarVisibleRef.current,
-      );
-      pendingSelectionRef.current = candidate.handoffContext.pendingSelection;
-      pendingToolbarVisibleRef.current = candidate.handoffContext.pendingToolbarVisible;
-    };
-    recaptureAnchor();
+    refreshRuntimeHandoffContextFromActive(candidate.handoffContext);
     // Hidden size/position waits still belong to runtimeCandidateRef. The
     // visible Active must keep accepting Native Edit until beginPositioning.
     const isCurrent = () => (
@@ -2861,7 +2881,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       isReady: () => frameScrollMetricsReady(iframe, documentNode),
       onReady: () => {
         if (!isCurrent()) return;
-        recaptureAnchor();
+        refreshRuntimeHandoffContextFromActive(candidate.handoffContext);
         applyReadingPosition({
           iframe,
           documentNode,
@@ -2887,7 +2907,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       },
     });
     return true;
-  }, [syncRuntimeCandidateDiagnostics]);
+  }, [refreshRuntimeHandoffContextFromActive, syncRuntimeCandidateDiagnostics]);
 
   const failRuntimeCandidate = useCallback((
     candidate: RuntimeCandidate,
@@ -7571,6 +7591,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           containerRef.current?.setAttribute("data-runtime-handoff", "active");
           updateOverlayPosition({ allowRuntimeHandoff: true });
         });
+        // Selection/toolbars and the accepted Runtime's published height can
+        // change the final outer geometry. Correct the same captured anchor
+        // after those derived states flush, but before this task can paint the
+        // new Active over the retained previous frame.
+        const outer = containerRef.current?.closest<HTMLElement>(".review-scroll-stage");
+        correctReadingPositionOnce({
+          iframe,
+          documentNode,
+          outer,
+          anchor,
+          anchorElement: readingAnchorElement(),
+          adjustOuter: true,
+        });
         fencedDocumentCleanupRef.current();
         activeFrameConnectionPendingRef.current = false;
         finalizeRuntimePromotionRef.current(candidate);
@@ -7587,15 +7620,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           restoreReadingLocation();
           requestAnimationFrame(() => {
             if (!isCurrent()) return;
-            const outer = containerRef.current?.closest<HTMLElement>(".review-scroll-stage");
-            correctReadingPositionOnce({
-              iframe,
-              documentNode,
-              outer,
-              anchor,
-              anchorElement: readingAnchorElement(),
-              adjustOuter: true,
-            });
             activateHandoff();
           });
         },

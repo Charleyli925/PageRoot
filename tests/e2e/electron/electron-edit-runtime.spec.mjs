@@ -2931,10 +2931,23 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
       候选等待提交时仍可进入文字编辑。
     </p>
   </main>
+  <input id="runtime-candidate-focus-probe" aria-label="Candidate focus probe"
+    autofocus style="position:fixed;left:0;top:0;width:1px;height:1px;opacity:.01">
   <div aria-hidden="true" style="height:1600px"></div>
   <script>
     document.querySelector('[data-native-case="runtime-commit-hold-edit"]')
       .dataset.runtimeReady = 'true';
+    const focusProbe = document.querySelector('#runtime-candidate-focus-probe');
+    focusProbe.focus();
+    window.focus();
+    parent.__PAGEROOT_CANDIDATE_FOCUS_PROOFS__ = [
+      ...(parent.__PAGEROOT_CANDIDATE_FOCUS_PROOFS__ || []),
+      {
+        candidate: window.frameElement?.getAttribute('data-frame-role') === 'runtime-candidate',
+        childFocused: document.activeElement === focusProbe,
+        parentFocusedCandidate: parent.document.activeElement === window.frameElement,
+      },
+    ];
   </script>
 </body></html>`;
 
@@ -2973,6 +2986,21 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
     await waitForHeldRuntimeCommit(page);
     await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_CANDIDATE_FOCUS_PROOFS__ || []
+    ).filter((proof) => proof.candidate).length)).toBeGreaterThanOrEqual(2);
+    const hiddenCandidateFocusProofs = await page.evaluate(() => (
+      window.__PAGEROOT_CANDIDATE_FOCUS_PROOFS__ || []
+    ).filter((proof) => proof.candidate));
+    expect(hiddenCandidateFocusProofs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        childFocused: false,
+        parentFocusedCandidate: false,
+      }),
+    ]));
+    expect(hiddenCandidateFocusProofs.every((proof) => (
+      !proof.childFocused && !proof.parentFocusedCandidate
+    ))).toBe(true);
     await expect.poll(() => visibleActiveFrameProof(page, "runtime-commit-hold-edit"))
       .toEqual(expect.objectContaining({
         renderVerified: "true",
@@ -3001,6 +3029,12 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
       };
     });
     const candidateFrame = editor.locator('iframe[data-frame-role="runtime-candidate"]');
+    await expect.poll(() => candidateFrame.evaluate((iframe) => ({
+      inert: iframe.contentDocument?.documentElement.inert ?? null,
+      marker: iframe.contentDocument?.documentElement.getAttribute(
+        "data-pageroot-runtime-candidate-inert",
+      ) ?? null,
+    }))).toEqual({ inert: true, marker: "true" });
     await candidateFrame.evaluate((iframe) => {
       const documentNode = iframe.contentDocument;
       if (!documentNode?.body) throw new Error("Candidate document was unavailable.");
@@ -3067,6 +3101,165 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
       frame.locator('[data-native-case="runtime-commit-hold-edit"]')
         .filter({ hasText: "提交后继续" }),
     ).toHaveCount(1);
+    expect(await frame.evaluate(() => {
+      const focusProbe = document.querySelector("#runtime-candidate-focus-probe");
+      focusProbe?.focus({ preventScroll: true });
+      return document.activeElement === focusProbe;
+    })).toBe(true);
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
+test("a held Candidate commits the latest Active scroll and selection intent", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime latest handoff intent</title></head><body>
+  <div aria-hidden="true" style="height:620px"></div>
+  <main>
+    <p data-native-case="runtime-latest-intent-first">先复制这个结构来启动候选页。</p>
+    <div aria-hidden="true" style="height:920px"></div>
+    <p data-native-case="runtime-latest-intent-final">候选等待时，以这里的最新选择和位置为准。</p>
+  </main>
+  <div aria-hidden="true" style="height:1400px"></div>
+  <script>
+    document.querySelector('[data-native-case="runtime-latest-intent-final"]')
+      .dataset.runtimeReady = 'true';
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-latest-intent-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const reviewStage = page.locator(".review-scroll-stage");
+    let { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "runtime-latest-intent-first",
+    );
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    const lastKnownGoodBefore = await editor.getAttribute(
+      "data-runtime-last-known-good-id",
+    );
+
+    await armRuntimeCommitHold(page);
+    await frame.locator('[data-native-case="runtime-latest-intent-first"]').click();
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    const duplicateButtonBox = await duplicateButton.boundingBox();
+    expect(duplicateButtonBox).not.toBeNull();
+    await page.mouse.click(
+      duplicateButtonBox.x + duplicateButtonBox.width / 2,
+      duplicateButtonBox.y + duplicateButtonBox.height / 2,
+    );
+    await waitForHeldRuntimeCommit(page);
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+
+    await page.evaluate(() => {
+      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
+      const stage = editorElement?.closest(".review-scroll-stage");
+      const activeFrame = editorElement?.querySelector("iframe:not([data-frame-role])");
+      const target = activeFrame?.contentDocument?.querySelector(
+        '[data-native-case="runtime-latest-intent-final"]',
+      );
+      if (!stage || !activeFrame || !target) {
+        throw new Error("Latest Active intent target was unavailable.");
+      }
+      const targetScreenTop = activeFrame.getBoundingClientRect().top
+        + target.getBoundingClientRect().top;
+      const desiredScreenTop = stage.getBoundingClientRect().top
+        + Math.min(240, stage.clientHeight / 2);
+      stage.scrollTop += targetScreenTop - desiredScreenTop;
+    });
+    await page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    frame = await currentEditorFrame(page);
+    const latestTarget = frame.locator('[data-native-case="runtime-latest-intent-final"]');
+    const latestTargetBox = await latestTarget.boundingBox();
+    expect(latestTargetBox).not.toBeNull();
+    const stageBox = await reviewStage.boundingBox();
+    expect(stageBox).not.toBeNull();
+    expect(latestTargetBox.y).toBeGreaterThan(stageBox.y);
+    expect(latestTargetBox.y).toBeLessThan(stageBox.y + stageBox.height);
+    await page.mouse.click(
+      latestTargetBox.x + latestTargetBox.width / 2,
+      latestTargetBox.y + latestTargetBox.height / 2,
+    );
+    await expect(latestTarget).toHaveAttribute("data-html-canvas-selected", /.+/u);
+
+    const latestActiveIntent = await page.evaluate(() => {
+      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
+      const activeFrame = editorElement?.querySelector("iframe:not([data-frame-role])");
+      const selected = activeFrame?.contentDocument?.querySelector(
+        "[data-html-canvas-selected]",
+      );
+      return {
+        stableId: selected?.getAttribute("data-pageroot-id") || null,
+        screenTop: selected && activeFrame
+          ? activeFrame.getBoundingClientRect().top + selected.getBoundingClientRect().top
+          : null,
+        localTop: selected?.getBoundingClientRect().top ?? null,
+        stageScrollTop: editorElement?.closest(".review-scroll-stage")?.scrollTop ?? null,
+        stageScrollHeight:
+          editorElement?.closest(".review-scroll-stage")?.scrollHeight ?? null,
+        frameHeight: activeFrame?.getBoundingClientRect().height ?? null,
+        toolbarVisible: Boolean(
+          editorElement?.querySelector('[role="toolbar"]')?.getClientRects().length,
+        ),
+      };
+    });
+    expect(latestActiveIntent.stableId).toBeTruthy();
+    expect(latestActiveIntent.screenTop).not.toBeNull();
+    expect(latestActiveIntent.toolbarVisible).toBe(true);
+
+    await releaseHeldRuntimeCommits(page);
+    await waitForRuntimeHandoffSettled(page);
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .not.toBe(lastKnownGoodBefore);
+    const committedIntent = await page.evaluate(() => {
+      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
+      const activeFrame = editorElement?.querySelector("iframe:not([data-frame-role])");
+      const selected = activeFrame?.contentDocument?.querySelector(
+        "[data-html-canvas-selected]",
+      );
+      return {
+        stableId: selected?.getAttribute("data-pageroot-id") || null,
+        screenTop: selected && activeFrame
+          ? activeFrame.getBoundingClientRect().top + selected.getBoundingClientRect().top
+          : null,
+        localTop: selected?.getBoundingClientRect().top ?? null,
+        stageScrollTop: editorElement?.closest(".review-scroll-stage")?.scrollTop ?? null,
+        stageScrollHeight:
+          editorElement?.closest(".review-scroll-stage")?.scrollHeight ?? null,
+        frameHeight: activeFrame?.getBoundingClientRect().height ?? null,
+        toolbarVisible: Boolean(
+          editorElement?.querySelector('[role="toolbar"]')?.getClientRects().length,
+        ),
+        inert: activeFrame?.contentDocument?.documentElement.inert ?? null,
+        inertMarker: activeFrame?.contentDocument?.documentElement.getAttribute(
+          "data-pageroot-runtime-candidate-inert",
+        ) ?? null,
+      };
+    });
+    expect(committedIntent.stableId).toBe(latestActiveIntent.stableId);
+    expect(committedIntent.toolbarVisible).toBe(true);
+    expect(committedIntent.inert).toBe(false);
+    expect(committedIntent.inertMarker).toBeNull();
+    const screenOffsetDelta = Math.abs(
+      committedIntent.screenTop - latestActiveIntent.screenTop,
+    );
+    if (screenOffsetDelta > 6) {
+      throw new Error(`Latest Active screen offset was not preserved: ${JSON.stringify({
+        screenOffsetDelta,
+        latestActiveIntent,
+        committedIntent,
+      })}`);
+    }
   }, {
     injectedEnv: {
       PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE,
   EDIT_RUNTIME_CSP,
   baseHrefFromSourcePath,
   disableExecutableMarkup,
@@ -11,6 +12,23 @@ import {
 test("Edit runtime CSP keeps workers outside the admitted program closure", () => {
   assert.match(EDIT_RUNTIME_CSP, /worker-src 'none'/u);
   assert.doesNotMatch(EDIT_RUNTIME_CSP, /worker-src[^;]*blob:/u);
+});
+
+test("disposable Runtime documents carry a private Candidate inert marker", async () => {
+  const source = await readFile(
+    new URL("../app/components/html-preview-sandbox.js", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE,
+    "data-pageroot-runtime-candidate-inert",
+  );
+  assert.match(source, /function isolateRuntimeCandidateFocus/u);
+  assert.match(source, /if \(!root\.hasAttribute\("inert"\)\)/u);
+  assert.match(source, /root\.setAttribute\("inert", ""\)/u);
+  assert.match(source, /EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE/u);
+  assert.match(source, /querySelectorAll\("\[autofocus\]"\)/u);
+  assert.match(source, /removeAttribute\("autofocus"\)/u);
 });
 
 test("preview sandbox disables scripts without losing authored type metadata", () => {

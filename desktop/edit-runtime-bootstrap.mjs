@@ -52,6 +52,37 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     : null;
   const registerProved = registration?.registerProved;
   const reportActivationOutcome = registration?.reportActivationOutcome;
+  const canAcceptFocus = registration?.canAcceptFocus;
+
+  // Author scripts execute while this document is still a hidden Candidate.
+  // Keep their explicit focus calls private until the parent coordinator has
+  // accepted this exact frame as Active. The wrappers remain transparent once
+  // accepted and do not add a second lifecycle authority inside the iframe.
+  const installFocusGuard = (owner, property) => {
+    const descriptor = Object.getOwnPropertyDescriptor(owner, property);
+    const nativeFocus = descriptor?.value;
+    if (typeof nativeFocus !== "function") return;
+    try {
+      Object.defineProperty(owner, property, {
+        ...descriptor,
+        value: function guardedRuntimeFocus(...args) {
+          if (
+            typeof canAcceptFocus !== "function"
+            || canAcceptFocus() !== true
+          ) return undefined;
+          return Reflect.apply(nativeFocus, this, args);
+        },
+      });
+    } catch {
+      // The document root is also inert during preparation. A non-configurable
+      // focus implementation therefore degrades to that platform boundary.
+    }
+  };
+  installFocusGuard(HTMLElement.prototype, "focus");
+  if (typeof SVGElement !== "undefined") {
+    installFocusGuard(SVGElement.prototype, "focus");
+  }
+  installFocusGuard(window, "focus");
 
   const candidates = (root) => {
     if (!root || root.nodeType !== Node.ELEMENT_NODE) return [];

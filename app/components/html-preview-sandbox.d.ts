@@ -1,5 +1,6 @@
 export const EDITOR_STYLE_ATTRIBUTE: string;
 export const FRAME_VERIFICATION_ATTRIBUTE: string;
+export const EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE: string;
 export const EDIT_RUNTIME_CSP: string;
 
 export function disableExecutableMarkup(source: string): string;
@@ -17,6 +18,7 @@ export function prepareVerifiedFrameDocument(
   options?: {
     baseUrl?: string;
     editorStyles?: string;
+    candidateInert?: boolean;
   },
 ): string;
 export function prepareDisposableRuntimeFrameDocument(
@@ -37,6 +39,7 @@ export function prepareCanvasFrameDocument(
     mode?: "static";
     baseUrl?: string;
     editorStyles?: string;
+    candidateInert?: boolean;
   } | {
     mode: "disposable-runtime";
     sessionId: string;
