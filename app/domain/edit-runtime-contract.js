@@ -65,27 +65,6 @@ function asciiLower(value) {
   return String(value || "").toLowerCase();
 }
 
-function isNameBoundary(value) {
-  return value === "" || /[\t\n\f\r />]/u.test(value);
-}
-
-function htmlTagEnd(source, start) {
-  let quote = "";
-  for (let cursor = start; cursor < source.length; cursor += 1) {
-    const character = source[cursor];
-    if (quote) {
-      if (character === quote) quote = "";
-      continue;
-    }
-    if (character === "\"" || character === "'") {
-      quote = character;
-      continue;
-    }
-    if (character === ">") return cursor;
-  }
-  return -1;
-}
-
 function attributesFromOpeningTag(openingTag) {
   const attributes = [];
   let cursor = 0;
@@ -195,67 +174,70 @@ export function authoredDocumentBase(html) {
 }
 
 /**
- * Scans HTML executable script elements. The parser also treats a closing
- * script tag inside a JavaScript string as a terminator, so this deliberately
- * conservative scanner follows browser parsing instead of inventing JS rules.
+ * Collects authored Script elements from the live parsed document tree. Exact
+ * source locations preserve author bytes while naturally excluding comments,
+ * raw-text element content and inert template.content from execution identity.
  */
 export function collectEditRuntimeScripts(html) {
   const source = String(html ?? "");
   const scripts = [];
   let unsupportedReason = null;
-  let cursor = 0;
   let activeIndex = 0;
-  const lower = source.toLowerCase();
-  while (cursor < source.length) {
-    const comment = source.indexOf("<!--", cursor);
-    const opening = lower.indexOf("<script", cursor);
-    if (comment >= 0 && (opening < 0 || comment < opening)) {
-      const end = source.indexOf("-->", comment + 4);
-      cursor = end < 0 ? source.length : end + 3;
-      continue;
-    }
-    if (opening < 0) break;
-    if (!isNameBoundary(source[opening + 7] || "")) {
-      cursor = opening + 7;
-      continue;
-    }
-    const openingEnd = htmlTagEnd(source, opening + 7);
-    if (openingEnd < 0) break;
-    let closingStart = lower.indexOf("</script", openingEnd + 1);
-    while (closingStart >= 0 && !isNameBoundary(source[closingStart + 8] || "")) {
-      closingStart = lower.indexOf("</script", closingStart + 8);
-    }
-    if (closingStart < 0) {
-      unsupportedReason ||= "unterminated-script";
-      break;
-    }
-    const closingEnd = htmlTagEnd(source, closingStart + 8);
-    if (closingEnd < 0) {
-      unsupportedReason ||= "unterminated-script";
-      break;
-    }
-    const openingTag = source.slice(opening, openingEnd + 1);
-    const attributes = attributesFromOpeningTag(openingTag);
-    const policy = scriptPolicy(attributes);
-    const src = attributeValue(attributes, "src");
-    const body = source.slice(openingEnd + 1, closingStart);
-    const entry = Object.freeze({
-      startOffset: opening,
-      endOffset: closingEnd + 1,
-      openingTag,
-      attributes,
-      type: asciiLower(attributeValue(attributes, "type") || "").trim(),
-      src: src === null ? null : src,
-      inline: body,
-      executable: policy.executable,
-      index: policy.executable ? activeIndex : null,
-      reason: policy.reason,
+  let document;
+  try {
+    document = parseHtmlDocument(source, {
+      scriptingEnabled: true,
+      sourceCodeLocationInfo: true,
     });
-    scripts.push(entry);
-    if (policy.reason) unsupportedReason ||= policy.reason;
-    if (policy.executable) activeIndex += 1;
-    cursor = closingEnd + 1;
+  } catch {
+    return Object.freeze({
+      scripts: frozenArray(scripts),
+      executableScripts: frozenArray([]),
+      unsupportedReason: "invalid-html",
+    });
   }
+  const visit = (node) => {
+    if (
+      String(node?.tagName || "").toLowerCase() === "script"
+      && node.sourceCodeLocation?.startTag
+    ) {
+      const location = node.sourceCodeLocation;
+      if (!location.endTag) {
+        unsupportedReason ||= "unterminated-script";
+        return;
+      }
+      const openingTag = source.slice(
+        location.startTag.startOffset,
+        location.startTag.endOffset,
+      );
+      const body = source.slice(
+        location.startTag.endOffset,
+        location.endTag.startOffset,
+      );
+      const attributes = attributesFromOpeningTag(openingTag);
+      const policy = scriptPolicy(attributes);
+      const src = attributeValue(attributes, "src");
+      const entry = Object.freeze({
+        startOffset: location.startTag.startOffset,
+        endOffset: location.endTag.endOffset,
+        openingTag,
+        attributes,
+        type: asciiLower(attributeValue(attributes, "type") || "").trim(),
+        src: src === null ? null : src,
+        inline: body,
+        executable: policy.executable,
+        index: policy.executable ? activeIndex : null,
+        reason: policy.reason,
+      });
+      scripts.push(entry);
+      if (policy.reason) unsupportedReason ||= policy.reason;
+      if (policy.executable) activeIndex += 1;
+    }
+    // Template descendants live under node.content and are deliberately not
+    // visited. Raw-text containers expose their apparent markup only as text.
+    for (const child of node?.childNodes || []) visit(child);
+  };
+  visit(document);
   return Object.freeze({
     scripts: frozenArray(scripts),
     executableScripts: frozenArray(scripts.filter((script) => script.executable)),
@@ -281,35 +263,52 @@ export function editRuntimeProgramIdentity(html) {
   });
 }
 
-function containsJavaScriptImportSyntax(source) {
-  try {
-    const root = parseJavaScript(source, {
-      ecmaVersion: "latest",
-      sourceType: "script",
-      allowImportExportEverywhere: true,
-      allowAwaitOutsideFunction: true,
-    });
-    const pending = [root];
-    while (pending.length > 0) {
-      const node = pending.pop();
-      if (!node || typeof node !== "object") continue;
-      if (
-        node.type === "ImportDeclaration"
-        || node.type === "ImportExpression"
-        || (
-          (node.type === "ExportAllDeclaration" || node.type === "ExportNamedDeclaration")
-          && node.source
-        )
-      ) return true;
-      for (const value of Object.values(node)) {
-        if (Array.isArray(value)) pending.push(...value);
-        else if (value && typeof value === "object") pending.push(value);
-      }
+function containsImportInAst(root) {
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node || typeof node !== "object") continue;
+    if (
+      node.type === "ImportDeclaration"
+      || node.type === "ImportExpression"
+      || (
+        (node.type === "ExportAllDeclaration" || node.type === "ExportNamedDeclaration")
+        && node.source
+      )
+    ) return true;
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) pending.push(...value);
+      else if (value && typeof value === "object") pending.push(value);
     }
+  }
+  return false;
+}
+
+function containsJavaScriptImportSyntax(source) {
+  const options = {
+    ecmaVersion: "latest",
+    allowImportExportEverywhere: true,
+    allowAwaitOutsideFunction: true,
+  };
+  try {
+    return containsImportInAst(parseJavaScript(source, {
+      ...options,
+      sourceType: "script",
+    }));
   } catch {
-    // Syntax errors are Runtime Script failures, not proof of an unsupported
-    // loading dependency. Acorn owns lexical distinctions such as Annex-B HTML
-    // comments, regular expressions, strings, property names and import.meta.
+    try {
+      // Module-only grammar such as top-level using declarations is valid in
+      // supported import-free module scripts. A second maintained-parser goal
+      // prevents a real dependency later in that program from failing open.
+      return containsImportInAst(parseJavaScript(source, {
+        ...options,
+        sourceType: "module",
+      }));
+    } catch {
+      // Syntax errors are Runtime Script failures, not proof of an unsupported
+      // loading dependency. Acorn owns lexical distinctions such as Annex-B
+      // HTML comments, regexps, strings, property names and import.meta.
+    }
   }
   return false;
 }

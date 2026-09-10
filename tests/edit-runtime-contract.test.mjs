@@ -44,6 +44,32 @@ test("direct Edit runtime extracts ordered deterministic classic scripts", () =>
   assert.equal(contract.scripts.at(-1)?.executable, false);
 });
 
+test("only live parsed Script elements enter Runtime execution identity", () => {
+  const contract = collectEditRuntimeScripts([
+    "<template><script type=\"module\">import('./inert-template.js')</script></template>",
+    "<textarea><script>import('./raw-text.js')</script></textarea>",
+    "<script>window.live = true</script>",
+  ].join("\n"));
+  assert.equal(contract.unsupportedReason, null);
+  assert.deepEqual(contract.executableScripts.map((script) => script.inline.trim()), [
+    "window.live = true",
+  ]);
+  assert.notEqual(
+    editRuntimeProgramIdentity(
+      "<template><script>inertA()</script></template><script>live()</script>",
+    ),
+    null,
+  );
+  assert.equal(
+    editRuntimeProgramIdentity(
+      "<template><script>inertA()</script></template><script>live()</script>",
+    ),
+    editRuntimeProgramIdentity(
+      "<template><script>inertB()</script></template><script>live()</script>",
+    ),
+  );
+});
+
 test("disposable Edit runtime preserves native script scheduling attributes", () => {
   for (const html of [
     '<script type="module">window.ready = true</script>',
@@ -93,6 +119,8 @@ test("import detection ignores authored prose and JavaScript literal content", (
     "const options = { set import(value) { this.value = value; } };",
     "const options = { async import() { return 'data'; } };",
     "const url = import.meta.url;",
+    "using resource = { [Symbol.dispose]() {} }; window.ready = true;",
+    "await using resource = await open(); window.ready = true;",
   ]) assert.equal(unsupportedEditRuntimeProgramReason(program), null, program);
 
   for (const program of [
@@ -101,6 +129,8 @@ test("import detection ignores authored prose and JavaScript literal content", (
     "const module = import('./dynamic.js');",
     "await import('./top-level-await-dynamic.js');",
     "for await (const row of rows) { import('./top-level-for-await-dynamic.js'); }",
+    "using resource = { [Symbol.dispose]() {} }; import('./using-dynamic.js');",
+    "await using resource = await open(); import('./await-using-dynamic.js');",
     "const template = `value: ${import('./nested.js')}`;",
     "const module = import /* webpackIgnore: true */ ('./comment-gap.js');",
     "const modules = { ...import('./spread-dynamic.js') };",

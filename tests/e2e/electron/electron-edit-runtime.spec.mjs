@@ -3787,6 +3787,24 @@ test("Edit frame navigation blocks location.assign and location.replace", async 
   });
 });
 
+test("inert Script-like markup does not disable the live Runtime program", async () => {
+  const html = `<!doctype html>
+<html><head><title>Inert Script markup</title></head><body>
+  <template><script type="module">import('./never-template.js')</script></template>
+  <textarea><script>import('./never-raw-text.js')</script></textarea>
+  <main data-native-case="runtime-inert-script">Live Runtime remains enabled</main>
+  <script>document.body.dataset.liveRuntimeExecuted = 'true';</script>
+</body></html>`;
+  await withRuntimeProject("pageroot-runtime-inert-script-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-inert-script");
+    await expect(frame.locator("body")).toHaveAttribute("data-live-runtime-executed", "true");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
 test("Electron Edit renders a source-relative ECharts page in the editable iframe", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {

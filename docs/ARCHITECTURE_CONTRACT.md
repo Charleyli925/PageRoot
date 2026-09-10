@@ -660,6 +660,9 @@ run in real Electron. Program identity and Main resource preparation use the
 same first live-document `base[href]`; href-less base elements, inert
 `<template>` contents and foreign-namespace lookalikes cannot win, while
 absolute or escaping bases fail closed.
+Only Script elements in the live parsed document enter execution identity;
+apparent markup inside comments, raw-text elements or inert `template.content`
+does not become an author program.
 The bounded syntax recognizer rejects actual static and dynamic imports while
 distinguishing comments, strings, regular expressions, property/private names
 and module metadata. `import.meta` is metadata rather than a loading dependency;

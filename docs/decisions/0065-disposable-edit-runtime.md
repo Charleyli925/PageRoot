@@ -204,6 +204,8 @@ runtime-only state after reopen.
 - The supported compatibility surface includes parser-blocking classic scripts,
   inline classic scripts, `defer`, import-free modules, author
   `DOMContentLoaded` listeners, and a first contained relative `<base href>`.
+  Only Script elements in the live parsed document participate; apparent tags
+  inside comments, raw-text elements and inert `template.content` do not.
   The bounded maintained parser distinguishes actual static/dynamic imports from comments,
   strings, regular expressions, property/private names and module metadata;
   `import.meta` is checked as supported metadata rather than treated as a module

@@ -707,6 +707,34 @@ test("a relative module import is classified as unsupported before preparation",
   assert.deepEqual(requests, []);
 });
 
+test("inert and raw-text Script-like content does not degrade a live program", async () => {
+  const requests = [];
+  const runtimeHtml = [
+    "<!doctype html><html><body>",
+    "<template><script type=\"module\">import('./inert.js')</script></template>",
+    "<textarea><script>import('./raw-text.js')</script></textarea>",
+    "<script>window.live = true</script>",
+    "</body></html>",
+  ].join("");
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+
+  const runtimeInput = input({ html: runtimeHtml });
+  session.refresh(runtimeInput);
+  assert.equal(session.startPreparation(runtimeInput), true);
+  await flushAsync();
+
+  assert.equal(session.snapshot.phase, "ready");
+  assert.equal(requests.length, 1);
+});
+
 test("desktop-unavailable static fallback does not offer an ineffective retry", () => {
   const session = new EditAuthorRuntimeSession();
 
