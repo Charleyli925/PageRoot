@@ -199,6 +199,10 @@ async function armRuntimeHandoffSamples(page) {
         .find((frame) => !frame.hasAttribute("data-frame-role"));
       const activeStyle = activeFrame ? getComputedStyle(activeFrame) : null;
       const candidateStyle = candidateFrame ? getComputedStyle(candidateFrame) : null;
+      const outerActiveElement = document.activeElement;
+      const toolbar = editor.querySelector('[role="toolbar"]');
+      const outerActiveRect = outerActiveElement?.getBoundingClientRect?.() || null;
+      const toolbarRect = toolbar?.getBoundingClientRect() || null;
       const candidateGeneration = candidateFrame?.getAttribute("data-frame-generation")
         || candidate?.getAttribute("data-frame-generation")
         || null;
@@ -284,6 +288,11 @@ async function armRuntimeHandoffSamples(page) {
         sharedClientHeight: sharedScrollElement?.clientHeight ?? null,
         sharedScrollWidth: sharedScrollElement?.scrollWidth ?? null,
         sharedScrollHeight: sharedScrollElement?.scrollHeight ?? null,
+        outerActiveElement: outerActiveElement?.getAttribute?.("aria-label")
+          || outerActiveElement?.tagName
+          || null,
+        outerActiveTop: outerActiveRect?.top ?? null,
+        toolbarTop: toolbarRect?.top ?? null,
         selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
         selectionStableId: selected?.getAttribute("data-pageroot-id") || null,
         viewportAnchorStableId: selected?.getAttribute("data-pageroot-id") || null,
@@ -2839,7 +2848,19 @@ test("a failed structural candidate after in-place text editing promotes static 
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
     frame = await currentEditorFrame(page);
     await frame.locator('[data-native-case="runtime-text-candidate-trigger"]').click();
-    await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+    const duplicateButton = editor.getByRole("button", { name: "复制元素", exact: true });
+    const duplicateButtonBox = await duplicateButton.boundingBox();
+    expect(duplicateButtonBox).not.toBeNull();
+    const scrollBeforeDuplicate = await reviewStage.evaluate((element) => element.scrollTop);
+    // Click the already-visible toolbar control at its real screen coordinate.
+    // Playwright locator.click() may scroll the shared stage before pointerdown,
+    // which is not a user-visible Candidate side effect.
+    await page.mouse.click(
+      duplicateButtonBox.x + duplicateButtonBox.width / 2,
+      duplicateButtonBox.y + duplicateButtonBox.height / 2,
+    );
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(scrollBeforeDuplicate, 1);
     const failedHandoffSamples = await assertRuntimeHandoff(page, {
       requireActiveChrome: true,
       expectPromotion: false,
@@ -2869,8 +2890,33 @@ test("a failed structural candidate after in-place text editing promotes static 
         && activeFrame.contentDocument?.documentElement
       );
     })).toBe(true);
-    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
-      .toBeGreaterThan(400);
+    const finalSharedScrollTop = await reviewStage.evaluate((element) => element.scrollTop);
+    if (finalSharedScrollTop <= 400) {
+      const scrollTransitions = failedHandoffSamples.filter((sample, index, samples) => (
+        index === 0
+        || sample.sharedScrollTop !== samples[index - 1]?.sharedScrollTop
+        || sample.handoffState !== samples[index - 1]?.handoffState
+        || sample.candidateGeneration !== samples[index - 1]?.candidateGeneration
+      )).map((sample) => ({
+        rafSequence: sample.rafSequence,
+        handoffState: sample.handoffState,
+        candidateGeneration: sample.candidateGeneration,
+        sharedScrollTop: sample.sharedScrollTop,
+        sharedClientHeight: sample.sharedClientHeight,
+        sharedScrollHeight: sample.sharedScrollHeight,
+        iframeHeight: sample.iframeHeight,
+        outerActiveElement: sample.outerActiveElement,
+        outerActiveTop: sample.outerActiveTop,
+        toolbarTop: sample.toolbarTop,
+        selectedStableId: sample.selectedStableId,
+        viewportAnchorStableId: sample.viewportAnchorStableId,
+        selectedScreenTop: sample.selectedScreenTop,
+      }));
+      throw new Error(`Static fallback shared scroll mismatch: ${JSON.stringify({
+        finalSharedScrollTop,
+        scrollTransitions,
+      })}`);
+    }
   });
 });
 
@@ -2878,12 +2924,14 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
-<html><head><title>Runtime commit hold edit</title></head><body>
+  <html><head><title>Runtime commit hold edit</title></head><body>
+  <div aria-hidden="true" style="height:700px"></div>
   <main>
     <p data-native-case="runtime-commit-hold-edit" id="commit-hold-edit">
       候选等待提交时仍可进入文字编辑。
     </p>
   </main>
+  <div aria-hidden="true" style="height:1600px"></div>
   <script>
     document.querySelector('[data-native-case="runtime-commit-hold-edit"]')
       .dataset.runtimeReady = 'true';
@@ -2901,13 +2949,23 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
       .toBeTruthy();
     const lastKnownGoodBefore = await editor.getAttribute("data-runtime-last-known-good-id");
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const reviewStage = page.locator(".review-scroll-stage");
 
     await armRuntimeCommitHold(page);
     const target = frame.locator('[data-native-case="runtime-commit-hold-edit"]');
     await target.click();
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
-    await duplicateButton.click();
+    const duplicateButtonBox = await duplicateButton.boundingBox();
+    expect(duplicateButtonBox).not.toBeNull();
+    await page.mouse.click(
+      duplicateButtonBox.x + duplicateButtonBox.width / 2,
+      duplicateButtonBox.y + duplicateButtonBox.height / 2,
+    );
     await expect.poll(async () => (
       (await readPublishedWorkingCopy(workingCopyPath, "utf8"))
         .split('<p data-native-case="runtime-commit-hold-edit"').length - 1
@@ -2920,6 +2978,67 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
         renderVerified: "true",
         visible: true,
       }));
+
+    const activePresentationBeforeFault = await page.evaluate(() => {
+      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
+      const stage = editorElement?.closest(".review-scroll-stage");
+      const activeFrame = editorElement?.querySelector("iframe:not([data-frame-role])");
+      const selected = activeFrame?.contentDocument?.querySelector(
+        "[data-html-canvas-selected]",
+      );
+      return {
+        scrollTop: stage?.scrollTop ?? null,
+        canvasHeight: editorElement?.getBoundingClientRect().height ?? null,
+        publishedCanvasHeight: document.documentElement.style.getPropertyValue(
+          "--comment-canvas-height",
+        ),
+        selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
+        toolbarVisible: Boolean(editorElement?.querySelector('[role="toolbar"]')?.getClientRects().length),
+        focusedLabel: document.activeElement?.getAttribute?.("aria-label")
+          || document.activeElement?.textContent?.trim()
+          || document.activeElement?.tagName
+          || null,
+      };
+    });
+    const candidateFrame = editor.locator('iframe[data-frame-role="runtime-candidate"]');
+    await candidateFrame.evaluate((iframe) => {
+      const documentNode = iframe.contentDocument;
+      if (!documentNode?.body) throw new Error("Candidate document was unavailable.");
+      const spacer = documentNode.createElement("div");
+      spacer.setAttribute("data-e2e-candidate-layout-fault", "true");
+      spacer.style.height = "1800px";
+      documentNode.body.prepend(spacer);
+      documentNode.defaultView?.dispatchEvent(new Event("resize"));
+    });
+    await page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    const activePresentationAfterFault = await page.evaluate(() => {
+      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
+      const stage = editorElement?.closest(".review-scroll-stage");
+      const activeFrame = editorElement?.querySelector("iframe:not([data-frame-role])");
+      const selected = activeFrame?.contentDocument?.querySelector(
+        "[data-html-canvas-selected]",
+      );
+      return {
+        scrollTop: stage?.scrollTop ?? null,
+        canvasHeight: editorElement?.getBoundingClientRect().height ?? null,
+        publishedCanvasHeight: document.documentElement.style.getPropertyValue(
+          "--comment-canvas-height",
+        ),
+        selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
+        toolbarVisible: Boolean(editorElement?.querySelector('[role="toolbar"]')?.getClientRects().length),
+        focusedLabel: document.activeElement?.getAttribute?.("aria-label")
+          || document.activeElement?.textContent?.trim()
+          || document.activeElement?.tagName
+          || null,
+      };
+    });
+    expect(activePresentationAfterFault).toEqual(activePresentationBeforeFault);
+    await candidateFrame.evaluate((iframe) => {
+      iframe.contentDocument?.querySelector('[data-e2e-candidate-layout-fault="true"]')?.remove();
+      iframe.contentWindow?.dispatchEvent(new Event("resize"));
+    });
 
     frame = await currentEditorFrame(page);
     const activeTarget = frame.locator('[data-native-case="runtime-commit-hold-edit"]').first();
