@@ -42,17 +42,12 @@ listed under Progressive disclosure.
 
 ## Standard task lifecycle
 
-1. Run `npm run task:status` and inspect `git status -sb` before editing.
-2. From the clean primary `main` worktree, run `npm run task:start -- <prefix/short-name>`. It keeps the primary worktree on `main` and creates an isolated checkout under the shared `.codex-worktrees/` directory. Allowed prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `integration/`, `refactor/`, `chore/` and `recovery/`. If the primary checkout is dirty, create an isolated worktree from `origin/main` instead of stashing.
-3. Keep the diff focused. Add tests and documentation in the same change when behavior, contracts, commands or public expectations change.
-4. While editing, use `npm run gate:edit` as needed. Before publishing a branch, run `npm run task:finish` once; it already owns the end-of-task gate, so do not precede it with a duplicate `gate:task` run.
-5. Review `git diff`, stage only intentional paths, review `git diff --cached`, then commit and push the task branch.
-6. Open every PR as Draft. Ordinary Draft pushes run only impact-selected `pr-feedback`. Moving the frozen head to Ready starts the complete source matrix; `release-gate` is the sole required merge check. The review service status, absence and unverified comments are informational; verified P0/P1 defects still block delivery. Apply the mandatory P0/P1 scope-stop rule in `docs/CODEX_WORKFLOW.md`: record P2/P3 and unclassified minor findings, but do not let them cause another edit, commit, Ready run, packaging delay or merge delay unless the user explicitly escalates them. After explicit merge authorization, prefer GitHub native Auto-merge over polling and a later manual merge click.
-7. For implementation tasks, report outcome, verification, documentation impact, branch/commit, PR and worktree state; include release details only when applicable. For read-only tasks, report findings, evidence and unresolved questions. After merge, run `npm run task:audit` from the primary worktree and retire only the exact merged task with `task:retire --apply`.
+For any implementation or delivery task, the root reads `docs/CODEX_WORKFLOW.md` sections `Standard commands` and `Branch and Pull Request flow`; it reads `docs/RELEASING.md` only for packaging or release work. Children receive only the applicable steps in their task packet. The non-negotiable summary is:
 
-Ordinary development stops at `gate:edit` / `task:finish` and a Draft PR.
-Installer composition and package delivery: `docs/CODEX_WORKFLOW.md`.
-Release, packaging, and Candidate publication: `docs/RELEASING.md`.
+1. Inspect with `npm run task:status`; work on an isolated task branch/worktree and never stash unrelated user changes.
+2. Keep the diff focused. Use `gate:edit` while editing and run `npm run task:finish` once before publication; it already owns `gate:task`.
+3. Review the unstaged and staged diff, stage only intended paths, then commit, push and open a Draft PR.
+4. Stop at the tested Draft PR unless the user separately authorizes Ready, merge, packaging or release. After merge, audit and retire only the exact merged task.
 
 ## Product invariants
 
@@ -63,12 +58,7 @@ Release, packaging, and Candidate publication: `docs/RELEASING.md`.
 - AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML. Weak page continuity forces review instead of failing an otherwise usable candidate.
 - QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. Authorized automatic paths are ADR 0032's Qoder ACP driver, ADR 0053's Codex ACP adapter, and ADR 0069's PageRoot native OpenAI-compatible HTTP Agent. Anthropic is not authorized.
 - Committed tests and fixtures use synthetic data only. Relevant editor/runtime/recovery changes also require real Electron acceptance using the user-designated local HTML corpus, as defined in `tests/TEST_STRATEGY.md`. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
-
-1. Keep the architecture small, explicit, and internally consistent; prefer the smallest coherent solution and avoid speculative abstractions, compatibility layers, or parallel flows.
-2. Give every module and piece of mutable state one clear responsibility and owner, with predictable dependency direction and minimal hidden coupling.
-3. Optimize for local reasoning through clear names, types, contracts, visible control flow, predictable file locations, and comments that explain why.
-4. Keep changes narrowly scoped, extend existing patterns instead of creating parallel implementations, and avoid unrelated refactoring.
-5. Verify changed behavior with focused tests and update architecture documentation whenever ownership, interfaces, lifecycle, or data flow changes.
+- Implementation shape, ownership, testing and completion rules live in `docs/ENGINEERING_STANDARDS.md`; read only the sections relevant to the routed task.
 
 ## Locate, execute, and finish
 
@@ -82,13 +72,7 @@ Release, packaging, and Candidate publication: `docs/RELEASING.md`.
 
 ## User-facing design changes
 
-For any change affecting what a Stemmio user sees, understands or operates, read
-`docs/PRODUCT_DESIGN_SYSTEM.md` and the relevant interaction contract, then use
-`.agents/skills/stemmio-product-design/SKILL.md`. This includes UI copy, states,
-navigation, keyboard behavior, Agent progress, Review and adoption. Pure internal
-changes without user-visible effects are exempt. Scale evidence to the change:
-one-copy/token edits retain DESIGN_LANGUAGE §5’s lightweight exception; this is
-not a requirement to run a full audit or add a new CI lane for every UI edit.
+For any change affecting what a Stemmio user sees, understands or operates, read `docs/PRODUCT_DESIGN_SYSTEM.md` and the relevant interaction contract, then use `.agents/skills/stemmio-product-design/SKILL.md`. Pure internal changes are exempt; scale evidence to the change and retain `DESIGN_LANGUAGE.md` section 5's lightweight exception for one-copy/token edits.
 
 ## Progressive disclosure
 
@@ -126,32 +110,9 @@ When code makes a routed document inaccurate, update that document in the same P
 
 ## Code Review Rules
 
-Classify a failure by whether it is irreversible. Do not treat every fail-closed check as sacred.
+Before review, read `docs/ENGINEERING_STANDARDS.md` sections `Defense classes`, `Tests` and `Definition of complete`, then the task-specific contracts routed above. Apply these boundaries:
 
-Do not remove an irreversible authority-boundary protection unless an equivalent protection remains. For reversible interaction, presentation and preflight boundaries, a change may move a front-door block to post-validation, automatic repair or degradation when tests and a recovery path exist.
-
-### Authority boundary (fail-closed)
-
-Protects against wrong-disk writes, mistaken AI adoption, wrong Version activation, destructive deletes and wrong published packages. Same fact: validate at most at ingress, after an await, and immediately before irreversible commit.
-
-- Flag any path that serializes preview DOM, rewrites unrelated HTML bytes, bypasses current hash, identity, scope or persistence checks at a commit boundary, treats SourcePatch as a second public edit API, or makes concurrent writes last-writer-wins.
-- Require negative and compatibility coverage for target resolution, source mapping, atomic writes, selection or IME behavior.
-- Require one named owner, an asynchronous outcome model and a drain-boundary decision for every new mutable or persisted state. `npm run architecture:check` must pass; never bypass it with a new view-level Bridge call, browser-storage write or duplicated compatibility branch.
-
-### Reversible coordination (converge automatically)
-
-Stale queries, expired Canvas acknowledgements, catalog refresh failures, lost Bridge replies that can be reread, and expired projections must discard the old result, reread authority, rebuild, retry once within a bound, or degrade. They must not become a dialog, a locked canvas, or a user-owned retry for internal uncertainty.
-
-### Presentation and edit eligibility (fail-open)
-
-Layout preflight, hover/outline trust, Review runtime capture completeness, comment-marker location and UI projection lag must not refuse the user. Enter edit first; validate afterwards with MutationObserver, patch scope and the source commit. Keep a comment whose target failed outside an explicit element delete, mark its location as lost, and direct the user to delete and comment again. Hide a failed outline; do not forbid editing.
-
-### Trust, protocol and release
-
-- Flag widened renderer, IPC, filesystem, managed-path or AI-output authority without explicit validation and fail-closed tests at the irreversible boundary.
-- Protocol or schema changes require synchronized schemas, fixtures, compatibility notes, validators and tests.
-- QoderWork automation beyond clipboard-only handoff is a product and security boundary change; changes outside ADR 0032's fixed Qoder ACP contract require new explicit authorization.
-- Flag committed secrets, personal paths, real user files, build output, installers or private operational records.
-- Flag packages that cannot be traced to one clean commit/tree, publishing before all gates pass, or mutation of an existing tag or Release asset.
-- User confirmation is for destructive deletes, discarding unsavable edits, explicit overwrite of external changes, and unrecoverable identity or permission changes. An uncertain async receipt is not a confirmation dialog.
-- Review rules complement tests, branch protection and human acceptance; they do not replace them.
+- Fail closed at irreversible filesystem, AI-adoption, identity, persistence and release boundaries; require equivalent protection and negative coverage for any change there.
+- Converge or degrade automatically for reversible coordination failures. Presentation and preflight uncertainty must not block editing.
+- Flag widened renderer/IPC/filesystem/AI authority, protocol drift, unsafe concurrent writes, real user data or secrets, and packages without clean source provenance.
+- Verified P0/P1 findings block delivery. Review evidence complements deterministic gates and human acceptance; it does not replace them.
