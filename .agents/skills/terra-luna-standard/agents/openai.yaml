@@ -1,0 +1,4 @@
+interface:
+  display_name: "Terra-Luna Standard"
+  short_description: "Terra Max with Luna High and Max agents"
+  default_prompt: "Use $terra-luna-standard for this scoped PageRoot engineering task when the active primary is Terra Max."

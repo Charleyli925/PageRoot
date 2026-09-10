@@ -36,12 +36,17 @@ or a specific unresolved risk. Follow the applicable session's tester routing.
 `task:finish` already runs `gate:task`; do not run both as separate completion gates.
 Required local, Draft, Ready and release boundaries remain distinct and mandatory.
 
-This checkout's `AGENTS.md` is the portable project entrypoint. Do not assume a
-parent-workspace AGENTS file, skill or agent profile is available in a separate
-checkout or worktree. When handing off to a fresh agent, include the applicable
-user constraints and routing explicitly with the checkout, scope and acceptance
-criteria. Preserve the user's root model; missing local configuration does not
-authorize substitution. Do not copy the whole parent conversation.
+The repository root is the single portable authority for Codex project setup:
+`AGENTS.md` owns durable project guidance, `.codex/` owns project configuration
+and custom agents, and `.agents/skills/` owns repository skills. A surrounding
+local workspace may expose convenience symlinks to these exact paths, but must
+not keep editable copies or become a source fallback. This keeps the primary
+checkout, isolated worktrees, CI and fresh clones on the same configuration.
+
+When handing off to a fresh agent, include the applicable user constraints and
+routing explicitly with the checkout, scope and acceptance criteria. Preserve
+the user's root model; missing local configuration does not authorize
+substitution. Do not copy the whole parent conversation.
 
 ## Standard commands
 
