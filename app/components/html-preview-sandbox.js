@@ -17,8 +17,6 @@ import {
 export const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
 export const FRAME_VERIFICATION_ATTRIBUTE =
   "data-html-canvas-render-verification";
-export const EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE =
-  "data-pageroot-runtime-candidate-inert";
 
 const INJECTED_BASE_ATTRIBUTE = "data-html-canvas-injected-base";
 const DISABLED_SCRIPT_ATTRIBUTE = "data-html-canvas-disabled-script";
@@ -140,14 +138,16 @@ export function sanitizeScrollableDisplayDocument(source, baseUrl) {
   return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
 }
 
-function isolateRuntimeCandidateFocus(parsed) {
+function isolateRuntimeCandidateFocus(parsed, candidateInertOwnership) {
   const root = parsed.documentElement;
   // A replacement document is born as a hidden Candidate. Keep its controls
   // outside the focus order until the existing handoff coordinator accepts it
-  // as Active. The marker lets promotion preserve an authored `inert` root.
-  if (!root.hasAttribute("inert")) {
+  // as Active. Ownership stays in the parent-side Candidate record because
+  // author markup and scripts can freely mutate every attribute in this DOM.
+  const injected = !root.hasAttribute("inert");
+  if (candidateInertOwnership) candidateInertOwnership.injected = injected;
+  if (injected) {
     root.setAttribute("inert", "");
-    root.setAttribute(EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE, "true");
   }
   parsed.querySelectorAll("[autofocus]").forEach((element) => {
     element.removeAttribute("autofocus");
@@ -157,7 +157,12 @@ function isolateRuntimeCandidateFocus(parsed) {
 export function prepareVerifiedFrameDocument(
   source,
   verificationToken,
-  { baseUrl, editorStyles, candidateInert = false } = {},
+  {
+    baseUrl,
+    editorStyles,
+    candidateInert = false,
+    candidateInertOwnership,
+  } = {},
 ) {
   const sanitized = sanitizePreviewDocument(source, baseUrl);
   if (typeof DOMParser === "undefined") return sanitized;
@@ -173,7 +178,9 @@ export function prepareVerifiedFrameDocument(
   marker.setAttribute(FRAME_VERIFICATION_ATTRIBUTE, verificationToken);
   marker.setAttribute("content", verificationToken);
   parsed.head.prepend(marker);
-  if (candidateInert) isolateRuntimeCandidateFocus(parsed);
+  if (candidateInert) {
+    isolateRuntimeCandidateFocus(parsed, candidateInertOwnership);
+  }
   return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
 }
 
@@ -244,6 +251,7 @@ export function prepareDisposableRuntimeFrameDocument(
     documentBasePath,
     baseUrl,
     editorStyles,
+    candidateInertOwnership,
   } = {},
 ) {
   if (
@@ -263,7 +271,7 @@ export function prepareDisposableRuntimeFrameDocument(
   if (!parsed.documentElement || !parsed.head) return null;
   if (!addRuntimeResourceBase(parsed, sessionId, documentBasePath)) return null;
   const root = parsed.documentElement;
-  isolateRuntimeCandidateFocus(parsed);
+  isolateRuntimeCandidateFocus(parsed, candidateInertOwnership);
   const sourceElements = [root, ...root.querySelectorAll("*")];
   const seenMarkers = new Set();
   for (const element of sourceElements) {

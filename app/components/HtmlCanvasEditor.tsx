@@ -263,7 +263,6 @@ export type {
   NativeDeferredCommandOptions,
 } from "./HtmlCanvasEditor.types";
 import {
-  EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE,
   EDITOR_STYLE_ATTRIBUTE,
   FRAME_VERIFICATION_ATTRIBUTE,
   baseHrefFromSourcePath,
@@ -499,6 +498,7 @@ type RuntimeCandidate = {
   sourceElements: RuntimeSourceElements | null;
   registrationCleanup: () => void;
   loaded: boolean;
+  candidateInertInjected: boolean;
   handoffContext: RuntimeHandoffContext;
   retiredSlot: RuntimeSlotRetirement | null;
   viewContext: PageViewContext | null;
@@ -2224,6 +2224,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`
     }`;
     let prepared: string | null = null;
+    const candidateInertOwnership = { injected: false };
     if (staticDisabled) {
       prepared = prepareCanvasFrameDocument(
         instrumentedSource,
@@ -2233,11 +2234,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           baseUrl: staticAssetBaseHref,
           editorStyles: EDITOR_DOCUMENT_STYLES,
           candidateInert: true,
+          candidateInertOwnership,
         },
       ) || prepareVerifiedFrameDocument(instrumentedSource, verificationToken, {
         baseUrl: staticAssetBaseHref,
         editorStyles: EDITOR_DOCUMENT_STYLES,
         candidateInert: true,
+        candidateInertOwnership,
       });
       if (
         prepared
@@ -2265,6 +2268,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             documentBasePath: runtimeGrant.documentBasePath,
             baseUrl: documentBaseHref,
             editorStyles: EDITOR_DOCUMENT_STYLES,
+            candidateInertOwnership,
           },
         );
         if (prepared) {
@@ -2334,6 +2338,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceElements: null,
       registrationCleanup: () => undefined,
       loaded: false,
+      candidateInertInjected: candidateInertOwnership.injected,
       handoffContext,
       retiredSlot: null,
       viewContext: null,
@@ -2786,8 +2791,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return false;
     }
     const promotedRoot = promotedDocument.documentElement;
-    if (promotedRoot.getAttribute(EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE) === "true") {
-      promotedRoot.removeAttribute(EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE);
+    if (candidate.candidateInertInjected) {
       promotedRoot.removeAttribute("inert");
     }
     applyReadingPosition({

@@ -1,7 +1,10 @@
 export const EDITOR_STYLE_ATTRIBUTE: string;
 export const FRAME_VERIFICATION_ATTRIBUTE: string;
-export const EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE: string;
 export const EDIT_RUNTIME_CSP: string;
+
+export type RuntimeCandidateInertOwnership = {
+  injected: boolean;
+};
 
 export function disableExecutableMarkup(source: string): string;
 export function sanitizePreviewDocument(
@@ -19,6 +22,7 @@ export function prepareVerifiedFrameDocument(
     baseUrl?: string;
     editorStyles?: string;
     candidateInert?: boolean;
+    candidateInertOwnership?: RuntimeCandidateInertOwnership;
   },
 ): string;
 export function prepareDisposableRuntimeFrameDocument(
@@ -30,6 +34,7 @@ export function prepareDisposableRuntimeFrameDocument(
     documentBasePath?: string;
     baseUrl?: string;
     editorStyles?: string;
+    candidateInertOwnership?: RuntimeCandidateInertOwnership;
   },
 ): string | null;
 export function prepareCanvasFrameDocument(
@@ -40,6 +45,7 @@ export function prepareCanvasFrameDocument(
     baseUrl?: string;
     editorStyles?: string;
     candidateInert?: boolean;
+    candidateInertOwnership?: RuntimeCandidateInertOwnership;
   } | {
     mode: "disposable-runtime";
     sessionId: string;
@@ -47,6 +53,7 @@ export function prepareCanvasFrameDocument(
     documentBasePath?: string;
     baseUrl?: string;
     editorStyles?: string;
+    candidateInertOwnership?: RuntimeCandidateInertOwnership;
   },
 ): string | null;
 export function baseHrefFromSourcePath(

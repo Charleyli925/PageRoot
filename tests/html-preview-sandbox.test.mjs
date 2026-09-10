@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE,
   EDIT_RUNTIME_CSP,
   baseHrefFromSourcePath,
   disableExecutableMarkup,
@@ -14,21 +13,24 @@ test("Edit runtime CSP keeps workers outside the admitted program closure", () =
   assert.doesNotMatch(EDIT_RUNTIME_CSP, /worker-src[^;]*blob:/u);
 });
 
-test("disposable Runtime documents carry a private Candidate inert marker", async () => {
-  const source = await readFile(
+test("disposable Runtime inert ownership stays outside the author DOM", async () => {
+  const sandboxSource = await readFile(
     new URL("../app/components/html-preview-sandbox.js", import.meta.url),
     "utf8",
   );
-  assert.equal(
-    EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE,
-    "data-pageroot-runtime-candidate-inert",
+  const editorSource = await readFile(
+    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
+    "utf8",
   );
-  assert.match(source, /function isolateRuntimeCandidateFocus/u);
-  assert.match(source, /if \(!root\.hasAttribute\("inert"\)\)/u);
-  assert.match(source, /root\.setAttribute\("inert", ""\)/u);
-  assert.match(source, /EDIT_RUNTIME_CANDIDATE_INERT_ATTRIBUTE/u);
-  assert.match(source, /querySelectorAll\("\[autofocus\]"\)/u);
-  assert.match(source, /removeAttribute\("autofocus"\)/u);
+  assert.match(sandboxSource, /function isolateRuntimeCandidateFocus/u);
+  assert.match(sandboxSource, /const injected = !root\.hasAttribute\("inert"\)/u);
+  assert.match(sandboxSource, /candidateInertOwnership\.injected = injected/u);
+  assert.match(sandboxSource, /root\.setAttribute\("inert", ""\)/u);
+  assert.match(sandboxSource, /querySelectorAll\("\[autofocus\]"\)/u);
+  assert.match(sandboxSource, /removeAttribute\("autofocus"\)/u);
+  assert.doesNotMatch(sandboxSource, /data-pageroot-runtime-candidate-inert/u);
+  assert.match(editorSource, /candidateInertInjected: candidateInertOwnership\.injected/u);
+  assert.match(editorSource, /if \(candidate\.candidateInertInjected\)/u);
 });
 
 test("preview sandbox disables scripts without losing authored type metadata", () => {

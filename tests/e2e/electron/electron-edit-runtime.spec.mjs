@@ -3034,7 +3034,7 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
       marker: iframe.contentDocument?.documentElement.getAttribute(
         "data-pageroot-runtime-candidate-inert",
       ) ?? null,
-    }))).toEqual({ inert: true, marker: "true" });
+    }))).toEqual({ inert: true, marker: null });
     await candidateFrame.evaluate((iframe) => {
       const documentNode = iframe.contentDocument;
       if (!documentNode?.body) throw new Error("Candidate document was unavailable.");
@@ -3264,6 +3264,55 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
     injectedEnv: {
       PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
+  });
+});
+
+test("Candidate inert ownership cannot be forged or cleared by author markup", async () => {
+  const markerMutationHtml = `<!doctype html>
+<html data-pageroot-runtime-candidate-inert="source-owned"><head>
+  <title>Runtime Candidate inert marker mutation</title>
+</head><body>
+  <main data-native-case="runtime-inert-marker-mutation">Candidate 属性不是授权。</main>
+  <script>
+    document.documentElement.removeAttribute('data-pageroot-runtime-candidate-inert');
+    document.body.dataset.runtimeReady = 'true';
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-inert-marker-mutation-e2e-", {
+    "runtime-report.html": markerMutationHtml,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "runtime-inert-marker-mutation",
+    );
+    await expect(frame.locator("html")).not.toHaveAttribute("inert", "");
+    await expect(frame.locator("html")).not.toHaveAttribute(
+      "data-pageroot-runtime-candidate-inert",
+      /.+/u,
+    );
+    await expect(frame.locator("body")).toHaveAttribute("data-runtime-ready", "true");
+  });
+
+  const authoredInertHtml = `<!doctype html>
+<html inert data-pageroot-runtime-candidate-inert="true"><head>
+  <title>Runtime authored inert root</title>
+</head><body>
+  <main data-native-case="runtime-authored-inert">Author inert 必须保留。</main>
+  <script>document.body.dataset.runtimeReady = 'true';</script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-authored-inert-e2e-", {
+    "runtime-report.html": authoredInertHtml,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-authored-inert");
+    await expect(frame.locator("html")).toHaveAttribute("inert", "");
+    await expect(frame.locator("html")).toHaveAttribute(
+      "data-pageroot-runtime-candidate-inert",
+      "true",
+    );
+    await expect(frame.locator("body")).toHaveAttribute("data-runtime-ready", "true");
   });
 });
 
