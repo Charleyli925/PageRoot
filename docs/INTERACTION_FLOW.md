@@ -727,7 +727,8 @@ Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<�
 
 设置页与 AI 对话侧栏共用同一份 `checking / ready / not-installed / auth-required /
 unavailable` 状态。打开设置只执行**当前方案**无副作用的 `diagnose`，不创建
-preflight ticket 或 Agent session；窗口从外部终端返回时，只在安装中或等待登录等
+preflight ticket 或执行会话；Qoder 诊断可启动无文件、终端与提示权限的短生命周期 ACP
+smoke session，仅验证 `initialize → session.new → identity/protocol` 并确认进程退出。窗口从外部终端返回时，只在安装中或等待登录等
 临时状态轻量刷新。并发的相同诊断共享一个 selection-keyed Promise，过期结果不能发布。
 对话侧栏只消费最近一次可信状态，未知、检测中、
 未安装、需要登录、额度用尽或连接失败时都提供进入设置的下一步，不把英文原文写进聊天。
@@ -1254,7 +1255,8 @@ A 项目 processing 时切换 B 项目：
 | AI 失败或取消 | 不建版、不创建工作文件 | 修改要求后再提交 |
 
 Agent 设置与执行状态均原位收口：设置页只执行无副作用的
-diagnose，不建立 preflight ticket 或 Agent session，只在 Bridge 真实诊断
+diagnose，不建立 preflight ticket 或执行会话；允许用无工具权限的短生命周期 ACP smoke
+session 证明协议、Agent 身份、建会话与进程清理，只在 Bridge 真实诊断
 成功后显示“已连接”。窗口重新获得焦点时，仅安装中或等待登录
 的临时状态轻量刷新。正式发送才执行 preflight 并冻结 Agent、模型与配置。
 

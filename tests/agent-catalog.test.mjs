@@ -6,7 +6,11 @@ import test from "node:test";
 
 import { createAgentCatalog } from "../bridge/agent/catalog/agent-catalog.mjs";
 import { QODER_MANAGED_RELEASE } from "../bridge/agent/catalog/qoder-managed-release.mjs";
-import { diagnoseQoder, resolveQoderAcpCommand } from "../bridge/agent/providers/qoder-provider.mjs";
+import {
+  diagnoseQoder,
+  resolveQoderAcpCommand,
+  startQoderLogin,
+} from "../bridge/agent/providers/qoder-provider.mjs";
 
 async function isolatedHome(t) {
   const root = await realpath(
@@ -62,7 +66,7 @@ test("public catalog projection never includes command, path or stderr", async (
   assert.equal(serialized.includes("qodercli.js"), false);
 });
 
-test("user-installed Qoder wins over a managed copy", async (t) => {
+test("PageRoot-managed Qoder wins over a valid user copy", async (t) => {
   const root = await isolatedHome(t);
   const agentsRoot = path.join(root, "agents");
   const managed = await writeManagedQoder(agentsRoot);
@@ -86,9 +90,9 @@ test("user-installed Qoder wins over a managed copy", async (t) => {
     homeDirectory: root,
     managedCandidates: () => catalog.managedCommandCandidates("qoder"),
   });
-  assert.equal(resolved.installSource, "user");
-  assert.equal(resolved.command, userBundle);
-  assert.notEqual(resolved.command, managed);
+  assert.equal(resolved.installSource, "managed");
+  assert.equal(resolved.command, managed);
+  assert.notEqual(resolved.command, userBundle);
 });
 
 test("managed Qoder is used only when no user CLI exists", async (t) => {
@@ -106,14 +110,84 @@ test("managed Qoder is used only when no user CLI exists", async (t) => {
   assert.equal(resolved.command, managed);
 });
 
-test("Qoder diagnosis uses only version and model-list commands", async (t) => {
+test("Qoder diagnosis requires an ACP identity and session smoke check", async (t) => {
   const root = await isolatedHome(t);
   const command = path.join(root, "qoder-diagnose");
   await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo PageRoot-E2E; fi\n", { mode: 0o755 });
   await chmod(command, 0o755);
-  const diagnostic = await diagnoseQoder({ command, version: "1.1.27", source: "e2e-override" }, {});
+  let probe = null;
+  const diagnostic = await diagnoseQoder(
+    { command, version: "1.1.27", source: "e2e-override" },
+    {},
+    { probeRunner: async (input) => { probe = input; } },
+  );
   assert.equal(diagnostic.readiness, "ready");
   assert.equal(diagnostic.activeInstallation, null);
+  assert.equal(diagnostic.facts.protocol, "ready");
+  assert.equal(diagnostic.facts.service, "ready");
+  assert.deepEqual(probe.args, ["--acp"]);
+  assert.match("pageroot-e2e-qoder", probe.expectedAgentName);
+});
+
+test("Qoder diagnosis keeps authentication ready when ACP identity fails", async (t) => {
+  const root = await isolatedHome(t);
+  const command = path.join(root, "qoder-diagnose-identity");
+  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo PageRoot-E2E; fi\n", { mode: 0o755 });
+  await chmod(command, 0o755);
+  const diagnostic = await diagnoseQoder(
+    { command, version: "1.1.27", source: "e2e-override" },
+    {},
+    { probeRunner: async () => {
+      throw Object.assign(new Error("wrong agent"), { code: "ACP_AGENT_IDENTITY_MISMATCH" });
+    } },
+  );
+  assert.deepEqual(diagnostic.facts, {
+    installation: "ready",
+    authentication: "ready",
+    protocol: "failed",
+    service: "unknown",
+  });
+  assert.equal(diagnostic.readiness, "connection-failed");
+  assert.equal(diagnostic.cause, "ACP_AGENT_IDENTITY_MISMATCH");
+});
+
+test("Qoder diagnosis fails closed when ACP process cleanup is unconfirmed", async (t) => {
+  const root = await isolatedHome(t);
+  const command = path.join(root, "qoder-diagnose-cleanup");
+  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo PageRoot-E2E; fi\n", { mode: 0o755 });
+  await chmod(command, 0o755);
+  await assert.rejects(
+    diagnoseQoder(
+      { command, version: "1.1.27", source: "e2e-override" },
+      {},
+      { probeRunner: async () => {
+        throw Object.assign(new Error("cleanup unconfirmed"), {
+          code: "ACP_PROCESS_CLEANUP_UNCONFIRMED",
+        });
+      } },
+    ),
+    (error) => error?.code === "ACP_PROCESS_CLEANUP_UNCONFIRMED"
+      && /未确认停止/u.test(error.message),
+  );
+});
+
+test("Qoder login prints one validated URL for Stemmio to open", async () => {
+  let loginInput = null;
+  let capturedUrl = null;
+  await startQoderLogin(
+    { command: "/tmp/qodercli", installSource: "managed" },
+    {
+      environment: { HOME: "/tmp/qoder-home", PATH: "/usr/bin:/bin" },
+      loginRunner: async (input) => {
+        loginInput = input;
+        input.onOutput({ loginUrl: "https://qoder.com/account/integrations" });
+      },
+      onLoginUrl: (url) => { capturedUrl = url; },
+      inspectRunner: async () => ({ readiness: "ready" }),
+    },
+  );
+  assert.equal(loginInput.env.NO_BROWSER, "1");
+  assert.equal(capturedUrl, "https://qoder.com/account/integrations");
 });
 
 test("an invalid user installation is diagnostic-only when managed Qoder is valid", async (t) => {

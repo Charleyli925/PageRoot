@@ -48,8 +48,30 @@ if (process.argv.includes("--list-models")) {
   process.stdout.write("MODEL\\nSynthetic-Qoder\\n");
   process.exit(0);
 }
-process.stderr.write("unexpected command\\n");
-process.exit(2);
+if (process.argv.includes("--acp")) {
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    input += chunk;
+    for (;;) {
+      const newline = input.indexOf("\\n");
+      if (newline < 0) break;
+      const line = input.slice(0, newline);
+      input = input.slice(newline + 1);
+      if (!line.trim()) continue;
+      const request = JSON.parse(line);
+      const result = request.method === "initialize"
+        ? { protocolVersion: 1, agentCapabilities: { loadSession: false }, authMethods: [], agentInfo: { name: "pageroot-e2e-qoder", version: "1.1.27" } }
+        : request.method === "session/new"
+          ? { sessionId: "session_preflight" }
+          : null;
+      if (request.id !== undefined) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\\n");
+    }
+  });
+} else {
+  process.stderr.write("unexpected command\\n");
+  process.exit(2);
+}
 `, { encoding: "utf8", mode: 0o755 });
   await chmod(command, 0o755);
   return command;
@@ -104,7 +126,29 @@ if (process.argv.includes("--list-models")) {
   process.stdout.write(${JSON.stringify(`MODEL\n${models.join("\n")}${models.length ? "\n" : ""}`)});
   process.exit(0);
 }
-process.exit(2);
+if (process.argv.includes("--acp")) {
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    input += chunk;
+    for (;;) {
+      const newline = input.indexOf("\\n");
+      if (newline < 0) break;
+      const line = input.slice(0, newline);
+      input = input.slice(newline + 1);
+      if (!line.trim()) continue;
+      const request = JSON.parse(line);
+      const result = request.method === "initialize"
+        ? { protocolVersion: 1, agentCapabilities: { loadSession: false }, authMethods: [], agentInfo: { name: "qoder-synthetic-agent", version: ${JSON.stringify(manifestVersion)} } }
+        : request.method === "session/new"
+          ? { sessionId: "session_preflight" }
+          : null;
+      if (request.id !== undefined) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\\n");
+    }
+  });
+} else {
+  process.exit(2);
+}
 `, { encoding: "utf8", mode: 0o755 });
   await chmod(bundle, 0o755);
   const launcher = binDirectory ? path.join(binDirectory, "qodercli") : null;
