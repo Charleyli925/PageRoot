@@ -2125,6 +2125,8 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     await heading.dblclick({ force: true });
     await expect(heading).toHaveAttribute("contenteditable", "true");
     await heading.press("End");
+    const revisionBeforeFailure = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
     await page.keyboard.insertText("        候选失败");
     const pendingResolverCount = await page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
@@ -2171,6 +2173,7 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
       .toHaveAttribute("sandbox", /allow-scripts/u);
     frame = await currentEditorFrame(page);
     await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    await expectCheckpointPersisted(page, revisionBeforeFailure);
     let latestSource = await readPublishedWorkingCopy(workingCopyPath, "utf8");
     expect(latestSource).toContain("候选失败");
     expect(latestSource).toContain("你好");
@@ -3539,20 +3542,15 @@ test("static fallback can reload dynamic content and dismiss itself after succes
     await expect(editor).toHaveAttribute("data-render-verified", "true");
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     let frame = await currentEditorFrame(page);
-    const retryTarget = frame.locator('[data-native-case="runtime-retry"]');
+    const retryTarget = await activateNativeEdit(frame, "runtime-retry");
     await retryTarget.evaluate((element) => {
-      const rect = element.getBoundingClientRect();
-      const eventInit = {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + Math.max(1, rect.width / 2),
-        clientY: rect.top + Math.max(1, rect.height / 2),
-      };
-      element.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
-      element.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
+      const selection = element.ownerDocument.getSelection();
+      const range = element.ownerDocument.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
     });
-    await expect(retryTarget).toHaveAttribute("contenteditable", "true");
-    await retryTarget.press("End");
     const revisionBeforeEdit = Number(await page.locator("[data-persist-state]").first()
       .getAttribute("data-persisted-revision"));
     await page.keyboard.insertText(" 已保存的新文字");

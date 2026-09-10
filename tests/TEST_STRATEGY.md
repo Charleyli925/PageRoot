@@ -347,22 +347,40 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   立即截取，不能混入后续 switch、close、监控停止或 byte oracle 的耗时。
   任务级跑正常闭环和一个硬失败代表场景；
   发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态
-  返回/重开。正式 Electron 审阅用例必须证明默认“双页 + 全部变化 + 18%”总览无紫框、无 dim，
-  `全部 / 文字 / 元素` 工具栏、页面/筛选/可见度/导航彼此独立、左右单页和
-  双页均铺满 Canvas，以及采纳和返回修改前的持久化边界。
+  返回/重开。正式 Electron 审阅用例必须证明默认“双页 + 全部变化”总览有精确证据与页边导航，
+  但无边框、无 dim；变化聚焦与评论聚焦的全局偏好默认分别为 25% / 15%，工具栏不再有滑杆。
+  `全部 / 文字 / 元素`、页面、导航、聚焦、页内运行态、滚动和缩放彼此独立，左右单页和
+  双页均铺满 Canvas，并覆盖采纳和返回修改前的持久化边界。
   Node 直接覆盖精确字符范围、纯插入/删除镜像、完全重写 singleton 的兼容配对、
   重复多解不猜、超预算有界退化，以及 projection 只接受 `text/structure`，其
   结构子类为 `added/removed/moved/attribute/style/css-source/script-source`。真实 Electron 证明文字替换保留红色删除虚线与绿色逐字实点；
   真正新增/删除的 `li/tr/卡片/区块` 只显示一个最外层“新增元素 / 删除元素”框，
   内部元素和文字零重复；新增编号 `<br>` 行仍是文字事实；稳定 ID 的兄弟/跨父
   移动、普通属性、内联样式和 CSS/Script 源码变化进入元素事实，纯换行及
-  Canvas/SVG Runtime 绘制仍为零变化。段落两字或五处修改均为一个阅读块框和一个标签；两个远距离段落是两个 focus group，点击各自 bar 后必须揭示并滚动到对应段落。同一 CSS 规则命中的六张卡在满足 75% 与 grid/flex/list/repeated-card 条件时提升为一个容器框，单卡仍框自身；同一规则命中两个局部容器时保留一个 group 下两个 region，相同 inline delta 即使同父级也必须是不同 group。Node 必须覆盖 `displayScope`/`geometryMode` 分离、change-scoped atom key、group/region/payload 上限和重复 ID 拒绝；Browser 必须证明 257-group 或畸形 plan 只关闭 box/mask 而不删除精确红绿证据、multi-host atom 合法聚合、parser-time decoy 与 live prototype 篡改失败关闭。Electron 必须覆盖再次点击与 Escape 返回总览、筛选不激活、单侧新增/删除另一侧无 mask/scroll，以及段落文字和段落样式分别使用 text-content/element-box。50%–200% 缩放、resize 与字体变化后，前后页保持同一 `activeFocusGroupId`，框与遮罩孔保持同一 canonical `pathData`，
+  Canvas/SVG Runtime 绘制仍为零变化。Node 必须分别覆盖事实、几何与 paint plan：总览只启用
+  `evidenceMarks/navigationCues`；文字聚焦启用一个局部 mask 但 outline 恒为空；来源明确的新增、删除、
+  移动可以有一个局部 outline；style 只有当前 region 自己的纯样式 Stable host 得到 `changed` 视觉结论才有 outline，
+  另一 region 的 `changed` 不能外借，混合文字/属性证据、`unchanged/unverified` 均无；
+  每侧至多一个 mask hole 和一个 outline。两个远距离段落是两个 focus group，点击各自位置后必须揭示
+  并滚动到对应段落，但不得出现文字框。同一 CSS 规则可以共享 group，却按阅读局部与 owner 保留精确
+  region；页边可聚合为密度提示，目录仍列出带内容线索的全部位置，任何命中数量都不得提升成父容器框。相同 inline
+  delta 即使同父级也必须是不同 group。Node 继续覆盖 `displayScope`/`geometryMode` 分离、change-scoped
+  atom key、group/region/payload 上限和重复 ID 拒绝；Browser 必须证明 257-group 或畸形 plan 只关闭
+  mask/outline 而不删除精确红绿证据、multi-host atom 合法聚合、parser-time decoy 与 live prototype
+  篡改失败关闭；长 `tbody`、列表和 multi-screen section 必须保留完整 mask 与导航但无巨型 outline，也不能裁成视口框。
+  Electron 必须覆盖首次自动定位收到可定位回执后才提交、不聚焦、失败顺延及用户输入取消；短目标居中、长目标展示开头；
+  目录选择原子写入 group 与两侧 region、关闭后焦点回到 summary、目录先消费 Escape、再次点击保持激活、
+  Escape/手动滚出/手动换 Tab 返回总览、筛选不激活、单侧新增/删除另一侧无 mask/scroll、评论态优先并
+  在点击、移出或 Escape 后恢复变化 focus，marker 到自适应气泡可连续 hover，以及每个文档标签分别恢复页面、筛选、focus、Tab/折叠、双页滚动、横向位置
+  与缩放。顶栏“刷新本页面”必须在同一 Review 身份下恢复这些状态；“从磁盘重新载入 HTML”在待决定
+  Review 中可见但禁用。50%–200% 缩放、resize 与字体变化后，前后页保持同一 group/region；mask 与
+  可选 outline 各自遵守每侧一个的预算，outline 存在时才与 mask 复用 canonical path。
   评论、Tab、同步/独立滚动、缩放和采纳闭环继续运行。真实 Electron 像素
-  oracle 还必须在同一侧比较总览/聚焦的稳定作者元素：框内像素基本不变，
-  框外明显接近白色；即使作者 CSS 全局设置
+  oracle 还必须在同一侧比较总览/聚焦的稳定作者元素：mask 孔内像素基本不变，
+  孔外明显接近白色，并在密集文字、表格、长页面和复杂背景截图中直接确认边框数量与局部性；即使作者 CSS 全局设置
   `filter`/`backdrop-filter`/`mix-blend-mode !important`，Review 自有 mask
   primitive 仍不得被污染。DOM path、属性或 computed style 不能单独证明最终
-  遮罩正确。
+  遮罩或边框正确。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标；私有绑定、评论正文和 locator map 不进入 authored HTML 或后续 bootstrap，恶意作者 listener 不能抢先伪造评论端口。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。

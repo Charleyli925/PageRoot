@@ -6,6 +6,8 @@ export const DEFAULT_WORKSPACE_PREFERENCES = Object.freeze({
   inspectorWidth: 376,
   motion: "system",
   restoreTabsOnLaunch: true,
+  reviewChangeContextVisibility: 25,
+  reviewCommentContextVisibility: 15,
   defaultAgentProviderId: "qoder",
   agentConfigurations: Object.freeze({}),
   documentAgentSelections: Object.freeze({}),
@@ -15,6 +17,8 @@ export const DEFAULT_WORKSPACE_PREFERENCES = Object.freeze({
 export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
   sidebarWidth: Object.freeze({ min: 200, max: 420 }),
   inspectorWidth: Object.freeze({ min: 280, max: 520 }),
+  reviewChangeContextVisibility: Object.freeze({ min: 0, max: 100 }),
+  reviewCommentContextVisibility: Object.freeze({ min: 0, max: 100 }),
 });
 
 const WORKSPACE_KEYS = new Set(Object.keys(DEFAULT_WORKSPACE_PREFERENCES));
@@ -61,6 +65,16 @@ export function normalizeWorkspacePreferences(value) {
     restoreTabsOnLaunch: typeof source.restoreTabsOnLaunch === "boolean"
       ? source.restoreTabsOnLaunch
       : DEFAULT_WORKSPACE_PREFERENCES.restoreTabsOnLaunch,
+    reviewChangeContextVisibility: normalizedWidth(
+      source.reviewChangeContextVisibility,
+      DEFAULT_WORKSPACE_PREFERENCES.reviewChangeContextVisibility,
+      WORKSPACE_PREFERENCE_LIMITS.reviewChangeContextVisibility,
+    ),
+    reviewCommentContextVisibility: normalizedWidth(
+      source.reviewCommentContextVisibility,
+      DEFAULT_WORKSPACE_PREFERENCES.reviewCommentContextVisibility,
+      WORKSPACE_PREFERENCE_LIMITS.reviewCommentContextVisibility,
+    ),
     defaultAgentProviderId: AGENT_PROVIDER_IDS.has(source.defaultAgentProviderId)
       ? source.defaultAgentProviderId
       : DEFAULT_WORKSPACE_PREFERENCES.defaultAgentProviderId,

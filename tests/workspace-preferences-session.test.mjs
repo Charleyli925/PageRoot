@@ -35,6 +35,10 @@ test("workspace preference session loads v2 values and writes narrow patches", a
   assert.equal(session.snapshot.workspace.sidebarWidth, 300);
   assert.equal(session.snapshot.workspace.restoreTabsOnLaunch, false);
   assert.equal(session.snapshot.workspace.defaultAgentProviderId, "codex");
+  assert.equal(session.snapshot.workspace.reviewChangeContextVisibility, 25);
+  assert.equal(session.snapshot.workspace.reviewCommentContextVisibility, 15);
+  assert.equal(session.snapshot.workspace.reviewChangeContextVisibility, 25);
+  assert.equal(session.snapshot.workspace.reviewCommentContextVisibility, 15);
   assert.deepEqual(session.snapshot.workspace.disabledAgentProviderIds, []);
   assert.equal(await session.update({ defaultAgentProviderId: "pageroot" }), true);
   assert.deepEqual(calls, [{ workspace: { defaultAgentProviderId: "pageroot" } }]);
@@ -111,6 +115,8 @@ test("invalid workspace patches are rejected before they reach the port", async 
     },
   });
   assert.throws(() => session.update({ sidebarWidth: 999 }), /范围/u);
+  assert.throws(() => session.update({ reviewChangeContextVisibility: 101 }), /范围/u);
+  assert.throws(() => session.update({ reviewCommentContextVisibility: -1 }), /范围/u);
   assert.throws(() => session.update({ unknown: true }), /未知字段/u);
   assert.throws(() => session.update({ defaultAgentProviderId: "gemini" }), /默认 Agent/u);
   assert.throws(() => session.update({ disabledAgentProviderIds: ["gemini"] }), /停用的 AI 服务/u);

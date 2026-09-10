@@ -735,7 +735,7 @@ test("Canvas shortcuts follow the promoted frame and same-source reload keeps ch
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute("data-frame-generation", generation);
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-runtime-slot-role"))).toBe("active");
     await page.getByRole("button", { name: "更多", exact: true }).click();
-    await page.getByRole("menuitem", { name: "重新载入当前 HTML", exact: true }).click();
+    await page.getByRole("menuitem", { name: "从磁盘重新载入 HTML", exact: true }).click();
     await expect(page.locator(".workbench-chrome-status")).toHaveText("页面已重新加载，可以继续编辑");
     await expect.poll(() => frame.locator("#chart canvas").evaluateAll(canvases => canvases.filter(canvas => (
       canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data.some((value, index) => index % 4 === 3 && value > 0)

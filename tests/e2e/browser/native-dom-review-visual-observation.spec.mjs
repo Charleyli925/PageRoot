@@ -342,6 +342,7 @@ test("source projection activates existing text UI without creating replacement 
     changeIds: ["change-1"],
     displayGroupId: "display-text-1",
     displayScope: "paragraph",
+    focusOutlinePolicy: "never",
     atomKeys: [atomKey],
     presentation: { before: [], after: [] },
     regions: {
@@ -408,15 +409,17 @@ test("source projection activates existing text UI without creating replacement 
       filter: "all",
       focus: "change-1",
       activeFocusGroupId,
-      transparency: 18,
+      transparency: 25,
       scale: 1,
     },
   }, "*"), focusGroupId);
   await expect(page.locator("html"))
-    .toHaveAttribute("data-pageroot-review-focus-group", focusGroupId);
-  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(1);
+    .toHaveAttribute("data-pageroot-review-focus-group", "");
+  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(0);
   await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(1);
+  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-comment-mask-dim]"))
+    .toHaveAttribute("fill-opacity", "0.85");
   await expect(page.locator("[data-pageroot-review-comment-highlight]")).toHaveCount(1);
   await page.evaluate(() => window.__reviewTestVisualPort.postMessage({
     type: "comment-highlight",
@@ -426,6 +429,11 @@ test("source projection activates existing text UI without creating replacement 
     stableIds: [],
   }));
   await expect(page.locator("[data-pageroot-review-comment-highlight]")).toHaveCount(0);
+  await expect(page.locator("html"))
+    .toHaveAttribute("data-pageroot-review-focus-group", focusGroupId);
+  await expect(page.locator("[data-pageroot-review-mask-dim]"))
+    .toHaveAttribute("fill-opacity", "0.75");
+  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(0);
 });
 
 function exactTextFocusFixture() {
@@ -468,6 +476,7 @@ function exactTextFocusFixture() {
     changeIds: ["change-1"],
     displayGroupId: "display-text-1",
     displayScope: "paragraph",
+    focusOutlinePolicy: "never",
     atomKeys: [atomKey],
     presentation: { before: [], after: [] },
     regions: { before: [], after: [region] },
@@ -507,7 +516,7 @@ test("an invalid semantic plan preserves exact source evidence without a box or 
   await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
 });
 
-test("one exact atom may span several source marker occurrences but remains one focus box", async ({ page }) => {
+test("one exact text atom may span several markers but remains one borderless focus mask", async ({ page }) => {
   await page.goto("about:blank");
   const { atomKey, factValue, plan } = exactTextFocusFixture();
   const bootstrap = generatedReviewBootstrap(
@@ -533,15 +542,82 @@ test("one exact atom may span several source marker occurrences but remains one 
     source: "pageroot-ai-review-parent",
     sessionId: "review-session",
     type: "state",
-    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 18, scale: 1 },
+    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 25, scale: 1 },
   }, "*"), plan.id);
   const box = page.locator('[data-pageroot-review-overlay-box="change-1"]');
   const hole = page.locator("[data-pageroot-review-mask-hole]");
-  await expect(box).toHaveCount(1);
+  await expect(box).toHaveCount(0);
   await expect(hole).toHaveCount(1);
-  const boxPath = await box.getAttribute("data-path");
-  expect(boxPath).toBeTruthy();
-  expect(await hole.getAttribute("d")).toBe(boxPath);
+  expect(await hole.getAttribute("d")).toBeTruthy();
+});
+
+test("review navigation acknowledges only locatable geometry and honors cancellation", async ({ page }) => {
+  await page.goto("about:blank");
+  const { atomKey, factValue, plan } = exactTextFocusFixture();
+  const bootstrap = generatedReviewBootstrap(
+    [], "after", [], [plan], [{ atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script>
+    <p id="owner" style="display:none" data-pageroot-review-display-owner="display-owner-1">
+      <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1"
+        data-pageroot-review-projection-facts="${fact}">new</span>
+    </p>`);
+  await page.evaluate(() => {
+    window.__reviewNavigationResults = [];
+    addEventListener("message", (event) => {
+      if (event.data?.source === "pageroot-ai-review"
+        && event.data?.type === "navigation-result") {
+        window.__reviewNavigationResults.push(event.data);
+      }
+    });
+  });
+  const navigate = (commandId) => page.evaluate(({ commandId, plan }) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "navigate-change",
+    commandId,
+    changeId: plan.changeId,
+    focusGroupId: plan.id,
+    regionId: plan.regions.after[0].id,
+    revealSteps: [],
+    behavior: "auto",
+  }, "*"), { commandId, plan });
+
+  await navigate("initial-nav-hidden");
+  await expect.poll(() => page.evaluate(() => window.__reviewNavigationResults))
+    .toContainEqual(expect.objectContaining({ commandId: "initial-nav-hidden", located: false }));
+
+  await page.locator("#owner").evaluate((element) => { element.style.display = "block"; });
+  await navigate("initial-nav-visible");
+  await expect.poll(() => page.evaluate(() => window.__reviewNavigationResults))
+    .toContainEqual(expect.objectContaining({ commandId: "initial-nav-visible", located: true }));
+
+  await page.evaluate((planValue) => {
+    postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "navigate-change",
+      commandId: "initial-nav-cancelled",
+      changeId: planValue.changeId,
+      focusGroupId: planValue.id,
+      regionId: planValue.regions.after[0].id,
+      revealSteps: [],
+      behavior: "auto",
+    }, "*");
+    postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "cancel-navigation",
+      commandId: "initial-nav-cancelled",
+    }, "*");
+  }, plan);
+  await page.locator("html").evaluate(() => new Promise((resolve) => (
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  )));
+  expect(await page.evaluate(() => window.__reviewNavigationResults.some(
+    (result) => result.commandId === "initial-nav-cancelled",
+  ))).toBe(false);
 });
 
 test("Escape inside every valid contenteditable form stays with the editor", async ({ page }) => {
@@ -577,15 +653,16 @@ test("Escape inside every valid contenteditable form stays with the editor", asy
         filter: "all",
         focus: "change-1",
         activeFocusGroupId,
-        transparency: 18,
+        transparency: 25,
         scale: 1,
       },
     }, "*");
   }, plan.id);
-  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(1);
+  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(1);
   for (const selector of ["#bare-editable", "#plaintext-editable"]) {
     await page.locator(selector).press("Escape");
-    await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(1);
+    await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(1);
   }
   await expect.poll(() => page.evaluate(() => window.__reviewLeaveFocusMessages)).toBe(0);
 });
@@ -609,18 +686,18 @@ test("text-content geometry stays inside one loose reading flow of a complex ite
     source: "pageroot-ai-review-parent",
     sessionId: "review-session",
     type: "state",
-    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 18, scale: 1 },
+    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 25, scale: 1 },
   }, "*"), plan.id);
-  const box = page.locator("[data-pageroot-review-overlay-box]");
-  await expect(box).toHaveCount(1);
+  const hole = page.locator("[data-pageroot-review-mask-hole]");
+  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  await expect(hole).toHaveCount(1);
   const geometry = await page.evaluate(() => ({
-    boxBottom: Number(document.querySelector("[data-pageroot-review-overlay-box]").dataset.top)
-      + Number(document.querySelector("[data-pageroot-review-overlay-box]").dataset.height),
+    holeBottom: Number(document.querySelector("[data-pageroot-review-mask-hole]").dataset.top)
+      + Number(document.querySelector("[data-pageroot-review-mask-hole]").dataset.height),
     nested: document.querySelector("#nested-block").getBoundingClientRect().toJSON(),
   }));
-  expect(geometry.boxBottom).toBeLessThan(geometry.nested.top);
-  expect(await page.locator("[data-pageroot-review-mask-hole]").getAttribute("d"))
-    .toBe(await box.getAttribute("data-path"));
+  expect(geometry.holeBottom).toBeLessThan(geometry.nested.top);
+  expect(await hole.getAttribute("d")).toBeTruthy();
 });
 
 test("numbered-line geometry ignores br elements inside nested blocks", async ({ page }) => {
@@ -647,20 +724,21 @@ test("numbered-line geometry ignores br elements inside nested blocks", async ({
     source: "pageroot-ai-review-parent",
     sessionId: "review-session",
     type: "state",
-    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 18, scale: 1 },
+    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 25, scale: 1 },
   }, "*"), fixture.plan.id);
-  const box = page.locator("[data-pageroot-review-overlay-box]");
-  await expect(box).toHaveCount(1);
+  const hole = page.locator("[data-pageroot-review-mask-hole]");
+  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  await expect(hole).toHaveCount(1);
   const geometry = await page.evaluate(() => ({
-    boxTop: Number(document.querySelector("[data-pageroot-review-overlay-box]").dataset.top),
+    holeTop: Number(document.querySelector("[data-pageroot-review-mask-hole]").dataset.top),
     nested: document.querySelector("#nested-lines").getBoundingClientRect().toJSON(),
     first: document.querySelector("#numbered-first").getBoundingClientRect().toJSON(),
   }));
-  expect(geometry.boxTop).toBeGreaterThanOrEqual(geometry.first.bottom - 3.5);
-  expect(geometry.boxTop).toBeGreaterThan(geometry.nested.bottom);
+  expect(geometry.holeTop).toBeGreaterThanOrEqual(geometry.first.bottom - 3.5);
+  expect(geometry.holeTop).toBeGreaterThan(geometry.nested.bottom);
 });
 
-test("hidden changed branches never satisfy container promotion coverage", async ({ page }) => {
+test("a style locality stays on one visible owner and never promotes to its parent container", async ({ page }) => {
   await page.goto("about:blank");
   const changeId = "change-1";
   const facts = Array.from({ length: 4 }, (_, index) => ({
@@ -685,6 +763,7 @@ test("hidden changed branches never satisfy container promotion coverage", async
     changeIds: [changeId],
     displayGroupId: "display-css-shared",
     displayScope: "component",
+    focusOutlinePolicy: "visual-change",
     atomKeys,
     presentation: { before: [], after: [] },
     regions: {
@@ -726,16 +805,127 @@ test("hidden changed branches never satisfy container promotion coverage", async
     source: "pageroot-ai-review-parent",
     sessionId: "review-session",
     type: "state",
-    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 18, scale: 1 },
+    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 25, scale: 1 },
   }, "*"), plan.id);
-  const box = page.locator("[data-pageroot-review-overlay-box]");
-  await expect(box).toHaveCount(1);
+  const hole = page.locator("[data-pageroot-review-mask-hole]");
+  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  await expect(hole).toHaveCount(1);
   const geometry = await page.evaluate(() => ({
-    boxWidth: Number(document.querySelector("[data-pageroot-review-overlay-box]").dataset.width),
+    holeWidth: Number(document.querySelector("[data-pageroot-review-mask-hole]").dataset.width),
     gridWidth: document.querySelector("#grid").getBoundingClientRect().width,
   }));
-  expect(geometry.boxWidth).toBeLessThan(geometry.gridWidth / 2);
-  await expect(page.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+  expect(geometry.holeWidth).toBeLessThan(geometry.gridWidth / 2);
+});
+
+test("multi-screen table, list, and section owners keep navigation masks without giant outlines", async ({ page }) => {
+  await page.goto("about:blank");
+  const cases = ["table", "list", "section"].map((name, index) => {
+    const changeId = `change-${index + 1}`;
+    const ownerId = `owner-${name}`;
+    const fact = {
+      id: `structure-${name}`,
+      type: "structure",
+      semanticOwnerId: `semantic-${name}`,
+      geometryOwnerId: `geometry-${name}`,
+      structureChange: "reordered",
+      displayGroupId: `display-${name}`,
+      displayOwnerId: ownerId,
+      displayScope: "container",
+      geometryMode: "container-box",
+      summary: "结构调整",
+    };
+    const atomKey = `${changeId}\u001e${[
+      fact.type, fact.id, fact.semanticOwnerId, fact.geometryOwnerId,
+    ].join("\u001f")}`;
+    const regionId = `region-after-${name}`;
+    return {
+      name,
+      changeId,
+      ownerId,
+      fact,
+      atomKey,
+      regionId,
+      plan: {
+        id: `focus-${name}`,
+        kind: "structure",
+        changeId,
+        changeIds: [changeId],
+        displayGroupId: `display-${name}`,
+        displayScope: "container",
+        focusOutlinePolicy: "source-change",
+        atomKeys: [atomKey],
+        presentation: { before: [], after: [] },
+        regions: {
+          before: [],
+          after: [{
+            id: regionId,
+            side: "after",
+            navigationClusterId: `reading-${name}`,
+            contentCue: `${name} owner`,
+            correlationKey: `locality-${name}`,
+            primaryChangeId: changeId,
+            changeIds: [changeId],
+            geometryMode: "container-box",
+            displayOwnerIds: [ownerId],
+            visualEvidenceStableIds: [],
+            atomKeys: [atomKey],
+            presentation: [],
+          }],
+        },
+        presence: { before: false, after: true },
+      },
+    };
+  });
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [],
+    cases.map((entry) => entry.plan),
+    cases.map((entry) => ({ atomKey: entry.atomKey, count: 1 })),
+  );
+  const attributes = (entry) => `data-pageroot-review-display-owner="${entry.ownerId}"
+    data-pageroot-review-geometry-owner="geometry-${entry.name}"
+    data-pageroot-review-marker="${entry.changeId}"
+    data-pageroot-review-projection-facts="${JSON.stringify([entry.fact]).replaceAll('"', "&quot;")}"`;
+  await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<style>
+    .multi-screen-owner { box-sizing:border-box; min-height:1300px; width:760px; }
+  </style><script>${bootstrap}</script>
+  <table><tbody class="multi-screen-owner" ${attributes(cases[0])}>
+    <tr style="height:1300px"><td>long table body</td></tr>
+  </tbody></table>
+  <ul class="multi-screen-owner" ${attributes(cases[1])}><li>long list</li></ul>
+  <section class="multi-screen-owner" ${attributes(cases[2])}>long section</section>`);
+  for (const entry of cases) {
+    await page.evaluate(({ changeId, focusGroupId, regionId }) => postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "state",
+      state: {
+        filter: "all",
+        focus: changeId,
+        activeFocusGroupId: focusGroupId,
+        activeFocusRegionId: regionId,
+        paintPlan: {
+          contextMask: { regionId },
+          focusOutline: { regionId },
+        },
+        transparency: 25,
+        scale: 1,
+      },
+    }, "*"), {
+      changeId: entry.changeId,
+      focusGroupId: entry.plan.id,
+      regionId: entry.regionId,
+    });
+    const hole = page.locator(
+      `[data-pageroot-review-mask-hole][data-pageroot-review-focus-group="${entry.plan.id}"]`,
+    );
+    await expect(hole).toHaveCount(1);
+    await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+    expect(Number(await hole.getAttribute("data-height"))).toBeGreaterThan(
+      await page.evaluate(() => innerHeight),
+    );
+  }
 });
 
 test("moving exact atom attributes to a parser-time decoy fails closed", async ({ page }) => {
@@ -783,7 +973,7 @@ test("reparenting an exact atom outside its captured display owner fails closed"
       filter: "all",
       focus: "change-1",
       activeFocusGroupId,
-      transparency: 18,
+      transparency: 25,
       scale: 1,
     },
   }, "*"), plan.id);

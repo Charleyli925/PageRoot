@@ -149,7 +149,7 @@ export function globalInterruptionPresentation(interruption) {
     case "review-no-visible-change":
       return {
         kind: interruption.kind,
-        title: "这次没有产生有效变化",
+        title: "未识别到明确的页面变化",
         message: "没有找到能够定位到页面具体位置的内容、结构或视觉变化。",
         tone: "success",
         dismissMs: 8_000,

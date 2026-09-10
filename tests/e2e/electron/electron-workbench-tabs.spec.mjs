@@ -214,6 +214,33 @@ test("Electron settings routes categories and persists restore preference withou
     await captureSettings("settings-general-1024x768", 1024, 768);
     await captureSettings("settings-general-960x720", 960, 720);
 
+    const changeContext = settings.getByRole("slider", {
+      name: "变化聚焦时的上下文可见度",
+    });
+    const commentContext = settings.getByRole("slider", {
+      name: "评论聚焦时的上下文可见度",
+    });
+    await expect(changeContext).toHaveValue("25");
+    await expect(commentContext).toHaveValue("15");
+    await changeContext.fill("31");
+    await expect(commentContext).toBeEnabled();
+    await commentContext.fill("19");
+    await expect.poll(() => {
+      try {
+        return JSON.parse(readFileSync(preferencesPath, "utf8"));
+      } catch {
+        return null;
+      }
+    }).toMatchObject({
+      workspace: {
+        reviewChangeContextVisibility: 31,
+        reviewCommentContextVisibility: 19,
+      },
+    });
+    await settings.getByRole("button", { name: "恢复默认可见度", exact: true }).click();
+    await expect(changeContext).toHaveValue("25");
+    await expect(commentContext).toHaveValue("15");
+
     await settings.getByRole("checkbox", { name: "启动时恢复上次标签页" }).uncheck();
     await expect.poll(() => {
       try {

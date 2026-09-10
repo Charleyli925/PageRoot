@@ -97,7 +97,15 @@ test("a pre-load review navigation falls back without trusting the replacement p
     });
     await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
     await launched.page.getByRole("button", { name: "收起会话面板" }).click();
-    await launched.page.getByRole("button", { name: "采纳修改" }).click();
+    const pendingDecisionEntry = launched.page.getByRole("button", {
+      name: "待决定",
+      exact: true,
+    });
+    await expect(pendingDecisionEntry).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "采纳修改" }))
+      .toHaveCount(0);
+    await pendingDecisionEntry.click();
+    await launched.page.getByRole("button", { name: "采用修改", exact: true }).click();
     await expect(launched.page.getByRole("dialog"))
       .not.toContainText("无法视觉验证");
     await launched.page.getByRole("button", { name: "继续审阅" }).click();
@@ -123,7 +131,7 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
     const noChangeBar = launched.page.getByTestId("ai-conversation-action-bar");
-    await expect(noChangeBar.getByText("这次没有产生有效变化", { exact: true }))
+    await expect(noChangeBar.getByText("未识别到明确的页面变化", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     await expect(noChangeBar.getByText(
       "原评论和附件都已保留，调整要求后可以重新发送。",
@@ -151,7 +159,7 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     // the conversation. A second AI-assistant click must not be required.
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
     const reopenedBar = launched.page.getByTestId("ai-conversation-action-bar");
-    await expect(reopenedBar.getByText("这次没有产生有效变化", { exact: true }))
+    await expect(reopenedBar.getByText("未识别到明确的页面变化", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     const aiTask = await launched.page.evaluate((sourcePath) => (
       window.htmlAIProjects?.revealAiTask({ sourcePath })

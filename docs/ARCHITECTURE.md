@@ -223,9 +223,10 @@ the historical synthetic-spike decision.
   complex list items/cells keep the smallest inner reading block, and numbered
   `br` lines stay separate. A simple-selector CSS source may span several
   targets; each inline-style attribute remains its own operation even when a
-  sibling has the same property delta. Shared CSS targets promote only when at
-  least two branches cover 75% of a Runtime-proven grid/flex/list/repeated-card
-  container. Geometry or distance never creates a group.
+  sibling has the same property delta. Shared CSS facts may keep one semantic
+  group, but each reading locality and concrete owner receives its own region;
+  geometry, target count or distance never creates a group or promotes a parent
+  container into the visible target.
   The analyzer is the sole author of bounded `ReviewFocusGroupPlan` records,
   including change-scoped exact atom keys, per-side region IDs, correlation,
   presentation, owner IDs, geometry modes and presence. The first bootstrap
@@ -233,13 +234,16 @@ the historical synthetic-spike decision.
   geometry but never reconstructs group membership or IDs. Exact-evidence
   occurrence bindings are validated independently, so an invalid/oversized
   semantic plan closes frames and masks without erasing red/green source facts.
-  `changeId` remains navigation identity and `activeFocusGroupId` alone owns
-  visual focus.
-  Overview has no outline or dim mask. Focus rendering consumes one set of final
-  canonical outline records, and global context masking consumes those records:
-  one SVG luminance mask keeps a full-page white background and adds the record
-  paths as black holes, so `outlinePaths = maskHoles` and overlapping holes remain a set union rather than an
-  `evenodd` XOR and mask and frame cannot diverge. Its per-render identifier is
+  `changeId` remains navigation identity; `activeFocusGroupId` plus one explicit
+  per-side region ID owns the current locality.
+  Overview has no outline or dim mask. A pure paint plan keeps source evidence,
+  navigation cues, context masking and focus outlines as independent channels.
+  Explicit focus may create one local mask hole per side without any outline;
+  text and ordinary attributes never outline, source structural changes may,
+  and style outlines additionally require a confirmed visual-change verdict.
+  When an outline exists it reuses its region mask path, but `maskHoles` does not
+  imply `outlinePaths`. One SVG luminance mask keeps a full-page white background
+  and adds the chosen region path as a black hole. Its per-render identifier is
   scoped to the review session, side and projection epoch. The disposable
   projection uses reserved attributes plus inline and static important resets,
   preventing authored `svg`/`div` rules from restyling its mask primitives or
@@ -249,8 +253,7 @@ the historical synthetic-spike decision.
   `mix-blend-mode`; real backdrop blur is not part of the formal Review
   contract because Chromium may composite it before applying the SVG hole.
   Mask correctness is proved from final rendered pixels as well as DOM paths.
-  Stable
-  outline regions remain navigation-only. `page-presentation-dom` is the
+  Inactive regions remain navigation-only. `page-presentation-dom` is the
   shared explicit-ID and strict indexed-Tab discovery contract consumed by
   Canvas comment presentation and formal review. Before/after panel and action keys
   are assigned as pairs before either isolated document is prepared, so safe

@@ -1465,6 +1465,18 @@
       ]
     },
     {
+      "id": "review-paint-plan",
+      "patterns": [
+        "^app/workbench/review-paint-plan\\.ts$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/review-paint-plan.test.mjs"
+      ]
+    },
+    {
       "id": "review-ui-state",
       "patterns": [
         "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|presentation|review-toolbar-controls|run-conversation-outlet|workbench-header-shell)\\.(?:ts|tsx)$",

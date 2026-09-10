@@ -172,7 +172,7 @@ function deriveRunProgressCopy({
   if (status === "no-change") {
     return progressPresentationCopy(
       "处理结果",
-      "这次没有产生有效变化",
+      "未识别到明确的页面变化",
       "没有新版本",
       "页面与评论可以继续编辑",
       "原评论和附件都已保留，调整要求后可以重新发送",

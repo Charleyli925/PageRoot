@@ -327,8 +327,18 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
       defaultAgentProviderId: "qoder",
     },
   });
+  await uiPreferences.record({
+    workspace: {
+      reviewChangeContextVisibility: 31,
+      reviewCommentContextVisibility: 19,
+    },
+  });
   assert.equal(calls[1][0], "html-ui-preferences:record");
   assert.equal(calls[1][1].workspace.sidebarWidth, 320);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[2][1].workspace)), {
+    reviewChangeContextVisibility: 31,
+    reviewCommentContextVisibility: 19,
+  });
   await assert.rejects(
     () => uiPreferences.record({ action: "dismissed" }),
     /工作台偏好记录无效/u,
@@ -338,18 +348,22 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     /工作台偏好记录无效/u,
   );
   await assert.rejects(
+    () => uiPreferences.record({ workspace: { reviewChangeContextVisibility: 101 } }),
+    /工作台偏好记录无效/u,
+  );
+  await assert.rejects(
     () => uiPreferences.record({ workspace: { defaultAgentProviderId: "gemini" } }),
     /工作台偏好记录无效/u,
   );
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   await uiPreferences.record({ workspace: { defaultAgentProviderId: "pageroot" } });
-  assert.equal(calls[2][1].workspace.defaultAgentProviderId, "pageroot");
+  assert.equal(calls[3][1].workspace.defaultAgentProviderId, "pageroot");
   await assert.rejects(
     () => uiPreferences.record({ workspace: { disabledAgentProviderIds: ["gemini"] } }),
     /工作台偏好记录无效/u,
   );
   await uiPreferences.record({ workspace: { disabledAgentProviderIds: ["codex"] } });
-  assert.deepEqual(calls[3][1].workspace.disabledAgentProviderIds, ["codex"]);
+  assert.deepEqual(calls[4][1].workspace.disabledAgentProviderIds, ["codex"]);
   assert.deepEqual(Object.keys(uiPreferences).sort(), ["get", "record"]);
 });
 

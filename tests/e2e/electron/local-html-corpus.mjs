@@ -582,7 +582,7 @@ for (const [fileIndex, filename] of files.entries()) {
     row.lifecycle.push("preview-edit-reenter");
 
     await page.getByRole("button", { name: "更多", exact: true }).click();
-    await page.getByRole("menuitem", { name: "重新载入当前 HTML", exact: true }).click();
+    await page.getByRole("menuitem", { name: "从磁盘重新载入 HTML", exact: true }).click();
     await expect(page.locator(".workbench-chrome-status"))
       .toHaveText("页面已重新加载，可以继续编辑", { timeout: 60_000 });
     await waitUntilEditable(page);
