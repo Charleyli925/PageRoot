@@ -7,13 +7,16 @@ listed under Progressive disclosure.
 ## Model and multi-agent routing
 
 - Preserve the model and reasoning level selected by the user for the root agent. No `AGENTS.md`, skill, project default or child profile may replace, upgrade or downgrade it.
+- This repository opts into Codex multi-agent V2. The feature flag is project-scoped, so it selects the multi-agent runtime for every root model used in this checkout; the explicit child-model routing below applies only to non-Ultra Sol and Astra.
 - Use Codex's built-in `explorer` and `worker` roles. Keep `explorer` read-only. Use the project-defined, model-neutral `reviewer` and `tester` roles. Do not create model-named copies of these roles.
 - For a `gpt-5.6-sol` root below Ultra, spawn `explorer`, `worker` and `tester` with `gpt-5.6-luna` / `max`; spawn `reviewer` with `gpt-5.6-sol` / `high`.
 - For a `gpt-6-astra` root below Ultra, spawn `explorer`, `worker` and `tester` with `gpt-5.6-luna` / `max`; spawn `reviewer` with `gpt-5.6-sol` / `xhigh`.
 - For Sol Ultra or Astra Ultra, keep Codex's native delegation and model-selection behavior. Do not apply the non-Ultra routing tables or require a project `reviewer` or `tester`.
 - For every other root model, omit child model and reasoning overrides so the child inherits the root selection.
 - If an explicit child model or effort is unavailable, retry that spawn once without model or reasoning overrides so the child inherits the root. Report the fallback; do not silently substitute a third model.
-- Delegate only bounded work that adds value. At most three child agents may be open concurrently. Independent read-only investigations may run in parallel, but only one agent may write a worktree at a time and no agents may receive overlapping files or shared interfaces.
+- For non-Ultra Sol and Astra, the root agent decides proactively whether to delegate; it does not wait for a separate user request. Before starting substantial work, identify the immediate critical path and any concrete, bounded side tasks that can run independently while the root continues useful work. Delegate those side tasks when parallel execution is likely to save meaningful time or improve quality.
+- Keep short tasks, tightly coupled decisions and immediate blockers on the root agent. Do not duplicate a delegated task. Continue non-overlapping root work while children run and wait only when a child result is needed.
+- Use the same delegation trigger for non-Ultra Sol and Astra; their child-model routing remains different as listed above. At most three child agents may be open concurrently. Independent read-only investigations may run in parallel, but only one agent may write a worktree at a time and no agents may receive overlapping files or shared interfaces.
 - Prefer `fork_turns: "none"` with a self-contained task when a child does not need full history. Leaf agents complete their assignment directly and do not spawn more agents.
 - The root agent remains available to the user, integrates results and retains all approval and final-decision authority.
 
