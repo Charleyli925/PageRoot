@@ -6649,6 +6649,7 @@ export default function Workbench() {
                       candidateSourceRevision: attempt.sourceRevision,
                       outcome,
                       preserveLastKnownGood: settlement.preserveLastKnownGood,
+                      runtimePartial: settlement.runtimePartial,
                     });
                   }}
                   onRuntimeDegradationChange={(state) => {

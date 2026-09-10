@@ -1,6 +1,8 @@
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { expect, test } from "@playwright/test";
 
+import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-contract.js";
+
 import {
   activateNativeEdit,
   closePageRootGracefully,
@@ -500,7 +502,12 @@ test("failed chart refresh keeps the latest static source quietly editable acros
       window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
     )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeFirstRetry);
     await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
-    await expect(editor).toHaveAttribute('data-runtime-degradation', 'static-visible');
+    await expect(editor).toHaveAttribute(
+      'data-runtime-degradation',
+      'static-visible',
+      { timeout: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs + 8_000 },
+    );
+    await expect(editor).toHaveAttribute('data-runtime-surface-budget', 'exceeded');
     await expect(editor).toHaveAttribute('aria-readonly', 'false');
     frame = await currentEditorFrame(page);
     await expect(frame.locator('#chart canvas')).toHaveCount(0);
@@ -523,7 +530,11 @@ test("failed chart refresh keeps the latest static source quietly editable acros
     await expect.poll(() => page.evaluate(() => (
       window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
     )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeRetry);
-    await expect(editor).toHaveAttribute('data-runtime-degradation', 'static-visible');
+    await expect(editor).toHaveAttribute(
+      'data-runtime-degradation',
+      'static-visible',
+      { timeout: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs + 8_000 },
+    );
     await expect(editor).toHaveAttribute('aria-readonly', 'false');
     frame = await currentEditorFrame(page);
     target = frame.locator('[data-native-case="format-chart"]').first();

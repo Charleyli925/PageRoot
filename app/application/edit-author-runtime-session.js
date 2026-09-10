@@ -35,8 +35,13 @@ function frozenSnapshot({
     canvasGeneration: Number.isSafeInteger(canvasGeneration) ? canvasGeneration : null,
     grant,
     lastOutcome,
-    retryAvailable: phase === "static-fallback"
-      && RETRYABLE_STATIC_FALLBACK_OUTCOMES.has(lastOutcome),
+    retryAvailable: (
+      phase === "static-fallback"
+      && RETRYABLE_STATIC_FALLBACK_OUTCOMES.has(lastOutcome)
+    ) || (
+      phase === "settled"
+      && lastOutcome === "runtime-partial"
+    ),
   });
 }
 
@@ -533,6 +538,7 @@ export class EditAuthorRuntimeSession {
     candidateSourceRevision,
     outcome,
     preserveLastKnownGood = false,
+    runtimePartial = false,
   } = {}) {
     const grant = this.#snapshot.grant;
     const attempt = normalizedRuntimeAttempt({
@@ -570,7 +576,7 @@ export class EditAuthorRuntimeSession {
         sourcePath: this.#identity?.sourcePath || null,
         canvasGeneration: grant.canvasGeneration,
         grant,
-        lastOutcome: "ready",
+        lastOutcome: runtimePartial === true ? "runtime-partial" : "ready",
       });
       return true;
     }
@@ -595,7 +601,6 @@ export class EditAuthorRuntimeSession {
       this.#disposed
       || !identity
       || !this.#latestSourceAuthoritative
-      || this.#snapshot.phase !== "static-fallback"
       || !this.#snapshot.retryAvailable
     ) return false;
     this.#identity = null;

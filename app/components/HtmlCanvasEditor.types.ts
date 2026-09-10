@@ -153,6 +153,8 @@ export type HtmlCanvasEditRuntimeSettlement = Readonly<{
   preserveLastKnownGood: boolean;
   /** A real failure has no usable Runtime projection and may enter static fallback. */
   shouldUseStaticFallback: boolean;
+  /** A usable Runtime was promoted with a noncritical author-script error. */
+  runtimePartial: boolean;
 }>;
 
 export type HtmlCanvasFreezeSnapshot = {

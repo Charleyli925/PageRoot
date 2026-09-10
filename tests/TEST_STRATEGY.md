@@ -212,7 +212,9 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   不允许跨版本替代或第二次恢复 Session。Activation 测试还要区分资源失败与
   作者脚本错误，并证明只有关键图表已经就绪时，后者才能保留为可编辑的
   `runtime-partial`；源码自带的静态 SVG 图标不得冒充运行时图表，识别出的
-  ECharts 必须存在对应的实时实例。
+  ECharts 必须存在对应的实时实例。`runtime-partial` 必须保留显式动态重试，
+  重试使用最新已保存源码和新的 Runtime Session；重复部分失败仍可编辑，之后的
+  完整成功会清除降级状态和重试入口。
   Session 单测还覆盖外部来源切换至托管 V1 时，即使 SHA/Canvas generation
   未变也会发布新的准备路径；而 macOS `/var` 与 `/private/var` 同一文件别名
   不会消耗额外尝试。

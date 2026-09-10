@@ -1809,6 +1809,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       {
         preserveLastKnownGood: settlement.preserveLastKnownGood,
         shouldUseStaticFallback: settlement.shouldUseStaticFallback,
+        runtimePartial: outcome === "ready" && frame.activation === "partial",
       },
     );
     return settlement;

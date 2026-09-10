@@ -1,6 +1,7 @@
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { expect, test } from "@playwright/test";
 
+import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-contract.js";
 import { buildSourceIndex } from "../../../app/lib/source-index.js";
 
 import {
@@ -66,7 +67,9 @@ async function armRuntimeCommitHold(page) {
 async function waitForHeldRuntimeCommit(page) {
   await expect.poll(() => page.evaluate(() => (
     window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
-  ))).toBeGreaterThan(0);
+  )), {
+    timeout: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs + 8_000,
+  }).toBeGreaterThan(0);
 }
 
 async function releaseHeldRuntimeCommits(page) {
@@ -1840,7 +1843,7 @@ test("Runtime range styling never grants a forged clone source authority", {
   });
 });
 
-test("latest required Runtime candidate wins across slow ECharts, in-place text editing and static degradation", {
+test("latest required Runtime candidate wins across slow ECharts, in-place text editing and partial recovery", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -2102,9 +2105,9 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     await expect(heading).toHaveAttribute("data-html-canvas-selected", "part");
     await expect(heading).toContainText("你好");
 
-    // A failed author program must fall back to the verified latest static
-    // source without revoking edit authority. Runtime-generated charts may be
-    // stale, but repeated retries cannot lock the document.
+    // A noncritical author failure after the chart is ready keeps that verified
+    // partial Runtime editable. Repeated retries cannot lock the document, and
+    // a later clean attempt can still replace it with a fully ready Runtime.
     frame = await currentEditorFrame(page);
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await heading.click();
@@ -2143,15 +2146,20 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     });
     await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
       timeout: 12_000,
-    }).toBe("candidate-failed");
-    await expect(surface).toHaveAttribute("data-edit-runtime-phase", "static-fallback");
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
-    await expect(editor).toHaveAttribute("data-runtime-degradation", "static-visible");
+    }).toBe("runtime-partial");
+    await expect(editor).toHaveAttribute(
+      "data-runtime-activation",
+      "activation-author-error",
+    );
+    await expect(editor).toHaveAttribute("data-runtime-degradation", "runtime-partial");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "页面仍可编辑，关键图表已保留",
+    );
     await expect(editor).toHaveAttribute("aria-readonly", "false");
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
-      .toHaveAttribute("sandbox", "allow-same-origin");
+      .toHaveAttribute("sandbox", /allow-scripts/u);
     frame = await currentEditorFrame(page);
-    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(0);
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
     let latestSource = await readPublishedWorkingCopy(workingCopyPath, "utf8");
     expect(latestSource).toContain("候选失败");
     expect(latestSource).toContain("你好");
@@ -2161,11 +2169,11 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     await heading.dblclick();
     await expect(heading).toHaveAttribute("contenteditable", "true");
     await heading.press("End");
-    await page.keyboard.insertText(" 静态继续编辑");
+    await page.keyboard.insertText(" 部分继续编辑");
     await page.keyboard.press(keyShortcut("s"));
     await page.keyboard.press("Escape");
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
-      .toContain("静态继续编辑");
+      .toContain("部分继续编辑");
     await expect(editor).toHaveAttribute("aria-readonly", "false");
     latestSource = await readPublishedWorkingCopy(workingCopyPath, "utf8");
 
@@ -2177,10 +2185,11 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     await expect.poll(() => page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_FAILURE_COUNT__ || 0
     )), { timeout: 12_000 }).toBeGreaterThan(failureCountBeforeRetry);
-    await expect(surface).toHaveAttribute("data-edit-runtime-outcome", "candidate-failed");
-    await expect(editor).toHaveAttribute("data-runtime-degradation", "static-visible");
+    await expect(surface).toHaveAttribute("data-edit-runtime-outcome", "runtime-partial");
+    await expect(editor).toHaveAttribute("data-runtime-degradation", "runtime-partial");
     await expect(editor).toHaveAttribute("aria-readonly", "false");
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
 
     await page.evaluate(() => { window.__PAGEROOT_RUNTIME_FAILURE_CLEARED__ = true; });
     await page.getByRole("button", { name: "更多", exact: true }).click();
@@ -2197,13 +2206,14 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
       timeout: 12_000,
     }).toBe("ready");
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(editor).not.toHaveAttribute("data-runtime-degradation", "runtime-partial");
     await expect(editor).toHaveAttribute("aria-readonly", "false");
     frame = await currentEditorFrame(page);
     await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
     await expect(frame.locator('[data-native-case="runtime-latest-wins-text"]').first())
       .toContainText("候选失败");
     await expect(frame.locator('[data-native-case="runtime-latest-wins-text"]').first())
-      .toContainText("静态继续编辑");
+      .toContainText("部分继续编辑");
     await expect(frame.locator('[data-native-case="runtime-latest-wins"]')).toHaveCount(3);
     await expect(editor.locator('iframe:not([data-frame-role])')).toHaveCount(1);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
@@ -3458,6 +3468,10 @@ test("a noncritical author error keeps a ready ECharts surface editable as parti
     await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
       "页面仍可编辑，关键图表已保留",
     );
+    await expect(page.getByTestId("edit-runtime-static-fallback").getByRole(
+      "button",
+      { name: "重新加载动态内容", exact: true },
+    )).toBeVisible();
     const editable = frame.locator('[data-native-case="echarts-partial-text"]');
     await editable.dblclick();
     await expect(editable).toHaveAttribute("contenteditable", "true");

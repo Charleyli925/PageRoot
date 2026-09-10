@@ -55,6 +55,7 @@ export class EditAuthorRuntimeSession {
     candidateSourceRevision?: string;
     outcome?: "ready" | "rejected" | "failed" | "superseded";
     preserveLastKnownGood?: boolean;
+    runtimePartial?: boolean;
   }): boolean;
   retry(input?: {
     html?: string;

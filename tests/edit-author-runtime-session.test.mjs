@@ -340,6 +340,51 @@ test("a superseded disposable frame keeps the shared runtime grant alive", async
   assert.deepEqual(revoked, []);
 });
 
+test("a partial settled runtime remains explicitly retryable", async () => {
+  const requests = [];
+  const revoked = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request, {
+          sessionId: requests.length === 1
+            ? "0123456789abcdef0123456789abcdef"
+            : "fedcba9876543210fedcba9876543210",
+          executionId: requests.length === 1
+            ? "abcdefabcdefabcdefabcdef"
+            : "fedcbafedcbafedcbafedcba",
+        });
+      },
+      revoke: async (sessionId) => revoked.push(sessionId),
+    },
+  });
+
+  session.refresh(input());
+  assert.equal(session.startPreparation(input()), true);
+  await flushAsync();
+  const firstGrant = session.snapshot.grant;
+  assert.ok(firstGrant);
+  assert.equal(beginRuntime(session, firstGrant), true);
+  assert.equal(settleRuntime(session, firstGrant, "ready", undefined, {
+    runtimePartial: true,
+  }), true);
+  assert.equal(session.snapshot.phase, "settled");
+  assert.equal(session.snapshot.lastOutcome, "runtime-partial");
+  assert.equal(session.snapshot.retryAvailable, true);
+
+  assert.equal(session.retry(input()), true);
+  assert.equal(session.snapshot.phase, "preparing");
+  assert.equal(session.snapshot.grant, null);
+  assert.equal(session.startPreparation(input()), true);
+  await flushAsync();
+
+  assert.equal(requests.length, 2);
+  assert.deepEqual(revoked, [firstGrant.sessionId]);
+  assert.equal(session.snapshot.phase, "ready");
+  assert.equal(session.snapshot.retryAvailable, false);
+});
+
 test("an old candidate callback cannot settle a newer running attempt", async () => {
   const session = new EditAuthorRuntimeSession({
     port: {
