@@ -80,7 +80,7 @@ for (const [index, filename] of files.entries()) {
     await page.keyboard.press('Escape');
     row.steps.push('preview-edit');
     await page.getByRole('button', { name: '更多', exact: true }).click();
-    await page.getByRole('menuitem', { name: '重新载入当前 HTML', exact: true }).click();
+    await page.getByRole('menuitem', { name: '从磁盘重新载入 HTML', exact: true }).click();
     await expect(page.locator('.workbench-chrome-status')).toHaveText('页面已重新加载，可以继续编辑');
     await target().dblclick({ position: { x: 18, y: 10 } });
     await expect(target()).toHaveAttribute('contenteditable', 'true');

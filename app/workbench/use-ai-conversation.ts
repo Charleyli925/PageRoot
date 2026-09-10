@@ -61,6 +61,8 @@ export type UseAiConversationOptions = {
   commentComposerOpen?: boolean;
   draftReadOnly?: boolean;
   canvasMode: "edit" | "preview";
+  /** False while a Start/Settings/project-rules tab owns the window. */
+  documentPresented?: boolean;
   projectId: string;
   documentId: string;
   sourcePath: string;
@@ -103,6 +105,7 @@ export function useAiConversation({
   commentComposerOpen = false,
   draftReadOnly = false,
   canvasMode,
+  documentPresented = true,
   projectId,
   documentId,
   sourcePath,
@@ -112,13 +115,19 @@ export function useAiConversation({
   onDecision,
   onOpenAgentSettings,
 }: UseAiConversationOptions) {
-  const [open, setOpen] = useState(false);
+  const [openDocuments, setOpenDocuments] = useState<ReadonlySet<string>>(() => new Set());
+  const documentKey = `${projectId}:${documentId}`;
+  const open = openDocuments.has(documentKey);
   // The Document owns its history, but the conversation is only presented
   // beside Preview or Review. Returning to Edit restores the comment rail and
   // closes the presentation without deleting the Document's durable thread.
-  const active = Boolean(sourcePath) && (canvasMode === "preview" || reviewing);
+  const active = documentPresented
+    && Boolean(sourcePath)
+    && (canvasMode === "preview" || reviewing);
   const visible = active && open && !commentComposerOpen;
-  if ((!active || commentComposerOpen) && open) setOpen(false);
+  // Edit, Start, Settings and comment composition temporarily hide the dock.
+  // They do not rewrite the Document's presentation preference: an explicit
+  // hide/toggle owns that decision, and a restored Review can reopen in place.
 
   // Load when the sidebar becomes visible for a Document and close it on any
   // identity change or when it stops being visible.
@@ -138,16 +147,28 @@ export function useAiConversation({
     };
   }, [visible, projectId, documentId, sourcePath, controllerRef]);
 
-  const toggle = useCallback(() => setOpen((value) => !value), []);
+  const toggle = useCallback(() => setOpenDocuments((current) => {
+    const next = new Set(current);
+    if (next.has(documentKey)) next.delete(documentKey);
+    else next.add(documentKey);
+    return next;
+  }), [documentKey]);
   // Submitting a round makes this the surface that reports it, so the workbench
   // keeps the conversation thread visible beside the page.
   //
   const reveal = useCallback(() => {
-    setOpen(true);
-  }, []);
+    setOpenDocuments((current) => current.has(documentKey)
+      ? current
+      : new Set(current).add(documentKey));
+  }, [documentKey]);
   const hide = useCallback(() => {
-    setOpen(false);
-  }, []);
+    setOpenDocuments((current) => {
+      if (!current.has(documentKey)) return current;
+      const next = new Set(current);
+      next.delete(documentKey);
+      return next;
+    });
+  }, [documentKey]);
 
   const onSend = useCallback(() => {
     onDeliverModification?.("managed-agent");

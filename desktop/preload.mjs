@@ -658,6 +658,8 @@ const workspacePreferenceKeys = new Set([
   "inspectorWidth",
   "motion",
   "restoreTabsOnLaunch",
+  "reviewChangeContextVisibility",
+  "reviewCommentContextVisibility",
   "defaultAgentProviderId",
   "agentConfigurations",
   "documentAgentSelections",
@@ -708,6 +710,9 @@ function validWorkspacePreferencePatch(value) {
     }
     if (key === "inspectorWidth") {
       return typeof next === "number" && Number.isFinite(next) && next >= 280 && next <= 520;
+    }
+    if (key === "reviewChangeContextVisibility" || key === "reviewCommentContextVisibility") {
+      return typeof next === "number" && Number.isFinite(next) && next >= 0 && next <= 100;
     }
     return false;
   });

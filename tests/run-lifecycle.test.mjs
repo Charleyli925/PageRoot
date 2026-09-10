@@ -299,7 +299,7 @@ test("run presentation copy follows the four stages and keeps exception actions 
     {
       header: {
         eyebrow: "处理结果",
-        title: "这次没有产生有效变化",
+        title: "未识别到明确的页面变化",
       },
       statusLabel: "没有新版本",
       summaryTitle: "页面与评论可以继续编辑",

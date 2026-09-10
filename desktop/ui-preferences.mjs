@@ -18,6 +18,8 @@ export const WORKSPACE_PREFERENCE_DEFAULTS = Object.freeze({
   inspectorWidth: 376,
   motion: "system",
   restoreTabsOnLaunch: true,
+  reviewChangeContextVisibility: 25,
+  reviewCommentContextVisibility: 15,
   defaultAgentProviderId: "qoder",
   agentConfigurations: Object.freeze({}),
   documentAgentSelections: Object.freeze({}),
@@ -26,6 +28,8 @@ export const WORKSPACE_PREFERENCE_DEFAULTS = Object.freeze({
 export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
   sidebarWidth: Object.freeze({ min: 200, max: 420 }),
   inspectorWidth: Object.freeze({ min: 280, max: 520 }),
+  reviewChangeContextVisibility: Object.freeze({ min: 0, max: 100 }),
+  reviewCommentContextVisibility: Object.freeze({ min: 0, max: 100 }),
 });
 
 const MAX_STATE_BYTES = 16 * 1024;
@@ -97,6 +101,16 @@ export function normalizeWorkspacePreferences(value) {
     restoreTabsOnLaunch: typeof source.restoreTabsOnLaunch === "boolean"
       ? source.restoreTabsOnLaunch
       : WORKSPACE_PREFERENCE_DEFAULTS.restoreTabsOnLaunch,
+    reviewChangeContextVisibility: normalizedWidth(
+      source.reviewChangeContextVisibility,
+      WORKSPACE_PREFERENCE_DEFAULTS.reviewChangeContextVisibility,
+      WORKSPACE_PREFERENCE_LIMITS.reviewChangeContextVisibility,
+    ),
+    reviewCommentContextVisibility: normalizedWidth(
+      source.reviewCommentContextVisibility,
+      WORKSPACE_PREFERENCE_DEFAULTS.reviewCommentContextVisibility,
+      WORKSPACE_PREFERENCE_LIMITS.reviewCommentContextVisibility,
+    ),
     defaultAgentProviderId: normalizedAgentProviderId(source.defaultAgentProviderId),
     disabledAgentProviderIds: normalizedDisabledAgentProviderIds(source.disabledAgentProviderIds),
     agentConfigurations: normalizeAgentConfigurations(source.agentConfigurations),

@@ -66,7 +66,9 @@
 .bubble {
   position: absolute;
   top: 50%;
-  width: min(286px, calc(100vw - 88px));
+  width: max-content;
+  min-width: min(156px, calc(100vw - 88px));
+  max-width: min(320px, calc(100vw - 88px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -77,7 +79,7 @@
   box-shadow: 0 12px 34px rgb(35 31 80 / 20%);
   color: #34323f;
   opacity: 0;
-  pointer-events: none;
+  pointer-events: auto;
   text-align: left;
   transform: translateY(-50%) scale(.98);
   transform-origin: center;
@@ -88,6 +90,23 @@
   user-select: text;
   visibility: hidden;
   white-space: normal;
+}
+
+/* Keep the marker-to-bubble crossing inside one hover target. */
+.bubble::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  content: "";
+}
+
+.marker[data-bubble-placement="right"] .bubble::before {
+  right: 100%;
+}
+
+.marker[data-bubble-placement="left"] .bubble::before {
+  left: 100%;
 }
 
 .marker[data-bubble-placement="right"] .bubble {
@@ -111,26 +130,19 @@
   transform-origin: bottom;
 }
 
-/*
- * Hover and keyboard focus open the same bubble. Binding :focus-visible rather
- * than :focus keeps the bubble from appearing on a pointer click while still
- * reaching every keyboard user.
- */
-.marker:hover .bubble,
-.marker:focus-visible .bubble {
+/* Hover and keyboard focus share one explicit, parent-dismissible open state. */
+.marker[data-bubble-open="true"] .bubble {
   opacity: 1;
   transform: translateY(-50%) scale(1);
   transition-delay: 0s;
   visibility: visible;
 }
 
-.marker[data-bubble-vertical="below"]:hover .bubble,
-.marker[data-bubble-vertical="below"]:focus-visible .bubble {
+.marker[data-bubble-open="true"][data-bubble-vertical="below"] .bubble {
   transform: translateY(10px) scale(1);
 }
 
-.marker[data-bubble-vertical="above"]:hover .bubble,
-.marker[data-bubble-vertical="above"]:focus-visible .bubble {
+.marker[data-bubble-open="true"][data-bubble-vertical="above"] .bubble {
   transform: translateY(-10px) scale(1);
 }
 
@@ -180,12 +192,9 @@
     transform: none;
   }
 
-  .marker:hover .bubble,
-  .marker:focus-visible .bubble,
-  .marker[data-bubble-vertical="below"]:hover .bubble,
-  .marker[data-bubble-vertical="below"]:focus-visible .bubble,
-  .marker[data-bubble-vertical="above"]:hover .bubble,
-  .marker[data-bubble-vertical="above"]:focus-visible .bubble {
+  .marker[data-bubble-open="true"] .bubble,
+  .marker[data-bubble-open="true"][data-bubble-vertical="below"] .bubble,
+  .marker[data-bubble-open="true"][data-bubble-vertical="above"] .bubble {
     transform: none;
   }
 }

@@ -11,6 +11,10 @@ import {
   reviewTextEvidenceMarkGeometry,
 } from "../../lib/review-text-evidence-marks.js";
 import {
+  reviewFocusOutlineIsUseful,
+  reviewTargetScrollTop,
+} from "../../lib/review-region-annotation.js";
+import {
   REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT,
   REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES,
 } from "./constants";
@@ -129,6 +133,8 @@ function reviewBootstrap(
   const reviewTextEvidenceIsPunctuationCode = ${reviewTextEvidenceIsPunctuationCode.toString()};
   const reviewTextEvidenceMarkGeometry = ${reviewTextEvidenceMarkGeometry.toString()};
   const alignReviewTextEvidenceDotRows = ${alignReviewTextEvidenceDotRows.toString()};
+  const reviewFocusOutlineIsUseful = ${reviewFocusOutlineIsUseful.toString()};
+  const reviewTargetScrollTop = ${reviewTargetScrollTop.toString()};
   const reviewProjectionFactsSerializedLengthLimit = ${REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT};
   const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
   const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
@@ -348,14 +354,20 @@ function reviewBootstrap(
   let overlayMaskSequence = 0;
   let projectionTransitioning = false;
   let initialProjectionCommitted = false;
-  let confirmedVisualChangeIds = new RuntimeVisualSet();
+  // These IDs authorize projection of analyzer-owned source facts. Runtime
+  // visual observations decide only whether an optional outline is allowed.
+  let projectedSourceChangeIds = new RuntimeVisualSet();
+  let commentHighlightActive = false;
+  let activeFocusReadingBounds = null;
   let mirroringPanel = false;
   let mirroringAction = false;
   let currentState = {
     filter: "all",
     focus: "all",
     activeFocusGroupId: null,
-    transparency: 18,
+    activeFocusRegionId: null,
+    paintPlan: null,
+    transparency: 25,
     scale: 1,
   };
   const reviewParent = parent;
@@ -680,35 +692,151 @@ function reviewBootstrap(
     return { visible, fingerprint: reviewVisualHash(pieces) };
   };
   let reviewVisualObservationSequence = 0;
-  const renderReviewCommentHighlight = (stableIds) => {
+  const renderReviewCommentHighlight = (stableIds, rawContextVisibility = 15) => {
     document.querySelector('[data-pageroot-review-comment-highlight-layer]')?.remove();
     if (!stableIds.length) return;
+    const stableId = stableIds[0];
+    const element = reviewVisualStableElement(stableId);
+    if (!element) return;
+    const rect = runtimeVisualElementGetBoundingClientRect(element);
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const inset = 3;
+    const documentWidth = runtimeVisualMathMax(
+      innerWidth,
+      document.documentElement.scrollWidth,
+      document.body?.scrollWidth || 0,
+    );
+    const height = runtimeVisualMathMax(innerHeight, documentHeight());
+    const left = clamp(rect.left + scrollX - inset, 0, documentWidth);
+    const top = clamp(rect.top + scrollY - inset, 0, height);
+    const right = clamp(rect.right + scrollX + inset, 0, documentWidth);
+    const bottom = clamp(rect.bottom + scrollY + inset, 0, height);
+    const width = right - left;
+    const boxHeight = bottom - top;
+    if (width <= 0 || boxHeight <= 0) return;
     const layer = document.createElement("div");
     layer.setAttribute("data-pageroot-review-comment-highlight-layer", "true");
-    layer.style.cssText = "position:absolute;inset:0;z-index:2147483000;pointer-events:none";
-    runtimeVisualArrayForEach(stableIds, (stableId) => {
-      const element = reviewVisualStableElement(stableId);
-      if (!element) return;
-      const rect = runtimeVisualElementGetBoundingClientRect(element);
-      if (rect.width <= 0 || rect.height <= 0) return;
-      const box = document.createElement("div");
-      box.setAttribute("data-pageroot-review-comment-highlight", "true");
-      box.style.cssText = "position:absolute;border:2px solid #6258d6;border-radius:6px;background:rgb(98 88 214 / 10%);box-shadow:0 0 0 2px rgb(255 255 255 / 78%);pointer-events:none";
-      box.style.left = Math.max(0, rect.left + scrollX - 3) + "px";
-      box.style.top = Math.max(0, rect.top + scrollY - 3) + "px";
-      box.style.width = Math.max(0, rect.width + 6) + "px";
-      box.style.height = Math.max(0, rect.height + 6) + "px";
-      layer.append(box);
-    });
-    if (layer.childElementCount) document.documentElement.append(layer);
+    layer.style.setProperty("position", "absolute", "important");
+    layer.style.setProperty("inset", "0", "important");
+    layer.style.setProperty("z-index", "2147483000", "important");
+    layer.style.setProperty("pointer-events", "none", "important");
+    layer.style.setProperty("width", documentWidth + "px", "important");
+    layer.style.setProperty("height", height + "px", "important");
+    const namespace = "http://www.w3.org/2000/svg";
+    const resetCommentPrimitive = (node, fill = "") => {
+      node.style.setProperty("display", "block", "important");
+      node.style.setProperty("margin", "0", "important");
+      node.style.setProperty("padding", "0", "important");
+      node.style.setProperty("border", "0", "important");
+      node.style.setProperty("outline", "none", "important");
+      node.style.setProperty("opacity", "1", "important");
+      node.style.setProperty("filter", "none", "important");
+      node.style.setProperty("backdrop-filter", "none", "important");
+      node.style.setProperty("-webkit-backdrop-filter", "none", "important");
+      node.style.setProperty("mix-blend-mode", "normal", "important");
+      node.style.setProperty("transform", "none", "important");
+      node.style.setProperty("pointer-events", "none", "important");
+      if (!fill) return;
+      node.style.setProperty("fill", fill, "important");
+      node.style.setProperty("fill-opacity", "1", "important");
+      node.style.setProperty("stroke", "none", "important");
+    };
+    const svg = document.createElementNS(namespace, "svg");
+    svg.setAttribute("data-pageroot-review-comment-mask", "true");
+    svg.setAttribute("width", String(documentWidth));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
+    svg.style.setProperty("position", "absolute", "important");
+    svg.style.setProperty("inset", "0", "important");
+    resetCommentPrimitive(svg);
+    const maskId = "pageroot-review-comment-mask-"
+      + reviewMaskSessionKey + "-" + side + "-" + (++overlayMaskSequence);
+    const mask = document.createElementNS(namespace, "mask");
+    mask.setAttribute("id", maskId);
+    mask.setAttribute("maskUnits", "userSpaceOnUse");
+    mask.setAttribute("maskContentUnits", "userSpaceOnUse");
+    resetCommentPrimitive(mask);
+    const maskBackground = document.createElementNS(namespace, "rect");
+    maskBackground.setAttribute("x", "0");
+    maskBackground.setAttribute("y", "0");
+    maskBackground.setAttribute("width", String(documentWidth));
+    maskBackground.setAttribute("height", String(height));
+    maskBackground.setAttribute("fill", "#ffffff");
+    resetCommentPrimitive(maskBackground, "#ffffff");
+    const hole = document.createElementNS(namespace, "rect");
+    hole.setAttribute("data-pageroot-review-comment-mask-hole", stableId);
+    hole.setAttribute("x", String(left));
+    hole.setAttribute("y", String(top));
+    hole.setAttribute("width", String(width));
+    hole.setAttribute("height", String(boxHeight));
+    hole.setAttribute("fill", "#000000");
+    resetCommentPrimitive(hole, "#000000");
+    mask.append(maskBackground, hole);
+    const defs = document.createElementNS(namespace, "defs");
+    resetCommentPrimitive(defs);
+    defs.append(mask);
+    const dim = document.createElementNS(namespace, "rect");
+    dim.setAttribute("data-pageroot-review-comment-mask-dim", "true");
+    dim.setAttribute("x", "0");
+    dim.setAttribute("y", "0");
+    dim.setAttribute("width", String(documentWidth));
+    dim.setAttribute("height", String(height));
+    dim.setAttribute("fill", "#ffffff");
+    dim.setAttribute("mask", "url(#" + maskId + ")");
+    const dimOpacity = String(
+      Math.round((1 - clamp(Number(rawContextVisibility), 0, 100) / 100) * 1_000) / 1_000,
+    );
+    dim.setAttribute("fill-opacity", dimOpacity);
+    resetCommentPrimitive(dim, "#ffffff");
+    dim.style.setProperty("fill-opacity", dimOpacity, "important");
+    svg.append(defs, dim);
+    const box = document.createElement("div");
+    box.setAttribute("data-pageroot-review-comment-highlight", "true");
+    box.setAttribute("data-left", String(left));
+    box.setAttribute("data-top", String(top));
+    box.setAttribute("data-width", String(width));
+    box.setAttribute("data-height", String(boxHeight));
+    box.style.setProperty("position", "absolute", "important");
+    box.style.setProperty("border", "2px solid #6258d6", "important");
+    box.style.setProperty("border-radius", "6px", "important");
+    box.style.setProperty("background", "rgb(98 88 214 / 6%)", "important");
+    box.style.setProperty("box-shadow", "0 0 0 2px rgb(255 255 255 / 78%)", "important");
+    box.style.setProperty("pointer-events", "none", "important");
+    box.style.setProperty("left", left + "px", "important");
+    box.style.setProperty("top", top + "px", "important");
+    box.style.setProperty("width", width + "px", "important");
+    box.style.setProperty("height", boxHeight + "px", "important");
+    box.style.setProperty("margin", "0", "important");
+    box.style.setProperty("padding", "0", "important");
+    box.style.setProperty("outline", "none", "important");
+    box.style.setProperty("opacity", "1", "important");
+    box.style.setProperty("filter", "none", "important");
+    box.style.setProperty("backdrop-filter", "none", "important");
+    box.style.setProperty("-webkit-backdrop-filter", "none", "important");
+    box.style.setProperty("mix-blend-mode", "normal", "important");
+    box.style.setProperty("transform", "none", "important");
+    layer.append(svg, box);
+    document.documentElement.append(layer);
   };
   if (reviewVisualChannel) reviewVisualChannel.port1.onmessage = (event) => {
     const request = event.data;
     if (request?.type === "comment-highlight" && request.sessionId === sessionId
       && request.side === side && Array.isArray(request.stableIds)) {
-      renderReviewCommentHighlight(request.active === true
-        ? runtimeVisualArraySlice(request.stableIds, 0, 32)
-        : []);
+      const stableIds = request.active === true
+        ? runtimeVisualArraySlice(request.stableIds, 0, 1)
+        : [];
+      commentHighlightActive = stableIds.length > 0;
+      document.documentElement.dataset.pagerootReviewCommentFocus = commentHighlightActive
+        ? "true"
+        : "false";
+      document.documentElement.dataset.pagerootReviewFocusGroup = commentHighlightActive
+        ? ""
+        : currentState.activeFocusGroupId || "";
+      document.documentElement.dataset.pagerootReviewFocusRegion = commentHighlightActive
+        ? ""
+        : currentState.activeFocusRegionId || "";
+      renderReviewCommentHighlight(stableIds, request.contextVisibility);
+      scheduleOverlayRender();
       return;
     }
     if (request?.type === "verdicts" && request.sessionId === sessionId && request.side === side
@@ -750,7 +878,7 @@ function reviewBootstrap(
           runtimeVisualElementSetAttribute(element, "data-pageroot-review-confirmed", "true");
         }
       });
-      confirmedVisualChangeIds = nextConfirmed;
+      projectedSourceChangeIds = nextConfirmed;
       scheduleOverlayRender();
       return;
     }
@@ -1725,7 +1853,7 @@ function reviewBootstrap(
       document.body?.scrollWidth || 0,
     ) + "px", "important");
     mask.style.setProperty("height", Math.max(innerHeight, documentHeight()) + "px", "important");
-    const contextVisibility = clamp(Number(currentState.transparency ?? 18), 0, 100) / 100;
+    const contextVisibility = clamp(Number(currentState.transparency ?? 25), 0, 100) / 100;
     mask.style.setProperty("opacity", String(Math.round((1 - contextVisibility) * 1000) / 1000), "important");
     document.body.append(mask);
   };
@@ -1932,11 +2060,14 @@ function reviewBootstrap(
   const scrollToReviewRect = (rect, behavior = "auto") => {
     if (!rect || rect.height <= 0 || !Number.isFinite(rect.top)) return false;
     const token = "focus-" + Date.now() + "-" + Math.random();
-    const top = clamp(
-      scrollY + rect.top - Math.max(18, innerHeight * .12),
-      0,
-      maximumScrollTop(),
-    );
+    const top = reviewTargetScrollTop({
+      scrollTop: scrollY,
+      rectTop: rect.top,
+      rectHeight: rect.height,
+      viewportHeight: innerHeight,
+      maximumScrollTop: maximumScrollTop(),
+    });
+    if (top === null) return false;
     const command = recordFocusScrollCommand(token, top, scrollX);
     scrollTo({ top: command.top, left: command.left, behavior });
     return true;
@@ -2052,13 +2183,16 @@ function reviewBootstrap(
     behavior = "auto",
     regionId = "",
     focusGroupId = "",
+    commandId = "",
   ) => {
     revealTarget(target, panelPath);
     requestAnimationFrame(() => {
-      if (focusGroupId) {
-        // Navigation and its geometry must refer to the same selected group.
-        // The normal overlay RAF can run later than this focus command.
-        if (currentState.activeFocusGroupId !== focusGroupId) return;
+      if (commandId && cancelledNavigationCommandId === commandId) return;
+      const reportNavigationResult = (located) => {
+        if (!commandId || cancelledNavigationCommandId === commandId) return;
+        post("navigation-result", { commandId, changeId, located });
+      };
+      if (focusGroupId && currentState.activeFocusGroupId === focusGroupId) {
         renderReviewOverlays();
       }
       const reportHorizontalFootprint = (rect, documentSpace = false) => {
@@ -2085,33 +2219,55 @@ function reviewBootstrap(
           right,
         });
       };
-      const visibleBox = document.querySelector(regionId
-        ? '[data-pageroot-review-overlay-box][data-pageroot-review-focus-region="' + regionId + '"]'
-        : '[data-pageroot-review-overlay-box="' + changeId + '"]');
-      if (visibleBox) {
+      const visibleFocusGeometry = document.querySelector(regionId
+        ? '[data-pageroot-review-mask-hole][data-pageroot-review-focus-region="' + regionId + '"]'
+        : '[data-pageroot-review-mask-hole="' + changeId + '"]')
+        || document.querySelector(regionId
+          ? '[data-pageroot-review-overlay-box][data-pageroot-review-focus-region="' + regionId + '"]'
+          : '[data-pageroot-review-overlay-box="' + changeId + '"]');
+      let reportedFocusGeometry = false;
+      if (visibleFocusGeometry) {
         reportHorizontalFootprint({
-          left: visibleBox.getAttribute("data-left"),
-          right: Number(visibleBox.getAttribute("data-left"))
-            + Number(visibleBox.getAttribute("data-width")),
+          left: visibleFocusGeometry.getAttribute("data-left"),
+          right: Number(visibleFocusGeometry.getAttribute("data-left"))
+            + Number(visibleFocusGeometry.getAttribute("data-width")),
         }, true);
-        if (scrollToReviewRect(visibleBox.getBoundingClientRect(), behavior)) return;
+        reportedFocusGeometry = true;
+        if (scrollToReviewRect(visibleFocusGeometry.getBoundingClientRect(), behavior)) {
+          reportNavigationResult(true);
+          return;
+        }
       }
-      // An explicit region must never fall back to its entire semantic owner.
-      if (regionId) return;
-      const anchors = [...document.querySelectorAll(
-        '[data-pageroot-review-anchor-change="' + changeId + '"]',
-      )];
-      for (const anchor of anchors) {
-        const rect = collapsedAnchorRect(anchor, changeId);
-        if (!rect) continue;
-        reportHorizontalFootprint(rect);
-        if (scrollToReviewRect(rect, behavior)) return;
+      if (!regionId) {
+        const anchors = [...document.querySelectorAll(
+          '[data-pageroot-review-anchor-change="' + changeId + '"]',
+        )];
+        for (const anchor of anchors) {
+          const rect = collapsedAnchorRect(anchor, changeId);
+          if (!rect) continue;
+          reportHorizontalFootprint(rect);
+          if (scrollToReviewRect(rect, behavior)) {
+            reportNavigationResult(true);
+            return;
+          }
+        }
       }
       if (target) {
         const rect = target.getBoundingClientRect();
-        reportHorizontalFootprint(rect);
-        if (!scrollToReviewRect(rect, behavior)) scrollIntoReviewTarget(target, behavior);
+        if (!reportedFocusGeometry) reportHorizontalFootprint(rect);
+        if (scrollToReviewRect(rect, behavior)) {
+          reportNavigationResult(true);
+          return;
+        }
+        // A command that promises a location result must fail closed here.
+        // Legacy navigation has no acknowledgement contract, so preserve its
+        // historical element-level fallback for zero-sized/transient boxes.
+        if (!commandId) {
+          scrollIntoReviewTarget(target, behavior);
+          return;
+        }
       }
+      reportNavigationResult(false);
     });
   };
   const applyScrollOwner = (message) => {
@@ -2483,75 +2639,6 @@ function reviewBootstrap(
     right: runtimeVisualMathMax(...runtimeVisualArrayMap(rects, (rect) => rect.right)),
     bottom: runtimeVisualMathMax(...runtimeVisualArrayMap(rects, (rect) => rect.bottom)),
   } : null;
-  const nearestCommonDisplayContainer = (elements) => {
-    const uniqueSet = new RuntimeVisualSet(elements);
-    const unique = [];
-    runtimeVisualSetForEach(uniqueSet, (element) => runtimeVisualArrayPush(unique, element));
-    if (unique.length < 2) return null;
-    let candidate = unique[0].parentElement;
-    while (candidate && candidate !== document.body && candidate !== document.documentElement) {
-      if (runtimeVisualElementTagName(candidate) !== "MAIN"
-        && runtimeVisualArrayEvery(unique, (element) => runtimeVisualElementContains(candidate, element))) {
-        return candidate;
-      }
-      candidate = candidate.parentElement;
-    }
-    return null;
-  };
-  const directDisplayBranch = (container, element) => {
-    let branch = element;
-    while (branch.parentElement && branch.parentElement !== container) branch = branch.parentElement;
-    return branch.parentElement === container ? branch : null;
-  };
-  const repeatedCardContainer = (container, branches) => {
-    if (branches.length < 2) return false;
-    const tokens = runtimeVisualArrayMap(branches, (branch) => (
-      runtimeVisualArrayFilter(runtimeVisualStringSplit(
-        runtimeVisualStringToLowerCase(runtimeVisualElementGetAttribute(branch, "class") || ""),
-        /\s+/u,
-      ), (token) => (
-        runtimeVisualRegExpExec(/(?:^|-)(?:card|tile|metric|kpi|stat)(?:-|$)/u, token) !== null
-      ))
-    ));
-    return runtimeVisualArrayEvery(tokens, (entry) => entry.length)
-      && runtimeVisualArraySome(tokens[0], (token) => runtimeVisualArrayEvery(
-        tokens,
-        (entry) => runtimeVisualArraySome(entry, (candidate) => candidate === token),
-      ));
-  };
-  const promotableStyleContainer = (elements) => {
-    const container = nearestCommonDisplayContainer(elements);
-    if (!container) return null;
-    const visibleElements = runtimeVisualArrayFilter(elements, (element) => {
-      const style = runtimeVisualGetComputedStyle(element);
-      const rect = runtimeVisualElementGetBoundingClientRect(element);
-      return style.display !== "none" && style.visibility !== "hidden"
-        && rect.width > 1 && rect.height > 1;
-    });
-    const branchSet = new RuntimeVisualSet(runtimeVisualArrayFilter(runtimeVisualArrayMap(visibleElements, (element) => (
-      directDisplayBranch(container, element)
-    )), runtimeVisualBoolean));
-    const branches = [];
-    runtimeVisualSetForEach(branchSet, (branch) => runtimeVisualArrayPush(branches, branch));
-    const children = [];
-    const childCollection = runtimeVisualElementChildren(container);
-    for (let index = 0; index < runtimeVisualHtmlCollectionLength(childCollection); index += 1) {
-      const child = runtimeVisualHtmlCollectionItem(childCollection, index);
-      if (child) runtimeVisualArrayPush(children, child);
-    }
-    const eligible = runtimeVisualArrayFilter(children, (child) => {
-      const style = runtimeVisualGetComputedStyle(child);
-      const rect = runtimeVisualElementGetBoundingClientRect(child);
-      return style.display !== "none" && style.visibility !== "hidden"
-        && rect.width > 1 && rect.height > 1;
-    });
-    if (branches.length < 2 || !eligible.length || branches.length / eligible.length < .75) return null;
-    const display = runtimeVisualGetComputedStyle(container).display;
-    const semantic = runtimeVisualRegExpExec(/^(?:inline-)?(?:grid|flex)$/u, display) !== null
-      || runtimeVisualElementMatches(container, "ul, ol, [role='list']")
-      || repeatedCardContainer(container, branches);
-    return semantic ? container : null;
-  };
   const numberedLineBounds = (owner, atoms) => {
     const marker = runtimeVisualArrayFind(
       atoms,
@@ -2608,17 +2695,8 @@ function reviewBootstrap(
         return owner ? [{ ownerId, owner }] : [];
       });
       if (!owners.length) return [];
-      const promoted = plan.kind === "style"
-        && region.geometryMode === "container-box"
-        ? promotableStyleContainer(runtimeVisualArrayMap(owners, (entry) => entry.owner))
-        : null;
-      const geometryOwners = promoted
-        ? [{ ownerId: region.id, owner: promoted }]
-        : owners;
-      return runtimeVisualArrayFlatMap(geometryOwners, ({ ownerId, owner }, ownerIndex) => {
-      const ownerAtoms = promoted
-        ? regionAtoms
-        : runtimeVisualArrayFilter(regionAtoms, (atom) => (
+      return runtimeVisualArrayFlatMap(owners, ({ ownerId, owner }, ownerIndex) => {
+      const ownerAtoms = runtimeVisualArrayFilter(regionAtoms, (atom) => (
           atom.displayOwnerId === ownerId
         ));
       if (!ownerAtoms.length) return [];
@@ -2667,6 +2745,7 @@ function reviewBootstrap(
         element: owner,
         focusGroupId: plan.id,
         focusRegionId: region.id,
+        navigationClusterId: region.navigationClusterId,
         displayGroupId: plan.displayGroupId,
         displayScope: plan.displayScope,
         geometryMode: region.geometryMode,
@@ -2757,7 +2836,7 @@ function reviewBootstrap(
     const records = [];
     runtimeVisualMapForEach(reviewExactAtomOccurrenceCounts, (_expectedCount, atomKey) => {
           runtimeVisualArrayForEach(reviewFocusAtomEntriesForKey(atomKey), (entry) => {
-          if (!runtimeVisualSetHas(confirmedVisualChangeIds, entry.changeId)) return;
+          if (!runtimeVisualSetHas(projectedSourceChangeIds, entry.changeId)) return;
           const { element, changeId, fact } = entry;
           if (filter !== "all" && fact.type !== filter) return;
           const semanticOwnerId = fact.semanticOwnerId;
@@ -2844,14 +2923,25 @@ function reviewBootstrap(
         || left.top - right.top || left.left - right.left,
     );
     const requestedFocusGroupId = safeProjectionFactKey(currentState.activeFocusGroupId);
-    const activeFocusGroupId = runtimeVisualArraySome(reviewFocusGroupPlans, (plan) => (
+    const activeFocusGroupId = !commentHighlightActive && runtimeVisualArraySome(reviewFocusGroupPlans, (plan) => (
       plan.id === requestedFocusGroupId
     )) ? requestedFocusGroupId : "";
-    let merged = activeFocusGroupId
-      ? runtimeVisualArrayFilter(
-        resolvedGroups,
-        (record) => record.focusGroupId === activeFocusGroupId,
-      )
+    const activeFocusRegionId = activeFocusGroupId
+      ? safeProjectionFactKey(currentState.activeFocusRegionId)
+      : "";
+    const contextMaskRegionId = activeFocusRegionId
+      && safeProjectionFactKey(currentState.paintPlan?.contextMask?.regionId) === activeFocusRegionId
+      ? activeFocusRegionId
+      : "";
+    const focusOutlineRegionId = activeFocusRegionId
+      && safeProjectionFactKey(currentState.paintPlan?.focusOutline?.regionId) === activeFocusRegionId
+      ? activeFocusRegionId
+      : "";
+    const activeRecords = activeFocusGroupId && activeFocusRegionId
+      ? runtimeVisualArrayFilter(resolvedGroups, (record) => (
+        record.focusGroupId === activeFocusGroupId
+        && record.focusRegionId === activeFocusRegionId
+      ))
       : [];
     const inset = overlayInset;
     // Measure the authored document after the previous projection layer has
@@ -2863,7 +2953,12 @@ function reviewBootstrap(
       document.body?.scrollWidth || 0,
     );
     const height = runtimeVisualMathMax(innerHeight, documentHeight());
-    merged = runtimeVisualArrayFlatMap(merged, (record) => {
+    // One selected locality can still resolve multiple element boxes. A paint
+    // plan chooses one useful local target; it never turns every measurement
+    // into a visible outline or a disconnected multi-contour pseudo-outline.
+    const preparedActiveRecords = runtimeVisualArrayFlatMap(
+      runtimeVisualArraySlice(activeRecords, 0, 1),
+      (record) => {
       const renderFragments = runtimeVisualArrayFilter(runtimeVisualArrayMap(
         record.fragments || [{
         left: record.left,
@@ -2911,7 +3006,29 @@ function reviewBootstrap(
         renderFragments,
         pathData: unionPath(renderFragments),
       }];
-    });
+      },
+    );
+    const contextMaskRecords = contextMaskRegionId ? preparedActiveRecords : [];
+    const focusOutlineRecords = focusOutlineRegionId
+      ? runtimeVisualArrayFilter(preparedActiveRecords, (record) => (
+        reviewFocusOutlineIsUseful({
+          left: record.left,
+          top: record.top,
+          right: record.right,
+          bottom: record.bottom,
+          viewportWidth: innerWidth,
+          viewportHeight: innerHeight,
+          documentWidth,
+          documentHeight: height,
+        })
+      ))
+      : [];
+    activeFocusReadingBounds = preparedActiveRecords[0]
+      ? {
+        top: preparedActiveRecords[0].top,
+        bottom: preparedActiveRecords[0].bottom,
+      }
+      : null;
     // Navigation bars remain available for every resolved group in overview;
     // only the active group's first outline carries the single public label.
     const badgeUiScale = 1 / runtimeVisualMathMax(
@@ -2920,30 +3037,30 @@ function reviewBootstrap(
     );
     const regionsById = new RuntimeVisualMap();
     runtimeVisualArrayForEach(resolvedGroups, (record) => {
-      const existing = runtimeVisualMapGet(regionsById, record.focusRegionId);
+      const navigationClusterId = record.navigationClusterId || record.focusRegionId;
+      const existing = runtimeVisualMapGet(regionsById, navigationClusterId);
       if (existing) {
-        existing.left = runtimeVisualMathMin(existing.left, record.left);
-        existing.top = runtimeVisualMathMin(existing.top, record.top);
-        existing.right = runtimeVisualMathMax(existing.right, record.right);
-        existing.bottom = runtimeVisualMathMax(existing.bottom, record.bottom);
+        runtimeVisualArrayPush(existing.members, record);
         return;
       }
-      runtimeVisualMapSet(regionsById, record.focusRegionId, {
+      runtimeVisualMapSet(regionsById, navigationClusterId, {
         changeId: record.changeId,
         focusGroupId: record.focusGroupId,
         regionId: record.focusRegionId,
+        navigationClusterId,
         left: record.left,
         top: record.top,
         right: record.right,
         bottom: record.bottom,
         carrier: record,
+        members: [record],
       });
     });
     const regions = [];
     runtimeVisualMapForEach(regionsById, (region) => runtimeVisualArrayPush(regions, region));
     const labelByCarrier = new RuntimeVisualMap();
-    if (merged[0]) runtimeVisualMapSet(labelByCarrier, merged[0], {
-      text: merged[0].summary,
+    if (focusOutlineRecords[0]) runtimeVisualMapSet(labelByCarrier, focusOutlineRecords[0], {
+      text: focusOutlineRecords[0].summary,
       clusterCount: 1,
     });
     overlayElementsByChange = new RuntimeVisualMap();
@@ -2970,7 +3087,7 @@ function reviewBootstrap(
       element.style.setProperty("fill-opacity", "1", "important");
       element.style.setProperty("stroke", "none", "important");
     };
-    if (merged.length) {
+    if (contextMaskRecords.length) {
     const svg = document.createElementNS(namespace, "svg");
     svg.setAttribute("data-pageroot-review-mask-layer", "true");
     svg.setAttribute("width", String(documentWidth));
@@ -3002,7 +3119,7 @@ function reviewBootstrap(
     maskBackground.setAttribute("fill", "#ffffff");
     resetMaskPrimitive(maskBackground, "#ffffff");
     mask.append(maskBackground);
-    const emphasizedRecords = merged;
+    const emphasizedRecords = contextMaskRecords;
     runtimeVisualArrayForEach(emphasizedRecords, (record) => {
       const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
@@ -3010,6 +3127,7 @@ function reviewBootstrap(
       hole.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
       hole.setAttribute("data-pageroot-review-fact", record.factKey || "");
       hole.setAttribute("data-pageroot-review-focus-group", record.focusGroupId || "");
+      hole.setAttribute("data-pageroot-review-focus-region", record.focusRegionId || "");
       if (record.textGroup) hole.setAttribute("data-text-group", record.textGroup);
       if (record.textGroups?.length) {
         hole.setAttribute("data-text-groups", runtimeVisualArrayJoin(record.textGroups, " "));
@@ -3039,7 +3157,7 @@ function reviewBootstrap(
     dim.setAttribute("height", String(height));
     dim.setAttribute("fill", "#ffffff");
     dim.setAttribute("mask", "url(#" + maskId + ")");
-    const contextVisibility = Math.max(0, Math.min(100, Number(currentState.transparency ?? 18))) / 100;
+    const contextVisibility = Math.max(0, Math.min(100, Number(currentState.transparency ?? 25))) / 100;
     const dimOpacity = String(Math.round((1 - contextVisibility) * 1_000) / 1_000);
     dim.setAttribute("fill-opacity", dimOpacity);
     resetMaskPrimitive(dim, "#ffffff");
@@ -3063,17 +3181,9 @@ function reviewBootstrap(
       resetMaskPrimitive(marksSvg);
       const strikeRuns = [];
       const addedDots = [];
-      const activeAtomKeys = new RuntimeVisualSet();
-      if (activeFocusGroupId) runtimeVisualArrayForEach(reviewFocusGroupPlans, (plan) => {
-        if (plan.id !== activeFocusGroupId) return;
-        runtimeVisualArrayForEach(plan.atomKeys, (atomKey) => {
-          runtimeVisualSetAdd(activeAtomKeys, atomKey);
-        });
-      });
       const markedElements = new RuntimeVisualSet();
       runtimeVisualArrayForEach(visibleRecords, (atom) => {
         if (!runtimeVisualArraySome(atom.types, (type) => type === "text")) return;
-        if (activeFocusGroupId && !runtimeVisualSetHas(activeAtomKeys, atom.atomKey)) return;
         const entry = runtimeVisualArrayFind(
           reviewFocusAtomEntriesForKey(atom.atomKey),
           (candidate) => candidate.element === atom.element,
@@ -3175,7 +3285,7 @@ function reviewBootstrap(
       });
       layer.append(marksSvg);
     }
-    runtimeVisualArrayForEach(merged, (record) => {
+    runtimeVisualArrayForEach(focusOutlineRecords, (record) => {
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
       box.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
@@ -3258,15 +3368,20 @@ function reviewBootstrap(
       layer.append(box);
     });
     runtimeVisualArrayForEach(regions, (region) => {
-      const focusedRegion = activeFocusGroupId === region.focusGroupId;
+      const focusedRegion = runtimeVisualArraySome(region.members, (member) => (
+        activeFocusGroupId === member.focusGroupId
+        && activeFocusRegionId === member.focusRegionId
+      ));
       const regionElements = runtimeVisualMapGet(overlayElementsByChange, region.changeId) || [];
       const bar = document.createElement("div");
       bar.setAttribute("data-pageroot-review-region-bar", region.changeId);
       bar.setAttribute("data-pageroot-review-focus-group", region.focusGroupId || "");
       bar.setAttribute("data-pageroot-review-focus-region", region.regionId || "");
+      bar.setAttribute("data-pageroot-review-navigation-cluster", region.navigationClusterId || "");
+      bar.setAttribute("data-pageroot-review-region-count", String(region.members.length));
       bar.dataset.active = focusedRegion ? "true" : "false";
       const barTop = Math.max(0, region.top - inset);
-      const barHeight = Math.max(8 * badgeUiScale, region.bottom + inset - barTop);
+      const barHeight = 10 * badgeUiScale;
       bar.style.setProperty("left", (2 * badgeUiScale) + "px", "important");
       bar.style.setProperty("top", barTop + "px", "important");
       bar.style.setProperty("height", barHeight + "px", "important");
@@ -3300,18 +3415,54 @@ function reviewBootstrap(
     scheduleLayoutReport();
   }
   const applyState = (state) => {
+    const ownsFocusRegion = Object.prototype.hasOwnProperty.call(state, "activeFocusRegionId");
+    const ownsPaintPlan = Object.prototype.hasOwnProperty.call(state, "paintPlan");
     currentState = { ...currentState, ...state };
     const requestedFocusGroupId = safeProjectionFactKey(currentState.activeFocusGroupId);
-    currentState.activeFocusGroupId = runtimeVisualArraySome(reviewFocusGroupPlans, (plan) => (
-      plan.id === requestedFocusGroupId
-    )) ? requestedFocusGroupId : null;
+    const activeFocusPlan = runtimeVisualArrayFind(
+      reviewFocusGroupPlans,
+      (plan) => plan.id === requestedFocusGroupId,
+    );
+    currentState.activeFocusGroupId = activeFocusPlan ? requestedFocusGroupId : null;
+    const requestedFocusRegionId = safeProjectionFactKey(currentState.activeFocusRegionId);
+    const activeFocusRegion = activeFocusPlan
+      ? runtimeVisualArrayFind(activeFocusPlan.regions[side], (region) => (
+        region.id === requestedFocusRegionId
+      )) || (!ownsFocusRegion ? activeFocusPlan.regions[side][0] : null)
+      : null;
+    currentState.activeFocusRegionId = activeFocusRegion?.id || null;
+    const requestedContextMaskRegionId = safeProjectionFactKey(
+      currentState.paintPlan?.contextMask?.regionId,
+    );
+    const requestedFocusOutlineRegionId = safeProjectionFactKey(
+      currentState.paintPlan?.focusOutline?.regionId,
+    );
+    currentState.paintPlan = {
+      contextMask: activeFocusRegion?.id === requestedContextMaskRegionId || (
+        !ownsPaintPlan && activeFocusRegion
+      )
+        ? { regionId: activeFocusRegion.id }
+        : null,
+      focusOutline: activeFocusRegion?.id === requestedFocusOutlineRegionId || (
+        !ownsPaintPlan
+        && activeFocusRegion
+        && activeFocusPlan?.focusOutlinePolicy === "source-change"
+      )
+        ? { regionId: activeFocusRegion.id }
+        : null,
+    };
     const root = document.documentElement;
     root.dataset.pagerootReviewFilter = currentState.filter || "all";
     root.dataset.pagerootReviewFocus = currentState.focus || "all";
-    root.dataset.pagerootReviewFocusGroup = currentState.activeFocusGroupId || "";
+    root.dataset.pagerootReviewFocusGroup = commentHighlightActive
+      ? ""
+      : currentState.activeFocusGroupId || "";
+    root.dataset.pagerootReviewFocusRegion = commentHighlightActive
+      ? ""
+      : currentState.activeFocusRegionId || "";
     const transparency = Math.max(
       0,
-      Math.min(100, Number(currentState.transparency ?? 18)),
+      Math.min(100, Number(currentState.transparency ?? 25)),
     ) / 100;
     root.style.setProperty("--pageroot-review-context-opacity", String(transparency));
     root.style.setProperty("--pageroot-review-ui-scale", String(1 / Math.max(
@@ -3334,6 +3485,7 @@ function reviewBootstrap(
     if (projectionTransitioning) renderTransitionMask();
     else scheduleOverlayRender();
   };
+  let cancelledNavigationCommandId = "";
   runtimeVisualAddEventListener("message", (event) => {
     const message = event.data;
     if (
@@ -3358,8 +3510,11 @@ function reviewBootstrap(
       schedulePresentationReady(message.presentationEpoch);
     }
     if (message.type === "commit-presentation") commitProjectionTransition(message.presentationEpoch);
+    if (message.type === "cancel-navigation") {
+      cancelledNavigationCommandId = safeProjectionFactKey(message.commandId);
+    }
     if (message.type === "mirror-action") mirrorAction(message);
-    if (message.type === "focus-change") {
+    if (message.type === "navigate-change" || message.type === "focus-change") {
       const changeId = String(message.changeId || "").replace(/[^a-z0-9-]/gi, "");
       const focusGroupId = safeProjectionFactKey(message.focusGroupId);
       const regionId = safeProjectionFactKey(message.regionId);
@@ -3370,13 +3525,32 @@ function reviewBootstrap(
       const focusRegion = focusPlan ? runtimeVisualArrayFind(focusPlan.regions[side], (region) => (
         region.id === regionId && region.primaryChangeId === changeId
       )) : null;
+      const commandId = safeProjectionFactKey(message.commandId);
       const target = focusRegion
         ? reviewFocusOwnerElement(focusRegion.displayOwnerIds[0])
         : !focusGroupId && !regionId
           ? document.querySelector('[data-pageroot-review-id="' + changeId + '"]')
           : null;
-      if ((focusGroupId || regionId) && (!focusRegion || !target)) return;
-      if (focusPlan) applyState({ focus: changeId, activeFocusGroupId: focusPlan.id });
+      if ((focusGroupId || regionId) && (!focusRegion || !target)) {
+        if (commandId && cancelledNavigationCommandId !== commandId) {
+          post("navigation-result", { commandId, changeId, located: false });
+        }
+        return;
+      }
+      // Legacy focus-change messages still activate; the current parent sends
+      // navigation and paint state independently so restoration cannot behave
+      // like a second click.
+      if (message.type === "focus-change" && focusPlan) applyState({
+        focus: changeId,
+        activeFocusGroupId: focusPlan.id,
+        activeFocusRegionId: focusRegion?.id || null,
+        paintPlan: {
+          contextMask: focusRegion ? { regionId: focusRegion.id } : null,
+          focusOutline: focusPlan.focusOutlinePolicy === "source-change" && focusRegion
+            ? { regionId: focusRegion.id }
+            : null,
+        },
+      });
       focusChangeTarget(
         changeId,
         target,
@@ -3386,6 +3560,7 @@ function reviewBootstrap(
         message.behavior === "smooth" ? "smooth" : "auto",
         focusRegion?.id || "",
         focusPlan?.id || "",
+        commandId,
       );
     }
     if (message.type === "focus-outline") {
@@ -3539,6 +3714,20 @@ function reviewBootstrap(
     if (event.target === document && command
       && Math.abs(scrollY - command.top) <= 1
       && Math.abs(scrollX - command.left) <= 1) activeScrollCommand = null;
+    if (
+      event.target === document
+      && !command
+      && currentState.activeFocusGroupId
+      && activeFocusReadingBounds
+    ) {
+      const readingMargin = Math.max(48, innerHeight * .35);
+      const viewportTop = scrollY;
+      const viewportBottom = scrollY + innerHeight;
+      if (
+        activeFocusReadingBounds.bottom < viewportTop - readingMargin
+        || activeFocusReadingBounds.top > viewportBottom + readingMargin
+      ) post("leave-focus");
+    }
   }, { passive: true });
   const handleLayoutChange = () => {
     if (projectionTransitioning) {
@@ -3587,7 +3776,7 @@ function reviewBootstrap(
       ));
       if (changeId) runtimeVisualSetAdd(sourceChangeIds, changeId);
     });
-    confirmedVisualChangeIds = sourceChangeIds;
+    projectedSourceChangeIds = sourceChangeIds;
     initialProjectionCommitted = true;
     scheduleOverlayRender();
     announceReady();

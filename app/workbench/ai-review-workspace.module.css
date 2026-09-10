@@ -171,7 +171,6 @@
   grid-template-columns:
     minmax(150px, .7fr)
     minmax(210px, 1fr)
-    minmax(160px, .8fr)
     minmax(235px, 1.15fr)
     235px;
   align-items: center;
@@ -256,64 +255,6 @@
 .canvasReviewTitle small {
   color: #7d7d8c;
   font-size: 10px;
-}
-
-.transparencyField {
-  min-width: 0;
-  min-height: 58px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.transparencyField > .toolbarFieldLabel {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 1ch;
-}
-
-.transparencyField output {
-  color: #4f47b8;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-
-.transparencyControl {
-  min-width: 0;
-  height: 38px;
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  border-radius: 12px;
-  background: #f1f1f5;
-  white-space: nowrap;
-}
-
-.transparencyControl input {
-  width: 100%;
-  height: 17px;
-  margin: 0;
-  appearance: none;
-  background: transparent;
-  cursor: pointer;
-}
-
-.transparencyControl input::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(to right, #6258d6 0 var(--mask-position), #d6d6df var(--mask-position) 100%);
-}
-
-.transparencyControl input::-webkit-slider-thumb {
-  width: 16px;
-  height: 16px;
-  margin-top: -6px;
-  appearance: none;
-  border: 3px solid #fff;
-  border-radius: 50%;
-  background: #6258d6;
-  box-shadow: 0 2px 6px rgb(31 28 51 / 18%);
 }
 
 .reviewModeControl,
@@ -463,12 +404,165 @@
   position: absolute;
   inset: 0;
   min-height: 0;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
   overflow: hidden;
+}
+
+.reviewDirectoryHeader {
+  position: relative;
+  z-index: 72;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 7px;
+  border-bottom: 1px solid #e6e6eb;
+  background: rgb(250 250 252 / 94%);
+  backdrop-filter: blur(12px) saturate(140%);
+}
+
+.reviewDirectory {
+  position: relative;
+}
+
+.reviewDirectory > summary {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  list-style: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #55525f;
+  font-size: 11px;
+  font-weight: 620;
+  cursor: pointer;
+  user-select: none;
+}
+
+.reviewDirectory > summary::-webkit-details-marker {
+  display: none;
+}
+
+.reviewDirectory > summary:hover,
+.reviewDirectory[open] > summary {
+  border-color: #dedde6;
+  background: #fff;
+  color: #47415f;
+}
+
+.reviewDirectory[open] > summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+.reviewDirectory > summary:focus-visible,
+.reviewDirectoryMenu button:focus-visible {
+  outline: 2px solid rgb(90 85 223 / 35%);
+  outline-offset: 2px;
+}
+
+.reviewDirectoryMenu {
+  position: absolute;
+  top: 33px;
+  left: 0;
+  width: min(330px, calc(100vw - 28px));
+  max-height: min(480px, calc(100vh - 150px));
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid #dedde5;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 97%);
+  box-shadow: 0 12px 32px rgb(31 29 41 / 14%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+
+.reviewDirectoryItem {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #383641;
+  font: inherit;
+  text-align: left;
+}
+
+button.reviewDirectoryItem {
+  cursor: pointer;
+}
+
+button.reviewDirectoryItem:hover,
+button.reviewDirectoryItem[aria-current="location"] {
+  background: #f5f3fb;
+}
+
+.reviewDirectoryItem > span {
+  grid-row: 1 / span 2;
+  align-self: start;
+  padding-top: 1px;
+  color: #8b8794;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.reviewDirectoryItem > strong,
+.reviewDirectoryItem > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewDirectoryItem > strong {
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.reviewDirectoryItem > small {
+  color: #85818d;
+  font-size: 9px;
+}
+
+.reviewDirectoryLocations {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.reviewDirectoryLocations button {
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #e1dfe8;
+  border-radius: 6px;
+  background: #fff;
+  color: #625c78;
+  font-size: 9px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewDirectoryLocations button:hover,
+.reviewDirectoryLocations button[aria-current="location"] {
+  border-color: #cfcbe0;
+  background: #f7f5fb;
 }
 
 .canvasGrid {
   box-sizing: border-box;
-  height: 100%;
+  height: auto;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

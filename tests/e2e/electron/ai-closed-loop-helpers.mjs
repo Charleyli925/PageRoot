@@ -856,6 +856,11 @@ export async function adoptReadyResult(page) {
   const review = page.getByRole("button", { name: "查看修改", exact: true });
   if (!await page.getByTestId("ai-review-workspace").isVisible()) await review.click();
   await page.getByRole("button", { name: "采用修改", exact: true }).click();
+  const confirmation = page.getByRole("dialog", {
+    name: /采纳 AI 修改后（.+）？/u,
+  });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "确认并采纳" }).click();
 }
 
 export const REVIEW_PROJECTION_CASES = Object.freeze([
@@ -864,7 +869,7 @@ export const REVIEW_PROJECTION_CASES = Object.freeze([
     sourceFixture: "generated-ai-loop.html",
     filter: "all",
     pageMode: "split",
-    contextPercent: "18",
+    contextPercent: "25",
     changeType: "structure",
     ownerSelector: '[data-review-brand-row="added"]',
     rangeSelector: null,
@@ -878,19 +883,23 @@ export const REVIEW_PROJECTION_CASES = Object.freeze([
   },
 ]);
 
-export async function assertReviewControlDefaults(page, beforeReviewFrame) {
+export async function assertReviewControlDefaults(
+  page,
+  beforeReviewFrame,
+  expectedNavigationTarget,
+) {
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
     "data-pageroot-review-filter",
   ), { timeout: 30_000 }).toBe("all");
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
     "data-pageroot-review-focus",
-  )).toBe("all");
+  )).toBe(expectedNavigationTarget);
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
     "data-pageroot-review-focus-group",
   )).toBe("");
   await expect(page.getByRole("slider", {
     name: "非修改区域上下文可见度",
-  })).toHaveValue("18");
+  })).toHaveCount(0);
   await expect(page.locator('[data-view="split"]')).toBeVisible();
   await expect(page.getByRole("button", {
     name: "双页对比",
@@ -907,23 +916,21 @@ export async function assertReviewControlDefaults(page, beforeReviewFrame) {
   ).count(), { timeout: 30_000 }).toBeGreaterThan(0);
 }
 
-export async function assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame) {
-  // Region-bar focus can still be inside a projection transition. Overlay boxes
-  // are the user-visible change outline; wait for the transition to finish, then
-  // require an outline on both sides instead of sampling a transient empty layer.
+export async function assertReviewFocusPaint(beforeReviewFrame, afterReviewFrame) {
+  // A selected region always owns navigation and a context mask. Its outline is
+  // a separate paint decision, so text focus legitimately has no box.
   for (const frame of [beforeReviewFrame, afterReviewFrame]) {
     await expect.poll(async () => frame.locator("html").evaluate((html) => (
       !html.hasAttribute("data-pageroot-review-transitioning")
     )), { timeout: 30_000 }).toBe(true);
   }
-  await expect.poll(
-    async () => beforeReviewFrame.locator("[data-pageroot-review-overlay-box]").count(),
-    { timeout: 30_000 },
-  ).toBeGreaterThan(0);
-  await expect.poll(
-    async () => afterReviewFrame.locator("[data-pageroot-review-overlay-box]").count(),
-    { timeout: 30_000 },
-  ).toBeGreaterThan(0);
+  for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+    await expect.poll(
+      async () => frame.locator("[data-pageroot-review-mask-hole]").count(),
+      { timeout: 30_000 },
+    ).toBe(1);
+    expect(await frame.locator("[data-pageroot-review-overlay-box]").count()).toBeLessThanOrEqual(1);
+  }
 }
 
 export async function assertProjectionGeometryCase(frame, geometryCase) {
@@ -950,8 +957,8 @@ export async function assertProjectionGeometryCase(frame, geometryCase) {
   const masks = frame.locator(
     `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
   );
-  // Region bars toggle focus. Retrying a click while its asynchronous state
-  // arrives can close the group again; wait for the one requested transition.
+  // Region bars activate one explicit region. Retrying while its asynchronous
+  // state arrives is unnecessary; wait for the requested transition.
   const root = frame.locator("html");
   await expect(root).not.toHaveAttribute("data-pageroot-review-transitioning", /./);
   if (await root.getAttribute("data-pageroot-review-focus-group") !== focusGroupId) {
@@ -977,7 +984,7 @@ export async function assertProjectionGeometryCase(frame, geometryCase) {
   return owner;
 }
 
-export async function assertOverlayMaskEquivalence(frame) {
+export async function assertActiveFocusPaintBudget(frame) {
   return frame.locator("html").evaluate(() => {
     const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
     const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")];
@@ -992,26 +999,23 @@ export async function assertOverlayMaskEquivalence(frame) {
         && left + elementWidth <= width
         && top + elementHeight <= height;
     };
-    return holes.length <= boxes.length && holes.every((hole) => boxes.some((box) => (
-      (
-        (box.getAttribute("data-types") || "").split(/\s+/u).includes("text")
-        || box.getAttribute("data-active") === "true"
-      )
-      && box.getAttribute("data-pageroot-review-overlay-box")
+    return holes.length === 1
+      && boxes.length <= 1
+      && holes.every(insideDocument)
+      && boxes.every((box) => insideDocument(box) && holes.some((hole) => (
+        box.getAttribute("data-pageroot-review-overlay-box")
         === hole.getAttribute("data-pageroot-review-mask-hole")
       && box.getAttribute("data-pageroot-review-semantic-owner")
         === hole.getAttribute("data-pageroot-review-semantic-owner")
       && box.getAttribute("data-pageroot-review-fact")
         === hole.getAttribute("data-pageroot-review-fact")
-      && insideDocument(box)
-      && insideDocument(hole)
       && Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
       && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
       && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
       && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02
       && Boolean(box.getAttribute("data-path"))
       && box.getAttribute("data-path") === hole.getAttribute("d")
-    )));
+      )));
   });
 }
 

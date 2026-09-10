@@ -113,10 +113,10 @@ export function WorkbenchHeaderToolbar({
             <button
               className="workbench-refresh-button"
               type="button"
-              aria-label={reviewActive ? "刷新审阅画布" : presentation.mode === "preview" ? "刷新预览" : "刷新画布"}
+              aria-label={reviewActive ? "刷新本页面" : presentation.mode === "preview" ? "刷新预览" : "刷新画布"}
               disabled={!refreshAvailable}
               data-tooltip={reviewActive
-                ? "刷新审阅画布"
+                ? "刷新本页面"
                 : presentation.mode === "preview"
                   ? "刷新预览"
                   : "进入预览或审阅后可刷新"}
