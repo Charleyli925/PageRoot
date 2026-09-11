@@ -2400,7 +2400,9 @@
         "^tests/helpers/source-byte-region-oracle\\.mjs$",
         "^tests/(?:clipboard-snapshot|real-html-result-model|real-html-source-scope|real-html-stage-contracts|source-byte-region-oracle|workspace-provenance)\\.test\\.mjs$"
       ],
-      "suites": [],
+      "suites": [
+        "browser-editing-smoke"
+      ],
       "nodeTests": [
         "tests/clipboard-snapshot.test.mjs",
         "tests/real-html-result-model.test.mjs",

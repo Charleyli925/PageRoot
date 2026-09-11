@@ -37,6 +37,22 @@ function suiteIds(plan) {
   return plan.suites.map(({ id }) => id);
 }
 
+test("real HTML observer changes select the paired Browser trust probe", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["tests/e2e/electron/real-html/runtime-observer.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "node-targeted",
+    "build-web",
+    "browser-editing-smoke",
+  ]);
+  assert.ok(plan.selectedNodeTests.includes("tests/real-html-stage-contracts.test.mjs"));
+});
+
 const TASK_OWNER_CASES = [
   {
     file: "app/lib/comment-rail-layout.js",
