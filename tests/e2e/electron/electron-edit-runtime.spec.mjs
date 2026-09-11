@@ -27,7 +27,6 @@ import {
   stopPageRoot,
   tmpdir,
   waitForRuntimeHandoffSettled,
-  waitForProjectReady,
   writeFileSync,
 } from "./electron-native-harness.mjs";
 import { queuedStaticFallbackOracle } from "./queued-static-fallback-oracle.mjs";
@@ -607,6 +606,71 @@ test("author script cannot preclaim a future parser-authored source object", {
     expect(readFileSync(sourcePath, "utf8")).not.toContain(
       '<button id="runtime-preclaim-decoy"',
     );
+  });
+});
+
+test("fixed structure samples prove expected-copyable and expected-non-copyable without fallback", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Fixed copyability</title></head><body>
+  <p data-native-case="copyable" data-test-copyability="expected-copyable">可复制源码元素</p>
+  <div data-native-case="non-copyable" data-test-copyability="expected-non-copyable">
+    运行时子树宿主
+  </div>
+  <script>
+    const generated = document.createElement('span');
+    generated.textContent = '运行时生成内容';
+    document.querySelector('[data-test-copyability="expected-non-copyable"]').append(generated);
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-fixed-copyability-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "copyable");
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    const toolbar = page.getByRole("toolbar");
+    const copyableSelector =
+      '[data-test-copyability="expected-copyable"][data-pageroot-id]';
+    const nonCopyableSelector =
+      '[data-test-copyability="expected-non-copyable"][data-pageroot-id]';
+
+    await expect(frame.locator(copyableSelector)).toHaveCount(1);
+    await expect(frame.locator(nonCopyableSelector)).toHaveCount(1);
+    const originalId = await frame.locator(copyableSelector).getAttribute("data-pageroot-id");
+
+    await frame.locator(copyableSelector).click();
+    const duplicateButton = toolbar.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await expect(editor).toHaveAttribute("data-element-copy-availability", "available");
+    await waitForRuntimeHandoffSettled(page);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator(copyableSelector)).toHaveCount(2);
+    const ids = await frame.locator(copyableSelector).evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-pageroot-id"))
+    ));
+    expect(new Set(ids).size).toBe(2);
+    const duplicateId = ids.find((id) => id && id !== originalId);
+    expect(duplicateId).toBeTruthy();
+
+    await frame.locator(`[data-pageroot-id="${duplicateId}"]`).click();
+    page.once("dialog", (dialog) => dialog.accept());
+    await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
+    await waitForRuntimeHandoffSettled(page);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator(copyableSelector)).toHaveCount(1);
+    expect(await frame.locator(copyableSelector).evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-pageroot-id"))
+    ))).toEqual([originalId]);
+
+    await frame.locator(nonCopyableSelector).click();
+    await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
+    expect(await frame.locator(nonCopyableSelector).evaluate(
+      (element) => element.isContentEditable,
+    )).toBe(false);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });
 

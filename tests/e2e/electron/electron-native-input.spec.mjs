@@ -123,7 +123,9 @@ test("Electron shows continuous source text immediately without rebuilding the i
   }
 });
 
-test("Electron proves one V2 editable-island lane across complex projections", async () => {
+test("Electron fixed real-input sample covers mouse, keyboard, deletion and Enter", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
   const fixture = createSourceFixture("editable-island-lane.html");
   const { electronApp, page, isolatedUserData } = await launchPageRoot({
     activeSourcePath: fixture.sourcePath,
@@ -135,7 +137,14 @@ test("Electron proves one V2 editable-island lane across complex projections", a
       "collapsed-whitespace-copy",
     );
     const controlledCase = "collapsed-whitespace-copy";
-    await frame.locator(caseSelector(controlledCase)).scrollIntoViewIfNeeded();
+    const managedSourcePath = await managedWorkingCopyPath(page, fixture.sourcePath);
+    const initialDocument = await documentToken(frame);
+    const initialGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute("data-frame-generation");
+    const selectedTarget = frame.locator(caseSelector(controlledCase));
+    await selectedTarget.scrollIntoViewIfNeeded();
+    await selectedTarget.click();
+    await expect(selectedTarget).toHaveAttribute("data-html-canvas-selected", "module");
     const beforeGeometry = await geometrySnapshot(frame, controlledCase);
     const controlledTarget = await activateNativeEdit(frame, controlledCase);
     await expect(controlledTarget).toHaveAttribute("contenteditable", "true");
@@ -149,14 +158,41 @@ test("Electron proves one V2 editable-island lane across complex projections", a
     );
     expect(await geometrySnapshot(frame, controlledCase)).toEqual(beforeGeometry);
 
-    await setTextSelection(frame, controlledCase, 0, 4);
-    await electronApp.evaluate(({ clipboard }, text) => {
-      clipboard.writeText(text);
-    }, "<b>Electron纯文字</b>");
-    await page.keyboard.press(keyShortcut("V"));
+    await page.keyboard.insertText("__REAL_BACKSPACE__X");
+    await page.keyboard.press("Backspace");
     await expect.poll(() => controlledTarget.textContent())
-      .toContain("<b>Electron纯文字</b>");
-    expect(await controlledTarget.locator("b").count()).toBe(0);
+      .toContain("__REAL_BACKSPACE__");
+    await expect.poll(() => controlledTarget.textContent())
+      .not.toContain("__REAL_BACKSPACE__X");
+
+    await page.keyboard.insertText("__REAL_DELETE__X");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("Delete");
+    await expect.poll(() => controlledTarget.textContent())
+      .toContain("__REAL_DELETE__");
+    await expect.poll(() => controlledTarget.textContent())
+      .not.toContain("__REAL_DELETE__X");
+
+    await page.keyboard.insertText("__REAL_ENTER_BEFORE__");
+    const breakIdsBefore = await controlledTarget.locator("br[data-pageroot-id]")
+      .evaluateAll((elements) => elements.map(
+        (element) => element.getAttribute("data-pageroot-id"),
+      ).filter(Boolean));
+    await page.keyboard.press("Enter");
+    await page.keyboard.insertText("__REAL_ENTER_LINE__");
+    await expect.poll(() => controlledTarget.textContent())
+      .toContain("__REAL_ENTER_LINE__");
+    await expect.poll(async () => (
+      (await controlledTarget.locator("br[data-pageroot-id]").evaluateAll((elements) => (
+        elements.map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
+      ))).filter((id) => !breakIdsBefore.includes(id)).length
+    )).toBe(1);
+    await expect.poll(() => readPublishedWorkingCopy(managedSourcePath, "utf8"))
+      .toMatch(/__REAL_ENTER_BEFORE__[\s\S]*<br\s+[^>]*data-pageroot-id="pr1_[0-9a-f]{32}"[^>]*>[\s\S]*__REAL_ENTER_LINE__/u);
+    expect(await documentToken(frame)).toBe(initialDocument);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("data-frame-generation", initialGeneration);
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
 
     const secondProjectionCase = "display-contents-copy";
     await activateNativeEdit(page, secondProjectionCase);

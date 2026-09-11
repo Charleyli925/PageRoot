@@ -89,6 +89,40 @@ test("a failed stage propagates later rows as NOT_EXECUTED with an explicit bloc
   assert.equal(model.state, "FAIL");
 });
 
+test("an operation failure blocks every later row in the same file", () => {
+  let model = createResultModel({
+    files: [{
+      id: "page-a.html",
+      stages: [
+        { id: "first", operations: [{ id: "op-1" }, { id: "op-2" }] },
+        { id: "second", operations: [{ id: "op-3" }] },
+      ],
+    }],
+  });
+  const failedOperation = resultRowId.operation("page-a.html", "first", "op-1");
+  model = recordFailure(model, failedOperation, RESULT_REASON_CODES.OPERATION_FAILED, {
+    message: "synthetic operation failure",
+  });
+  const downstream = model.rows.filter((row) => (
+    row.fileId === "page-a.html"
+    && row.order > model.rows.find((candidate) => candidate.id === failedOperation).order
+  ));
+  assert.ok(downstream.length > 0);
+  assert.equal(downstream.every((row) => (
+    row.state === "NOT_EXECUTED"
+    && row.reasonCode === RESULT_REASON_CODES.UPSTREAM_OPERATION_FAILED
+    && row.blockedBy === failedOperation
+  )), true);
+  assert.equal(model.summary.levels.file.denominator, 0);
+  assert.equal(model.summary.levels.stage.denominator, 0);
+  assert.equal(model.summary.levels.operation.denominator, 1);
+  assert.equal(model.summary.levels.operation.failed, 1);
+  assert.throws(
+    () => recordPass(model, resultRowId.operation("page-a.html", "first", "op-2")),
+    /already blocked or not executed/u,
+  );
+});
+
 test("page-specific fixture stays NOT_APPLICABLE and does not become failed coverage", () => {
   let model = createResultModel(plan());
   model = recordPass(model, resultRowId.file("page-a.html"));
@@ -112,9 +146,9 @@ test("file, stage and operation denominators remain independent", () => {
   model = recordPass(model, resultRowId.file("page-a.html"));
   model = recordPass(model, resultRowId.stage("page-a.html", "open"));
   model = recordPass(model, resultRowId.operation("page-a.html", "open", "discover-target"));
-  model = recordFailure(model, resultRowId.operation("page-a.html", "open", "edit-text"), RESULT_REASON_CODES.OPERATION_FAILED);
+  model = recordPass(model, resultRowId.operation("page-a.html", "open", "edit-text"));
   model = recordPass(model, resultRowId.stage("page-a.html", "reopen"));
-  model = recordPass(model, resultRowId.operation("page-a.html", "reopen", "verify-source"));
+  model = recordFailure(model, resultRowId.operation("page-a.html", "reopen", "verify-source"), RESULT_REASON_CODES.OPERATION_FAILED);
   model = finalizeResultModel(model);
   assert.deepEqual(
     Object.fromEntries(Object.entries(model.summary.levels).map(([level, counts]) => [
@@ -182,6 +216,43 @@ test("file-level environment blockers propagate without entering coverage", () =
   ));
 });
 
+test("operation blockers propagate to every later row in the same file", () => {
+  for (const reasonCode of [
+    RESULT_REASON_CODES.MISSING_TARGET,
+    RESULT_REASON_CODES.ENVIRONMENT_BLOCKED,
+  ]) {
+    let model = createResultModel({
+      files: [{
+        id: "blocked-operation-page",
+        stages: [
+          { id: "first", operations: [{ id: "op-1" }, { id: "op-2" }] },
+          { id: "second", operations: [{ id: "op-3" }] },
+        ],
+      }],
+    });
+    const blocker = resultRowId.operation("blocked-operation-page", "first", "op-1");
+    model = recordBlocker(model, blocker, reasonCode, { reason: "direct operation blocker" });
+    const downstream = model.rows.filter((row) => (
+      row.fileId === "blocked-operation-page"
+      && row.id !== blocker
+      && row.order > model.rows.find((candidate) => candidate.id === blocker).order
+    ));
+    assert.ok(downstream.length > 0);
+    assert.equal(downstream.every((row) => (
+      row.state === "NOT_EXECUTED"
+      && row.reasonCode === reasonCode
+      && row.blockedBy === blocker
+    )), true);
+    assert.equal(model.summary.levels.operation.denominator, 0);
+    assert.equal(model.summary.levels.stage.denominator, 0);
+    assert.equal(model.summary.levels.file.denominator, 0);
+    assert.throws(
+      () => recordPass(model, resultRowId.operation("blocked-operation-page", "first", "op-2")),
+      /already blocked or not executed/u,
+    );
+  }
+});
+
 test("not-applicable propagation and validation reject invented or stale states", () => {
   let model = createResultModel({
     files: [{ id: "page", stages: [{ id: "stage", operations: [{ id: "op" }] }] }],
@@ -203,4 +274,33 @@ test("not-applicable propagation and validation reject invented or stale states"
   const stale = structuredClone(model);
   stale.summary = { state: "PASS", levels: {}, reasonCodes: {} };
   assert.throws(() => validateResultModel(stale), /summary does not match rows/iu);
+});
+
+test("applicable files and stages cannot silently produce empty denominators", () => {
+  assert.throws(
+    () => createResultModel({ files: [{ id: "empty.html", stages: [] }] }),
+    (error) => error?.code === "RESULT_PLAN_EMPTY_STAGES",
+  );
+  assert.throws(
+    () => createResultModel({ files: [{ id: "empty.html", stages: [{ id: "stage", operations: [] }] }] }),
+    (error) => error?.code === "RESULT_PLAN_EMPTY_OPERATIONS",
+  );
+  assert.doesNotThrow(() => createResultModel({
+    files: [{ id: "not-applicable.html", applicable: false, stages: [] }],
+  }));
+});
+
+test("rows must exactly reconcile with the immutable file/stage/operation plan", () => {
+  const model = createResultModel(plan());
+  const missing = structuredClone(model);
+  missing.rows.pop();
+  assert.equal(isValidResultModel(missing), false);
+
+  const extra = structuredClone(model);
+  extra.rows.push(structuredClone(extra.rows.at(-1)));
+  assert.equal(isValidResultModel(extra), false);
+
+  const tampered = structuredClone(model);
+  tampered.rows[2].label = "different operation";
+  assert.equal(isValidResultModel(tampered), false);
 });

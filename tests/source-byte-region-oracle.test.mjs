@@ -62,6 +62,18 @@ function regionForReplacement(
     label,
     before: { start: beforeStart, end: beforeStart + beforeNeedle.length },
     after: { start: afterStart, end: afterStart + afterNeedle.length },
+    sourceRange: {
+      selector: `source:${label}`,
+      start: beforeStart,
+      end: beforeStart + beforeNeedle.length,
+      label: `source:${label}`,
+    },
+    domRange: {
+      selector: `[data-test-region="${label}"]`,
+      start: 0,
+      end: 1,
+      label: `dom:${label}`,
+    },
     expectedBefore: beforeNeedle,
     expectedAfter: afterNeedle,
   };
@@ -74,6 +86,73 @@ test("UTF-8 offsets are byte offsets, including BOM, Chinese, emoji and combinin
   assert.equal(utf8ByteOffset(source, 3), 9);
   assert.deepEqual(utf8ByteRange(source, { start: 1, end: 5 }), { start: 3, end: 13 });
   assert.equal(Buffer.byteLength(source.slice(1, 5), "utf8"), 10);
+});
+
+test("UTF-16 ranges fail closed when an offset splits a surrogate pair", () => {
+  const source = "A😀B";
+  assert.equal(utf8ByteOffset(source, 0), 0);
+  assert.equal(utf8ByteOffset(source, 1), 1);
+  assert.equal(utf8ByteOffset(source, 3), 5);
+  assert.equal(utf8ByteOffset(source, 4), 6);
+  assert.throws(
+    () => utf8ByteOffset(source, 2),
+    (error) => error instanceof SourceByteRegionOracleError
+      && error.code === SOURCE_BYTE_ORACLE_REASON_CODES.CODE_UNIT_SURROGATE_BOUNDARY,
+  );
+  assert.throws(
+    () => utf8ByteRange(source, { start: 2, end: 3 }),
+    (error) => error instanceof SourceByteRegionOracleError
+      && error.code === SOURCE_BYTE_ORACLE_REASON_CODES.CODE_UNIT_SURROGATE_BOUNDARY,
+  );
+  assert.throws(
+    () => utf8ByteRange(source, { start: 1, end: 2 }),
+    (error) => error instanceof SourceByteRegionOracleError
+      && error.code === SOURCE_BYTE_ORACLE_REASON_CODES.CODE_UNIT_SURROGATE_BOUNDARY,
+  );
+});
+
+test("allowed regions require exact expectations and source/DOM identity", () => {
+  const before = Buffer.from("SAFE");
+  const after = Buffer.from("EVIL");
+  const ranges = {
+    before: { start: 0, end: before.length },
+    after: { start: 0, end: after.length },
+    sourceRange: { id: "source-safe", start: 0, end: before.length },
+    domRange: { id: "dom-safe", start: 0, end: 1 },
+  };
+  assert.throws(
+    () => compareSourceByteRegions({ before, after, allowedRegions: [ranges] }),
+    (error) => error instanceof SourceByteRegionOracleError
+      && error.code === SOURCE_BYTE_ORACLE_REASON_CODES.REGION_EXPECTATION_REQUIRED,
+  );
+  assert.throws(
+    () => compareSourceByteRegions({
+      before,
+      after,
+      allowedRegions: [{
+        ...ranges,
+        expectedBefore: before,
+        expectedAfter: after,
+        normalizationPolicy: "anything",
+      }],
+    }),
+    (error) => error instanceof SourceByteRegionOracleError
+      && error.code === SOURCE_BYTE_ORACLE_REASON_CODES.REGION_NORMALIZATION_POLICY_INVALID,
+  );
+  assert.throws(
+    () => compareSourceByteRegions({
+      before,
+      after,
+      allowedRegions: [{
+        before: ranges.before,
+        after: ranges.after,
+        expectedBefore: before,
+        expectedAfter: after,
+      }],
+    }),
+    (error) => error instanceof SourceByteRegionOracleError
+      && error.code === SOURCE_BYTE_ORACLE_REASON_CODES.REGION_IDENTITY_REQUIRED,
+  );
 });
 
 test("one allowed replacement preserves exact UTF-8 bytes outside the region", () => {
@@ -112,6 +191,8 @@ test("changed evidence retains the declared source and DOM ranges", () => {
       domRange: { selector: "p", start: 0, end: 1, label: "paragraph" },
       before: { start: beforeStart, end: beforeStart + 3 },
       after: { start: afterStart, end: afterStart + 3 },
+      expectedBefore: "old",
+      expectedAfter: "new",
     }],
   });
   assert.equal(report.ok, true);
@@ -144,6 +225,8 @@ test("CRLF, entities/comments and duplicate tokens are handled by explicit disjo
     label: "middle-section",
     before: { start: middleBeforeStart, end: middleBeforeStart + middleBefore.length },
     after: { start: middleAfterStart, end: middleAfterStart + middleAfter.length },
+    sourceRange: { selector: "source:middle-section", start: middleBeforeStart, end: middleBeforeStart + middleBefore.length },
+    domRange: { selector: "section", start: 0, end: 1, label: "middle-section" },
     expectedBefore: middleBefore,
     expectedAfter: middleAfter,
   };
@@ -182,6 +265,8 @@ test("insertions, deletions and offset shifts stay scoped to paired regions", ()
         kind: "normalize",
         before: { start: alphaBeforeStart, end: alphaBeforeStart + alphaBefore.length },
         after: { start: alphaAfterStart, end: alphaAfterStart + alphaAfter.length },
+        sourceRange: { selector: "source:alpha", start: alphaBeforeStart, end: alphaBeforeStart + alphaBefore.length },
+        domRange: { selector: "[data-test-region=alpha]", start: 0, end: 1 },
         expectedBefore: alphaBefore,
         expectedAfter: alphaAfter,
       },
@@ -190,6 +275,8 @@ test("insertions, deletions and offset shifts stay scoped to paired regions", ()
         kind: "delete",
         before: { start: betaBeforeStart, end: betaBeforeStart + beta.length },
         after: { start: betaAfterStart, end: betaAfterStart },
+        sourceRange: { selector: "source:beta", start: betaBeforeStart, end: betaBeforeStart + beta.length },
+        domRange: { selector: "[data-test-region=beta]", start: 0, end: 1 },
         expectedBefore: beta,
         expectedAfter: Buffer.alloc(0),
       },
@@ -198,6 +285,8 @@ test("insertions, deletions and offset shifts stay scoped to paired regions", ()
         kind: "insert",
         before: { start: before.length, end: before.length },
         after: { start: insertAfterStart, end: after.length },
+        sourceRange: { selector: "source:tail", start: before.length, end: before.length },
+        domRange: { selector: "[data-test-region=tail]", start: 0, end: 1 },
         expectedBefore: Buffer.alloc(0),
         expectedAfter: insert,
       },
@@ -223,12 +312,44 @@ test("invalid region order, overlap and bounds fail closed", () => {
     );
   };
   assertRegionError([
-    { label: "later", before: { start: 7, end: 8 }, after: { start: 7, end: 8 } },
-    { label: "earlier", before: { start: 2, end: 3 }, after: { start: 2, end: 3 } },
+    {
+      label: "later",
+      before: { start: 7, end: 8 },
+      after: { start: 7, end: 8 },
+      sourceRange: { id: "later" },
+      domRange: { id: "later" },
+      expectedBefore: "7",
+      expectedAfter: "7",
+    },
+    {
+      label: "earlier",
+      before: { start: 2, end: 3 },
+      after: { start: 2, end: 3 },
+      sourceRange: { id: "earlier" },
+      domRange: { id: "earlier" },
+      expectedBefore: "2",
+      expectedAfter: "2",
+    },
   ], SOURCE_BYTE_ORACLE_REASON_CODES.REGION_ORDER_INVALID);
   assertRegionError([
-    { label: "one", before: { start: 2, end: 6 }, after: { start: 2, end: 6 } },
-    { label: "two", before: { start: 5, end: 7 }, after: { start: 5, end: 7 } },
+    {
+      label: "one",
+      before: { start: 2, end: 6 },
+      after: { start: 2, end: 6 },
+      sourceRange: { id: "one" },
+      domRange: { id: "one" },
+      expectedBefore: "2345",
+      expectedAfter: "2345",
+    },
+    {
+      label: "two",
+      before: { start: 5, end: 7 },
+      after: { start: 5, end: 7 },
+      sourceRange: { id: "two" },
+      domRange: { id: "two" },
+      expectedBefore: "56",
+      expectedAfter: "56",
+    },
   ], SOURCE_BYTE_ORACLE_REASON_CODES.REGION_OVERLAP);
   assertRegionError([
     { label: "out", before: { start: 2, end: 11 }, after: { start: 2, end: 3 } },
@@ -273,6 +394,10 @@ test("one declared region reports multiple disjoint byte runs independently", ()
       label: "two-character-edits",
       before: { start: 0, end: before.length },
       after: { start: 0, end: after.length },
+      sourceRange: { id: "whole-source", start: 0, end: before.length },
+      domRange: { id: "whole-dom", start: 0, end: 1 },
+      expectedBefore: before,
+      expectedAfter: after,
     }],
   });
   assert.equal(report.ok, true);
@@ -326,6 +451,8 @@ test("declared expected bytes are checked independently from observed bytes", ()
       label: "replacement",
       before: { start: 0, end: before.length },
       after: { start: 0, end: after.length },
+      sourceRange: { id: "replacement-source", start: 0, end: before.length },
+      domRange: { id: "replacement-dom", start: 0, end: 1 },
       expectedBefore: "wrong-before",
       expectedAfter: "wrong-after",
     }],
