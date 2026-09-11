@@ -201,7 +201,8 @@ test("a static non-candidate document does not require Candidate creation", () =
     ordinaryAfter: null,
     reloadBefore: { document: "doc-a", generation: "1" },
     reloadAfter: { document: "doc-b", generation: "2" },
-    candidateApplicable: false,
+    candidateNotApplicableReason:
+      RUNTIME_LIFECYCLE_REASONS.STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE,
     candidateEvidence: null,
   });
   assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_REBUILD].state, "PASS");
@@ -211,6 +212,41 @@ test("a static non-candidate document does not require Candidate creation", () =
     RUNTIME_LIFECYCLE_REASONS.STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE,
   );
   assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_GENERATION].state, "PASS");
+});
+
+test("failed preparation before beginCandidate makes Candidate not applicable", () => {
+  const outcomes = runtimeOperationOutcomes({
+    ordinaryBefore: null,
+    ordinaryAfter: null,
+    reloadBefore: { document: "doc-a", generation: "1" },
+    reloadAfter: { document: "doc-b", generation: "2" },
+    candidateNotApplicableReason:
+      RUNTIME_LIFECYCLE_REASONS.RUNTIME_PREPARATION_FAILED_BEFORE_CANDIDATE,
+    candidateEvidence: null,
+  });
+  assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_REBUILD].state, "PASS");
+  assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE].state, "NOT_APPLICABLE");
+  assert.equal(
+    outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE].details.exactReason,
+    RUNTIME_LIFECYCLE_REASONS.RUNTIME_PREPARATION_FAILED_BEFORE_CANDIDATE,
+  );
+  assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_GENERATION].state, "PASS");
+});
+
+test("an unknown Candidate applicability reason cannot hide missing evidence", () => {
+  const outcomes = runtimeOperationOutcomes({
+    ordinaryBefore: null,
+    ordinaryAfter: null,
+    reloadBefore: { document: "doc-a", generation: "1" },
+    reloadAfter: { document: "doc-b", generation: "2" },
+    candidateNotApplicableReason: "INVENTED_REASON",
+    candidateEvidence: null,
+  });
+  assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE].state, "FAIL");
+  assert.equal(
+    outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE].details.exactReason,
+    RUNTIME_LIFECYCLE_REASONS.CANDIDATE_CREATION_NOT_OBSERVED,
+  );
 });
 
 test("runtime facts fail when edit rebuilds or reload Candidate evidence is absent", () => {

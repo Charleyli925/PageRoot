@@ -1682,6 +1682,17 @@ for (const filename of files) {
     await waitForRuntimeReloadTerminal(page);
     const runtimeObservations = await stopRuntimeLifecycleObservation(page);
     const reloadAfter = await runtimeContractSnapshot(page);
+    const candidateNotApplicableReason = (
+      reloadAfter.runtimePhase === "static"
+      && reloadAfter.runtimeOutcome === "not-candidate"
+    )
+      ? "STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE"
+      : (
+        reloadAfter.runtimePhase === "static-fallback"
+        && reloadAfter.runtimeOutcome === "prepare-failed"
+      )
+        ? "RUNTIME_PREPARATION_FAILED_BEFORE_CANDIDATE"
+        : null;
     row.runtime = {
       ordinaryBefore: null,
       ordinaryAfter: null,
@@ -1694,10 +1705,7 @@ for (const filename of files) {
       ordinaryAfter: null,
       reloadBefore,
       reloadAfter,
-      candidateApplicable: !(
-        reloadAfter.runtimePhase === "static"
-        && reloadAfter.runtimeOutcome === "not-candidate"
-      ),
+      candidateNotApplicableReason,
       candidateEvidence: runtimeObservations.find((observation) => (
         observation.kind === "candidate-created"
         && observation.evidence === "candidate-id-absent-to-present"

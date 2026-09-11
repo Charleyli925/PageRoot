@@ -4,6 +4,7 @@ export const RUNTIME_LIFECYCLE_REASONS = Object.freeze({
   ORDINARY_EDIT_RETAINED_RUNTIME: "ORDINARY_EDIT_RETAINED_RUNTIME",
   NO_CANDIDATE_OBSERVED_AFTER_SETTLE: "NO_CANDIDATE_OBSERVED_AFTER_SETTLE",
   STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE: "STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE",
+  RUNTIME_PREPARATION_FAILED_BEFORE_CANDIDATE: "RUNTIME_PREPARATION_FAILED_BEFORE_CANDIDATE",
   SOURCE_RELOAD_SWITCHED_GENERATION: "SOURCE_RELOAD_SWITCHED_GENERATION",
   NO_DYNAMIC_RUNTIME_FAULT_INJECTED: "NO_DYNAMIC_RUNTIME_FAULT_INJECTED",
   STATIC_FALLBACK_NOT_REQUIRED: "STATIC_FALLBACK_NOT_REQUIRED",
@@ -85,7 +86,7 @@ export function runtimeOperationOutcomes({
   reloadAfter,
   dynamicRecovery = null,
   staticFallback = null,
-  candidateApplicable = true,
+  candidateNotApplicableReason = null,
   candidateEvidence = null,
 } = {}) {
   const ordinary = transition(ordinaryBefore, ordinaryAfter);
@@ -94,6 +95,10 @@ export function runtimeOperationOutcomes({
     && candidateEvidence?.evidence === "candidate-id-absent-to-present"
     && typeof candidateEvidence?.candidateId === "string"
     && candidateEvidence.candidateId.trim() !== "";
+  const candidateNotApplicable = [
+    RUNTIME_LIFECYCLE_REASONS.STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE,
+    RUNTIME_LIFECYCLE_REASONS.RUNTIME_PREPARATION_FAILED_BEFORE_CANDIDATE,
+  ].includes(candidateNotApplicableReason);
   const ordinaryObserved = ordinary.validDocument && ordinary.validGeneration;
   const ordinaryProvided = ordinaryBefore != null || ordinaryAfter != null;
   const ordinaryEvidenceInvalid = ordinaryProvided && !ordinaryObserved;
@@ -176,8 +181,8 @@ export function runtimeOperationOutcomes({
           ordinary,
           reload,
         }),
-    [REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE]: candidateApplicable === false
-      ? notApplicable(RUNTIME_LIFECYCLE_REASONS.STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE, {
+    [REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE]: candidateNotApplicable
+      ? notApplicable(candidateNotApplicableReason, {
         candidateCreated: false,
         candidateEvidence,
       })
