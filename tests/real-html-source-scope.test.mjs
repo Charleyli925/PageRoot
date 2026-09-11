@@ -161,6 +161,39 @@ test("operation-scoped oracle accepts one exact insertion before preserved trail
   assert.equal(report.appendedByteRange.end - report.appendedByteRange.start, 6);
 });
 
+test("operation-scoped oracle rejects an outside byte change around an otherwise exact insertion", () => {
+  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<main data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}">Original\n  </p></main>`;
+  const after = `<main class="changed" data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}">Original TOKEN\n  </p></main>`;
+  const report = compareElementScopedMutation({
+    before,
+    after,
+    sourceId: SOURCE_ID,
+    normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
+    expectedAfterContains: ["TOKEN"],
+    expectedAppendedPattern: / TOKEN/u,
+  });
+  assert.equal(report.ok, false);
+  assert.equal(report.outsideUnchanged, false);
+  assert.equal(report.preservedBeforeContent, true);
+});
+
+test("operation-scoped oracle rejects replacement even when the expected marker is present", () => {
+  const before = `<p data-pageroot-id="${SOURCE_ID}">Original\n  </p>`;
+  const after = `<p data-pageroot-id="${SOURCE_ID}">Replaced TOKEN\n  </p>`;
+  const report = compareElementScopedMutation({
+    before,
+    after,
+    sourceId: SOURCE_ID,
+    normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
+    expectedAfterContains: ["TOKEN"],
+    expectedAppendedPattern: / TOKEN/u,
+  });
+  assert.equal(report.ok, false);
+  assert.equal(report.outsideUnchanged, true);
+  assert.equal(report.preservedBeforeContent, false);
+});
+
 test("format oracle permits only the Stable ID and three requested declarations", () => {
   const before = `<p data-pageroot-id="${SOURCE_ID}">Original</p>`;
   const marker = "PRQA_0_FORMAT";
