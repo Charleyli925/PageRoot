@@ -195,6 +195,24 @@ test("runtime rebuild uses its own reload baseline when no A-stage continuity pa
   );
 });
 
+test("a static non-candidate document does not require Candidate creation", () => {
+  const outcomes = runtimeOperationOutcomes({
+    ordinaryBefore: null,
+    ordinaryAfter: null,
+    reloadBefore: { document: "doc-a", generation: "1" },
+    reloadAfter: { document: "doc-b", generation: "2" },
+    candidateApplicable: false,
+    candidateEvidence: null,
+  });
+  assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_REBUILD].state, "PASS");
+  assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE].state, "NOT_APPLICABLE");
+  assert.equal(
+    outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE].details.exactReason,
+    RUNTIME_LIFECYCLE_REASONS.STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE,
+  );
+  assert.equal(outcomes[REAL_HTML_OPERATION_IDS.RUNTIME_GENERATION].state, "PASS");
+});
+
 test("runtime facts fail when edit rebuilds or reload Candidate evidence is absent", () => {
   const ordinaryRebuild = runtimeOperationOutcomes({
     ordinaryBefore: { document: "doc-a", generation: "1" },
