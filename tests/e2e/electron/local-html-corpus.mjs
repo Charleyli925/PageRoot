@@ -63,6 +63,7 @@ import {
   createTargetRef,
 } from "../../../app/lib/source-patch-core.js";
 import { isEditableIslandTarget } from "../../../app/lib/editable-island.js";
+import { isTransparentSourceTextElement } from "../../../app/lib/source-text-map.js";
 
 const corpus = process.env.PAGEROOT_REAL_HTML_DIR;
 if (!corpus) {
@@ -586,25 +587,49 @@ async function clickAuthoredTab(page, tabId) {
   await page.waitForTimeout(200);
 }
 
-function editableSourceElementIds(sourceBytes) {
+function editableSourceElementCapabilities(sourceBytes) {
   const index = buildPatchSourceIndex(sourceBytes.toString("utf8"));
-  return new Set(index.elements.flatMap((element) => {
+  return index.elements.flatMap((element) => {
     if (!element.textContent?.trim()) return [];
     const targetRef = createTargetRef(index, element, { level: "subregion" });
-    return isEditableIslandTarget(index, targetRef).editable
-      ? [element.pagerootId || element.nodeId]
-      : [];
-  }));
+    if (!isEditableIslandTarget(index, targetRef).editable) return [];
+    const parent = element.parentId ? index.byNodeId.get(element.parentId) : null;
+    return [{
+      id: element.pagerootId || element.nodeId,
+      parentId: parent?.type === "element" ? parent.pagerootId || null : null,
+      transparent: isTransparentSourceTextElement(element.tagName),
+    }];
+  });
 }
 
-async function captureTextTargetSnapshots(page, allowedSourceIds, tabId) {
+async function captureTextTargetSnapshots(page, sourceCapabilities, tabId) {
   const frame = await currentEditorFrame(page);
   // `evaluateAll` serializes only the callback itself, so the descriptor is
   // intentionally called inline through its self-contained function source.
-  const snapshots = await frame.locator(TEXT_TARGET_SELECTOR).evaluateAll((elements, allowedIds) => {
-    const allowed = new Set(allowedIds);
+  const snapshots = await frame.locator(TEXT_TARGET_SELECTOR).evaluateAll((elements, capabilities) => {
+    const allowed = new Map(capabilities.map((capability) => [capability.id, capability]));
+    const nativeHostFor = (hitElement) => {
+      let candidate = hitElement.closest("[data-pageroot-id]");
+      let nearestSafeCandidate = null;
+      while (candidate) {
+        const id = candidate.getAttribute("data-pageroot-id");
+        const capability = allowed.get(id);
+        if (!capability) return null;
+        const parent = candidate.parentElement?.closest("[data-pageroot-id]") || null;
+        if ((parent?.getAttribute("data-pageroot-id") || null) !== capability.parentId) return null;
+        nearestSafeCandidate = candidate;
+        const display = candidate.ownerDocument.defaultView
+          ?.getComputedStyle(candidate).display.toLowerCase() || "";
+        const climbThrough = candidate.localName === "br" || (
+          capability.transparent && (display === "inline" || display === "contents")
+        );
+        if (!climbThrough) break;
+        candidate = parent;
+      }
+      return nearestSafeCandidate;
+    };
     return (
-    elements.map((element) => {
+    elements.map((hitElement) => nativeHostFor(hitElement)).filter(Boolean).map((element) => {
       const view = element.ownerDocument.defaultView;
       const style = view?.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -666,7 +691,7 @@ async function captureTextTargetSnapshots(page, allowedSourceIds, tabId) {
       };
     })
     );
-  }, allowedSourceIds);
+  }, sourceCapabilities);
   return snapshots
     .filter((snapshot) => snapshot.visible && snapshot.sourceEditable)
     .map((snapshot) => ({ ...snapshot, tabId }));
@@ -676,7 +701,7 @@ async function planTextTargets(page, workingCopyPath, {
   limit = TEXT_TARGET_COUNT,
   requireFormatTarget = true,
 } = {}) {
-  const allowedSourceIds = [...editableSourceElementIds(readFileSync(workingCopyPath))];
+  const sourceCapabilities = editableSourceElementCapabilities(readFileSync(workingCopyPath));
   const initialFrame = await currentEditorFrame(page);
   const tabs = await initialFrame.locator(
     '[role="tab"][aria-controls][data-pageroot-id]',
@@ -689,7 +714,7 @@ async function planTextTargets(page, workingCopyPath, {
   const snapshots = [];
   for (const tabId of tabs.length > 0 ? tabs : [null]) {
     await clickAuthoredTab(page, tabId);
-    snapshots.push(...await captureTextTargetSnapshots(page, allowedSourceIds, tabId));
+    snapshots.push(...await captureTextTargetSnapshots(page, sourceCapabilities, tabId));
   }
   const fixed = createFixedTextTargetPlan(snapshots, { limit, requireFormatTarget });
   if (!fixed.ok) {
