@@ -465,7 +465,7 @@ A 仅从当前可见且通过 `isEditableIslandTarget` 源码资格检查的节�
 
 B 只接受测试显式标注且唯一的 `expected-copyable` / `expected-non-copyable`，缺少页面专用标记记为 `NOT_APPLICABLE`，重复或能力不符直接失败，禁止换目标直到成功；复制与删除分别冻结固定 selector 的 Stable ID 集合并独立记账。C 使用自己的最小文字目标和 reload baseline，分别记录 iframe Document 重建、clean absent 前置条件后的 Candidate 创建事件、单调递增的 generation、dynamic recovery、static fallback、重载后重入、viewport、项目重开与原件 Hash，不复用 A 的 Stable ID，也不以“仍可编辑”或另一项生命周期事实代替 Runtime 恢复。
 
-每一行只允许 `PASS`、`FAIL`、`NOT_APPLICABLE`、`NOT_EXECUTED`。操作失败只把同阶段内依赖它的后续项记为 `NOT_EXECUTED`；A、B、C 彼此仍须独立执行并分别结算。报告同时给出文件、阶段、操作三级分母和覆盖率，不能把未执行项目计为覆盖。每项 A 操作都在自己的 accepted baseline 前后立即核对 Stable-ID 元素之外的 UTF-8 bytes 完全不变，并用封闭的规范化策略及独立 contains/excludes 语义检查元素内部；额外的精确替换 Oracle 仍要求调用方独立声明 edit subrange 的 exact before/after。Oracle 失败报告必须保留每个布尔条件和发生变化的 offset/length 范围，但不得包含源码片段、原始 byte 值或私人路径。报告的 workspace source Hash 覆盖 HEAD、staged、unstaged 和 untracked 内容，避免未跟踪 runner 模块脱离证据来源。
+每一行只允许 `PASS`、`FAIL`、`NOT_APPLICABLE`、`NOT_EXECUTED`。操作失败只把同阶段内依赖它的后续项记为 `NOT_EXECUTED`；A、B、C 彼此仍须独立执行并分别结算。报告同时给出文件、阶段、操作三级分母和覆盖率，不能把未执行项目计为覆盖。每项 A 变更都在自己的 accepted baseline 前后立即核对 Stable-ID 元素之外的 UTF-8 bytes 完全不变，并用封闭的规范化策略及独立 contains/excludes 语义检查元素内部；`source-scope` 结果只汇总这些已完成操作的 Oracle，不再额外修改一次 HTML。Oracle 失败报告必须保留每个布尔条件和发生变化的 offset/length 范围，但不得包含源码片段、原始 byte 值或私人路径。报告的 workspace source Hash 覆盖 HEAD、staged、unstaged 和 untracked 内容，避免未跟踪 runner 模块脱离证据来源。
 
 原件只读，测试必须使用独立项目、用户数据目录和 HTML 副本，并核对原件 Hash。相关场景包含连续格式化、继续输入、撤销重做、切换页面、重新加载、保存后重开；绑定被测源码版本，分别记录计划、执行、通过、失败、跳过和未覆盖项。外部语料缺失时报告验收未完成，不回退到简单自造页面并宣称通过。私人 HTML、路径、截图和日志仅留本机；CI 的合成测试通过不等同于本地真实文档验收通过。
 
