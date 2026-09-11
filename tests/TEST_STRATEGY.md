@@ -461,7 +461,7 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 
 `PAGEROOT_REAL_HTML_DIR` 指向该语料目录后，运行 `npm run test:real-html:electron`；缺少目录或空目录直接失败，完整结果与截图写入系统临时目录，不进入 Git。该入口先冻结文件 / 阶段 / 操作计划，再明确分为 A 文字编辑、B 元素结构、C Runtime/iframe 三类。每类开始前都恢复自己的本地副本并启动独立 Electron session，不继承前一类的 Selection、编辑 session、Candidate 或 iframe generation。
 
-A 仅从当前可见且通过 `isEditableIslandTarget` 源码资格检查的节点中，按固定 authored-tab 顺序冻结少量唯一 Stable ID；执行每个动作前重新验证 Stable ID、源码宿主、可见性和能力，计划后禁止启发式换目标。A 使用真实鼠标与键盘覆盖激活、输入、Backspace/Delete、Enter、在系统剪贴板为空的安全前置条件下执行并回读确认的纯文本粘贴、Undo/Redo、格式和源码范围，不要求同一宿主可复制；格式样本必须明确从未加粗、未斜体、无下划线开始，并分别验证 off 到 on。任何非空剪贴板会在修改前只把 Paste 记为 `NOT_APPLICABLE`，留给独立的系统剪贴板验收，不阻断同文件的后续操作。上述动作按 operation-major 顺序执行并即时记账，不能从已完成宿主数猜测失败动作。
+A 仅从当前可见且通过 `isEditableIslandTarget` 源码资格检查的节点中，按产品相同的源码父级和透明内联规则解析出实际 Native Edit 宿主，再按固定 authored-tab 顺序冻结少量唯一 Stable ID；执行每个动作前重新验证 Stable ID、源码宿主、可见性和能力，计划后禁止启发式换目标。A 使用真实鼠标与键盘覆盖激活、输入、Backspace/Delete、Enter、在系统剪贴板为空的安全前置条件下执行并回读确认的纯文本粘贴、Undo/Redo、格式和源码范围，不要求同一宿主可复制；格式样本必须明确从未加粗、未斜体、无下划线开始，并分别验证 off 到 on。任何非空剪贴板会在修改前只把 Paste 记为 `NOT_APPLICABLE`，留给独立的系统剪贴板验收，不阻断同文件的后续操作。上述动作按 operation-major 顺序执行并即时记账，不能从已完成宿主数猜测失败动作。
 
 B 只接受测试显式标注且唯一的 `expected-copyable` / `expected-non-copyable`，缺少页面专用标记记为 `NOT_APPLICABLE`，重复或能力不符直接失败，禁止换目标直到成功；复制与删除分别冻结固定 selector 的 Stable ID 集合并独立记账。C 使用自己的最小文字目标和 reload baseline，分别记录 iframe Document 重建、clean absent 前置条件后的 Candidate 创建事件、单调递增的 generation、dynamic recovery、static fallback、重载后重入、viewport、项目重开与原件 Hash，不复用 A 的 Stable ID，也不以“仍可编辑”或另一项生命周期事实代替 Runtime 恢复。
 
