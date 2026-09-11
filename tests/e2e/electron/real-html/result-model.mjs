@@ -252,11 +252,20 @@ function descendants(rows, parent) {
 }
 
 function downstreamRows(rows, sourceRow) {
-  if (sourceRow.level === "file" || sourceRow.level === "stage") {
+  if (sourceRow.level === "file") {
     return rows.filter((row) => row.fileId === sourceRow.fileId && row.order > sourceRow.order);
   }
-  if (sourceRow.level === "operation") {
-    return rows.filter((row) => row.fileId === sourceRow.fileId && row.order > sourceRow.order);
+  // A, B and C are independent categories.  A stage failure may only block
+  // work that belongs to that same category; it must never turn a later
+  // category into NOT_EXECUTED.  Operation failures retain the same boundary
+  // because their remaining operations are the only rows with an implicit
+  // sequential dependency in this plan.
+  if (sourceRow.level === "stage" || sourceRow.level === "operation") {
+    return rows.filter((row) => (
+      row.fileId === sourceRow.fileId
+      && row.stageId === sourceRow.stageId
+      && row.order > sourceRow.order
+    ));
   }
   return [];
 }
