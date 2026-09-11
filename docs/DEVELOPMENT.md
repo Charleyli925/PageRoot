@@ -193,7 +193,9 @@ Desktop IPC modules each have their own owner so a leaf change does not
 reselect the old wide union. Task canaries are Playwright tags such as
 `@smoke-editing`; the original global `@gate-smoke` union remains the `main`
 lane smoke. Ready PRs still run `node-full`, `browser-full`, `electron-full`,
-`ai-closed-loop` and `real-html`. After the selected local gate has passed,
+`ai-closed-loop` and `dom-editing-compatibility`. The synthetic scan runs through
+`npm run test:dom-editing-compatibility`; it does not replace the opt-in
+private-corpus Electron acceptance. After the selected local gate has passed,
 do not rerun the complete matrix or packaging unless the diff changed, a check
 failed, or a specific unresolved risk remains. Node passing does not prove
 Enter, IME, caret or iframe continuity.

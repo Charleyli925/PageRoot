@@ -21,6 +21,7 @@ export const RESULT_REASON_CODES = Object.freeze({
   NOT_STARTED: "NOT_STARTED",
   UPSTREAM_STAGE_FAILED: "UPSTREAM_STAGE_FAILED",
   UPSTREAM_FILE_FAILED: "UPSTREAM_FILE_FAILED",
+  UPSTREAM_OPERATION_FAILED: "UPSTREAM_OPERATION_FAILED",
   PAGE_NOT_APPLICABLE: "PAGE_NOT_APPLICABLE",
   STAGE_NOT_APPLICABLE: "STAGE_NOT_APPLICABLE",
   OPERATION_NOT_APPLICABLE: "OPERATION_NOT_APPLICABLE",
@@ -41,6 +42,7 @@ const BLOCKING_REASON_CODES = new Set([
   RESULT_REASON_CODES.ENVIRONMENT_BLOCKED,
   RESULT_REASON_CODES.UPSTREAM_STAGE_FAILED,
   RESULT_REASON_CODES.UPSTREAM_FILE_FAILED,
+  RESULT_REASON_CODES.UPSTREAM_OPERATION_FAILED,
   RESULT_REASON_CODES.NOT_EXECUTED,
   RESULT_REASON_CODES.NOT_STARTED,
 ]);
@@ -121,6 +123,11 @@ function normalizePlan(plan) {
     });
     const fileApplicability = normalizeApplicability(file, RESULT_REASON_CODES.PAGE_NOT_APPLICABLE);
     const stages = Array.isArray(file.stages) ? file.stages : [];
+    if (fileApplicability.applicable && stages.length === 0) {
+      fail("RESULT_PLAN_EMPTY_STAGES", "An applicable file must declare at least one stage.", {
+        fileId: fileSourceId,
+      });
+    }
     return {
       id: fileSourceId,
       label: typeof file.label === "string" ? file.label : fileSourceId,
@@ -147,6 +154,13 @@ function normalizePlan(plan) {
           : Array.isArray(stage.actions)
             ? stage.actions
             : [];
+        if (fileApplicability.applicable && stageApplicability.applicable && operations.length === 0) {
+          fail(
+            "RESULT_PLAN_EMPTY_OPERATIONS",
+            "An applicable stage must declare at least one operation.",
+            { fileId: fileSourceId, stageId: stageSourceId },
+          );
+        }
         return {
           id: stageSourceId,
           label: typeof stage.label === "string" ? stage.label : stageSourceId,
@@ -239,6 +253,9 @@ function descendants(rows, parent) {
 
 function downstreamRows(rows, sourceRow) {
   if (sourceRow.level === "file" || sourceRow.level === "stage") {
+    return rows.filter((row) => row.fileId === sourceRow.fileId && row.order > sourceRow.order);
+  }
+  if (sourceRow.level === "operation") {
     return rows.filter((row) => row.fileId === sourceRow.fileId && row.order > sourceRow.order);
   }
   return [];
@@ -417,6 +434,20 @@ export const RESULT_MODEL_SCHEMA = Object.freeze({
  */
 export function createResultModel(plan, options = {}) {
   const normalizedPlan = normalizePlan(plan);
+  const rows = buildPlannedRows(normalizedPlan);
+  const model = {
+    schemaVersion: RESULT_MODEL_SCHEMA_VERSION,
+    state: recomputeModelState({ rows }),
+    plan: normalizedPlan,
+    rows,
+    summary: null,
+    metadata: stableMetadata(options.metadata),
+  };
+  validateResultModel(model);
+  return model;
+}
+
+function buildPlannedRows(normalizedPlan) {
   const rows = [];
   let order = 0;
   for (const file of normalizedPlan.files) {
@@ -473,16 +504,7 @@ export function createResultModel(plan, options = {}) {
       }
     }
   }
-  const model = {
-    schemaVersion: RESULT_MODEL_SCHEMA_VERSION,
-    state: recomputeModelState({ rows }),
-    plan: normalizedPlan,
-    rows,
-    summary: null,
-    metadata: stableMetadata(options.metadata),
-  };
-  validateResultModel(model);
-  return model;
+  return rows;
 }
 
 /**
@@ -506,8 +528,12 @@ export function recordResult(model, selector, outcomeValue) {
     blockRows(next.rows, updated, RESULT_REASON_CODES.UPSTREAM_FILE_FAILED);
   } else if (updated.state === "FAIL" && updated.level === "stage") {
     blockRows(next.rows, updated, RESULT_REASON_CODES.UPSTREAM_STAGE_FAILED);
+  } else if (updated.state === "FAIL" && updated.level === "operation") {
+    blockRows(next.rows, updated, RESULT_REASON_CODES.UPSTREAM_OPERATION_FAILED);
   } else if (updated.state === "NOT_EXECUTED" && (
-    updated.level === "file" || updated.level === "stage"
+    updated.level === "file"
+    || updated.level === "stage"
+    || updated.level === "operation"
   ) && (
     updated.reasonCode === RESULT_REASON_CODES.MISSING_TARGET
     || updated.reasonCode === RESULT_REASON_CODES.ENVIRONMENT_BLOCKED
@@ -547,23 +573,11 @@ export function recordFailure(model, rowIdValue, reasonCode, details = null) {
  * the same semantic outcome and remain visible in their own denominators.
  */
 export function recordNotApplicable(model, rowIdValue, reasonCode, details = null) {
-  const next = recordResult(model, rowIdValue, {
+  return recordResult(model, rowIdValue, {
     state: "NOT_APPLICABLE",
     reasonCode,
     details,
   });
-  const source = next.rows.find((row) => row.id === rowIdValue);
-  for (const row of descendants(next.rows, source)) {
-    if (row.state !== "NOT_EXECUTED" || row.reasonCode !== RESULT_REASON_CODES.NOT_STARTED) continue;
-    row.state = "NOT_APPLICABLE";
-    row.reasonCode = reasonCode;
-    row.blockedBy = null;
-    row.details = details == null ? null : clone(details);
-  }
-  next.state = recomputeModelState(next);
-  next.summary = summarizeResultModel(next);
-  validateResultModel(next);
-  return next;
 }
 
 /**
@@ -630,11 +644,51 @@ export function validateResultModel(model, { skipSummary = false } = {}) {
     });
   }
   assertKnownState(model.state);
+  if (!model.plan || typeof model.plan !== "object" || Array.isArray(model.plan)) {
+    fail("RESULT_PLAN_REQUIRED", "A result model must retain its complete result plan.");
+  }
+  const normalizedPlan = normalizePlan(model.plan);
+  const plannedRows = buildPlannedRows(normalizedPlan);
   if (!Array.isArray(model.rows)) fail("RESULT_ROWS_INVALID", "Result model rows must be an array.");
+  if (model.rows.length !== plannedRows.length) {
+    fail("RESULT_ROWS_PLAN_MISMATCH", "Result rows must exactly match the planned rows.", {
+      plannedRowCount: plannedRows.length,
+      actualRowCount: model.rows.length,
+    });
+  }
   const ids = new Set();
   let previousOrder = 0;
-  for (const row of model.rows) {
+  for (const [rowIndex, row] of model.rows.entries()) {
     if (!row || typeof row !== "object") fail("RESULT_ROW_INVALID", "Each result row must be an object.");
+    const planned = plannedRows[rowIndex];
+    if (!planned) {
+      fail("RESULT_ROWS_PLAN_MISMATCH", "Result rows contain an unplanned row.", { rowIndex });
+    }
+    for (const field of [
+      "id", "level", "sourceId", "fileId", "stageId", "operationId", "order", "label", "planned",
+      "applicable",
+    ]) {
+      if (row[field] !== planned[field]) {
+        fail("RESULT_ROW_PLAN_MISMATCH", `Result row ${row.id || rowIndex} does not match its plan.`, {
+          rowIndex,
+          field,
+          actual: row[field],
+          expected: planned[field],
+        });
+      }
+    }
+    if (JSON.stringify(row.metadata ?? {}) !== JSON.stringify(planned.metadata ?? {})) {
+      fail("RESULT_ROW_PLAN_MISMATCH", `Result row ${row.id || rowIndex} metadata does not match its plan.`, {
+        rowIndex,
+      });
+    }
+    if (!planned.applicable && row.reasonCode !== planned.reasonCode) {
+      fail("RESULT_ROW_PLAN_MISMATCH", `Result row ${row.id || rowIndex} applicability reason drifted.`, {
+        rowIndex,
+        actual: row.reasonCode,
+        expected: planned.reasonCode,
+      });
+    }
     asNonEmptyString(row.id, "row.id");
     if (ids.has(row.id)) fail("RESULT_ROW_DUPLICATE", `Duplicate result row ${row.id}.`, { rowId: row.id });
     ids.add(row.id);
@@ -684,6 +738,11 @@ export function validateResultModel(model, { skipSummary = false } = {}) {
       }
       if (row.reasonCode === RESULT_REASON_CODES.UPSTREAM_FILE_FAILED && !row.blockedBy) {
         fail("RESULT_BLOCKED_BY_REQUIRED", "Upstream file propagation requires blockedBy.", {
+          rowId: row.id,
+        });
+      }
+      if (row.reasonCode === RESULT_REASON_CODES.UPSTREAM_OPERATION_FAILED && !row.blockedBy) {
+        fail("RESULT_BLOCKED_BY_REQUIRED", "Upstream operation propagation requires blockedBy.", {
           rowId: row.id,
         });
       }

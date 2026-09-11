@@ -695,7 +695,10 @@ test("real-HTML gate changes run the discovery oracle instead of an unrelated sm
     lane: "task",
     changedFiles: ["tests/e2e/browser/real-complex-html.gate.mjs"],
   });
-  assert.deepEqual(suiteIds(plan), ["typecheck", "lint", "build-web", "real-html"]);
+  assert.deepEqual(
+    suiteIds(plan),
+    ["typecheck", "lint", "build-web", "dom-editing-compatibility"],
+  );
 });
 
 test("real-HTML result and byte oracles select their focused Node tests", () => {
@@ -708,10 +711,24 @@ test("real-HTML result and byte oracles select their focused Node tests", () => 
     ],
   });
   assert.deepEqual(plan.selectedNodeTests, [
+    "tests/clipboard-snapshot.test.mjs",
     "tests/real-html-result-model.test.mjs",
+    "tests/real-html-source-scope.test.mjs",
+    "tests/real-html-stage-contracts.test.mjs",
     "tests/source-byte-region-oracle.test.mjs",
+    "tests/workspace-provenance.test.mjs",
   ]);
   assert.deepEqual(suiteIds(plan), ["node-targeted"]);
+
+  for (const changedFile of [
+    "tests/e2e/electron/helpers/clipboard-snapshot.mjs",
+    "tests/e2e/electron/local-html-corpus.mjs",
+  ]) {
+    const runnerPlan = selectGatePlan({ map, lane: "edit", changedFiles: [changedFile] });
+    assert.equal(runnerPlan.selectedNodeTests.includes("tests/clipboard-snapshot.test.mjs"), true);
+    assert.equal(runnerPlan.selectedNodeTests.includes("tests/real-html-source-scope.test.mjs"), true);
+    assert.equal(runnerPlan.selectedNodeTests.includes("tests/real-html-stage-contracts.test.mjs"), true);
+  }
 });
 
 test("the shared fixture driver schedules both browser and Electron smoke", () => {
@@ -844,7 +861,7 @@ test("release and artifact lanes use complete automated coverage and never smoke
     "build-web",
     "node-full",
     "browser-full",
-    "real-html",
+    "dom-editing-compatibility",
     "build-desktop",
     "electron-full",
     "ai-closed-loop",

@@ -19,9 +19,13 @@ export const SOURCE_BYTE_ORACLE_REASON_CODES = Object.freeze({
   REGION_RANGE_INVALID: "REGION_RANGE_INVALID",
   REGION_EXPECTED_BEFORE_MISMATCH: "REGION_EXPECTED_BEFORE_MISMATCH",
   REGION_EXPECTED_AFTER_MISMATCH: "REGION_EXPECTED_AFTER_MISMATCH",
+  REGION_EXPECTATION_REQUIRED: "REGION_EXPECTATION_REQUIRED",
+  REGION_IDENTITY_REQUIRED: "REGION_IDENTITY_REQUIRED",
+  REGION_NORMALIZATION_POLICY_INVALID: "REGION_NORMALIZATION_POLICY_INVALID",
   OUTSIDE_RANGE_CHANGED: "OUTSIDE_RANGE_CHANGED",
   OUTSIDE_RANGE_LENGTH_MISMATCH: "OUTSIDE_RANGE_LENGTH_MISMATCH",
   IDENTITY_BASELINE_MISMATCH: "IDENTITY_BASELINE_MISMATCH",
+  CODE_UNIT_SURROGATE_BOUNDARY: "CODE_UNIT_SURROGATE_BOUNDARY",
 });
 
 export class SourceByteRegionOracleError extends Error {
@@ -105,6 +109,35 @@ function optionalLabel(region, key, nestedKey) {
     return nested.label;
   }
   return null;
+}
+
+const RANGE_IDENTITY_FIELDS = Object.freeze([
+  "id",
+  "identity",
+  "nodeId",
+  "sourceId",
+  "domId",
+  "selector",
+  "path",
+  "label",
+  "name",
+]);
+
+function hasRangeIdentity(value) {
+  return RANGE_IDENTITY_FIELDS.some((field) => (
+    typeof value?.[field] === "string" && value[field].trim() !== ""
+  ));
+}
+
+function normalizeIdentityRange(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !hasRangeIdentity(value)) {
+    fail(
+      SOURCE_BYTE_ORACLE_REASON_CODES.REGION_IDENTITY_REQUIRED,
+      `${label} must include source/DOM range identity metadata.`,
+      { label },
+    );
+  }
+  return { ...value };
 }
 
 function validateOrderedRanges(regions, side, byteLength) {
@@ -266,26 +299,67 @@ function normalizeRegion(region, index, beforeLength, afterLength) {
   const label = regionLabel(region, index);
   const beforeRange = asRange(rangeSource(region, "before"), `${label}.before`, beforeLength);
   const afterRange = asRange(rangeSource(region, "after"), `${label}.after`, afterLength);
+  const sourceRange = normalizeIdentityRange(region.sourceRange, `${label}.sourceRange`);
+  const domRange = normalizeIdentityRange(region.domRange, `${label}.domRange`);
+  const expectedBeforeDeclared = Object.hasOwn(region, "expectedBefore")
+    || Object.hasOwn(region, "beforeBytes");
+  const expectedAfterDeclared = Object.hasOwn(region, "expectedAfter")
+    || Object.hasOwn(region, "afterBytes");
+  const expectedBeforeValue = Object.hasOwn(region, "expectedBefore")
+    ? region.expectedBefore
+    : region.beforeBytes;
+  const expectedAfterValue = Object.hasOwn(region, "expectedAfter")
+    ? region.expectedAfter
+    : region.afterBytes;
+  const expectedBeforePresent = expectedBeforeDeclared
+    && expectedBeforeValue !== null
+    && expectedBeforeValue !== undefined;
+  const expectedAfterPresent = expectedAfterDeclared
+    && expectedAfterValue !== null
+    && expectedAfterValue !== undefined;
+  if (
+    (expectedBeforeDeclared || expectedAfterDeclared)
+    && !(expectedBeforePresent && expectedAfterPresent)
+  ) {
+    fail(
+      SOURCE_BYTE_ORACLE_REASON_CODES.REGION_EXPECTATION_REQUIRED,
+      `${label} must declare both expectedBefore and expectedAfter bytes together.`,
+      { label },
+    );
+  }
+  if (!(expectedBeforePresent && expectedAfterPresent)) {
+    fail(
+      SOURCE_BYTE_ORACLE_REASON_CODES.REGION_EXPECTATION_REQUIRED,
+      `${label} must declare exact expectedBefore and expectedAfter bytes.`,
+      { label },
+    );
+  }
+  // The oracle intentionally has no open-ended normalization hook.  A
+  // caller computes any required normalization before invoking this module
+  // and declares the resulting exact bytes instead.
+  if (region.normalizationPolicy != null) {
+    fail(
+      SOURCE_BYTE_ORACLE_REASON_CODES.REGION_NORMALIZATION_POLICY_INVALID,
+      `${label}.normalizationPolicy is unsupported; declare exact expected bytes.`,
+      { label },
+    );
+  }
   return {
     index,
     label,
     kind: typeof region.kind === "string" ? region.kind : "replace",
     sourceLabel: optionalLabel(region, "sourceLabel", "sourceRange"),
     domLabel: optionalLabel(region, "domLabel", "domRange"),
-    sourceRange: region.sourceRange && typeof region.sourceRange === "object"
-      ? { ...region.sourceRange }
-      : null,
-    domRange: region.domRange && typeof region.domRange === "object"
-      ? { ...region.domRange }
-      : null,
+    sourceRange,
+    domRange,
     before: beforeRange,
     after: afterRange,
     expectedBefore: optionalBytes(
-      region.expectedBefore ?? region.beforeBytes,
+      expectedBeforePresent ? expectedBeforeValue : null,
       `${label}.expectedBefore`,
     ),
     expectedAfter: optionalBytes(
-      region.expectedAfter ?? region.afterBytes,
+      expectedAfterPresent ? expectedAfterValue : null,
       `${label}.expectedAfter`,
     ),
   };
@@ -340,6 +414,20 @@ export function utf8ByteOffset(source, codeUnitOffset) {
       codeUnitOffset,
       codeUnitLength: text.length,
     });
+  }
+  if (
+    codeUnitOffset > 0
+    && codeUnitOffset < text.length
+    && text.charCodeAt(codeUnitOffset - 1) >= 0xd800
+    && text.charCodeAt(codeUnitOffset - 1) <= 0xdbff
+    && text.charCodeAt(codeUnitOffset) >= 0xdc00
+    && text.charCodeAt(codeUnitOffset) <= 0xdfff
+  ) {
+    fail(
+      SOURCE_BYTE_ORACLE_REASON_CODES.CODE_UNIT_SURROGATE_BOUNDARY,
+      "codeUnitOffset must not split a UTF-16 surrogate pair.",
+      { codeUnitOffset, codeUnitLength: text.length },
+    );
   }
   return Buffer.byteLength(text.slice(0, codeUnitOffset), "utf8");
 }
