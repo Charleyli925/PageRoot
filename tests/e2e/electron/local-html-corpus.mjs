@@ -55,7 +55,7 @@ import {
 } from "./real-html/source-scope.mjs";
 import { workspaceSourceFingerprint } from "./real-html/workspace-provenance.mjs";
 import {
-  buildSourceIndex,
+  buildSourceIndex as buildPatchSourceIndex,
   createTargetRef,
 } from "../../../app/lib/source-patch-core.js";
 import { isEditableIslandTarget } from "../../../app/lib/editable-island.js";
@@ -445,7 +445,7 @@ async function clickAuthoredTab(page, tabId) {
 }
 
 function editableSourceElementIds(sourceBytes) {
-  const index = buildSourceIndex(sourceBytes.toString("utf8"));
+  const index = buildPatchSourceIndex(sourceBytes.toString("utf8"));
   return new Set(index.elements.flatMap((element) => {
     if (!element.textContent?.trim()) return [];
     const targetRef = createTargetRef(index, element, { level: "subregion" });
