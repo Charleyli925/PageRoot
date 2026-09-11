@@ -306,7 +306,7 @@ function containsJavaScriptImportSyntax(source) {
       }));
     } catch {
       // Syntax errors are Runtime Script failures, not proof of an unsupported
-      // loading dependency. Acorn owns lexical distinctions such as Annex-B
+      // loading dependency. Acorn owns syntax distinctions such as Annex-B
       // HTML comments, regexps, strings, property names and import.meta.
     }
   }
