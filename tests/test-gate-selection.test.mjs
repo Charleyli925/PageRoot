@@ -698,6 +698,22 @@ test("real-HTML gate changes run the discovery oracle instead of an unrelated sm
   assert.deepEqual(suiteIds(plan), ["typecheck", "lint", "build-web", "real-html"]);
 });
 
+test("real-HTML result and byte oracles select their focused Node tests", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: [
+      "tests/e2e/electron/real-html/result-model.mjs",
+      "tests/helpers/source-byte-region-oracle.mjs",
+    ],
+  });
+  assert.deepEqual(plan.selectedNodeTests, [
+    "tests/real-html-result-model.test.mjs",
+    "tests/source-byte-region-oracle.test.mjs",
+  ]);
+  assert.deepEqual(suiteIds(plan), ["node-targeted"]);
+});
+
 test("the shared fixture driver schedules both browser and Electron smoke", () => {
   const plan = selectGatePlan({
     map,
