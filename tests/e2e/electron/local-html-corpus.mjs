@@ -49,7 +49,6 @@ import {
 } from "./real-html/text-targets.mjs";
 import {
   compareElementScopedMutation,
-  compareElementSourceDelta,
   formattedMarkerAppendedPattern,
   SOURCE_SCOPE_POLICIES,
 } from "./real-html/source-scope.mjs";
@@ -920,28 +919,6 @@ async function deleteFixedStructureTargets({ page, plan, selector, duplicateIds,
   await expect(original).toHaveCount(1);
 }
 
-async function selectMarkerText(target, marker) {
-  return target.evaluate((element, wanted) => {
-    const walker = element.ownerDocument.createTreeWalker(
-      element,
-      element.ownerDocument.defaultView.NodeFilter.SHOW_TEXT,
-    );
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const offset = node.textContent?.indexOf(wanted) ?? -1;
-      if (offset < 0) continue;
-      element.focus({ preventScroll: true });
-      const range = element.ownerDocument.createRange();
-      range.setStart(node, offset);
-      range.setEnd(node, offset + wanted.length);
-      const selection = element.ownerDocument.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      return true;
-    }
-    throw new Error(`Marker ${wanted} is not present in the authored target.`);
-  }, marker);
-}
-
 async function runDeterministicPasteProbe({
   page,
   electronApp,
@@ -983,57 +960,32 @@ async function runDeterministicPasteProbe({
   };
 }
 
-async function runSourceScopeProbe({ page, workingCopyPath, plan, markers }) {
-  const before = readFileSync(workingCopyPath);
-  const beforeRevision = await currentRevision(page);
-  const sourceMarker = markers.startMarker || markers.marker;
-  const replacement = `${sourceMarker}_SCOPE`;
-  const target = await enterNativeEdit(page, plan);
-  await selectMarkerText(target, sourceMarker);
-  await page.keyboard.insertText(replacement);
-  await expect(target).toContainText(replacement);
-  await page.keyboard.press(keyShortcut("s"));
-  await expectCheckpointPersisted(page, beforeRevision);
-  await page.keyboard.press("Escape");
-  await waitForRuntimeHandoffSettled(page);
-  await waitUntilEditable(page);
-
-  const after = readFileSync(workingCopyPath);
-  const beforeToken = Buffer.from(sourceMarker, "utf8");
-  const afterToken = Buffer.from(replacement, "utf8");
-  const beforeStart = before.indexOf(beforeToken);
-  const afterStart = after.indexOf(afterToken);
-  if (beforeStart < 0 || afterStart < 0) {
-    const error = new Error("Source scope probe markers were not found in the saved bytes.");
-    error.code = "SOURCE_SCOPE_MARKER_MISSING";
-    throw error;
-  }
-  const oracle = compareElementSourceDelta({
-    before,
-    after,
-    sourceId: plan.id,
-    beforeRange: { start: beforeStart, end: beforeStart + beforeToken.length },
-    afterRange: { start: afterStart, end: afterStart + afterToken.length },
-    expectedBefore: beforeToken,
-    expectedAfter: afterToken,
-    domSelector: `[data-pageroot-id="${plan.id}"]`,
-    label: `A source scope ${plan.id}`,
-    kind: "replace",
-  });
-  if (!oracle.ok) {
-    const error = new Error("Text source scope oracle rejected the saved bytes.");
+function summarizeSourceScopeEvidence(entries, omittedOperationIds = []) {
+  const checks = entries.map(({ operationId, targetId, sourceScope }) => ({
+    operationId,
+    targetId,
+    booleanConditions: Object.fromEntries(
+      Object.entries(sourceScope).filter(([, value]) => typeof value === "boolean"),
+    ),
+    appendedByteRange: sourceScope.appendedByteRange || null,
+    changedRanges: sourceScope.changedRanges || null,
+    elementRanges: sourceScope.elementRanges || null,
+  }));
+  const failed = checks.filter((check) => (
+    Object.values(check.booleanConditions).some((value) => value !== true)
+  ));
+  if (failed.length) {
+    const error = new Error("One or more operation-scoped source oracles failed.");
     error.code = "SOURCE_SCOPE_ORACLE_FAILED";
-    error.oracle = oracle;
+    error.oracle = { checks, omittedOperationIds };
     throw error;
   }
   return {
-    marker: sourceMarker,
-    replacement,
-    ok: oracle.ok,
-    outsideUnchanged: oracle.outsideUnchanged,
-    changedRegionCount: oracle.changedRegionCount,
-    outsideChangedRangeCount: oracle.outsideChangedRangeCount,
-    allowedRegions: oracle.allowedRegions,
+    ok: true,
+    checkedOperationCount: new Set(checks.map((check) => check.operationId)).size,
+    checkedTargetCount: new Set(checks.map((check) => check.targetId)).size,
+    omittedOperationIds,
+    checks,
   };
 }
 
@@ -1162,7 +1114,7 @@ for (const [fileIndex, filename] of files.entries()) {
       operations: ["activate", "input", "Backspace", "Delete", "save and re-enter"],
       sourceScope: sample.sourceScope,
     }));
-    await runTextOperation(
+    const newline = await runTextOperation(
       REAL_HTML_OPERATION_IDS.TEXT_NEWLINE,
       () => runNewlineOperation({
         page,
@@ -1181,7 +1133,7 @@ for (const [fileIndex, filename] of files.entries()) {
         fileIndex,
       }),
     );
-    await runTextOperation(
+    const undoRedo = await runTextOperation(
       REAL_HTML_OPERATION_IDS.TEXT_UNDO_REDO,
       () => runUndoRedoOperation({
         page,
@@ -1190,7 +1142,7 @@ for (const [fileIndex, filename] of files.entries()) {
         fileIndex,
       }),
     );
-    await runTextOperation(
+    const format = await runTextOperation(
       REAL_HTML_OPERATION_IDS.TEXT_FORMAT,
       () => runFormatOperation({
         page,
@@ -1201,12 +1153,33 @@ for (const [fileIndex, filename] of files.entries()) {
     );
     const sourceScope = await runTextOperation(
       REAL_HTML_OPERATION_IDS.TEXT_SOURCE_SCOPE,
-      () => runSourceScopeProbe({
-        page,
-        workingCopyPath,
-        plan: selectedPlans[0],
-        markers: successful[0].markers,
-      }),
+      () => summarizeSourceScopeEvidence([
+        ...inputDelete.samples.map((sample) => ({
+          operationId: REAL_HTML_OPERATION_IDS.TEXT_INPUT_DELETE,
+          targetId: sample.plan.id,
+          sourceScope: sample.sourceScope,
+        })),
+        {
+          operationId: REAL_HTML_OPERATION_IDS.TEXT_NEWLINE,
+          targetId: selectedPlans[0].id,
+          sourceScope: newline.sourceScope,
+        },
+        ...(paste.sourceScope ? [{
+          operationId: REAL_HTML_OPERATION_IDS.TEXT_PASTE,
+          targetId: selectedPlans[0].id,
+          sourceScope: paste.sourceScope,
+        }] : []),
+        {
+          operationId: REAL_HTML_OPERATION_IDS.TEXT_UNDO_REDO,
+          targetId: selectedPlans[0].id,
+          sourceScope: undoRedo.sourceScope,
+        },
+        {
+          operationId: REAL_HTML_OPERATION_IDS.TEXT_FORMAT,
+          targetId: selectedPlans[0].id,
+          sourceScope: format.sourceScope,
+        },
+      ], paste.sourceScope ? [] : [REAL_HTML_OPERATION_IDS.TEXT_PASTE]),
     );
     row.sourceScope = sourceScope;
     resultReport.passStage(filename, REAL_HTML_STAGE_IDS.TEXT_EDITING, {
