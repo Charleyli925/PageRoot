@@ -2392,6 +2392,19 @@
       ]
     },
     {
+      "id": "real-html-test-oracles",
+      "patterns": [
+        "^tests/e2e/electron/real-html/result-model\\.mjs$",
+        "^tests/helpers/source-byte-region-oracle\\.mjs$",
+        "^tests/(?:real-html-result-model|source-byte-region-oracle)\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/real-html-result-model.test.mjs",
+        "tests/source-byte-region-oracle.test.mjs"
+      ]
+    },
+    {
       "id": "real-html-e2e",
       "patterns": [
         "^tests/e2e/browser/real-complex-html\\.gate\\.mjs$",
@@ -2465,7 +2478,7 @@
     {
       "id": "electron-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?!ai-|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config).*\\.mjs$"
+        "^tests/e2e/electron/(?!ai-|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|real-html/).*\\.mjs$"
       ],
       "suites": [
         "electron-editing-smoke"
