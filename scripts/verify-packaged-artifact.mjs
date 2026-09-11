@@ -215,7 +215,10 @@ export const REQUIRED_APP_SOURCE_FILES = [
 const RETIRED_EDITOR_ARTIFACTS = [
   { name: "Edit runtime probe owner", pattern: /edit-runtime-probe-owner/iu },
   { name: "Edit runtime capture owner", pattern: /edit-runtime-capture-owner/iu },
-  { name: "Lexical", pattern: /(?:@lexical\/|\blexical\b)/iu },
+  {
+    name: "Lexical",
+    pattern: /(?:@lexical\/|\bnode_modules[/\\]lexical(?:[/\\"']|$)|["']lexical["']\s*:|["'][^"']+["']\s*:\s*["']npm:lexical@|\b(?:from|import)\s*["']lexical["']|\b(?:import|require)\s*\(\s*["']lexical["']\s*\)|\bMinified Lexical error\b)/iu,
+  },
   {
     name: "TextFlow",
     pattern: /(?:\b(?:TextFlow(?:Editor|Session|Surface)?|textFlow(?:Editor|Session|Surface)|startTextFlowEditing)\b|"(?:node_modules\/)?(?:@[^"/]+\/)?text-?flow"\s*:|"[^"]+"\s*:\s*"npm:(?:@[^"/]+\/)?text-?flow@)/iu,

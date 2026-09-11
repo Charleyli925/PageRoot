@@ -1,3 +1,4 @@
+import { parse as parseJavaScript } from "acorn";
 import { parse as parseHtmlDocument } from "parse5";
 
 /**
@@ -62,27 +63,6 @@ function frozenArray(value) {
 
 function asciiLower(value) {
   return String(value || "").toLowerCase();
-}
-
-function isNameBoundary(value) {
-  return value === "" || /[\t\n\f\r />]/u.test(value);
-}
-
-function htmlTagEnd(source, start) {
-  let quote = "";
-  for (let cursor = start; cursor < source.length; cursor += 1) {
-    const character = source[cursor];
-    if (quote) {
-      if (character === quote) quote = "";
-      continue;
-    }
-    if (character === "\"" || character === "'") {
-      quote = character;
-      continue;
-    }
-    if (character === ">") return cursor;
-  }
-  return -1;
 }
 
 function attributesFromOpeningTag(openingTag) {
@@ -194,67 +174,70 @@ export function authoredDocumentBase(html) {
 }
 
 /**
- * Scans HTML executable script elements. The parser also treats a closing
- * script tag inside a JavaScript string as a terminator, so this deliberately
- * conservative scanner follows browser parsing instead of inventing JS rules.
+ * Collects authored Script elements from the live parsed document tree. Exact
+ * source locations preserve author bytes while naturally excluding comments,
+ * raw-text element content and inert template.content from execution identity.
  */
 export function collectEditRuntimeScripts(html) {
   const source = String(html ?? "");
   const scripts = [];
   let unsupportedReason = null;
-  let cursor = 0;
   let activeIndex = 0;
-  const lower = source.toLowerCase();
-  while (cursor < source.length) {
-    const comment = source.indexOf("<!--", cursor);
-    const opening = lower.indexOf("<script", cursor);
-    if (comment >= 0 && (opening < 0 || comment < opening)) {
-      const end = source.indexOf("-->", comment + 4);
-      cursor = end < 0 ? source.length : end + 3;
-      continue;
-    }
-    if (opening < 0) break;
-    if (!isNameBoundary(source[opening + 7] || "")) {
-      cursor = opening + 7;
-      continue;
-    }
-    const openingEnd = htmlTagEnd(source, opening + 7);
-    if (openingEnd < 0) break;
-    let closingStart = lower.indexOf("</script", openingEnd + 1);
-    while (closingStart >= 0 && !isNameBoundary(source[closingStart + 8] || "")) {
-      closingStart = lower.indexOf("</script", closingStart + 8);
-    }
-    if (closingStart < 0) {
-      unsupportedReason ||= "unterminated-script";
-      break;
-    }
-    const closingEnd = htmlTagEnd(source, closingStart + 8);
-    if (closingEnd < 0) {
-      unsupportedReason ||= "unterminated-script";
-      break;
-    }
-    const openingTag = source.slice(opening, openingEnd + 1);
-    const attributes = attributesFromOpeningTag(openingTag);
-    const policy = scriptPolicy(attributes);
-    const src = attributeValue(attributes, "src");
-    const body = source.slice(openingEnd + 1, closingStart);
-    const entry = Object.freeze({
-      startOffset: opening,
-      endOffset: closingEnd + 1,
-      openingTag,
-      attributes,
-      type: asciiLower(attributeValue(attributes, "type") || "").trim(),
-      src: src === null ? null : src,
-      inline: body,
-      executable: policy.executable,
-      index: policy.executable ? activeIndex : null,
-      reason: policy.reason,
+  let document;
+  try {
+    document = parseHtmlDocument(source, {
+      scriptingEnabled: true,
+      sourceCodeLocationInfo: true,
     });
-    scripts.push(entry);
-    if (policy.reason) unsupportedReason ||= policy.reason;
-    if (policy.executable) activeIndex += 1;
-    cursor = closingEnd + 1;
+  } catch {
+    return Object.freeze({
+      scripts: frozenArray(scripts),
+      executableScripts: frozenArray([]),
+      unsupportedReason: "invalid-html",
+    });
   }
+  const visit = (node) => {
+    if (
+      String(node?.tagName || "").toLowerCase() === "script"
+      && node.sourceCodeLocation?.startTag
+    ) {
+      const location = node.sourceCodeLocation;
+      if (!location.endTag) {
+        unsupportedReason ||= "unterminated-script";
+        return;
+      }
+      const openingTag = source.slice(
+        location.startTag.startOffset,
+        location.startTag.endOffset,
+      );
+      const body = source.slice(
+        location.startTag.endOffset,
+        location.endTag.startOffset,
+      );
+      const attributes = attributesFromOpeningTag(openingTag);
+      const policy = scriptPolicy(attributes);
+      const src = attributeValue(attributes, "src");
+      const entry = Object.freeze({
+        startOffset: location.startTag.startOffset,
+        endOffset: location.endTag.endOffset,
+        openingTag,
+        attributes,
+        type: asciiLower(attributeValue(attributes, "type") || "").trim(),
+        src: src === null ? null : src,
+        inline: body,
+        executable: policy.executable,
+        index: policy.executable ? activeIndex : null,
+        reason: policy.reason,
+      });
+      scripts.push(entry);
+      if (policy.reason) unsupportedReason ||= policy.reason;
+      if (policy.executable) activeIndex += 1;
+    }
+    // Template descendants live under node.content and are deliberately not
+    // visited. Raw-text containers expose their apparent markup only as text.
+    for (const child of node?.childNodes || []) visit(child);
+  };
+  visit(document);
   return Object.freeze({
     scripts: frozenArray(scripts),
     executableScripts: frozenArray(scripts.filter((script) => script.executable)),
@@ -280,229 +263,54 @@ export function editRuntimeProgramIdentity(html) {
   });
 }
 
-function skipJavaScriptQuotedLiteral(source, start, quote) {
-  let cursor = start + 1;
-  while (cursor < source.length) {
-    const character = source[cursor];
-    if (character === "\\") {
-      cursor += 2;
-      continue;
+function containsImportInAst(root) {
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node || typeof node !== "object") continue;
+    if (
+      node.type === "ImportDeclaration"
+      || node.type === "ImportExpression"
+      || (
+        (node.type === "ExportAllDeclaration" || node.type === "ExportNamedDeclaration")
+        && node.source
+      )
+    ) return true;
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) pending.push(...value);
+      else if (value && typeof value === "object") pending.push(value);
     }
-    cursor += 1;
-    if (character === quote) break;
   }
-  return cursor;
-}
-
-function skipJavaScriptComment(source, start) {
-  if (source[start + 1] === "/") {
-    let cursor = start + 2;
-    while (cursor < source.length && source[cursor] !== "\n" && source[cursor] !== "\r") {
-      cursor += 1;
-    }
-    return cursor;
-  }
-  if (source[start + 1] === "*") {
-    const end = source.indexOf("*/", start + 2);
-    return end < 0 ? source.length : end + 2;
-  }
-  return start;
-}
-
-function skipJavaScriptTrivia(source, start) {
-  let cursor = start;
-  while (cursor < source.length) {
-    if (/\s/u.test(source[cursor])) {
-      cursor += 1;
-      continue;
-    }
-    const commentEnd = source[cursor] === "/"
-      ? skipJavaScriptComment(source, cursor)
-      : cursor;
-    if (commentEnd === cursor) break;
-    cursor = commentEnd;
-  }
-  return cursor;
-}
-
-function skipJavaScriptRegexLiteral(source, start) {
-  let cursor = start + 1;
-  let inCharacterClass = false;
-  while (cursor < source.length) {
-    const character = source[cursor];
-    if (character === "\\") {
-      cursor += 2;
-      continue;
-    }
-    if (character === "[") inCharacterClass = true;
-    if (character === "]") inCharacterClass = false;
-    cursor += 1;
-    if (character === "/" && !inCharacterClass) break;
-    if (character === "\n" || character === "\r") break;
-  }
-  while (cursor < source.length && /[a-z]/iu.test(source[cursor])) cursor += 1;
-  return cursor;
+  return false;
 }
 
 function containsJavaScriptImportSyntax(source) {
-  let found = false;
-  const expressionKeywords = new Set([
-    "await", "case", "delete", "do", "else", "in", "instanceof", "new",
-    "of", "return", "throw", "typeof", "void", "yield",
-  ]);
-  const blockOpeningKeywords = new Set(["do", "else", "finally", "try"]);
-  let scanCode;
-
-  const scanTemplate = (start) => {
-    let cursor = start + 1;
-    while (cursor < source.length && !found) {
-      const character = source[cursor];
-      if (character === "\\") {
-        cursor += 2;
-        continue;
-      }
-      if (character === "`") return cursor + 1;
-      if (character === "$" && source[cursor + 1] === "{") {
-        cursor = scanCode(cursor + 2, true);
-        continue;
-      }
-      cursor += 1;
-    }
-    return cursor;
+  const options = {
+    ecmaVersion: "latest",
+    allowImportExportEverywhere: true,
+    allowAwaitOutsideFunction: true,
   };
-
-  scanCode = (start, stopAtClosingBrace = false) => {
-    let cursor = start;
-    const braceKinds = [];
-    let parenthesisDepth = 0;
-    let bracketDepth = 0;
-    let pendingClassBody = null;
-    let expressionExpected = true;
-    let previousToken = "";
-    while (cursor < source.length && !found) {
-      const character = source[cursor];
-      if (/\s/u.test(character)) {
-        cursor += 1;
-        continue;
-      }
-      if (character === "'" || character === '"') {
-        cursor = skipJavaScriptQuotedLiteral(source, cursor, character);
-        expressionExpected = false;
-        previousToken = "literal";
-        continue;
-      }
-      if (character === "`") {
-        cursor = scanTemplate(cursor);
-        expressionExpected = false;
-        previousToken = "literal";
-        continue;
-      }
-      if (character === "/") {
-        const commentEnd = skipJavaScriptComment(source, cursor);
-        if (commentEnd !== cursor) {
-          cursor = commentEnd;
-          continue;
-        }
-        if (expressionExpected) {
-          cursor = skipJavaScriptRegexLiteral(source, cursor);
-          expressionExpected = false;
-          previousToken = "literal";
-        } else {
-          cursor += source[cursor + 1] === "=" ? 2 : 1;
-          expressionExpected = true;
-          previousToken = "/";
-        }
-        continue;
-      }
-      if (/[A-Za-z_$]/u.test(character)) {
-        const match = /^[A-Za-z_$][\w$]*/u.exec(source.slice(cursor));
-        const identifier = match?.[0] || character;
-        const next = skipJavaScriptTrivia(source, cursor + identifier.length);
-        const memberPrefix = ["{", ",", "}", ";", "*", "get", "set", "async", "static"]
-          .includes(previousToken);
-        const importPropertyMethod = source[next] === "("
-          && (
-            (braceKinds.at(-1) === "object" && memberPrefix)
-            || (braceKinds.at(-1) === "class" && memberPrefix)
-          );
-        const importClassMember = identifier === "import"
-          && braceKinds.at(-1) === "class"
-          && memberPrefix;
-        if (
-          identifier === "import"
-          && previousToken !== "."
-          && previousToken !== "?."
-          && source[next] !== ":"
-          && !importPropertyMethod
-          && !importClassMember
-        ) {
-          found = true;
-          return source.length;
-        }
-        cursor += identifier.length;
-        if (identifier === "class" && previousToken !== "." && previousToken !== "?.") {
-          pendingClassBody = { parenthesisDepth, bracketDepth };
-        }
-        expressionExpected = expressionKeywords.has(identifier);
-        previousToken = identifier;
-        continue;
-      }
-      if (/[0-9]/u.test(character)) {
-        const match = /^(?:0[xob][0-9a-f]+|(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)/iu.exec(
-          source.slice(cursor),
-        );
-        cursor += match?.[0].length || 1;
-        expressionExpected = false;
-        previousToken = "literal";
-        continue;
-      }
-      if (character === "{") {
-        const opensClassBody = pendingClassBody
-          && pendingClassBody.parenthesisDepth === parenthesisDepth
-          && pendingClassBody.bracketDepth === bracketDepth;
-        braceKinds.push(
-          opensClassBody
-            ? "class"
-            : !expressionExpected
-          || previousToken === "=>"
-          || blockOpeningKeywords.has(previousToken)
-            ? "block"
-            : "object",
-        );
-        if (opensClassBody) pendingClassBody = null;
-        cursor += 1;
-        expressionExpected = true;
-        previousToken = "{";
-        continue;
-      }
-      if (character === "}") {
-        if (stopAtClosingBrace && braceKinds.length === 0) return cursor + 1;
-        const braceKind = braceKinds.pop();
-        cursor += 1;
-        expressionExpected = braceKind === "block";
-        previousToken = "}";
-        continue;
-      }
-      const threeCharacters = source.slice(cursor, cursor + 3);
-      const twoCharacters = source.slice(cursor, cursor + 2);
-      const token = threeCharacters === "..."
-        ? threeCharacters
-        : ["?.", "=>"].includes(twoCharacters)
-          ? twoCharacters
-          : character;
-      cursor += token.length;
-      if (token === "(") parenthesisDepth += 1;
-      if (token === ")") parenthesisDepth = Math.max(0, parenthesisDepth - 1);
-      if (token === "[") bracketDepth += 1;
-      if (token === "]") bracketDepth = Math.max(0, bracketDepth - 1);
-      expressionExpected = ![")", "]"].includes(token);
-      previousToken = token;
+  try {
+    return containsImportInAst(parseJavaScript(source, {
+      ...options,
+      sourceType: "script",
+    }));
+  } catch {
+    try {
+      // Module-only grammar such as top-level using declarations is valid in
+      // supported import-free module scripts. A second maintained-parser goal
+      // prevents a real dependency later in that program from failing open.
+      return containsImportInAst(parseJavaScript(source, {
+        ...options,
+        sourceType: "module",
+      }));
+    } catch {
+      // Syntax errors are Runtime Script failures, not proof of an unsupported
+      // loading dependency. Acorn owns syntax distinctions such as Annex-B
+      // HTML comments, regexps, strings, property names and import.meta.
     }
-    return cursor;
-  };
-
-  scanCode(0);
-  return found;
+  }
+  return false;
 }
 
 /**

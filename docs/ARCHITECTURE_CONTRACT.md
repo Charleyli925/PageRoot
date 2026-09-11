@@ -533,10 +533,14 @@ element's public source identity revokes that authority. Every source mutation
 must revalidate the live DOM object, its registered stable ID and its current
 SourceIndex mapping; cached selection state is never mutation authority. A runtime descendant is
 display-only and resolves to the nearest still-proven source host for comments;
-it cannot become a semantic source edit. Every supported semantic source change
-materializes complete HTML. A successful direct text/common-style change also
-updates the proved current DOM projection and ends without a deferred rebuild;
-structure, program-identity change, failed local projection or stale projection
+it cannot become a semantic source edit. Element duplication proves the complete
+selected live subtree against the current SourceIndex; generated descendants,
+opaque runtime surfaces and authored programs reject the entire selected subtree
+at both toolbar and command boundaries without disabling independent source-backed
+siblings. Every supported semantic source change materializes complete HTML. A
+successful direct text/common-style/same-parent-reorder change also updates the
+proved current DOM projection and ends without a deferred rebuild. Structure,
+program-identity change, failed local projection or stale projection
 authority rebuilds the disposable frame and reruns the author program. The
 resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
@@ -573,6 +577,11 @@ complete source HTML. A text Selection retained across the handoff is
 presentation only and is discarded when its target or source text segments no
 longer match, without blocking a fresh native edit session on the current exact
 target.
+An already necessary pending Runtime recovery follows later accepted source
+revisions and clears only after the Candidate for that exact revision is fully
+connected and promoted. Preparing or beginning a different operation cannot
+clear it, and a failed post-switch connection restores presentation without
+manufacturing recovery success.
 The same one-time private capability returns an activation-result callback bound
 to the source window, session, execution and frame token. Resource/bootstrap
 errors report `activation-resource-failed`; synchronous author errors and
@@ -595,7 +604,7 @@ window. Completed identities age out, so repeated ordinary use never exhausts a
 permanent application-lifetime allowance or requires PageRoot to restart. An
 unavailable resource remains a recoverable preparation state while its
 independent bounded download is active. A terminal preparation, exact-resource
-load, provenance or execution-deadline failure selects an explicit
+load, provenance or unfinished execution-deadline failure selects an explicit
 script-disabled static Edit projection. A dynamic Candidate failure prepares
 the latest Working HTML once more with Script disabled while the prior frame
 remains visible. If Native Edit advances Working HTML before that deferred
@@ -651,6 +660,14 @@ run in real Electron. Program identity and Main resource preparation use the
 same first live-document `base[href]`; href-less base elements, inert
 `<template>` contents and foreign-namespace lookalikes cannot win, while
 absolute or escaping bases fail closed.
+Only Script elements in the live parsed document enter execution identity;
+apparent markup inside comments, raw-text elements or inert `template.content`
+does not become an author program.
+The bounded syntax recognizer rejects actual static and dynamic imports while
+distinguishing comments, strings, regular expressions, property/private names
+and module metadata. `import.meta` is metadata rather than a loading dependency;
+the maintained parser is used only to recognize dependency syntax and does not
+add module-graph loading.
 The dependency surface is separately finite: the three standard, query-free
 ECharts 5.4.3 and 5.6.0 minified core CDN URLs may use only their respective
 same-version packaged files. Near matches, version ranges, unknown paths,
@@ -666,8 +683,8 @@ API freezing. Popup/form guards and the existing resource/CSP boundaries remain
 defence in depth.
 
 The Edit Canvas has one normative experience/persistence contract. Direct
-source text and common-style edits are reflected in the current projection
-without a user refresh. After source and current-DOM synchronization succeeds,
+source text, common-style and same-parent reorder edits are reflected in the
+current projection without a user refresh. After source and current-DOM synchronization succeeds,
 high-frequency input, edit completion, target changes, waiting and ordinary
 save must retain the same document and must not rerun author Script. A structure
 or Script-dependent semantic operation, failed local projection or stale
@@ -678,6 +695,10 @@ stable-element-ID selection when each target remains valid. Every completed
 operation first materializes complete HTML and enters the ordinary Hash/CAS,
 atomic-save and recovery boundary; close/reopen must reproduce source edits
 from that HTML. Author Script then regenerates runtime presentation.
+These phase deadlines bound an unfinished wait. A settled current Candidate that
+already passed its identity and readiness checks remains usable when reported
+elapsed time exceeds a performance target; a cancelled, terminated, superseded
+or expired Candidate remains ineligible and can never reclaim Active.
 
 A soft checkpoint materializes delivered input as complete Working HTML,
 allocates required Stable IDs and enters the ordinary autosave/recovery queue

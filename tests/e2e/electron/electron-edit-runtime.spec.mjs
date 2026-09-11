@@ -620,8 +620,15 @@ test("author Script cannot add source authority after Runtime starts or save Run
     <button id="source-id-forged">被脚本改写 ID 的源码按钮</button>
     <button id="source-id-late">选中后被脚本改写 ID 的源码按钮</button>
     <button id="source-id-decoy">另一个源码按钮</button>
+    <button id="source-copy-safe">可安全复制的源码按钮</button>
+    <div id="runtime-closed-chart">动态表格宿主</div>
   </main>
   <script>
+    setTimeout(() => {
+      document.querySelector('#runtime-closed-chart')
+        .attachShadow({ mode: 'closed' }).innerHTML = '<table><tr><td>运行生成</td></tr></table>';
+      window.__runtimeClosedShadowReady = true;
+    }, 1000);
     const host = document.querySelector('[data-native-case="runtime-host"]');
     const sourceIdForged = document.querySelector('#source-id-forged');
     const sourceIdLate = document.querySelector('#source-id-late');
@@ -713,6 +720,87 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
     await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await frame.locator('[data-native-case="runtime-host"]').evaluate((element) => {
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect.poll(() => frame.locator("body").evaluate(() => (
+      window.__runtimeClosedShadowReady === true
+    ))).toBe(true);
+    await frame.locator("#runtime-closed-chart").click();
+    await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await frame.locator("#source-copy-safe").evaluate((button) => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const safeDuplicateButton = toolbar.getByRole("button", {
+      name: "复制元素",
+      exact: true,
+    });
+    await expect(safeDuplicateButton).toBeVisible();
+    const sourceBeforeLateRuntimeChild = readFileSync(sourcePath, "utf8");
+    await safeDuplicateButton.evaluate((duplicateButton) => {
+      const editor = duplicateButton.closest('[data-testid="html-canvas-editor"]');
+      const activeFrame = editor?.querySelector('iframe:not([data-frame-role])');
+      const frameWindow = activeFrame?.contentWindow;
+      const frameDocument = activeFrame?.contentDocument;
+      const button = frameDocument?.querySelector("#source-copy-safe");
+      if (!frameWindow || !frameDocument || !button) {
+        throw new Error("Active Runtime copy target was unavailable.");
+      }
+      const generated = frameDocument.createElement("table");
+      generated.id = "late-runtime-copy-content";
+      generated.textContent = "选中后生成";
+      button.append(generated);
+      const childNodesDescriptor = Object.getOwnPropertyDescriptor(
+        frameWindow.Node.prototype,
+        "childNodes",
+      );
+      const attributesDescriptor = Object.getOwnPropertyDescriptor(
+        frameWindow.Element.prototype,
+        "attributes",
+      );
+      const querySelector = frameWindow.Element.prototype.querySelector;
+      const querySelectorAll = frameWindow.Element.prototype.querySelectorAll;
+      frameWindow.__restoreRuntimeCopyInspection = () => {
+        Object.defineProperty(frameWindow.Node.prototype, "childNodes", childNodesDescriptor);
+        Object.defineProperty(frameWindow.Element.prototype, "attributes", attributesDescriptor);
+        frameWindow.Element.prototype.querySelector = querySelector;
+        frameWindow.Element.prototype.querySelectorAll = querySelectorAll;
+      };
+      Object.defineProperty(frameWindow.Node.prototype, "childNodes", {
+        configurable: true,
+        get: () => [],
+      });
+      Object.defineProperty(frameWindow.Element.prototype, "attributes", {
+        configurable: true,
+        get: () => [],
+      });
+      frameWindow.Element.prototype.querySelector = () => null;
+      frameWindow.Element.prototype.querySelectorAll = () => [];
+      duplicateButton.click();
+    });
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-element-copy-availability",
+      "unsupported",
+    );
+    expect(readFileSync(sourcePath, "utf8")).toBe(sourceBeforeLateRuntimeChild);
+    await frame.evaluate(() => window.__restoreRuntimeCopyInspection?.());
+    await frame.locator("#source-copy-safe").evaluate((button) => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
 
     await page.keyboard.press("Escape");
     await frame.locator("#source-id-forged").click();
@@ -1573,8 +1661,8 @@ test("overlapping edits promote only the latest Runtime without losing charts or
   <main>
     <article data-native-case="runtime-supersession" id="supersession-target" style="padding:24px">
       <h2 data-native-case="runtime-supersession-text">连续编辑目标</h2>
-      <div id="supersession-chart" style="width:320px;height:180px"></div>
     </article>
+    <div id="supersession-chart" style="width:320px;height:180px"></div>
     <output id="supersession-proof"></output>
   </main>
   <script src="echarts.js"></script>
@@ -1582,12 +1670,12 @@ test("overlapping edits promote only the latest Runtime without losing charts or
     let layoutFrame = 0;
     const pulseLayout = () => {
       layoutFrame += 1;
-      document.querySelector('[data-native-case="runtime-supersession"]').style.paddingBottom =
+      document.querySelector('#supersession-chart').style.paddingBottom =
         (layoutFrame % 2 === 0 ? '24px' : '28px');
       if (layoutFrame < 30) {
         requestAnimationFrame(pulseLayout);
       } else {
-        document.querySelector('[data-native-case="runtime-supersession"]').style.paddingBottom = '';
+        document.querySelector('#supersession-chart').style.paddingBottom = '';
       }
     };
     requestAnimationFrame(pulseLayout);
@@ -1863,8 +1951,9 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
   <main>
     <article data-native-case="runtime-latest-wins" style="padding:24px">
       <h2 data-native-case="runtime-latest-wins-text">连续编辑 Word 目标</h2>
-      <div id="latest-wins-chart" style="width:320px;height:180px"></div>
     </article>
+    <aside data-native-case="runtime-latest-wins-boundary">源码复制触发器</aside>
+    <div id="latest-wins-chart" style="width:320px;height:180px"></div>
     <output id="latest-wins-proof"></output>
   </main>
   <div aria-hidden="true" style="height:1800px"></div>
@@ -2092,6 +2181,11 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     );
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    frame = await currentActiveRuntimeFrame();
+    await frame.locator('[data-native-case="runtime-latest-wins-boundary"]').evaluate((element) => {
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect(duplicateButton).toBeVisible();
     const boundaryCandidate = await captureNextCandidate(() => duplicateButton.click());
     expect(boundaryCandidate).toBeTruthy();
     expect(new Set(candidateIds).size).toBe(candidateIds.length);
@@ -2113,7 +2207,8 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     frame = await currentEditorFrame(page);
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await expect(heading).not.toHaveAttribute("contenteditable", "true");
-    await expect(heading).toHaveAttribute("data-html-canvas-selected", "part");
+    await expect(frame.locator('[data-native-case="runtime-latest-wins-boundary"]').first())
+      .toHaveAttribute("data-html-canvas-selected", "module");
     await expect(heading).toContainText("你好");
 
     // A noncritical author failure after the chart is ready keeps that verified
@@ -2144,6 +2239,12 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     );
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    frame = await currentActiveRuntimeFrame();
+    await frame.locator('[data-native-case="runtime-latest-wins-boundary"]').first()
+      .evaluate((element) => {
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    await expect(duplicateButton).toBeVisible();
     const failureCandidatePending = waitForNewCandidate(beforeFailureCandidate);
     await duplicateButton.click();
     const failureCandidate = await failureCandidatePending;
@@ -2842,6 +2943,7 @@ test("a failed structural candidate after in-place text editing promotes static 
 
     await page.keyboard.press("Escape");
     await expect(target).not.toHaveAttribute("contenteditable", "true");
+    await page.waitForTimeout(800);
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
     await expect(editor.locator('iframe:not([data-frame-role])'))
       .toHaveAttribute("data-frame-generation", beforeGeneration);
@@ -3685,6 +3787,24 @@ test("Edit frame navigation blocks location.assign and location.replace", async 
   });
 });
 
+test("inert Script-like markup does not disable the live Runtime program", async () => {
+  const html = `<!doctype html>
+<html><head><title>Inert Script markup</title></head><body>
+  <template><script type="module">import('./never-template.js')</script></template>
+  <textarea><script>import('./never-raw-text.js')</script></textarea>
+  <main data-native-case="runtime-inert-script">Live Runtime remains enabled</main>
+  <script>document.body.dataset.liveRuntimeExecuted = 'true';</script>
+</body></html>`;
+  await withRuntimeProject("pageroot-runtime-inert-script-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-inert-script");
+    await expect(frame.locator("body")).toHaveAttribute("data-live-runtime-executed", "true");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
 test("Electron Edit renders a source-relative ECharts page in the editable iframe", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -3791,13 +3911,16 @@ test("Electron Edit renders the reviewed ECharts 5.4.3 URL from exact packaged b
   });
 });
 
-test("activation reported after its bounded phase cannot promote as ready", async () => {
+test("a slow activation already reported ready is not rejected after the fact", async () => {
   const html = `<!doctype html>
 <html><head><title>Slow activation</title></head><body>
   <main data-native-case="slow-activation">慢启动报告</main>
   <script>
-    const activationStartedAt = performance.now();
-    while (performance.now() - activationStartedAt < 4200) {}
+    const actualNow = performance.now.bind(performance);
+    Object.defineProperty(performance, 'now', {
+      configurable: true,
+      value: () => actualNow() + 4200,
+    });
     document.body.dataset.slowActivationReady = 'true';
   </script>
 </body></html>`;
@@ -3807,18 +3930,80 @@ test("activation reported after its bounded phase cannot promote as ready", asyn
   }, async ({ page, sourcePath }) => {
     const surface = page.locator(".canvas-edit-surface");
     const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-    await expect(surface).toHaveAttribute(
-      "data-edit-runtime-phase",
-      "static-fallback",
-      { timeout: 20_000 },
-    );
+    await expect(surface).toHaveAttribute("data-edit-runtime-phase", "settled", {
+      timeout: 20_000,
+    });
     await expect(editor).toHaveAttribute("data-runtime-activation-budget", "exceeded");
-    await expect(editor).not.toHaveAttribute("data-runtime-degradation", "runtime-partial");
+    await expect(editor).not.toHaveAttribute("data-runtime-degradation", /.+/u);
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
-      .toHaveAttribute("sandbox", "allow-same-origin");
+      .toHaveAttribute("sandbox", /allow-scripts/u);
     const frame = await currentEditorFrame(page);
-    await expect(frame.locator("body")).not.toHaveAttribute("data-slow-activation-ready", "true");
+    await expect(frame.locator("body")).toHaveAttribute("data-slow-activation-ready", "true");
     await expect(editor).toHaveAttribute("aria-readonly", "false");
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("a current critical surface already ready wins before an overdue wait is rejected", async () => {
+  const html = `<!doctype html>
+<html><head><title>Slow surface observation</title></head><body>
+  <main>
+    <aside data-native-case="surface-timeout-boundary">复制边界</aside>
+    <section id="surface-timeout-host"></section>
+  </main>
+  <script>
+    parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ =
+      (parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ || 0) + 1;
+    const renderSurface = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 120;
+      canvas.height = 80;
+      canvas.style.width = '120px';
+      canvas.style.height = '80px';
+      document.querySelector('#surface-timeout-host').append(canvas);
+    };
+    if (parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ === 1) {
+      renderSurface();
+    } else {
+      parent.__PAGEROOT_RELEASE_READY_SURFACE__ = renderSurface;
+    }
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-surface-timeout-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const editor = page.getByTestId("html-canvas-editor");
+    let frame = (await loadedDiskFrame(page, sourcePath, "surface-timeout-boundary")).frame;
+    await expect(frame.locator("#surface-timeout-host canvas")).toHaveCount(1);
+    await frame.locator('[data-native-case="surface-timeout-boundary"]').click();
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+    await expect(editor).toHaveAttribute("data-runtime-activation", "activation-ready");
+    await expect.poll(() => page.evaluate(
+      () => typeof window.__PAGEROOT_RELEASE_READY_SURFACE__,
+    )).toBe("function");
+    await page.evaluate(() => {
+      const actualNow = performance.now.bind(performance);
+      Object.defineProperty(performance, "now", {
+        configurable: true,
+        value: () => actualNow() + 13_000,
+      });
+      window.__PAGEROOT_RELEASE_READY_SURFACE__?.();
+    });
+
+    await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    await expect(editor).toHaveAttribute("data-runtime-surface-budget", "exceeded");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(editor).not.toHaveAttribute("data-runtime-degradation", /.+/u);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="surface-timeout-boundary"]')).toHaveCount(2);
+    await expect(frame.locator("#surface-timeout-host canvas")).toHaveCount(1);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .not.toBe(html);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });

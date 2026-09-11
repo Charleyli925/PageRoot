@@ -336,12 +336,15 @@ Rules:
   retains its separate bookmark and canonical-adoption path.
 - The pure `decideEditRuntimeRefresh()` policy owns the projection decision for
   an accepted source operation: safe static text/style/reorder stays in place;
-  Runtime text/common-style/same-parent reorder also ends in place after successful
-  source and DOM synchronization, without creating a later refresh obligation.
+  Runtime text/common-style/same-parent reorder
+  also end in place after successful source and DOM synchronization, without
+  creating a later refresh obligation.
   Runtime structure or any authored-program identity change prepares a candidate
   immediately. A failed local projection or separately stale Runtime
   authority may still store the latest pending source revision/reason/count for
-  recovery diagnostics. That state is not save authority and never retains an
+  recovery diagnostics. Later accepted source edits advance that same obligation
+  to the newest revision; only successful connection and promotion of the exact
+  revision clears it. That state is not save authority and never retains an
   intermediate iframe revision.
 - Project hydration is published before provisional Working HTML. Runtime
   preparation treats that interval as source-not-authoritative and resumes from

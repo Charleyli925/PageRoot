@@ -18,6 +18,7 @@ test("disposable runtime bootstrap proves the parsed source set before author wo
   assert.match(source, /executionId: config\.executionId/u);
   assert.match(source, /frameToken: config\.frameToken/u);
   assert.match(source, /registerProved/u);
+  assert.match(source, /registerRuntimeShadowHost/u);
   assert.match(source, /reportActivationOutcome/u);
   assert.match(source, /canAcceptFocus/u);
   assert.match(source, /installFocusGuard/u);
@@ -25,6 +26,7 @@ test("disposable runtime bootstrap proves the parsed source set before author wo
   assert.match(source, /HTMLElement\.prototype/u);
   assert.match(source, /SVGElement\.prototype/u);
   assert.match(source, /installFocusGuard\(window, "focus"\)/u);
+  assert.match(source, /trackedRuntimeAttachShadow/u);
   assert.match(source, /proveParsedSource/u);
   assert.match(source, /activateAuthorScripts/u);
   assert.match(source, /DOMContentLoaded/u);

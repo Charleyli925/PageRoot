@@ -1713,7 +1713,10 @@ async function getActiveProjectOperation() {
     }
     return taggedProject(project);
   }
-  if (project.openTarget) return taggedProject(project);
+  if (project.openTarget) {
+    sourceFileWatcher.watch(project.sourcePath);
+    return taggedProject(project);
+  }
   return prepareOrOpenFromPath(project.sourcePath);
 }
 

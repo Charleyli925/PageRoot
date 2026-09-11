@@ -44,6 +44,32 @@ test("direct Edit runtime extracts ordered deterministic classic scripts", () =>
   assert.equal(contract.scripts.at(-1)?.executable, false);
 });
 
+test("only live parsed Script elements enter Runtime execution identity", () => {
+  const contract = collectEditRuntimeScripts([
+    "<template><script type=\"module\">import('./inert-template.js')</script></template>",
+    "<textarea><script>import('./raw-text.js')</script></textarea>",
+    "<script>window.live = true</script>",
+  ].join("\n"));
+  assert.equal(contract.unsupportedReason, null);
+  assert.deepEqual(contract.executableScripts.map((script) => script.inline.trim()), [
+    "window.live = true",
+  ]);
+  assert.notEqual(
+    editRuntimeProgramIdentity(
+      "<template><script>inertA()</script></template><script>live()</script>",
+    ),
+    null,
+  );
+  assert.equal(
+    editRuntimeProgramIdentity(
+      "<template><script>inertA()</script></template><script>live()</script>",
+    ),
+    editRuntimeProgramIdentity(
+      "<template><script>inertB()</script></template><script>live()</script>",
+    ),
+  );
+});
+
 test("disposable Edit runtime preserves native script scheduling attributes", () => {
   for (const html of [
     '<script type="module">window.ready = true</script>',
@@ -68,8 +94,17 @@ test("import detection ignores authored prose and JavaScript literal content", (
     "const heading = 'import( is documentation';",
     "// import('./commented.js')\nwindow.ready = true;",
     "/* import value from './commented.js' */\nwindow.ready = true;",
+    "<!-- import('./legacy-open-comment.js')\nwindow.ready = true;",
+    "let ready = true; <!-- import('./legacy-inline-comment.js')\nwindow.ready = ready;",
+    "   --> import('./legacy-close-comment.js')\nwindow.ready = true;",
     "const matcher = /import\\s*\\(/u;",
+    "const marker = /<!--/; window.ready = true;",
+    "/<!--/.test(source); window.ready = true;",
     "if (ready) {} /import\\s*\\(/u.test(source);",
+    "if (ready) /import\\s*\\(/u.test(source);",
+    "for (; ready;) /import\\s*\\(/u.test(source);",
+    "async function inspect(rows) { for await (const row of rows) /import\\s*\\(/u.test(row); }",
+    "class Loader {} /import\\s*\\(/u.test(source);",
     "const prose = `How to import data`;",
     "viewer.import('./method.js');",
     "viewer?.import('./optional-method.js');",
@@ -78,20 +113,35 @@ test("import detection ignores authored prose and JavaScript literal content", (
     "class Loader { import() {} }",
     "class Loader { static import() {} }",
     "class Loader { import = () => 'data'; }",
+    "class Loader { #import = () => 'data'; }",
     "const options = { *import() { yield 'data'; } };",
     "const options = { get import() { return 'data'; } };",
     "const options = { set import(value) { this.value = value; } };",
     "const options = { async import() { return 'data'; } };",
+    "const url = import.meta.url;",
+    "using resource = { [Symbol.dispose]() {} }; window.ready = true;",
+    "await using resource = await open(); window.ready = true;",
   ]) assert.equal(unsupportedEditRuntimeProgramReason(program), null, program);
 
   for (const program of [
     "import value from './module.js';",
     "import './side-effect.js';",
     "const module = import('./dynamic.js');",
-    "const url = import.meta.url;",
+    "await import('./top-level-await-dynamic.js');",
+    "for await (const row of rows) { import('./top-level-for-await-dynamic.js'); }",
+    "using resource = { [Symbol.dispose]() {} }; import('./using-dynamic.js');",
+    "await using resource = await open(); import('./await-using-dynamic.js');",
     "const template = `value: ${import('./nested.js')}`;",
     "const module = import /* webpackIgnore: true */ ('./comment-gap.js');",
     "const modules = { ...import('./spread-dynamic.js') };",
+    "const marker = /<!--/; import('./after-regexp.js');",
+    "/<!--/.test(source); import('./after-regexp-expression.js');",
+    "{ import('./block-dynamic.js'); }",
+    "label: { import('./label-block-dynamic.js'); }",
+    "foo ?? bar; label: { import('./nullish-label-dynamic.js'); }",
+    "foo ??= bar; label: { import('./nullish-assignment-label-dynamic.js'); }",
+    "export { value } from './re-export.js';",
+    "export * from './export-all.js';",
   ]) {
     assert.equal(
       unsupportedEditRuntimeProgramReason(program),

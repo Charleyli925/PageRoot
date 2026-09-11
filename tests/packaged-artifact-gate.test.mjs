@@ -340,6 +340,9 @@ test("retired editor guard rejects dependencies, bundled code, and legacy editin
     "replace-editable-island",
     "planEditableIslandPatch()",
     "plainTextFlow",
+    "scope.lexical.indexOf(name)",
+    "const scope = { lexical: [] }",
+    "Acorn tracks lexical declarations while parsing modules",
   ]) {
     assert.doesNotThrow(() => assertNoRetiredEditorArtifacts(
       contents,
@@ -349,6 +352,11 @@ test("retired editor guard rejects dependencies, bundled code, and legacy editin
   for (const [label, contents] of [
     ["source package.json", '{"dependencies":{"lexical":"0.48.0"}}'],
     ["source package-lock.json", '{"packages":{"node_modules/@lexical/history":{}}}'],
+    ["source package-lock.json", '{"packages":{"node_modules/lexical":{}}}'],
+    ["source package alias", '{"dependencies":{"legacy-editor":"npm:lexical@0.48.0"}}'],
+    ["source module", 'import { createEditor } from "lexical"'],
+    ["source commonjs module", 'const editor = require("lexical")'],
+    ["source dynamic import", 'const editor = await import("lexical")'],
     ["renderer bundle", "Minified Lexical error"],
     ["renderer bundle", "new TextFlowSession()"],
     ["renderer bundle", "startTextFlowEditing()"],

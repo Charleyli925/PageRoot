@@ -1,6 +1,5 @@
 export type EditRuntimeRefreshAction =
   | "in-place"
-  | "defer-until-boundary"
   | "candidate-now";
 
 export type EditRuntimeRefreshDecision = Readonly<{
@@ -10,12 +9,15 @@ export type EditRuntimeRefreshDecision = Readonly<{
   markRuntimeRefreshPending: boolean;
 }>;
 
-export function isRuntimeInPlaceAttribute(attributeName: unknown): boolean;
+export function isRuntimeInPlaceAttribute(
+  attributeName: unknown,
+  elementTagName?: unknown,
+): boolean;
 
 export function decideEditRuntimeRefresh(input?: Readonly<{
   hasRuntime?: boolean;
-  nativeEditActive?: boolean;
   mutationKind?: "text" | "style" | "reorder" | "structure" | "attribute";
   programIdentityChanged?: boolean;
   attributeName?: string | null;
+  elementTagName?: string | null;
 }>): EditRuntimeRefreshDecision;

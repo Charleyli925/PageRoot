@@ -54,6 +54,7 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
     textFormatRequiresSelection,
     enableReorder,
     moveAvailability,
+    elementCopyAvailability,
     deleteCommentCount,
     deleteCommentDraftIncluded,
     spacingMenuRef,
@@ -475,16 +476,19 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
               >
                 <ArrowDownIcon size={15} weight="bold" aria-hidden="true" />
               </button>
-              <button
-                type="button"
-                className={styles.iconButton}
-                aria-label="复制元素"
-                data-tooltip="复制元素"
-                data-tooltip-side="below"
-                onClick={onDuplicateSelected}
-              >
-                <CopySimpleIcon size={15} weight="bold" aria-hidden="true" />
-              </button>
+              {elementCopyAvailability !== "unsupported" ? (
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  aria-label="复制元素"
+                  data-tooltip="复制元素"
+                  data-tooltip-side="below"
+                  disabled={elementCopyAvailability === "busy"}
+                  onClick={onDuplicateSelected}
+                >
+                  <CopySimpleIcon size={15} weight="bold" aria-hidden="true" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={styles.iconButton}

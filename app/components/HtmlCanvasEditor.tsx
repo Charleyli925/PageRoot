@@ -18,7 +18,6 @@ import { flushSync } from "react-dom";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
-  EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
   EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
   editRuntimeProgramIdentity,
   editRuntimeRegistrationProperty,
@@ -185,6 +184,7 @@ import {
   canvasVisualTargetElement,
   canvasPointerCapabilityFromProof,
   createCanvasTargetIdentityScope,
+  elementCopyAvailabilityForTarget,
   resolveCanvasTarget,
   type CanvasTargetIdentityScope,
   type ResolvedCanvasTarget,
@@ -447,6 +447,7 @@ type RuntimeSourceElements = {
   executionId: string;
   elements: WeakSet<HTMLElement>;
   pagerootIds: WeakMap<HTMLElement, string>;
+  runtimeShadowHosts: WeakSet<HTMLElement>;
 };
 
 type RuntimeCandidateRender = {
@@ -1364,6 +1365,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
   }, []);
 
+  const currentRuntimeShadowProof = useCallback(() => {
+    const runtimeFrame = runtimeFrameRef.current;
+    const registered = runtimeSourceElementsRef.current;
+    if (
+      !runtimeFrame?.settled
+      || runtimeFrame.elementGeneration !== frameLoadGenerationRef.current
+      || registered?.elementGeneration !== runtimeFrame.elementGeneration
+      || registered.executionId !== runtimeFrame.grant.executionId
+    ) return null;
+    return (element: HTMLElement) => registered.runtimeShadowHosts.has(element);
+  }, []);
+
   // Snapshots and canonical remounts create new objects. Only these private,
   // controller-owned paths may transfer identity; matching public attributes
   // on an author-created clone never confers mutation authority.
@@ -1609,9 +1622,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     syncRuntimeRefreshDiagnostics();
   }, [syncRuntimeRefreshDiagnostics]);
 
-  const clearRuntimeRefreshPending = useCallback(() => {
+  const advanceRuntimeRefreshPending = useCallback((sourceRevision: string) => {
+    const pending = runtimeRefreshPendingRef.current;
+    if (!pending || pending.sourceRevision === sourceRevision) return;
+    runtimeRefreshPendingRef.current = { ...pending, sourceRevision };
+    syncRuntimeRefreshDiagnostics();
+  }, [syncRuntimeRefreshDiagnostics]);
+
+  const clearRuntimeRefreshPending = useCallback((sourceRevision: string) => {
+    if (runtimeRefreshPendingRef.current?.sourceRevision !== sourceRevision) return false;
     runtimeRefreshPendingRef.current = null;
     syncRuntimeRefreshDiagnostics();
+    return true;
+  }, [syncRuntimeRefreshDiagnostics]);
+
+  const supersedeRuntimeRefreshPending = useCallback(() => {
+    if (!runtimeRefreshPendingRef.current) return false;
+    runtimeRefreshPendingRef.current = null;
+    syncRuntimeRefreshDiagnostics();
+    return true;
   }, [syncRuntimeRefreshDiagnostics]);
 
   const syncRuntimeCandidateDiagnostics = useCallback(() => {
@@ -2371,6 +2400,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             delete parentGlobals[registrationProperty];
           }
           const elements = new WeakSet<HTMLElement>();
+          const runtimeShadowHosts = new WeakSet<HTMLElement>();
           const claimedByPagerootId = new Map<string, HTMLElement>();
           const pagerootIdByElement = new WeakMap<HTMLElement, string>();
           const conflictedPagerootIds = new Set<string>();
@@ -2379,6 +2409,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             executionId: runtimeFrame.grant.executionId,
             elements,
             pagerootIds: pagerootIdByElement,
+            runtimeShadowHosts,
           };
           const registerProved = (candidates: unknown) => {
             const currentCandidate = runtimeCandidateRef.current;
@@ -2411,6 +2442,35 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }
             return registered;
           };
+          const registerRuntimeShadowHost = (host: unknown) => {
+            const candidateIframe = runtimeCandidateIframeRef.current;
+            const activeIframe = (
+              runtimeCandidateRef.current === candidate
+              && !runtimePromotionRef.current
+              && runtimeFrameCoordinatorRef.current!.accepts(candidate.attempt)
+              && sourceWindow === candidateIframe?.contentWindow
+            )
+              ? candidateIframe
+              : (
+                runtimeFrameRef.current === runtimeFrame
+                && runtimeSourceElementsRef.current === candidate.sourceElements
+                && runtimeFrame.elementGeneration === frameLoadGenerationRef.current
+                && candidate.sourceElements?.executionId === runtimeFrame.grant.executionId
+                && sourceWindow === iframeRef.current?.contentWindow
+              )
+                ? iframeRef.current
+                : null;
+            const HTMLElementConstructor = activeIframe?.contentDocument
+              ?.defaultView?.HTMLElement;
+            if (
+              !HTMLElementConstructor
+              || !(host instanceof HTMLElementConstructor)
+              || host.ownerDocument !== activeIframe?.contentDocument
+              || sourceWindow !== activeIframe?.contentWindow
+            ) return false;
+            runtimeShadowHosts.add(host as HTMLElement);
+            return true;
+          };
           const reportActivationOutcome = (outcome: unknown) => {
             const currentCandidate = runtimeCandidateRef.current;
             const activeIframe = runtimeCandidateIframeRef.current;
@@ -2440,7 +2500,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               || Number(resourceFailureCount) > 10_000
               || !Number.isSafeInteger(elapsedMs)
               || Number(elapsedMs) < 0
-              || Number(elapsedMs) > EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS
               || (status === "activation-ready"
                 && (authorErrorCount !== 0 || resourceFailureCount !== 0))
               || (status === "activation-author-error"
@@ -2465,13 +2524,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               >= EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs;
             if (activationExceededBudget) {
               containerRef.current?.setAttribute("data-runtime-activation-budget", "exceeded");
-              runtimeFrame.activation = "failed";
-              queueMicrotask(() => {
-                failRuntimeCandidateActivationRef.current(candidate, "failed");
-              });
-              return true;
+            } else {
+              containerRef.current?.removeAttribute("data-runtime-activation-budget");
             }
-            containerRef.current?.removeAttribute("data-runtime-activation-budget");
             if (status === "activation-ready" || status === "activation-author-error") {
               runtimeFrame.activation = status === "activation-ready" ? "ready" : "partial";
               return true;
@@ -2487,7 +2542,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             && runtimeFrameRef.current === candidate.runtimeFrame
             && iframeRef.current?.contentWindow === sourceWindow
           );
-          return { registerProved, reportActivationOutcome, canAcceptFocus };
+          return {
+            registerProved,
+            registerRuntimeShadowHost,
+            reportActivationOutcome,
+            canAcceptFocus,
+          };
         };
         Object.defineProperty(parentGlobals, registrationProperty, {
           configurable: true,
@@ -2504,6 +2564,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     runtimeCandidateRef.current = candidate;
     if (candidateKind === "dynamic") {
+      containerRef.current?.setAttribute("data-runtime-activation", "pending");
+      containerRef.current?.removeAttribute("data-runtime-activation-ms");
       containerRef.current?.removeAttribute("data-runtime-activation-budget");
       containerRef.current?.removeAttribute("data-runtime-surface-budget");
       lastRuntimeCandidateFailureRef.current = null;
@@ -2606,6 +2668,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const retired = candidate.retiredSlot;
     retired?.registrationCleanup();
     retired?.cleanupFrame();
+    clearRuntimeRefreshPending(candidate.attempt.sourceRevision);
     runtimePromotionRef.current = null;
     containerRef.current?.setAttribute("data-runtime-handoff", "active");
     if (retired) scheduleRuntimeInactiveSlotClear(retired.generation);
@@ -2613,7 +2676,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // replay cannot start until the visible frame is fully committed.
     syncRuntimeCandidateDiagnostics();
     window.requestAnimationFrame(() => replayDeferredRuntimeCandidateRef.current());
-  }, [scheduleRuntimeInactiveSlotClear, syncRuntimeCandidateDiagnostics]);
+  }, [
+    clearRuntimeRefreshPending,
+    scheduleRuntimeInactiveSlotClear,
+    syncRuntimeCandidateDiagnostics,
+  ]);
   finalizeRuntimePromotionRef.current = finalizeRuntimeCandidatePromotion;
 
   const refreshRuntimeHandoffContextFromActive = useCallback((
@@ -2766,7 +2833,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     expectedFrameHtmlRef.current = candidate.prepared;
     expectedFrameTokenRef.current = candidate.verificationToken;
     renderedSourceHtmlRef.current = null;
-    clearRuntimeRefreshPending();
     pendingFrameViewportRef.current = null;
     pendingSharedViewportRef.current = null;
     pendingStaticPresentationAnchorRef.current = null;
@@ -2829,7 +2895,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return true;
   }, [
     activeRuntimeSlotId,
-    clearRuntimeRefreshPending,
     frameRender,
     refreshRuntimeHandoffContextFromActive,
     syncRuntimeCandidateDiagnostics,
@@ -3850,8 +3915,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       const refreshDecision = decideEditRuntimeRefresh({
         hasRuntime: runtimeIsCurrent,
-        nativeEditActive: Boolean(activeNativeEditRef.current),
         mutationKind: mutation.kind,
+        elementTagName: mutation.target.tagName,
         programIdentityChanged: (
           editRuntimeProgramIdentity(currentSource)
           !== editRuntimeProgramIdentity(result.html)
@@ -3943,6 +4008,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
       semanticRevisionRef.current = semanticResult?.nextRevision
         ?? semanticRevisionRef.current + 1;
+      advanceRuntimeRefreshPending(result.sourceSha256);
       if (!blockedDetailAtCommandStart) setEditFeedback(null);
       const activeNativeEdit = activeNativeEditRef.current;
       if (
@@ -4111,6 +4177,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
   }, [
     advanceLastKnownGoodRuntimeProjection,
+    advanceRuntimeRefreshPending,
     currentRuntimeSourceProof,
     loadFrameSource,
     markRuntimeRefreshPending,
@@ -5574,6 +5641,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || !selectedElementHasSourceMutationAuthority()
       || !enableReorderRef.current
     ) return false;
+    if (action === "duplicate") {
+      const availability = elementCopyAvailabilityForTarget({
+        element: selectedElementRef.current,
+        sourceIndex: sourceIndexRef.current,
+        runtimeGenerated: runtimeGeneratedSelectionRef.current,
+        runtimeExpected: Boolean(runtimeFrameRef.current),
+        transientBusy: Boolean(
+          runtimePromotionRef.current || activeFrameConnectionPendingRef.current
+        ),
+        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
+        hasRuntimeShadowRoot: currentRuntimeShadowProof(),
+      });
+      containerRef.current?.setAttribute("data-element-copy-availability", availability);
+      if (availability !== "available") return false;
+    }
     const sourceIndex = sourceIndexRef.current;
     if (!sourceIndex) return false;
     const liveElement = selectedElementRef.current;
@@ -5607,6 +5689,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [
     applySourceCommand,
     clearSelection,
+    currentRuntimeSourceProof,
+    currentRuntimeShadowProof,
     finishNativeEditing,
     reportBlockedEdit,
     selectedElementHasSourceMutationAuthority,
@@ -6745,6 +6829,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // scripts after that static frame is proven. Same mounted editor keeps a
     // minimal viewport anchor; it must not restore Caret, Range or a native
     // editing session.
+    // Any recovery obligation belongs to the replaced source revision. This
+    // explicit authority transition supersedes it; unrelated local commands
+    // still retain their exact-revision pending work until promotion.
+    supersedeRuntimeRefreshPending();
     loadFrameSource(html, { forceStatic: true, preserveViewport: true });
   }, [
     detachNativeEditForFence,
@@ -6753,6 +6841,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     loadFrameSource,
     previewAssetsReady,
     resetSelection,
+    supersedeRuntimeRefreshPending,
   ]);
 
   useEffect(() => {
@@ -7905,8 +7994,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             >= EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
         ) {
           containerRef.current?.setAttribute("data-runtime-activation-budget", "exceeded");
-          failRuntimeCandidate(candidate, "failed");
-          return;
         }
         observedActivation = currentActivation;
         phaseStartedAt = activationSettledAt;
@@ -7914,24 +8001,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const runtimeDeadlineMs = currentActivation === "pending"
         ? EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
         : EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs;
-      if (
+      const waitExceededDeadline = Boolean(
         candidate.runtimeFrame
         && !candidate.runtimeFrame.settled
         && performance.now() - phaseStartedAt >= runtimeDeadlineMs
-      ) {
+      );
+      if (waitExceededDeadline) {
         containerRef.current?.setAttribute(
           currentActivation === "pending"
             ? "data-runtime-activation-budget"
             : "data-runtime-surface-budget",
           "exceeded",
         );
-        failRuntimeCandidate(candidate, "failed");
-        return;
       }
       if (connectRuntimeCandidateRef.current(
         iframe,
         candidateRender.elementGeneration,
       )) return;
+      if (waitExceededDeadline) {
+        failRuntimeCandidate(candidate, "failed");
+        return;
+      }
       if (candidate.runtimeFrame) {
         animationFrame = requestAnimationFrame(connectParsedCandidate);
         return;
@@ -8350,6 +8440,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || selectedNativeEditHost
     ),
   );
+  const elementCopyAvailability = elementCopyAvailabilityForTarget({
+    element: selectedElementRef.current,
+    sourceIndex: sourceIndexRef.current,
+    runtimeGenerated: runtimeGeneratedSelection,
+    runtimeExpected: Boolean(runtimeFrameRef.current),
+    transientBusy: canvasTransitionActive,
+    isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
+    hasRuntimeShadowRoot: currentRuntimeShadowProof(),
+  });
   const selectionCapability = selection && !interactionLocked
     ? canvasPointerCapabilityFromProof({
       canStartTextEdit: selectedNativeEditAvailable,
@@ -8702,6 +8801,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     textFormatRequiresSelection,
     enableReorder: enableReorder && !runtimeGeneratedSelection,
     moveAvailability,
+    elementCopyAvailability,
     deleteCommentCount,
     deleteCommentDraftIncluded,
     spacingMenuRef,
@@ -8715,6 +8815,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     deleteCommentDraftIncluded,
     editFeedback,
     editFeedbackActionAvailable,
+    elementCopyAvailability,
     enableReorder,
     hasTextRange,
     hoverChrome,
