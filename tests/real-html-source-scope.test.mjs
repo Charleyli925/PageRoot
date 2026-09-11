@@ -143,6 +143,24 @@ test("operation-scoped oracle rejects extra appended garbage around a valid mark
   assert.equal(report.appendedShapeValid, false);
 });
 
+test("operation-scoped oracle accepts one exact insertion before preserved trailing whitespace", () => {
+  const before = `<p data-pageroot-id="${SOURCE_ID}">Original\n  </p>`;
+  const after = `<p data-pageroot-id="${SOURCE_ID}">Original TOKEN\n  </p>`;
+  const report = compareElementScopedMutation({
+    before,
+    after,
+    sourceId: SOURCE_ID,
+    normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
+    expectedAfterContains: ["TOKEN"],
+    expectedAppendedPattern: / TOKEN/u,
+  });
+  assert.equal(report.ok, true);
+  assert.equal(report.outsideUnchanged, true);
+  assert.equal(report.preservedBeforeContent, true);
+  assert.equal(report.changedRanges.before.start, report.changedRanges.before.end);
+  assert.equal(report.appendedByteRange.end - report.appendedByteRange.start, 6);
+});
+
 test("format oracle permits only the Stable ID and three requested declarations", () => {
   const before = `<p data-pageroot-id="${SOURCE_ID}">Original</p>`;
   const marker = "PRQA_0_FORMAT";

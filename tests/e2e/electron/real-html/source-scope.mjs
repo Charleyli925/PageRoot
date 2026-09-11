@@ -143,7 +143,8 @@ export function compareElementScopedMutation({
     afterElement.contentByteRange.end,
   );
   const beforeElementText = beforeElementBytes.toString("utf8");
-  const appendedBytes = afterElementBytes.subarray(beforeElementBytes.length);
+  const relative = relativeChangedRange(beforeElementBytes, afterElementBytes);
+  const appendedBytes = afterElementBytes.subarray(relative.after.start, relative.after.end);
   const appendedText = appendedBytes.toString("utf8");
   const appendedStableIds = [...appendedText.matchAll(
     /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
@@ -164,12 +165,10 @@ export function compareElementScopedMutation({
     && appendedMatch.index === 0
     && appendedMatch[0] === appendedText,
   );
-  const preservedBeforeContent = afterElementBytes.subarray(0, beforeElementBytes.length)
-    .equals(beforeElementBytes);
+  const preservedBeforeContent = relative.before.start === relative.before.end;
   const unexpectedBefore = expectedBeforeExcludes.filter((value) => beforeElementText.includes(value));
   const missingExpected = expectedAfterContains.filter((value) => !appendedText.includes(value));
   const unexpectedPresent = expectedAfterExcludes.filter((value) => appendedText.includes(value));
-  const relative = relativeChangedRange(beforeElementBytes, afterElementBytes);
   return {
     ok: outsideUnchanged
       && preservedBeforeContent
@@ -197,8 +196,8 @@ export function compareElementScopedMutation({
     missingExpected,
     unexpectedPresent,
     appendedByteRange: {
-      start: afterElement.contentByteRange.start + beforeElementBytes.length,
-      end: afterElement.contentByteRange.end,
+      start: afterElement.contentByteRange.start + relative.after.start,
+      end: afterElement.contentByteRange.start + relative.after.end,
     },
     changedRanges: {
       before: {
