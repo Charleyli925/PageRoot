@@ -3,6 +3,7 @@ import { REAL_HTML_OPERATION_IDS } from "./plan.mjs";
 export const RUNTIME_LIFECYCLE_REASONS = Object.freeze({
   ORDINARY_EDIT_RETAINED_RUNTIME: "ORDINARY_EDIT_RETAINED_RUNTIME",
   NO_CANDIDATE_OBSERVED_AFTER_SETTLE: "NO_CANDIDATE_OBSERVED_AFTER_SETTLE",
+  STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE: "STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE",
   SOURCE_RELOAD_SWITCHED_GENERATION: "SOURCE_RELOAD_SWITCHED_GENERATION",
   NO_DYNAMIC_RUNTIME_FAULT_INJECTED: "NO_DYNAMIC_RUNTIME_FAULT_INJECTED",
   STATIC_FALLBACK_NOT_REQUIRED: "STATIC_FALLBACK_NOT_REQUIRED",
@@ -84,6 +85,7 @@ export function runtimeOperationOutcomes({
   reloadAfter,
   dynamicRecovery = null,
   staticFallback = null,
+  candidateApplicable = true,
   candidateEvidence = null,
 } = {}) {
   const ordinary = transition(ordinaryBefore, ordinaryAfter);
@@ -174,7 +176,12 @@ export function runtimeOperationOutcomes({
           ordinary,
           reload,
         }),
-    [REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE]: candidateCreated
+    [REAL_HTML_OPERATION_IDS.RUNTIME_CANDIDATE]: candidateApplicable === false
+      ? notApplicable(RUNTIME_LIFECYCLE_REASONS.STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE, {
+        candidateCreated: false,
+        candidateEvidence,
+      })
+      : candidateCreated
       ? pass({
         candidateCreated: true,
         candidateId: candidateEvidence.candidateId,

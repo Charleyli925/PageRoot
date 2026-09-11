@@ -269,6 +269,7 @@ function recordOperationFailure(fileId, stageId, operationId, error) {
 
 async function runtimeContractSnapshot(page) {
   const editor = editorFor(page);
+  const surface = surfaceFor(page);
   const active = editor.locator('iframe[data-runtime-slot-role="active"]');
   const candidate = editor.locator('iframe[data-frame-role="runtime-candidate"]');
   const identity = await currentFrameIdentity(page);
@@ -278,10 +279,10 @@ async function runtimeContractSnapshot(page) {
     candidatePhase: await editor.getAttribute("data-runtime-candidate-phase"),
     candidateCount: await candidate.count(),
     renderVerified: await editor.getAttribute("data-render-verified"),
-    runtimePhase: await editor.getAttribute("data-edit-runtime-phase"),
-    runtimeOutcome: await editor.getAttribute("data-edit-runtime-outcome"),
+    runtimePhase: await surface.getAttribute("data-edit-runtime-phase"),
+    runtimeOutcome: await surface.getAttribute("data-edit-runtime-outcome"),
     degradation: await editor.getAttribute("data-runtime-degradation"),
-    staticFallbackVisible: await editor.getByTestId("edit-runtime-static-fallback")
+    staticFallbackVisible: await surface.getByTestId("edit-runtime-static-fallback")
       .count()
       .catch(() => 0),
     activeSandbox: await active.getAttribute("sandbox"),
@@ -298,6 +299,27 @@ async function stopRuntimeLifecycleObservation(page) {
 
 function editorFor(page) {
   return page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+}
+
+function surfaceFor(page) {
+  return page.getByTestId("workbench-active-document-canvas")
+    .filter({ visible: true })
+    .first();
+}
+
+async function waitForRuntimeReloadTerminal(page) {
+  await expect.poll(async () => {
+    const surface = surfaceFor(page);
+    const phase = await surface.getAttribute("data-edit-runtime-phase");
+    const outcome = await surface.getAttribute("data-edit-runtime-outcome");
+    return {
+      terminal: phase === "settled"
+        || phase === "static-fallback"
+        || (phase === "static" && typeof outcome === "string" && outcome !== ""),
+      phase,
+      outcome,
+    };
+  }, { timeout: 60_000 }).toMatchObject({ terminal: true });
 }
 
 async function waitUntilEditable(page) {
@@ -1397,6 +1419,7 @@ for (const [fileIndex, filename] of files.entries()) {
     await expect(page.locator(".workbench-chrome-status"))
       .toHaveText("页面已重新加载，可以继续编辑", { timeout: 60_000 });
     await waitUntilEditable(page);
+    await waitForRuntimeReloadTerminal(page);
     const runtimeObservations = await stopRuntimeLifecycleObservation(page);
     const reloadAfter = await runtimeContractSnapshot(page);
     row.runtime = {
@@ -1411,6 +1434,10 @@ for (const [fileIndex, filename] of files.entries()) {
       ordinaryAfter: null,
       reloadBefore,
       reloadAfter,
+      candidateApplicable: !(
+        reloadAfter.runtimePhase === "static"
+        && reloadAfter.runtimeOutcome === "not-candidate"
+      ),
       candidateEvidence: runtimeObservations.find((observation) => (
         observation.kind === "candidate-created"
         && observation.evidence === "candidate-id-absent-to-present"
