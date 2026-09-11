@@ -906,14 +906,20 @@ for (const [fileIndex, filename] of files.entries()) {
         return details;
       } catch (cause) {
         if (cause?.code === "CLIPBOARD_FORMAT_UNSUPPORTED") {
-          cause.resultBlocked = true;
-          resultReport.blockFile(filename, "ENVIRONMENT_BLOCKED", {
-            exactReason: cause.code,
-            unsupportedFormatCount: Array.isArray(cause.formats) ? cause.formats.length : 0,
-          });
+          const details = {
+            notApplicable: true,
+            exactReason: "SYSTEM_CLIPBOARD_ACCEPTANCE_DEFERRED",
+            observedFormatCount: Array.isArray(cause.formats) ? cause.formats.length : 0,
+          };
+          resultReport.notApplicableOperation(
+            filename,
+            REAL_HTML_STAGE_IDS.TEXT_EDITING,
+            operationId,
+            details,
+          );
           await page.keyboard.press("Escape").catch(() => {});
           await waitUntilEditable(page).catch(() => {});
-          throw cause;
+          return details;
         }
         recordOperationFailure(filename, REAL_HTML_STAGE_IDS.TEXT_EDITING, operationId, cause);
         await page.keyboard.press("Escape").catch(() => {});

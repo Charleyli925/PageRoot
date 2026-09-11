@@ -156,9 +156,10 @@ as separate file/stage/operation rows. Operations execute and report in the
 same order; every A mutation freezes and checks its own source baseline. The
 private report binds HEAD plus staged, unstaged and untracked source bytes.
 The private deterministic paste probe requires an empty system clipboard and verifies that it is
-empty again afterward. Any non-empty clipboard fails closed as an environment
-blocker before mutation; lossless preservation of system clipboard formats
-belongs to a separate acceptance lane.
+empty again afterward. Any non-empty clipboard marks only Paste as
+`NOT_APPLICABLE` before mutation; lossless preservation of system clipboard
+formats belongs to a separate acceptance lane and does not suppress later
+operations in the same file.
 
 The current capability manifest contains 23 cases. If `cases.json` changes,
 the release report must use the count from that final file rather than copying
