@@ -92,12 +92,15 @@ export function runtimeOperationOutcomes({
     && candidateEvidence?.evidence === "candidate-id-absent-to-present"
     && typeof candidateEvidence?.candidateId === "string"
     && candidateEvidence.candidateId.trim() !== "";
-  const ordinaryRebuilt = ordinary.documentChanged || ordinary.generationChanged;
+  const ordinaryObserved = ordinary.validDocument && ordinary.validGeneration;
+  const ordinaryProvided = ordinaryBefore != null || ordinaryAfter != null;
+  const ordinaryEvidenceInvalid = ordinaryProvided && !ordinaryObserved;
+  const ordinaryRebuilt = ordinaryObserved
+    && (ordinary.documentChanged || ordinary.generationChanged);
   const reloadRebuilt = reload.documentChanged;
-  const runtimeIdentityValid = ordinary.validDocument
-    && ordinary.validGeneration
-    && reload.validDocument
-    && reload.validGeneration;
+  const runtimeIdentityValid = reload.validDocument
+    && reload.validGeneration
+    && !ordinaryEvidenceInvalid;
 
   let dynamic;
   if (!dynamicRecovery?.faultInjected) {
@@ -163,6 +166,7 @@ export function runtimeOperationOutcomes({
       : reloadRebuilt
         ? pass({
           exactReason: RUNTIME_LIFECYCLE_REASONS.SOURCE_RELOAD_REBUILT_RUNTIME,
+          ordinaryObserved,
           ordinary,
           reload,
         })

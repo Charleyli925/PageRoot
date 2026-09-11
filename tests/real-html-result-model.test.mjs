@@ -68,28 +68,35 @@ test("planned file, stage and operation rows are created before execution", () =
   validateResultModel(model);
 });
 
-test("a failed stage propagates later rows as NOT_EXECUTED with an explicit blocker", () => {
+test("a failed category stage blocks only its own operations", () => {
   let model = createResultModel(plan());
   const failedStage = resultRowId.stage("page-a.html", "open");
   model = recordFailure(model, failedStage, RESULT_REASON_CODES.STAGE_FAILED, {
     message: "synthetic stage failure",
   });
-  const downstream = model.rows.filter((row) => row.fileId === "page-a.html" && row.order > 2);
-  assert.ok(downstream.length > 0);
+  const stageRows = model.rows.filter((row) => (
+    row.fileId === "page-a.html" && row.stageId === "open" && row.id !== failedStage
+  ));
+  assert.ok(stageRows.length > 0);
   assert.equal(
-    downstream.every((row) => (
+    stageRows.every((row) => (
       row.state === "NOT_EXECUTED"
       && row.reasonCode === RESULT_REASON_CODES.UPSTREAM_STAGE_FAILED
       && row.blockedBy === failedStage
     )),
     true,
   );
+  const laterCategory = model.rows.filter((row) => (
+    row.fileId === "page-a.html" && row.stageId === "reopen"
+  ));
+  assert.equal(laterCategory.every((row) => row.reasonCode === RESULT_REASON_CODES.NOT_STARTED), true);
+  assert.equal(laterCategory.every((row) => row.state === "NOT_EXECUTED"), true);
   assert.equal(model.summary.levels.operation.denominator, 0);
   assert.equal(model.summary.levels.operation.covered, 0);
   assert.equal(model.state, "FAIL");
 });
 
-test("an operation failure blocks every later row in the same file", () => {
+test("an operation failure blocks later operations in the same category only", () => {
   let model = createResultModel({
     files: [{
       id: "page-a.html",
@@ -105,14 +112,18 @@ test("an operation failure blocks every later row in the same file", () => {
   });
   const downstream = model.rows.filter((row) => (
     row.fileId === "page-a.html"
+    && row.stageId === "first"
     && row.order > model.rows.find((candidate) => candidate.id === failedOperation).order
   ));
   assert.ok(downstream.length > 0);
   assert.equal(downstream.every((row) => (
     row.state === "NOT_EXECUTED"
     && row.reasonCode === RESULT_REASON_CODES.UPSTREAM_OPERATION_FAILED
-    && row.blockedBy === failedOperation
+      && row.blockedBy === failedOperation
   )), true);
+  const laterStage = model.rows.filter((row) => row.fileId === "page-a.html" && row.stageId === "second");
+  assert.equal(laterStage.every((row) => row.reasonCode === RESULT_REASON_CODES.NOT_STARTED), true);
+  assert.equal(laterStage.every((row) => row.state === "NOT_EXECUTED"), true);
   assert.equal(model.summary.levels.file.denominator, 0);
   assert.equal(model.summary.levels.stage.denominator, 0);
   assert.equal(model.summary.levels.operation.denominator, 1);
@@ -185,7 +196,11 @@ test("missing targets and environment blockers are NOT_EXECUTED and excluded fro
   assert.equal(model.summary.levels.stage.denominator, 0);
   assert.equal(model.summary.levels.operation.denominator, 0);
   assert.equal(model.summary.levels.stage.covered, 0);
-  assert.equal(model.summary.reasonCodes.MISSING_TARGET, 5);
+  assert.equal(model.summary.reasonCodes.MISSING_TARGET, 3);
+  const laterStageRows = model.rows.filter((row) => (
+    row.fileId === "page-a.html" && row.stageId === "reopen"
+  ));
+  assert.equal(laterStageRows.every((row) => row.reasonCode === RESULT_REASON_CODES.NOT_STARTED), true);
   model = finalizeResultModel(model);
   assert.equal(model.summary.levels.stage.denominator, 0);
   assert.equal(model.summary.levels.operation.denominator, 0);
@@ -216,7 +231,7 @@ test("file-level environment blockers propagate without entering coverage", () =
   ));
 });
 
-test("operation blockers propagate to every later row in the same file", () => {
+test("operation blockers propagate only within the same category", () => {
   for (const reasonCode of [
     RESULT_REASON_CODES.MISSING_TARGET,
     RESULT_REASON_CODES.ENVIRONMENT_BLOCKED,
@@ -234,6 +249,7 @@ test("operation blockers propagate to every later row in the same file", () => {
     model = recordBlocker(model, blocker, reasonCode, { reason: "direct operation blocker" });
     const downstream = model.rows.filter((row) => (
       row.fileId === "blocked-operation-page"
+      && row.stageId === "first"
       && row.id !== blocker
       && row.order > model.rows.find((candidate) => candidate.id === blocker).order
     ));
@@ -243,6 +259,10 @@ test("operation blockers propagate to every later row in the same file", () => {
       && row.reasonCode === reasonCode
       && row.blockedBy === blocker
     )), true);
+    const laterCategory = model.rows.filter((row) => (
+      row.fileId === "blocked-operation-page" && row.stageId === "second"
+    ));
+    assert.equal(laterCategory.every((row) => row.reasonCode === RESULT_REASON_CODES.NOT_STARTED), true);
     assert.equal(model.summary.levels.operation.denominator, 0);
     assert.equal(model.summary.levels.stage.denominator, 0);
     assert.equal(model.summary.levels.file.denominator, 0);

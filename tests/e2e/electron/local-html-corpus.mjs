@@ -40,12 +40,25 @@ import {
   runtimeOperationOutcomes,
 } from "./real-html/runtime-lifecycle.mjs";
 import {
+  createFixedTextTargetPlan,
+  describeTextTarget,
+  TEXT_TARGET_COUNT,
+  TEXT_TARGET_REASON_CODES,
+  TEXT_TARGET_SELECTOR,
+  validateFrozenTextTarget,
+} from "./real-html/text-targets.mjs";
+import {
   compareElementScopedMutation,
   compareElementSourceDelta,
   formattedMarkerAppendedPattern,
   SOURCE_SCOPE_POLICIES,
 } from "./real-html/source-scope.mjs";
 import { workspaceSourceFingerprint } from "./real-html/workspace-provenance.mjs";
+import {
+  buildSourceIndex,
+  createTargetRef,
+} from "../../../app/lib/source-patch-core.js";
+import { isEditableIslandTarget } from "../../../app/lib/editable-island.js";
 
 const corpus = process.env.PAGEROOT_REAL_HTML_DIR;
 if (!corpus) {
@@ -90,10 +103,159 @@ const saveReport = () => writeFileSync(
   JSON.stringify({ ...report, resultModel: resultReport.model }, null, 2),
 );
 
-function errorDetails(error) {
+const PUBLIC_ERROR_STRING_KEYS = new Set([
+  "code",
+  "exactReason",
+  "reasonCode",
+  "expectedId",
+  "observedId",
+  "observedTag",
+  "observedParentId",
+  "sourceId",
+  "policy",
+]);
+const PRIVATE_ERROR_KEYS = new Set([
+  "afterSnippet",
+  "beforeSnippet",
+  "html",
+  "raw",
+  "text",
+  "value",
+  "message",
+  "stack",
+  "filename",
+  "path",
+  "selector",
+]);
+
+function publicRange(range) {
+  if (!range || typeof range !== "object") return null;
+  const start = Number.isInteger(range.start) ? range.start : null;
+  const end = Number.isInteger(range.end) ? range.end : null;
   return {
-    error: String(error?.stack || error),
-    code: error?.code || null,
+    start,
+    end,
+    length: start != null && end != null ? Math.max(0, end - start) : null,
+  };
+}
+
+function publicFirstDifferingByte(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    beforeOffset: Number.isInteger(value.beforeOffset) ? value.beforeOffset : null,
+    afterOffset: Number.isInteger(value.afterOffset) ? value.afterOffset : null,
+  };
+}
+
+function publicOracleRange(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    scope: typeof value.scope === "string" ? value.scope : null,
+    reasonCode: typeof value.reasonCode === "string" ? value.reasonCode : null,
+    kind: typeof value.kind === "string" ? value.kind : null,
+    sourceRange: publicRange(value.sourceRange),
+    domRange: publicRange(value.domRange),
+    beforeRange: publicRange(value.beforeRange),
+    afterRange: publicRange(value.afterRange),
+    firstDifferingByte: publicFirstDifferingByte(value.firstDifferingByte),
+  };
+}
+
+function collectOracleBooleans(value, path = "", output = {}) {
+  if (typeof value === "boolean") {
+    output[path || "ok"] = value;
+    return output;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return output;
+  for (const [key, nested] of Object.entries(value)) {
+    if (PRIVATE_ERROR_KEYS.has(key) || key === "errors" || key === "allowedRegions") continue;
+    collectOracleBooleans(nested, path ? `${path}.${key}` : key, output);
+  }
+  return output;
+}
+
+function publicOracleDetails(oracle) {
+  if (!oracle || typeof oracle !== "object") return null;
+  const changedRanges = Array.isArray(oracle.changedRanges)
+    ? oracle.changedRanges.map(publicOracleRange)
+    : oracle.changedRanges?.before || oracle.changedRanges?.after
+      ? [
+        {
+          scope: "target",
+          reasonCode: null,
+          kind: "before",
+          sourceRange: publicRange(oracle.changedRanges.before),
+          domRange: null,
+          beforeRange: publicRange(oracle.changedRanges.before),
+          afterRange: null,
+          firstDifferingByte: null,
+        },
+        {
+          scope: "target",
+          reasonCode: null,
+          kind: "after",
+          sourceRange: publicRange(oracle.changedRanges.after),
+          domRange: null,
+          beforeRange: null,
+          afterRange: publicRange(oracle.changedRanges.after),
+          firstDifferingByte: null,
+        },
+      ]
+      : [];
+  const errors = Array.isArray(oracle.errors)
+    ? oracle.errors.map((entry) => ({
+      code: typeof entry?.code === "string" ? entry.code : null,
+    }))
+    : [];
+  return {
+    exactReason: oracle.ok === true
+      ? "SOURCE_SCOPE_ORACLE_PASSED"
+      : errors.find((entry) => entry.code)?.code || "SOURCE_SCOPE_ORACLE_FAILED",
+    booleanConditions: collectOracleBooleans(oracle),
+    changedRanges,
+    changedRegionCount: Number.isInteger(oracle.changedRegionCount)
+      ? oracle.changedRegionCount
+      : changedRanges.filter((entry) => entry?.scope === "allowed").length,
+    outsideChangedRangeCount: Number.isInteger(oracle.outsideChangedRangeCount)
+      ? oracle.outsideChangedRangeCount
+      : changedRanges.filter((entry) => entry?.scope === "outside").length,
+    appendedByteRange: publicRange(oracle.appendedByteRange),
+    elementRanges: {
+      before: publicRange(oracle.elementRanges?.before),
+      after: publicRange(oracle.elementRanges?.after),
+    },
+    errors,
+  };
+}
+
+function publicErrorValue(value, key = "") {
+  if (typeof value === "boolean" || typeof value === "number" || value == null) return value;
+  if (typeof value === "string") return PUBLIC_ERROR_STRING_KEYS.has(key) ? value : undefined;
+  if (Array.isArray(value)) {
+    return value.map((entry) => publicErrorValue(entry, key)).filter((entry) => entry !== undefined);
+  }
+  if (typeof value !== "object") return undefined;
+  const output = {};
+  for (const [nestedKey, nestedValue] of Object.entries(value)) {
+    if (PRIVATE_ERROR_KEYS.has(nestedKey) || nestedKey === "oracle") continue;
+    const publicValue = publicErrorValue(nestedValue, nestedKey);
+    if (publicValue !== undefined) output[nestedKey] = publicValue;
+  }
+  return output;
+}
+
+function errorDetails(error) {
+  const code = error?.code || null;
+  const oracle = publicOracleDetails(error?.oracle);
+  const details = publicErrorValue(error?.details);
+  return {
+    error: code === "SOURCE_SCOPE_ORACLE_FAILED"
+      ? "Source scope oracle failed."
+      : String(error?.stack || error),
+    code,
+    exactReason: oracle?.exactReason || details?.exactReason || null,
+    ...(details && Object.keys(details).length > 0 ? { details } : {}),
+    ...(oracle ? { oracle } : {}),
   };
 }
 
@@ -282,113 +444,125 @@ async function clickAuthoredTab(page, tabId) {
   await page.waitForTimeout(200);
 }
 
-async function visibleTextCandidates(page) {
+function editableSourceElementIds(sourceBytes) {
+  const index = buildSourceIndex(sourceBytes.toString("utf8"));
+  return new Set(index.elements.flatMap((element) => {
+    if (!element.textContent?.trim()) return [];
+    const targetRef = createTargetRef(index, element, { level: "subregion" });
+    return isEditableIslandTarget(index, targetRef).editable
+      ? [element.pagerootId || element.nodeId]
+      : [];
+  }));
+}
+
+async function captureTextTargetSnapshots(page, allowedSourceIds, tabId) {
   const frame = await currentEditorFrame(page);
-  return frame.locator("[data-pageroot-id]").evaluateAll((elements) => elements
-    .map((element) => {
+  // `evaluateAll` serializes only the callback itself, so the descriptor is
+  // intentionally called inline through its self-contained function source.
+  const snapshots = await frame.locator(TEXT_TARGET_SELECTOR).evaluateAll((elements, allowedIds) => {
+    const allowed = new Set(allowedIds);
+    return (
+    elements.map((element) => {
+      const view = element.ownerDocument.defaultView;
+      const style = view?.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      const style = element.ownerDocument.defaultView.getComputedStyle(element);
+      const id = element.getAttribute("data-pageroot-id");
+      const parent = element.parentElement?.closest("[data-pageroot-id]") || null;
+      const descendantSourceNodes = Array.from(
+        element.querySelectorAll("[data-pageroot-id]"),
+      );
+      const descendantSourceIds = descendantSourceNodes
+        .map((candidate) => candidate.getAttribute("data-pageroot-id"));
+      const descendantSourceTags = descendantSourceNodes.map((candidate) => candidate.localName);
+      const excludedAncestor = element.closest(
+        "button,a,input,textarea,select,option,nav,[role=tab],[role=tablist],[contenteditable=true]",
+      );
+      const tag = element.localName;
+      const sourceIdValid = /^pr1_[0-9a-f]{32}$/u.test(id || "");
       const text = element.textContent?.replace(/\s+/gu, " ").trim() || "";
-      const tag = element.tagName.toLowerCase();
-      const excluded = Boolean(element.closest(
-        "button,a,input,textarea,select,option,nav,[role=tab],[role=tablist],.tab[data-p],[contenteditable=true]",
-      ));
-      const preferred = [
-        "p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th",
-        "blockquote", "figcaption", "label", "span", "div",
-      ].indexOf(tag);
+      const hiddenByAttribute = element.hasAttribute("hidden")
+        || element.getAttribute("aria-hidden") === "true"
+        || element.hasAttribute("inert");
+      const visible = Boolean(
+        style
+        && !hiddenByAttribute
+        && style.display !== "none"
+        && style.visibility !== "hidden"
+        && Number(style.opacity || 1) > 0
+        && rect.width > 0
+        && rect.height > 0
+        && element.getClientRects().length > 0,
+      );
+      const format = {
+        bold: style?.fontWeight === "bold" || Number(style?.fontWeight || 0) >= 600,
+        italic: style?.fontStyle === "italic" || style?.fontStyle === "oblique",
+        underline: (style?.textDecorationLine || "").split(/\s+/u).includes("underline"),
+      };
+      const documentOrder = Array.from(
+        element.ownerDocument.querySelectorAll("[data-pageroot-id]"),
+      ).indexOf(element);
+      const domIdentityValid = sourceIdValid
+        && Array.from(element.ownerDocument.querySelectorAll("[data-pageroot-id]"))
+          .filter((candidate) => candidate.getAttribute("data-pageroot-id") === id)
+          .length === 1;
       return {
-        id: element.getAttribute("data-pageroot-id"),
+        id,
         tag,
+        parentId: parent?.getAttribute("data-pageroot-id") || null,
+        documentOrder,
         textLength: text.length,
         childCount: element.childElementCount,
-        top: rect.top,
-        height: rect.height,
-        width: rect.width,
-        preferred: preferred < 0 ? 99 : preferred,
-        visible:
-          !excluded
-          && preferred >= 0
-          && text.length >= 8
-          && text.length <= 800
-          && rect.width >= 36
-          && rect.height >= 12
-          && style.display !== "none"
-          && style.visibility !== "hidden"
-          && Number(style.opacity || 1) > 0,
+        descendantSourceIds,
+        descendantSourceTags,
+        sourceIdValid,
+        domIdentityValid,
+        visible,
+        interactive: Boolean(excludedAncestor),
+        sourceEditable: allowed.has(id),
+        format,
+        rect: { width: rect.width, height: rect.height },
       };
     })
-    .filter((candidate) => candidate.visible));
+    );
+  }, allowedSourceIds);
+  return snapshots
+    .filter((snapshot) => snapshot.visible && snapshot.sourceEditable)
+    .map((snapshot) => ({ ...snapshot, tabId }));
 }
 
-function distributedCandidates(candidates, limit) {
-  const preferred = candidates
-    .filter((candidate) => candidate.preferred <= 12)
-    .sort((left, right) => left.top - right.top || left.preferred - right.preferred);
-  const pool = preferred.length >= limit ? preferred : candidates;
-  if (pool.length <= limit) return pool;
-  const picks = [];
-  for (const ratio of [0, 0.5, 1]) {
-    const candidate = pool[Math.round((pool.length - 1) * ratio)];
-    if (candidate && !picks.some((pick) => pick.id === candidate.id)) picks.push(candidate);
-  }
-  for (const candidate of pool) {
-    if (picks.length >= limit) break;
-    if (!picks.some((pick) => pick.id === candidate.id)) picks.push(candidate);
-  }
-  return picks.slice(0, limit);
-}
-
-async function planTextTargets(page) {
-  const planned = [];
-  const seen = new Set();
-  const usedTags = new Set();
-  const extras = [];
-  let frame = await currentEditorFrame(page);
-  const tabs = await frame.locator(
+async function planTextTargets(page, workingCopyPath, {
+  limit = TEXT_TARGET_COUNT,
+  requireFormatTarget = true,
+} = {}) {
+  const allowedSourceIds = [...editableSourceElementIds(readFileSync(workingCopyPath))];
+  const initialFrame = await currentEditorFrame(page);
+  const tabs = await initialFrame.locator(
     '[role="tab"][aria-controls][data-pageroot-id]',
-  ).evaluateAll((elements) => (
-    elements.filter((element) => {
-      const rect = element.getBoundingClientRect();
-      const style = element.ownerDocument.defaultView.getComputedStyle(element);
-      return rect.width > 10 && rect.height > 10
-        && style.display !== "none" && style.visibility !== "hidden";
-    }).slice(0, 4).map((element) => element.getAttribute("data-pageroot-id"))
-  ));
-
-  const states = tabs.length ? tabs : [null];
-  for (const [stateIndex, tabId] of states.entries()) {
+  ).evaluateAll((elements) => elements.filter((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = element.ownerDocument.defaultView.getComputedStyle(element);
+    return rect.width > 10 && rect.height > 10
+      && style.display !== "none" && style.visibility !== "hidden";
+  }).slice(0, 4).map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean));
+  const snapshots = [];
+  for (const tabId of tabs.length > 0 ? tabs : [null]) {
     await clickAuthoredTab(page, tabId);
-    const candidates = distributedCandidates(await visibleTextCandidates(page), 10);
-    const preferred = candidates.find((candidate) => (
-      !seen.has(candidate.id) && !usedTags.has(candidate.tag)
-    )) || candidates.find((candidate) => !seen.has(candidate.id));
-    if (preferred) {
-      planned.push({ ...preferred, tabId });
-      seen.add(preferred.id);
-      usedTags.add(preferred.tag);
-    }
-    for (const candidate of candidates) {
-      if (candidate.id !== preferred?.id) extras.push({ ...candidate, tabId, stateIndex });
-    }
+    snapshots.push(...await captureTextTargetSnapshots(page, allowedSourceIds, tabId));
   }
-
-  for (const candidate of extras) {
-    if (planned.length >= 12) break;
-    if (seen.has(candidate.id)) continue;
-    planned.push(candidate);
-    seen.add(candidate.id);
+  const fixed = createFixedTextTargetPlan(snapshots, { limit, requireFormatTarget });
+  if (!fixed.ok) {
+    const error = new Error("The fixed text-host preflight did not produce enough qualified targets.");
+    error.code = fixed.reasonCode || TEXT_TARGET_REASON_CODES.SNAPSHOT_INCOMPLETE;
+    error.details = {
+      reasonCode: fixed.reasonCode,
+      available: fixed.available ?? 0,
+      required: fixed.required ?? limit,
+      duplicateIds: fixed.duplicateIds || [],
+      rejected: fixed.rejected || [],
+    };
+    throw error;
   }
-
-  if (planned.length < 3) {
-    frame = await currentEditorFrame(page);
-    const fallback = distributedCandidates(await visibleTextCandidates(page), 8);
-    for (const candidate of fallback) {
-      if (!seen.has(candidate.id)) planned.push({ ...candidate, tabId: null });
-      seen.add(candidate.id);
-    }
-  }
-  return planned;
+  return fixed.targets;
 }
 
 async function renderedTextPosition(target) {
@@ -414,11 +588,39 @@ async function renderedTextPosition(target) {
   });
 }
 
-async function enterNativeEdit(page, plan) {
+async function enterNativeEdit(page, plan, { requireFormatProperty = null } = {}) {
   await clickAuthoredTab(page, plan.tabId);
+  await page.keyboard.press("Escape");
+  await waitUntilEditable(page);
   const frame = await currentEditorFrame(page);
-  const target = frame.locator(`[data-pageroot-id="${plan.id}"]`);
+  const target = frame.locator(`[data-pageroot-id=${JSON.stringify(plan.id)}]`);
+  const count = await target.count();
+  if (count !== 1) {
+    const error = new Error("The frozen text target must resolve to exactly one DOM element.");
+    error.code = count === 0
+      ? TEXT_TARGET_REASON_CODES.DOM_IDENTITY_INVALID
+      : TEXT_TARGET_REASON_CODES.STABLE_ID_DUPLICATE;
+    error.details = { expectedId: plan.id, observedCount: count };
+    throw error;
+  }
   await target.scrollIntoViewIfNeeded();
+  const currentSnapshot = await target.evaluate(describeTextTarget);
+  currentSnapshot.sourceEditable = plan.sourceEditable === true;
+  const validation = validateFrozenTextTarget(currentSnapshot, plan, {
+    requireFormatProperty,
+  });
+  if (!validation.ok) {
+    const error = new Error("The frozen text target changed before the operation.");
+    error.code = validation.reasons[0] || TEXT_TARGET_REASON_CODES.SNAPSHOT_DRIFT;
+    error.details = {
+      expectedId: plan.id,
+      reasons: validation.reasons,
+      observedTag: currentSnapshot.tag,
+      observedParentId: currentSnapshot.parentId,
+      observedDocumentOrder: currentSnapshot.documentOrder,
+    };
+    throw error;
+  }
   await target.dblclick({ position: await renderedTextPosition(target) });
   await expect(target).toHaveAttribute("contenteditable", /^(?:plaintext-only|true)$/u);
   await expect.poll(() => target.evaluate((element) => (
@@ -626,7 +828,10 @@ async function runFormatOperation({ page, workingCopyPath, plan, fileIndex }) {
   const target = await enterNativeEdit(page, plan);
   await target.press(keyShortcut("ArrowDown"));
   await page.keyboard.insertText(` ${marker}`);
+  await expect.poll(() => markerComputedStyle(target, marker))
+    .toEqual({ bold: false, italic: false, underline: false });
   const editor = editorFor(page);
+  const formatTransitions = [];
   for (const [property, name] of [
     ["bold", "加粗"],
     ["italic", "斜体"],
@@ -635,8 +840,13 @@ async function runFormatOperation({ page, workingCopyPath, plan, fileIndex }) {
     await selectTrailingText(target, page, marker.length);
     const button = editor.getByRole("button", { name, exact: true });
     await expect(button).toBeEnabled();
-    if (await button.getAttribute("aria-pressed") !== "true") await button.click();
+    await expect(button).toHaveAttribute("aria-pressed", "false");
+    const beforeState = await markerComputedStyle(target, marker);
+    expect(beforeState[property]).toBe(false);
+    await button.click();
+    await expect(button).toHaveAttribute("aria-pressed", "true");
     await expect.poll(async () => (await markerComputedStyle(target, marker))[property]).toBe(true);
+    formatTransitions.push({ property, from: false, to: true });
   }
   await expect.poll(() => markerComputedStyle(target, marker))
     .toEqual({ bold: true, italic: true, underline: true });
@@ -645,6 +855,7 @@ async function runFormatOperation({ page, workingCopyPath, plan, fileIndex }) {
   expectFormattedMarker(saved, marker);
   return {
     marker,
+    formatTransitions,
     sourceScope: assertScopedMutation({
       before,
       workingCopyPath,
@@ -850,8 +1061,12 @@ for (const [fileIndex, filename] of files.entries()) {
     lifecycle: [],
   };
   let session;
+  let page;
   let original;
-  let activeStageId = REAL_HTML_STAGE_IDS.TEXT_EDITING;
+  let workingCopyPath = null;
+  let plans = [];
+  let selectedPlans = [];
+  let successful = [];
   try {
     try {
       original = readFileSync(originalPath);
@@ -874,16 +1089,16 @@ for (const [fileIndex, filename] of files.entries()) {
       });
       throw cause;
     }
-    const { page } = session;
+    page = session.page;
     await waitForProjectReady(page);
     await waitUntilEditable(page);
-    const ordinaryBefore = await runtimeContractSnapshot(page);
-    const workingCopyPath = await managedWorkingCopyPath(page, copyPath);
-    const plans = await planTextTargets(page);
+    workingCopyPath = await managedWorkingCopyPath(page, copyPath);
+    try {
+    plans = await planTextTargets(page, workingCopyPath);
+    selectedPlans = plans.slice(0, TEXT_TARGET_COUNT);
     row.plannedTargets = plans.map(({ id, tag, tabId, top }) => ({ id, tag, tabId, top }));
 
-    const selectedPlans = plans.slice(0, 3);
-    if (selectedPlans.length < 3) {
+    if (selectedPlans.length < TEXT_TARGET_COUNT) {
       const error = new Error("Each real HTML file must exercise at least three text hosts.");
       error.code = "TEXT_HOST_COVERAGE_INCOMPLETE";
       recordOperationFailure(
@@ -936,7 +1151,7 @@ for (const [fileIndex, filename] of files.entries()) {
       REAL_HTML_OPERATION_IDS.TEXT_INPUT_DELETE,
       () => runInputDeleteOperation({ page, workingCopyPath, plans: selectedPlans, fileIndex }),
     );
-    const successful = inputDelete.samples.map((sample) => ({
+    successful = inputDelete.samples.map((sample) => ({
       plan: sample.plan,
       markers: { startMarker: sample.marker, ...sample },
     }));
@@ -1007,26 +1222,45 @@ for (const [fileIndex, filename] of files.entries()) {
         REAL_HTML_OPERATION_IDS.TEXT_SOURCE_SCOPE,
       ],
     });
-    const ordinaryAfter = await runtimeContractSnapshot(page);
 
     await page.screenshot({ path: path.join(copyDir, "after-complex-text-edits.png"), fullPage: true });
-    activeStageId = REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE;
+    } catch (cause) {
+      row.textError = errorDetails(cause);
+      const textStage = resultReport.rowsForFile(filename).find(
+        (resultRow) => resultRow.level === "stage"
+          && resultRow.stageId === REAL_HTML_STAGE_IDS.TEXT_EDITING,
+      );
+      if (textStage?.state === "NOT_EXECUTED" && textStage.reasonCode === "NOT_STARTED") {
+        resultReport.failStage(filename, REAL_HTML_STAGE_IDS.TEXT_EDITING, errorDetails(cause));
+      }
+      await page.keyboard.press("Escape").catch(() => {});
+      await waitUntilEditable(page).catch(() => {});
+    }
+
+    await stopPageRoot(session.electronApp, session.isolatedUserData);
+    session = undefined;
+    writeFileSync(copyPath, original);
+    session = await launchPageRoot({ activeSourcePath: copyPath });
+    page = session.page;
+    await waitForProjectReady(page);
+    await waitUntilEditable(page);
+    workingCopyPath = await managedWorkingCopyPath(page, copyPath);
+
+    try {
     const structureFrame = await currentEditorFrame(page);
     const structureSamples = await inspectFixedStructureSamples(structureFrame);
     row.structureSamples = structureSamples;
     const copyable = structureSamples.expectedCopyable;
     const nonCopyable = structureSamples.expectedNonCopyable;
     let duplicateIds = [];
+    const deferredStructureFailures = [];
     if (copyable.status === "invalid") {
       const error = new Error("The expected-copyable marker must resolve to exactly one valid target.");
       error.code = copyable.reason;
-      recordOperationFailure(
-        filename,
-        REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
-        REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
+      deferredStructureFailures.push({
+        operationId: REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
         error,
-      );
-      throw error;
+      });
     }
     if (copyable.status === "missing") {
       resultReport.notApplicableOperation(
@@ -1045,13 +1279,14 @@ for (const [fileIndex, filename] of files.entries()) {
         REAL_HTML_OPERATION_IDS.STRUCTURE_DELETE_DUPLICATE,
         { exactReason: "COPYABLE_SAMPLE_NOT_AVAILABLE" },
       );
-    } else {
+    } else if (copyable.status !== "invalid") {
       const copyablePlan = {
         id: copyable.sourceId,
         tag: copyable.tagName,
         tabId: null,
       };
       let originalIds;
+      let copyableError = null;
       try {
         const fixedCopyableTarget = (await currentEditorFrame(page))
           .locator(FIXED_STRUCTURE_SAMPLES.expectedCopyable.selector);
@@ -1075,47 +1310,45 @@ for (const [fileIndex, filename] of files.entries()) {
           });
         }
       } catch (cause) {
-        recordOperationFailure(
-          filename,
-          REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
-          REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
-          cause,
-        );
-        throw cause;
+        copyableError = cause;
       }
-      resultReport.passOperation(
-        filename,
-        REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
-        REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
-        {
-          sampleId: copyable.sampleId,
-          sourceId: copyable.sourceId,
-          expectedCopyable: true,
-        },
-      );
-      try {
-        await deleteFixedStructureTargets({
-          page,
-          plan: copyablePlan,
-          selector: FIXED_STRUCTURE_SAMPLES.expectedCopyable.selector,
-          duplicateIds,
-          originalIds,
+      if (copyableError) {
+        deferredStructureFailures.push({
+          operationId: REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
+          error: copyableError,
         });
-        for (const cycle of row.structureCycles) cycle.result = "copied-and-deleted";
+      } else {
         resultReport.passOperation(
           filename,
           REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
-          REAL_HTML_OPERATION_IDS.STRUCTURE_DELETE_DUPLICATE,
-          { duplicateIds },
+          REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
+          {
+            sampleId: copyable.sampleId,
+            sourceId: copyable.sourceId,
+            expectedCopyable: true,
+          },
         );
-      } catch (cause) {
-        recordOperationFailure(
-          filename,
-          REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
-          REAL_HTML_OPERATION_IDS.STRUCTURE_DELETE_DUPLICATE,
-          cause,
-        );
-        throw cause;
+        try {
+          await deleteFixedStructureTargets({
+            page,
+            plan: copyablePlan,
+            selector: FIXED_STRUCTURE_SAMPLES.expectedCopyable.selector,
+            duplicateIds,
+            originalIds,
+          });
+          for (const cycle of row.structureCycles) cycle.result = "copied-and-deleted";
+          resultReport.passOperation(
+            filename,
+            REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
+            REAL_HTML_OPERATION_IDS.STRUCTURE_DELETE_DUPLICATE,
+            { duplicateIds },
+          );
+        } catch (cause) {
+          deferredStructureFailures.push({
+            operationId: REAL_HTML_OPERATION_IDS.STRUCTURE_DELETE_DUPLICATE,
+            error: cause,
+          });
+        }
       }
     }
 
@@ -1124,13 +1357,10 @@ for (const [fileIndex, filename] of files.entries()) {
         "The expected-non-copyable marker must resolve to exactly one valid target.",
       );
       error.code = nonCopyable.reason;
-      recordOperationFailure(
-        filename,
-        REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
-        REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE,
+      deferredStructureFailures.push({
+        operationId: REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE,
         error,
-      );
-      throw error;
+      });
     }
     if (nonCopyable.status === "missing") {
       resultReport.notApplicableOperation(
@@ -1173,14 +1403,19 @@ for (const [fileIndex, filename] of files.entries()) {
           },
         );
       } catch (cause) {
-        recordOperationFailure(
-          filename,
-          REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
-          REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE,
-          cause,
-        );
-        throw cause;
+        deferredStructureFailures.push({
+          operationId: REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE,
+          error: cause,
+        });
       }
+    }
+    for (const failure of deferredStructureFailures.reverse()) {
+      recordOperationFailure(
+        filename,
+        REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
+        failure.operationId,
+        failure.error,
+      );
     }
     const structureRows = resultReport.rowsForFile(filename).filter(
       (resultRow) => resultRow.level === "operation"
@@ -1199,15 +1434,56 @@ for (const [fileIndex, filename] of files.entries()) {
       });
     }
 
-    activeStageId = REAL_HTML_STAGE_IDS.RUNTIME_IFRAME;
+    } catch (cause) {
+      row.structureError = errorDetails(cause);
+      const structureStage = resultReport.rowsForFile(filename).find(
+        (resultRow) => resultRow.level === "stage"
+          && resultRow.stageId === REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
+      );
+      if (
+        structureStage?.state === "NOT_EXECUTED"
+        && structureStage.reasonCode === "NOT_STARTED"
+      ) {
+        resultReport.failStage(filename, REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE, errorDetails(cause));
+      }
+      await page.keyboard.press("Escape").catch(() => {});
+      await waitUntilEditable(page).catch(() => {});
+    }
+
+    await stopPageRoot(session.electronApp, session.isolatedUserData);
+    session = undefined;
+    writeFileSync(copyPath, original);
+    session = await launchPageRoot({ activeSourcePath: copyPath });
+    page = session.page;
+    await waitForProjectReady(page);
+    await waitUntilEditable(page);
+    workingCopyPath = await managedWorkingCopyPath(page, copyPath);
+
+    try {
+    const runtimePlans = await planTextTargets(page, workingCopyPath, {
+      limit: 1,
+      requireFormatTarget: false,
+    });
+    const runtimePlan = runtimePlans[0] || null;
+    const runtimeSecondaryPlan = runtimePlans[1] || runtimePlan;
     await page.getByRole("button", { name: "预览", exact: true }).click();
     await expect(editorFor(page).getByRole("toolbar")).toHaveCount(0);
     await page.getByRole("button", { name: "编辑", exact: true }).click();
     await waitUntilEditable(page);
-    let target = await enterNativeEdit(page, successful[0].plan);
-    await expect(target).toHaveAttribute("contenteditable", /^(?:plaintext-only|true)$/u);
-    await page.keyboard.press("Escape");
-    row.lifecycle.push("preview-edit-reenter");
+    let target = null;
+    if (runtimePlan) {
+      target = await enterNativeEdit(page, runtimePlan);
+      await expect(target).toHaveAttribute("contenteditable", /^(?:plaintext-only|true)$/u);
+      await page.keyboard.press("Escape");
+      row.lifecycle.push("preview-edit-reenter");
+    } else {
+      resultReport.notApplicableOperation(
+        filename,
+        REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
+        REAL_HTML_OPERATION_IDS.RUNTIME_REENTER,
+        { exactReason: "TEXT_TARGETS_UNAVAILABLE" },
+      );
+    }
 
     const reloadBefore = await runtimeContractSnapshot(page);
     await startRuntimeLifecycleObservation(page);
@@ -1219,15 +1495,15 @@ for (const [fileIndex, filename] of files.entries()) {
     const runtimeObservations = await stopRuntimeLifecycleObservation(page);
     const reloadAfter = await runtimeContractSnapshot(page);
     row.runtime = {
-      ordinaryBefore,
-      ordinaryAfter,
+      ordinaryBefore: null,
+      ordinaryAfter: null,
       reloadBefore,
       reloadAfter,
       observations: runtimeObservations,
     };
     const runtimeOutcomes = runtimeOperationOutcomes({
-      ordinaryBefore,
-      ordinaryAfter,
+      ordinaryBefore: null,
+      ordinaryAfter: null,
       reloadBefore,
       reloadAfter,
       candidateEvidence: runtimeObservations.find((observation) => (
@@ -1272,16 +1548,24 @@ for (const [fileIndex, filename] of files.entries()) {
       throw new Error("Runtime/iframe stage failed.");
     }
     try {
-      target = await enterNativeEdit(page, successful[1].plan);
-      await expect(target).toContainText(successful[1].markers.startMarker);
-      await page.keyboard.press("Escape");
-      row.lifecycle.push("source-reload-reenter");
-      resultReport.passOperation(
-        filename,
-        REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
-        REAL_HTML_OPERATION_IDS.RUNTIME_REENTER,
-        { sourceId: successful[1].plan.id },
-      );
+      if (!runtimeSecondaryPlan) {
+        resultReport.notApplicableOperation(
+          filename,
+          REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
+          REAL_HTML_OPERATION_IDS.RUNTIME_REENTER,
+          { exactReason: "TEXT_TARGETS_UNAVAILABLE" },
+        );
+      } else {
+        target = await enterNativeEdit(page, runtimeSecondaryPlan);
+        await page.keyboard.press("Escape");
+        row.lifecycle.push("source-reload-reenter");
+        resultReport.passOperation(
+          filename,
+          REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
+          REAL_HTML_OPERATION_IDS.RUNTIME_REENTER,
+          { sourceId: runtimeSecondaryPlan.id },
+        );
+      }
     } catch (cause) {
       recordOperationFailure(
         filename,
@@ -1320,27 +1604,30 @@ for (const [fileIndex, filename] of files.entries()) {
       session = await launchPageRoot({ isolatedUserData });
       await waitForProjectReady(session.page);
       await waitUntilEditable(session.page);
-      for (const sample of successful) {
-        await clickAuthoredTab(session.page, sample.plan.tabId);
-        const reopenedTarget = (await currentEditorFrame(session.page))
-          .locator(`[data-pageroot-id="${sample.plan.id}"]`);
-        await expect(reopenedTarget).toContainText(sample.markers.startMarker);
+      if (!runtimePlan) {
+        resultReport.notApplicableOperation(
+          filename,
+          REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
+          REAL_HTML_OPERATION_IDS.RUNTIME_REOPEN,
+          { exactReason: "TEXT_TARGETS_UNAVAILABLE" },
+        );
+      } else {
+        await clickAuthoredTab(session.page, runtimePlan.tabId);
+        const reopenedTarget = (await currentEditorFrame(session.page)).locator(
+          `[data-pageroot-id="${runtimePlan.id}"]`,
+        );
+        await reopenedTarget.scrollIntoViewIfNeeded();
+        await reopenedTarget.dblclick({ position: await renderedTextPosition(reopenedTarget) });
+        await expect(reopenedTarget).toHaveAttribute("contenteditable", /^(?:plaintext-only|true)$/u);
+        await session.page.keyboard.press("Escape");
+        row.lifecycle.push("reopen-managed-project-reenter");
+        resultReport.passOperation(
+          filename,
+          REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
+          REAL_HTML_OPERATION_IDS.RUNTIME_REOPEN,
+          { targetCount: 1 },
+        );
       }
-      await clickAuthoredTab(session.page, successful[0].plan.tabId);
-      const reopenedTarget = (await currentEditorFrame(session.page)).locator(
-        `[data-pageroot-id="${successful[0].plan.id}"]`,
-      );
-      await reopenedTarget.scrollIntoViewIfNeeded();
-      await reopenedTarget.dblclick({ position: await renderedTextPosition(reopenedTarget) });
-      await expect(reopenedTarget).toHaveAttribute("contenteditable", /^(?:plaintext-only|true)$/u);
-      await session.page.keyboard.press("Escape");
-      row.lifecycle.push("reopen-managed-project-reenter");
-      resultReport.passOperation(
-        filename,
-        REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
-        REAL_HTML_OPERATION_IDS.RUNTIME_REOPEN,
-        { targetCount: successful.length },
-      );
     } catch (cause) {
       recordOperationFailure(
         filename,
@@ -1376,20 +1663,39 @@ for (const [fileIndex, filename] of files.entries()) {
       observations: runtimeObservations,
       lifecycle: row.lifecycle,
     });
-    resultReport.passFile(filename, {
-      textTargets: successful.length,
-      structureCycles: row.structureCycles.length,
-      lifecycle: row.lifecycle,
-    });
-    row.status = "PASS";
+    } catch (cause) {
+      row.runtimeError = errorDetails(cause);
+      const runtimeStage = resultReport.rowsForFile(filename).find(
+        (resultRow) => resultRow.level === "stage"
+          && resultRow.stageId === REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
+      );
+      if (
+        runtimeStage?.state === "NOT_EXECUTED"
+        && runtimeStage.reasonCode === "NOT_STARTED"
+      ) {
+        resultReport.failStage(filename, REAL_HTML_STAGE_IDS.RUNTIME_IFRAME, errorDetails(cause));
+      }
+      await page.keyboard.press("Escape").catch(() => {});
+      await waitUntilEditable(page).catch(() => {});
+    }
+
+    const failedStages = resultReport.rowsForFile(filename).filter(
+      (resultRow) => resultRow.level === "stage" && resultRow.state === "FAIL",
+    );
+    if (failedStages.length > 0) {
+      resultReport.failFile(filename, {
+        exactReason: "CATEGORY_FAILED",
+        failedStages: failedStages.map((stage) => stage.stageId),
+      });
+    } else {
+      resultReport.passFile(filename, {
+        textTargets: successful.length,
+        structureCycles: row.structureCycles.length,
+        lifecycle: row.lifecycle,
+      });
+    }
   } catch (cause) {
     row.error = String(cause?.stack || cause);
-    const stageRow = resultReport.rowsForFile(filename).find(
-      (resultRow) => resultRow.level === "stage" && resultRow.stageId === activeStageId,
-    );
-    if (stageRow?.state === "NOT_EXECUTED" && stageRow.reasonCode === "NOT_STARTED") {
-      resultReport.failStage(filename, activeStageId, errorDetails(cause));
-    }
     const fileRow = resultReport.rowsForFile(filename).find(
       (resultRow) => resultRow.level === "file",
     );
