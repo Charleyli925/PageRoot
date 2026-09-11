@@ -4002,7 +4002,8 @@ test("a current critical surface already ready wins before an overdue wait is re
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="surface-timeout-boundary"]')).toHaveCount(2);
     await expect(frame.locator("#surface-timeout-host canvas")).toHaveCount(1);
-    expect(readFileSync(workingCopyPath, "utf8")).not.toBe(html);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .not.toBe(html);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });
