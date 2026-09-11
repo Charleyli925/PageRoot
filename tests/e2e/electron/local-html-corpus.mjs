@@ -24,6 +24,11 @@ import {
   waitForRuntimeHandoffSettled,
 } from "./electron-native-harness.mjs";
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
+import {
+  COPY_DIAGNOSTIC_CLASSIFICATIONS,
+  classifyCopyDiagnostic,
+} from "./helpers/copy-diagnostic-classifier.mjs";
+import { buildSourceIndex } from "../../../app/lib/source-index.js";
 
 const corpus = process.env.PAGEROOT_REAL_HTML_DIR;
 if (!corpus) {
@@ -32,9 +37,21 @@ if (!corpus) {
   );
 }
 
-const files = readdirSync(corpus).filter((name) => /\.html?$/iu.test(name)).sort();
-if (!files.length) {
+const corpusFiles = readdirSync(corpus).filter((name) => /\.html?$/iu.test(name)).sort();
+if (!corpusFiles.length) {
   throw new Error("The local corpus contains no HTML files. Acceptance was not run.");
+}
+const requestedFileIndexes = new Set(
+  String(process.env.PAGEROOT_REAL_HTML_FILE_INDEXES || "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value >= 1),
+);
+const files = requestedFileIndexes.size
+  ? corpusFiles.filter((_name, index) => requestedFileIndexes.has(index + 1))
+  : corpusFiles;
+if (!files.length) {
+  throw new Error("The requested local corpus file indexes did not match any HTML files.");
 }
 
 const reportDir = mkdtempSync(path.join(tmpdir(), "stemmio-real-html-acceptance-"));
@@ -44,6 +61,8 @@ const report = {
   head: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
   diffSha256: sha256(execFileSync("git", ["diff", "HEAD", "--binary"])),
   planned: files.length,
+  corpusFiles: corpusFiles.length,
+  selectedFileIndexes: [...requestedFileIndexes].sort((left, right) => left - right),
   minimumTextHostsPerFile: 3,
   minimumStructureCyclesPerFile: 2,
   minimumOrdinaryContinuityChecksPerFile: 3,
@@ -96,6 +115,130 @@ async function currentFrameIdentity(page) {
       ),
     },
   };
+}
+
+async function copyCapabilitySnapshot({
+  page,
+  workingCopyPath,
+  plan,
+  originalSha256,
+  relocated = null,
+}) {
+  const editor = editorFor(page);
+  const frame = await currentEditorFrame(page);
+  const workingHtml = await readPublishedWorkingCopy(workingCopyPath, "utf8");
+  const workingIndex = buildSourceIndex(workingHtml, {
+    caller: "local-html-corpus-copy-diagnostic",
+  });
+  const sourceTarget = workingIndex.byPagerootId.get(plan.id) ?? null;
+  const sourceCodeUnitRange = sourceTarget?.range
+    ? {
+        start: sourceTarget.range.startOffset,
+        end: sourceTarget.range.endOffset,
+      }
+    : null;
+  const sourceUtf8ByteRange = sourceCodeUnitRange
+    ? {
+        start: Buffer.byteLength(workingHtml.slice(0, sourceCodeUnitRange.start), "utf8"),
+        end: Buffer.byteLength(workingHtml.slice(0, sourceCodeUnitRange.end), "utf8"),
+      }
+    : null;
+  const copyButton = editor.getByRole("button", { name: "复制元素", exact: true });
+  const buttonCount = await copyButton.count();
+  const candidateFrames = editor.locator('iframe[data-runtime-slot-role="candidate"]');
+  const activeFrame = editor.locator('iframe[data-runtime-slot-role="active"]');
+  const editingHosts = frame.locator("[data-html-canvas-editing]");
+  const nativeEditingCount = await editingHosts.count();
+  const focusInsideEditingHost = await frame.locator("body").evaluate(() => Boolean(
+    document.activeElement?.closest?.("[data-html-canvas-editing]"),
+  ));
+  await editor.evaluate((root) => {
+    root.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe"));
+  });
+  const workingSourceSha256 = await editor.getAttribute("data-working-source-sha256");
+  const renderedProjectionSha256 = await editor.getAttribute(
+    "data-rendered-projection-sha256",
+  );
+  const renderedProjectionStale = await editor.getAttribute(
+    "data-rendered-projection-stale",
+  );
+  const diskWorkingSha256 = sha256(Buffer.from(workingHtml));
+  const workingEqualsDisplayed = Boolean(
+    workingSourceSha256
+    && workingSourceSha256 === workingIndex.sourceSha256
+    && workingSourceSha256 === renderedProjectionSha256
+    && workingSourceSha256 === `sha256:${diskWorkingSha256}`
+    && renderedProjectionStale === "false"
+  );
+  return {
+    phase: "before-copy",
+    planned: {
+      stableId: plan.id,
+      tag: plan.tag,
+      tabId: plan.tabId,
+      sourceTarget: {
+        stableId: sourceTarget?.pagerootId ?? null,
+        tag: sourceTarget?.tagName ?? null,
+        unique: Boolean(sourceTarget),
+        codeUnitRange: sourceCodeUnitRange,
+        utf8ByteRange: sourceUtf8ByteRange,
+        workingSha256: workingIndex.sourceSha256,
+      },
+    },
+    relocated,
+    uiProjection: {
+      availability: await editor.getAttribute("data-element-copy-availability"),
+      reason: await editor.getAttribute("data-element-copy-reason"),
+      diagnostic: await editor.getAttribute("data-element-copy-diagnostic"),
+      buttonCount,
+      disabled: buttonCount === 1 ? await copyButton.isDisabled() : null,
+    },
+    commandBoundary: {
+      availability: await editor.getAttribute("data-e2e-copy-live-availability"),
+      reason: await editor.getAttribute("data-e2e-copy-live-reason"),
+      diagnostic: await editor.getAttribute("data-e2e-copy-live-diagnostic"),
+      targetStableId: await editor.getAttribute("data-e2e-copy-live-target-id"),
+      probeSequence: await editor.getAttribute("data-e2e-copy-probe-sequence"),
+    },
+    nativeTextSession: {
+      activeEditingCount: nativeEditingCount,
+      focusInsideEditingHost,
+      ended: nativeEditingCount === 0 && !focusInsideEditingHost,
+      probeEnded: await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true",
+    },
+    runtime: {
+      documentToken: await documentToken(page),
+      activeGeneration: await activeFrame.getAttribute("data-frame-generation"),
+      candidateCount: await candidateFrames.count(),
+      candidateGenerations: await candidateFrames.evaluateAll((frames) => (
+        frames.map((candidate) => candidate.getAttribute("data-frame-generation"))
+      )),
+      candidateId: await editor.getAttribute("data-runtime-candidate-id"),
+      candidatePhase: await editor.getAttribute("data-runtime-candidate-phase"),
+      handoff: await editor.getAttribute("data-runtime-handoff"),
+      renderVerified: await editor.getAttribute("data-render-verified"),
+    },
+    source: {
+      originalSha256,
+      diskWorkingSha256,
+      workingSourceSha256,
+      renderedProjectionSha256,
+      renderedProjectionStale,
+      workingEqualsDisplayed,
+    },
+    attribution: null,
+  };
+}
+
+function failWithCopyDiagnostic(message, snapshot) {
+  const code = classifyCopyDiagnostic(snapshot);
+  snapshot.attribution = {
+    code,
+    label: COPY_DIAGNOSTIC_CLASSIFICATIONS[code],
+  };
+  const error = new Error(`${message} [${snapshot.attribution.label}; ${code}]`);
+  error.copyDiagnostic = snapshot;
+  throw error;
 }
 
 async function clickAuthoredTab(page, tabId) {
@@ -445,14 +588,86 @@ async function exerciseTextTarget({
   };
 }
 
-async function exerciseDuplicateDelete({ page, plan, marker }) {
+async function exerciseDuplicateDelete({
+  page,
+  workingCopyPath,
+  originalSha256,
+  plan,
+  marker,
+}) {
   await clickAuthoredTab(page, plan.tabId);
   let frame = await currentEditorFrame(page);
   let original = frame.locator(`[data-pageroot-id="${plan.id}"]`);
+  const relocatedCount = await original.count();
+  let relocated = {
+    count: relocatedCount,
+    stableId: null,
+    tag: null,
+    connected: false,
+    selectedMarker: false,
+    sameAsPlanned: false,
+    liveStyleAttribute: null,
+  };
+  if (relocatedCount === 1) {
+    relocated = await original.evaluate((element, expected) => ({
+      count: 1,
+      stableId: element.getAttribute("data-pageroot-id"),
+      tag: element.tagName.toLowerCase(),
+      connected: element.isConnected,
+      selectedMarker: element.hasAttribute("data-html-canvas-selected"),
+      liveStyleAttribute: element.getAttribute("style"),
+      sameAsPlanned: (
+        element.getAttribute("data-pageroot-id") === expected.stableId
+        && element.tagName.toLowerCase() === expected.tag
+      ),
+    }), { stableId: plan.id, tag: plan.tag });
+  }
+  if (relocatedCount !== 1 || !relocated.sameAsPlanned || !relocated.connected) {
+    const diagnostic = await copyCapabilitySnapshot({
+      page,
+      workingCopyPath,
+      plan,
+      originalSha256,
+      relocated,
+    });
+    failWithCopyDiagnostic("Planned copy target could not be uniquely re-located", diagnostic);
+  }
   await original.scrollIntoViewIfNeeded();
-  await original.click();
+  await original.click({ timeout: 5_000 });
+  await page.waitForTimeout(0);
+  relocated.selectedMarker = await original.getAttribute("data-html-canvas-selected") !== null;
+  const diagnostic = await copyCapabilitySnapshot({
+    page,
+    workingCopyPath,
+    plan,
+    originalSha256,
+    relocated,
+  });
+  if (!relocated.selectedMarker) {
+    failWithCopyDiagnostic("Re-located copy target was not the selected operation target", diagnostic);
+  }
+  if (
+    diagnostic.uiProjection.buttonCount !== 1
+    || diagnostic.uiProjection.disabled
+    || diagnostic.uiProjection.availability !== "available"
+  ) {
+    failWithCopyDiagnostic("Copy action was unavailable immediately after exact selection", diagnostic);
+  }
   const beforeDuplicate = await currentRevision(page);
-  await editorFor(page).getByRole("button", { name: "复制元素", exact: true }).click();
+  await editorFor(page).getByRole("button", { name: "复制元素", exact: true })
+    .click({ timeout: 5_000 });
+  diagnostic.commandBoundary.executedAvailability = await editorFor(page).getAttribute(
+    "data-element-copy-command-availability",
+  );
+  diagnostic.commandBoundary.executedReason = await editorFor(page).getAttribute(
+    "data-element-copy-command-reason",
+  );
+  if (
+    diagnostic.commandBoundary.executedAvailability !== "available"
+    || diagnostic.commandBoundary.executedReason !== "available"
+  ) {
+    failWithCopyDiagnostic("Copy command was refused at the live command boundary", diagnostic);
+  }
   await waitForRuntimeHandoffSettled(page);
   await waitUntilEditable(page);
   await expectCheckpointPersisted(page, beforeDuplicate);
@@ -481,7 +696,7 @@ async function exerciseDuplicateDelete({ page, plan, marker }) {
   original = frame.locator(`[data-pageroot-id="${plan.id}"]`);
   await expect(original).toHaveCount(1);
   await expect(original).toContainText(marker);
-  return duplicateId;
+  return { duplicateId, diagnostic };
 }
 
 async function verifyViewport(page) {
@@ -494,7 +709,8 @@ async function verifyViewport(page) {
   }));
 }
 
-for (const [fileIndex, filename] of files.entries()) {
+for (const filename of files) {
+  const fileIndex = corpusFiles.indexOf(filename);
   const originalPath = path.join(corpus, filename);
   const original = readFileSync(originalPath);
   const copyDir = path.join(reportDir, String(fileIndex));
@@ -564,12 +780,32 @@ for (const [fileIndex, filename] of files.entries()) {
     for (let cycle = 0; cycle < 2; cycle += 1) {
       const sample = successful.find(({ plan }) => !["td", "th"].includes(plan.tag))
         ?? successful[0];
-      const duplicateId = await exerciseDuplicateDelete({
-        page,
-        plan: sample.plan,
-        marker: sample.markers.startMarker,
-      });
-      row.structureCycles.push({ cycle, originalId: sample.plan.id, duplicateId, result: "passed" });
+      try {
+        const { duplicateId, diagnostic } = await exerciseDuplicateDelete({
+          page,
+          workingCopyPath,
+          originalSha256: row.originalSha256,
+          plan: sample.plan,
+          marker: sample.markers.startMarker,
+        });
+        row.structureCycles.push({
+          cycle,
+          originalId: sample.plan.id,
+          duplicateId,
+          result: "passed",
+          diagnostic,
+        });
+      } catch (cause) {
+        row.structureCycles.push({
+          cycle,
+          originalId: sample.plan.id,
+          duplicateId: null,
+          result: "failed",
+          diagnostic: cause?.copyDiagnostic ?? null,
+          error: String(cause?.stack || cause),
+        });
+        throw cause;
+      }
     }
 
     await page.getByRole("button", { name: "预览", exact: true }).click();
@@ -635,7 +871,7 @@ for (const [fileIndex, filename] of files.entries()) {
     report.results.push(row);
     saveReport();
     console.log(
-      `${fileIndex + 1}/${files.length}: ${row.status} ${filename} `
+      `${report.results.length}/${files.length}: ${row.status} ${filename} `
       + `(${row.completedTargets.filter((target) => !target.rejected).length} text hosts, `
       + `${row.structureCycles.length} structure cycles)`,
     );

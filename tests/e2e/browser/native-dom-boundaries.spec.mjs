@@ -393,6 +393,66 @@ test("source structure toolbar duplicates with fresh IDs and deletes only the se
   expect(exported).not.toContain(duplicatedIds[1]);
 });
 
+test("style copy equivalence accepts only exact source or an empty live residue", async ({ page }) => {
+  const source = Buffer.from(`<!doctype html>
+<html><head><title>Style copy equivalence</title></head><body>
+  <h1 data-native-case="style-missing">Source has no style</h1>
+  <h1 data-native-case="style-empty" style="">Source has an empty style</h1>
+  <h1 data-native-case="style-authored" style="color: red">Source has authored style</h1>
+</body></html>`, "utf8");
+  const { editor, frame } = await loadFixture(page, "style-copy-equivalence.html", {
+    buffer: source,
+    identifiedWorkingCopy: true,
+  });
+  const duplicateButton = editor.getByRole("button", {
+    name: "复制元素",
+    exact: true,
+  });
+  const assertAvailability = async (caseId, mutation, expected) => {
+    await page.keyboard.press("Escape");
+    const target = frame.locator(caseSelector(caseId));
+    if (mutation) await target.evaluate(mutation);
+    await target.click();
+    if (expected === "available") {
+      await expect(duplicateButton).toBeVisible();
+    } else {
+      await expect(duplicateButton).toHaveCount(0);
+      await expect(editor).toHaveAttribute(
+        "data-element-copy-reason",
+        "runtime-subtree-diverged",
+      );
+    }
+  };
+
+  await assertAvailability(
+    "style-missing",
+    (element) => element.setAttribute("style", ""),
+    "available",
+  );
+  await assertAvailability(
+    "style-missing",
+    (element) => element.setAttribute("style", "color: blue"),
+    "unsupported",
+  );
+  await assertAvailability("style-empty", null, "available");
+  await assertAvailability(
+    "style-empty",
+    (element) => element.removeAttribute("style"),
+    "unsupported",
+  );
+  await assertAvailability("style-authored", null, "available");
+  await assertAvailability(
+    "style-authored",
+    (element) => element.setAttribute("style", ""),
+    "unsupported",
+  );
+  await assertAvailability(
+    "style-authored",
+    (element) => element.setAttribute("style", "color: blue"),
+    "unsupported",
+  );
+});
+
 test("hovering a filled module's padding advertises the same module click selects", async ({
   page,
 }) => {

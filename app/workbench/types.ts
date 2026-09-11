@@ -431,6 +431,7 @@ declare global {
         }> | null;
         e2eStaticCandidateFailure?: boolean;
         e2eRuntimeCommitHooks?: boolean;
+        e2eCanvasCapabilityProbe?: boolean;
       }>;
     };
     __PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?: Array<() => void>;

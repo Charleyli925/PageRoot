@@ -740,6 +740,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
 
     await page.keyboard.press("Escape");
     await frame.locator("#source-copy-safe").evaluate((button) => {
+      button.setAttribute("style", "");
       const text = button.firstChild;
       if (!(text instanceof Text) || text.data.length < 2) {
         throw new Error("Copy-equivalence fixture text is missing.");
@@ -795,8 +796,12 @@ test("author Script cannot add source authority after Runtime starts or save Run
       duplicateButton.click();
     });
     await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
-      "data-element-copy-availability",
+      "data-element-copy-command-availability",
       "unsupported",
+    );
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-element-copy-command-reason",
+      "runtime-subtree-diverged",
     );
     expect(readFileSync(sourcePath, "utf8")).toBe(sourceBeforeLateRuntimeChild);
     await frame.evaluate(() => window.__restoreRuntimeCopyInspection?.());

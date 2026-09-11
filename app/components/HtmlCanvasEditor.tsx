@@ -185,9 +185,10 @@ import {
   canvasVisualTargetElement,
   canvasPointerCapabilityFromProof,
   createCanvasTargetIdentityScope,
-  elementCopyAvailabilityForTarget,
+  elementCopyAssessmentForTarget,
   resolveCanvasTarget,
   type CanvasTargetIdentityScope,
+  type ElementCopyAssessment,
   type ResolvedCanvasTarget,
 } from "./html-canvas-pointer-capability";
 import {
@@ -1178,6 +1179,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ) => boolean>(() => false);
   const nativeEditFinishingRef = useRef(false);
   const nativeEditNeedsReloadRef = useRef(false);
+  const copyCapabilityProbeSequenceRef = useRef(0);
   const retainNativeEditFocusRef = useRef<RetainedNativeEditFocus | null>(null);
   const blockedOuterCompositionGestureRef = useRef(false);
   const insertionPointsRef = useRef<InsertionPoint[]>([]);
@@ -5789,7 +5791,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || !enableReorderRef.current
     ) return false;
     if (action === "duplicate") {
-      const availability = elementCopyAvailabilityForTarget({
+      const assessment = elementCopyAssessmentForTarget({
         element: selectedElementRef.current,
         sourceIndex: sourceIndexRef.current,
         runtimeGenerated: runtimeGeneratedSelectionRef.current,
@@ -5800,8 +5802,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
         hasRuntimeShadowRoot: currentRuntimeShadowProof(),
       });
-      containerRef.current?.setAttribute("data-element-copy-availability", availability);
-      if (availability !== "available") return false;
+      containerRef.current?.setAttribute(
+        "data-element-copy-command-availability",
+        assessment.availability,
+      );
+      containerRef.current?.setAttribute(
+        "data-element-copy-command-reason",
+        assessment.reason,
+      );
+      if (assessment.diagnostic) {
+        containerRef.current?.setAttribute(
+          "data-element-copy-command-diagnostic",
+          assessment.diagnostic,
+        );
+      } else {
+        containerRef.current?.removeAttribute("data-element-copy-command-diagnostic");
+      }
+      if (assessment.availability !== "available") return false;
     }
     const sourceIndex = sourceIndexRef.current;
     if (!sourceIndex) return false;
@@ -8573,7 +8590,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || selectedNativeEditHost
     ),
   );
-  const elementCopyAvailability = useMemo(() => elementCopyAvailabilityForTarget({
+  const elementCopyAssessment = useMemo(() => elementCopyAssessmentForTarget({
     element: selectedElementRef.current,
     sourceIndex: sourceIndexRef.current,
     runtimeGenerated: runtimeGeneratedSelection,
@@ -8591,6 +8608,46 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     runtimeGeneratedSelection,
     selection,
   ]);
+  const elementCopyAvailability = elementCopyAssessment.availability;
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root || window.htmlAIRuntime?.diagnostics?.e2eCanvasCapabilityProbe !== true) return;
+    const probe = () => {
+      copyCapabilityProbeSequenceRef.current += 1;
+      const assessment: ElementCopyAssessment = elementCopyAssessmentForTarget({
+        element: selectedElementRef.current,
+        sourceIndex: sourceIndexRef.current,
+        runtimeGenerated: runtimeGeneratedSelectionRef.current,
+        runtimeExpected: Boolean(runtimeFrameRef.current),
+        transientBusy: Boolean(
+          runtimePromotionRef.current || activeFrameConnectionPendingRef.current
+        ),
+        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
+        hasRuntimeShadowRoot: currentRuntimeShadowProof(),
+      });
+      root.setAttribute(
+        "data-e2e-copy-probe-sequence",
+        String(copyCapabilityProbeSequenceRef.current),
+      );
+      root.setAttribute("data-e2e-copy-live-availability", assessment.availability);
+      root.setAttribute("data-e2e-copy-live-reason", assessment.reason);
+      if (assessment.diagnostic) {
+        root.setAttribute("data-e2e-copy-live-diagnostic", assessment.diagnostic);
+      } else {
+        root.removeAttribute("data-e2e-copy-live-diagnostic");
+      }
+      root.setAttribute(
+        "data-e2e-copy-live-target-id",
+        selectedElementRef.current?.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) || "",
+      );
+      root.setAttribute(
+        "data-e2e-copy-native-edit-ended",
+        activeNativeEditRef.current ? "false" : "true",
+      );
+    };
+    root.addEventListener("pageroot:e2e-copy-capability-probe", probe);
+    return () => root.removeEventListener("pageroot:e2e-copy-capability-probe", probe);
+  }, [currentRuntimeShadowProof, currentRuntimeSourceProof]);
   const selectionCapability = selection && !interactionLocked
     ? canvasPointerCapabilityFromProof({
       canStartTextEdit: selectedNativeEditAvailable,
@@ -9122,6 +9179,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       data-testid="html-canvas-editor"
       data-locked={interactionLocked ? "true" : undefined}
       data-runtime-degradation={runtimeDegradation === "none" ? undefined : runtimeDegradation}
+      data-element-copy-availability={elementCopyAssessment.availability}
+      data-element-copy-reason={elementCopyAssessment.reason}
+      data-element-copy-diagnostic={elementCopyAssessment.diagnostic}
       data-interaction-mode={renderedMode} data-runtime-library-origins={editRuntimeGrant?.libraryOrigins?.join(",") || undefined}
       data-runtime-libraries={editRuntimeGrant?.runtimeLibraries?.join(",") || undefined}
       aria-readonly={effectiveReadOnly || interactionLocked}
