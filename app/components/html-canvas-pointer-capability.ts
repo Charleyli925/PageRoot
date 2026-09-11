@@ -150,6 +150,66 @@ function captureTrustedDomInspection(): TrustedDomInspection | null {
 // DOM getters or selector methods that the authored realm can replace.
 const TRUSTED_DOM_INSPECTION = captureTrustedDomInspection();
 
+type CanonicalCopySource = Readonly<{
+  source: string;
+  sourceSha256: string;
+  rootsByPagerootId: ReadonlyMap<string, HTMLElement | null>;
+}>;
+
+// Exact SourceIndex objects are immutable revision snapshots. Cache only their
+// detached canonical side; live Runtime objects and the final availability
+// verdict are always checked again at the command boundary.
+const CANONICAL_COPY_SOURCE_BY_INDEX = new WeakMap<
+  SourceIndexValue,
+  CanonicalCopySource | null
+>();
+
+function canonicalCopySource(
+  sourceIndex: SourceIndexValue,
+): CanonicalCopySource | null {
+  if (CANONICAL_COPY_SOURCE_BY_INDEX.has(sourceIndex)) {
+    const cached = CANONICAL_COPY_SOURCE_BY_INDEX.get(sourceIndex) ?? null;
+    if (
+      cached
+      && (
+        cached.source !== sourceIndex.source
+        || cached.sourceSha256 !== sourceIndex.sourceSha256
+      )
+    ) return null;
+    return cached;
+  }
+  const inspection = TRUSTED_DOM_INSPECTION;
+  if (!inspection) return null;
+  try {
+    const canonicalDocument = inspection.parse(sourceIndex.source);
+    const rootsByPagerootId = new Map<string, HTMLElement | null>();
+    for (const candidate of inspection.query(
+      canonicalDocument,
+      `[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`,
+    )) {
+      const pagerootId = inspection.attributeValue(
+        candidate,
+        PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+      );
+      if (!pagerootId || !isValidPagerootElementId(pagerootId)) continue;
+      rootsByPagerootId.set(
+        pagerootId,
+        rootsByPagerootId.has(pagerootId) ? null : candidate as HTMLElement,
+      );
+    }
+    const result = Object.freeze({
+      source: sourceIndex.source,
+      sourceSha256: sourceIndex.sourceSha256,
+      rootsByPagerootId,
+    });
+    CANONICAL_COPY_SOURCE_BY_INDEX.set(sourceIndex, result);
+    return result;
+  } catch {
+    CANONICAL_COPY_SOURCE_BY_INDEX.set(sourceIndex, null);
+    return null;
+  }
+}
+
 function isOpaqueOrProgramCopyElement(localName: string): boolean {
   return OPAQUE_OR_PROGRAM_COPY_TAGS.has(localName) || localName.includes("-");
 }
@@ -223,6 +283,23 @@ function comparableChild(
   return candidate;
 }
 
+function adjacentTextRun(
+  inspection: TrustedDomInspection,
+  node: ChildNode | null,
+): Readonly<{ value: string; next: ChildNode | null }> | null {
+  if (!node || inspection.nodeType(node) !== Node.TEXT_NODE) return null;
+  let value = "";
+  let candidate: ChildNode | null = node;
+  while (candidate && inspection.nodeType(candidate) === Node.TEXT_NODE) {
+    value += inspection.nodeValue(candidate) ?? "";
+    candidate = inspection.next(candidate);
+  }
+  return Object.freeze({
+    value,
+    next: comparableChild(inspection, candidate),
+  });
+}
+
 function runtimeNodeMatchesSource(
   liveNode: Node,
   canonicalNode: Node,
@@ -251,6 +328,16 @@ function runtimeNodeMatchesSource(
   let liveChild = comparableChild(inspection, inspection.child(liveElement));
   let canonicalChild = comparableChild(inspection, inspection.child(canonicalElement));
   while (liveChild && canonicalChild) {
+    const liveText = adjacentTextRun(inspection, liveChild);
+    const canonicalText = adjacentTextRun(inspection, canonicalChild);
+    if (liveText || canonicalText) {
+      if (!liveText || !canonicalText || liveText.value !== canonicalText.value) {
+        return false;
+      }
+      liveChild = liveText.next;
+      canonicalChild = canonicalText.next;
+      continue;
+    }
     if (!runtimeNodeMatchesSource(
       liveChild,
       canonicalChild,
@@ -274,10 +361,8 @@ function runtimeSubtreeMatchesSource(
   try {
     const pagerootId = inspection.attributeValue(root, PAGEROOT_ELEMENT_ID_ATTRIBUTE);
     if (!pagerootId) return false;
-    const canonicalDocument = inspection.parse(sourceIndex.source);
-    const selector = `[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${pagerootId}"]`;
-    const matches = inspection.query(canonicalDocument, selector);
-    const canonicalRoot = matches.length === 1 ? matches[0] as HTMLElement : null;
+    const canonicalSource = canonicalCopySource(sourceIndex);
+    const canonicalRoot = canonicalSource?.rootsByPagerootId.get(pagerootId) ?? null;
     return Boolean(
       canonicalRoot
       && runtimeNodeMatchesSource(

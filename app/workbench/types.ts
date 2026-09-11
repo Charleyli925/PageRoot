@@ -435,6 +435,7 @@ declare global {
     };
     __PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?: Array<() => void>;
     __PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__?: boolean;
+    __PAGEROOT_E2E_FAIL_NEXT_NATIVE_REBASE__?: boolean;
     __PAGEROOT_HYDRATION_STAGE__?: string;
     __PAGEROOT_PERFORMANCE_TIMELINE__?: ReadonlyArray<Readonly<{
       stage: string;

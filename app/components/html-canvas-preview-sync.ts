@@ -267,15 +267,21 @@ export function adoptCanonicalHistoryIslandInPlace(options: {
 
   rootElement.replaceChildren(...canonicalChildren);
   options.onSourceChildrenRestored?.(Array.from(rootElement.querySelectorAll("*")));
-  const nextElements = nextIndex.elements as SourceElementValue[];
   const mountedElements = sourceBackedPreviewElements(documentNode);
-  if (
-    mountedElements.length !== nextElements.length
-    || mountedElements.some((element, index) => (
-      element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE) !== nextElements[index].pagerootId
-      || element.tagName.toLowerCase() !== nextElements[index].tagName
-    ))
-  ) throw new Error("历史文字结果无法保持当前画布的 Stable ID 映射。");
+  const mountedIds = new Set<string>();
+  const invalidMountedElement = mountedElements.some((element) => {
+    const pagerootId = element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+    if (!pagerootId || mountedIds.has(pagerootId)) return true;
+    mountedIds.add(pagerootId);
+    return !isCanonicalSourceElement(element as HTMLElement, nextIndex);
+  });
+  // Executed author <script> objects are intentionally consumed by the Runtime
+  // bootstrap, so a valid mounted projection can be a strict subset of source
+  // elements. Require every object that remains mounted to map uniquely and
+  // canonically; do not require consumed program nodes to stay in the DOM.
+  if (invalidMountedElement) {
+    throw new Error("历史文字结果无法保持当前画布的 Stable ID 映射。");
+  }
   return true;
 }
 

@@ -732,7 +732,10 @@ test("Canvas shortcuts follow the promoted frame and same-source reload keeps ch
     // during Undo's save/acknowledgement must execute after it, not disappear.
     await page.keyboard.press(keyShortcut("Shift+z"));
     await expect.poll(() => readPublishedWorkingCopy(working)).toContain("HISTORY_CONTINUITY");
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute("data-frame-generation", generation);
+    // The verified editable-island history path stays in the current Document;
+    // Redo must not consume a deferred whole-page Runtime refresh.
+    await expect.poll(() => editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute("data-frame-generation")).toBe(generation);
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-runtime-slot-role"))).toBe("active");
     await page.getByRole("button", { name: "更多", exact: true }).click();
     await page.getByRole("menuitem", { name: "从磁盘重新载入 HTML", exact: true }).click();
@@ -849,6 +852,60 @@ test("format state ignores unselected boundary text and unchanged formatting kee
   });
 });
 
+
+test("in-place text Undo and Redo leave no deferred Runtime refresh", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  await withRuntimeProject("pageroot-history-no-refresh-e2e-", {
+    "runtime-report.html": DELAYED_CHART_PAGE,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "format-chart");
+    const editor = page.getByTestId("html-canvas-editor");
+    const target = frame.locator('[data-native-case="format-chart"]');
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    const initialDocument = await documentToken(page);
+    const initialScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ));
+
+    await activateNativeEdit(frame, "format-chart");
+    await target.press("End");
+    await page.keyboard.insertText(" HISTORY_NO_REFRESH");
+    await page.keyboard.press(keyShortcut("s"));
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("HISTORY_NO_REFRESH");
+
+    await page.keyboard.press(keyShortcut("z"));
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .not.toContain("HISTORY_NO_REFRESH");
+    await expect(editor).toHaveAttribute(
+      "data-history-adopt-path",
+      "editable-island-in-place",
+    );
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+
+    await page.keyboard.press(keyShortcut("Shift+z"));
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("HISTORY_NO_REFRESH");
+    await expect(editor).toHaveAttribute(
+      "data-history-adopt-path",
+      "editable-island-in-place",
+    );
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+
+    await page.keyboard.press("Escape");
+    await frame.locator("#chart").click();
+    await page.keyboard.press(keyShortcut("s"));
+    await page.waitForTimeout(700);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ))).toBe(initialScriptCount);
+  });
+});
 
 test("editing a published Undo projection remains available while its save receipt waits", async () => {
   await withRuntimeProject('pageroot-history-followup-e2e-', { 'runtime-report.html': DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {

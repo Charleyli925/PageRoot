@@ -740,6 +740,11 @@ test("author Script cannot add source authority after Runtime starts or save Run
 
     await page.keyboard.press("Escape");
     await frame.locator("#source-copy-safe").evaluate((button) => {
+      const text = button.firstChild;
+      if (!(text instanceof Text) || text.data.length < 2) {
+        throw new Error("Copy-equivalence fixture text is missing.");
+      }
+      text.splitText(2);
       button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const safeDuplicateButton = toolbar.getByRole("button", {
@@ -2470,6 +2475,64 @@ test("long text Enter checkpoints Working HTML without replacing the Runtime doc
   });
 });
 
+test("an accepted Native Edit survives a live-session rebase failure", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime accepted checkpoint recovery</title></head><body>
+  <main><p data-native-case="runtime-accepted-rebase">已接受的源码</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-accepted-rebase-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-accepted-rebase");
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const revisionBefore = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await page.evaluate(() => {
+      window.__PAGEROOT_E2E_FAIL_NEXT_NATIVE_REBASE__ = true;
+    });
+    const target = await activateNativeEdit(frame, "runtime-accepted-rebase");
+    await target.press("End");
+    await page.keyboard.insertText("，恢复后仍在");
+
+    const acceptedRevision = await expectCheckpointPersisted(page, revisionBefore);
+    expect(acceptedRevision).toBe(revisionBefore + 1);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("恢复后仍在");
+    await expect(editor).toHaveAttribute(
+      "data-source-command-projection",
+      "refresh-required",
+    );
+    await expect(editor).toHaveAttribute(
+      "data-native-commit-path",
+      "v2-island-checkpoint-reload",
+    );
+    await expect(editor).not.toHaveAttribute(
+      "data-edit-block-detail",
+      /实时编辑会话无法推进到新版本/u,
+    );
+
+    frame = await currentEditorFrame(page);
+    const recovered = frame.locator('[data-native-case="runtime-accepted-rebase"]');
+    await expect(recovered).toContainText("恢复后仍在");
+    await recovered.dblclick();
+    await expect(recovered).toHaveAttribute("contenteditable", "true");
+    await recovered.press("End");
+    await page.keyboard.insertText("，可以继续编辑");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("可以继续编辑");
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
 test("Escape commits native editing and leaves contenteditable exited", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -3389,6 +3452,109 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
         committedIntent,
       })}`);
     }
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
+test("ending an unchanged Native Edit cannot publish a pending source projection", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime stale finish boundary</title></head><body>
+  <main>
+    <p data-native-case="runtime-stale-duplicate">先复制这一项。</p>
+    <p data-native-case="runtime-stale-last">最后一项保持原样。</p>
+  </main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-stale-finish-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-stale-duplicate");
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const revisionR0 = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await page.keyboard.press(keyShortcut("s"));
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "false");
+    const renderedR0 = await editor.getAttribute("data-rendered-projection-sha256");
+    expect(renderedR0).toBeTruthy();
+
+    await armRuntimeCommitHold(page);
+    await frame.locator('[data-native-case="runtime-stale-duplicate"]').click();
+    await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+    await waitForHeldRuntimeCommit(page);
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8"))
+        .split('data-native-case="runtime-stale-duplicate"').length - 1
+    )).toBe(2);
+    const revisionR1 = await expectCheckpointPersisted(page, revisionR0);
+    const sourceR1 = await readPublishedWorkingCopy(workingCopyPath, "utf8");
+    const sourceR1Hash = buildSourceIndex(sourceR1).sourceSha256;
+    expect(sourceR1Hash).not.toBe(renderedR0);
+    await expect(frame.locator('[data-native-case="runtime-stale-duplicate"]')).toHaveCount(1);
+
+    const last = await activateNativeEdit(frame, "runtime-stale-last");
+    await expect(last).toHaveAttribute("contenteditable", "true");
+    await setTextSelection(frame, "runtime-stale-last", 0, 4);
+    await editor.getByText("样式与间距", { exact: true }).click();
+    let fontSize = editor.getByLabel("字号（像素）");
+    await expect(fontSize).toBeEnabled();
+    const heldBeforeStyle = await page.evaluate(() => (
+      window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+    ));
+    await fontSize.fill("24");
+    await expectCheckpointPersisted(page, revisionR1);
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "source:requested:resumed",
+    );
+    await editor.getByText("样式与间距", { exact: true }).click();
+    fontSize = editor.getByLabel("字号（像素）");
+    await expect(fontSize).toBeEnabled();
+    await fontSize.fill("024");
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "unchanged:requested:resumed",
+    );
+    await expect(last).toHaveAttribute("contenteditable", "true");
+    await page.keyboard.press(keyShortcut("s"));
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toMatch(/font-size:\s*24px/u);
+    const sourceR2 = await readPublishedWorkingCopy(workingCopyPath, "utf8");
+    const sourceR2Hash = buildSourceIndex(sourceR2).sourceSha256;
+    expect(sourceR2Hash).not.toBe(sourceR1Hash);
+    await expect(editor).toHaveAttribute("data-working-source-sha256", sourceR2Hash);
+    await expect(editor).toHaveAttribute("data-rendered-projection-sha256", renderedR0);
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "true");
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+
+    await page.keyboard.press("Escape");
+    await expect(last).not.toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-working-source-sha256", sourceR2Hash);
+    await expect(editor).toHaveAttribute("data-rendered-projection-sha256", renderedR0);
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "true");
+    await expect(editor).toHaveAttribute(
+      "data-runtime-candidate-source-revision",
+      sourceR1Hash,
+    );
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+    ))).toBe(heldBeforeStyle);
+    await releaseHeldRuntimeCommits(page);
+    await waitForRuntimeHandoffSettled(page);
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-source-revision",
+      sourceR2Hash,
+    );
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-stale-duplicate"]')).toHaveCount(2);
+    await expect(editor).toHaveAttribute("data-rendered-projection-sha256", sourceR2Hash);
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "false");
   }, {
     injectedEnv: {
       PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
