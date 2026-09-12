@@ -45,7 +45,7 @@
         "tests/comment-text-locator.test.mjs",
         "tests/runtime-comment-hint.test.mjs",
         "tests/canvas-target-rebind.test.mjs",
-        "tests/workbench-render-snapshot.test.mjs"
+        "tests/workspace-controller.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
@@ -153,7 +153,6 @@
         "tests/project-workflow.test.mjs",
         "tests/project-plan.test.mjs",
         "tests/project-session.test.mjs",
-        "tests/workbench-render-snapshot.test.mjs",
         "tests/workspace-controller.test.mjs"
       ],
       "requiredDocs": [
@@ -373,7 +372,6 @@
         "tests/run-submit-plan.test.mjs",
         "tests/version-review-plan.test.mjs",
         "tests/ai-conversation-sidebar.test.mjs",
-        "tests/workbench-render-snapshot.test.mjs",
         "tests/workspace-controller.test.mjs"
       ],
       "requiredDocs": [
