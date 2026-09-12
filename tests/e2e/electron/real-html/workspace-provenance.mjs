@@ -55,3 +55,29 @@ export function workspaceSourceFingerprint(root = process.cwd()) {
     untrackedFileCount: untracked.length,
   };
 }
+
+export function compareOriginalFileIdentity({
+  expectedSha256,
+  expectedSize,
+  observedSha256,
+  observedSize,
+} = {}) {
+  const hashMatches = typeof expectedSha256 === "string"
+    && expectedSha256 !== ""
+    && observedSha256 === expectedSha256;
+  const sizeMatches = Number.isInteger(expectedSize)
+    && expectedSize >= 0
+    && observedSize === expectedSize;
+  return {
+    ok: hashMatches && sizeMatches,
+    exactReason: hashMatches && sizeMatches
+      ? "ORIGINAL_HASH_AND_SIZE_UNCHANGED"
+      : "FINAL_ORIGINAL_HASH_OR_SIZE_CHANGED",
+    hashMatches,
+    sizeMatches,
+    expectedSha256,
+    observedSha256,
+    expectedSize,
+    observedSize,
+  };
+}

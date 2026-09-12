@@ -95,10 +95,8 @@ export function runtimeOperationOutcomes({
     && candidateEvidence?.evidence === "candidate-id-absent-to-present"
     && typeof candidateEvidence?.candidateId === "string"
     && candidateEvidence.candidateId.trim() !== "";
-  const candidateNotApplicable = [
-    RUNTIME_LIFECYCLE_REASONS.STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE,
-    RUNTIME_LIFECYCLE_REASONS.RUNTIME_PREPARATION_FAILED_BEFORE_CANDIDATE,
-  ].includes(candidateNotApplicableReason);
+  const candidateNotApplicable = candidateNotApplicableReason
+    === RUNTIME_LIFECYCLE_REASONS.STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE;
   const ordinaryObserved = ordinary.validDocument && ordinary.validGeneration;
   const ordinaryProvided = ordinaryBefore != null || ordinaryAfter != null;
   const ordinaryEvidenceInvalid = ordinaryProvided && !ordinaryObserved;

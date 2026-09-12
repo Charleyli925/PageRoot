@@ -3,8 +3,11 @@ import { expect, test } from "@playwright/test";
 import { REAL_HTML_OPERATION_IDS } from "../electron/real-html/plan.mjs";
 import { runtimeOperationOutcomes } from "../electron/real-html/runtime-lifecycle.mjs";
 import {
+  startRuntimeLifecycleObservation,
   startRuntimeCandidateObservation,
+  stopRuntimeLifecycleObservation,
   stopRuntimeCandidateObservation,
+  summarizeRuntimeObserverRecords,
 } from "../electron/real-html/runtime-observer.mjs";
 
 const OBSERVER_KEY = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
@@ -78,4 +81,104 @@ test("generation change without a Candidate transition is rejected", {
     state: "FAIL",
     details: { exactReason: "CANDIDATE_CREATION_NOT_OBSERVED" },
   });
+});
+
+test("lifecycle observer proves Candidate, generation, promotion and Runtime terminal separately", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async ({ page }) => {
+  await page.setContent(`<section class="canvas-edit-surface"
+    data-edit-runtime-phase="preparing"
+    data-edit-runtime-outcome="pending">
+    <main data-runtime-root>
+      <iframe data-runtime-slot-role="active" data-frame-generation="1"></iframe>
+    </main>
+  </section>`);
+  const root = page.locator("[data-runtime-root]");
+  await root.evaluate(startRuntimeLifecycleObservation);
+
+  await root.evaluate((element) => {
+    const oldActive = element.querySelector('iframe[data-runtime-slot-role="active"]');
+    const candidate = document.createElement("iframe");
+    element.setAttribute("data-runtime-refresh-pending", "");
+    element.setAttribute("data-runtime-refresh-pending-source-revision", "source-2");
+    element.setAttribute("data-runtime-refresh-pending-reason", "structure-edit");
+    candidate.setAttribute("data-runtime-slot-role", "candidate");
+    candidate.setAttribute("data-frame-role", "runtime-candidate");
+    candidate.setAttribute("data-frame-generation", "2");
+    element.setAttribute("data-runtime-candidate-id", "candidate-2");
+    element.setAttribute("data-runtime-candidate-generation", "2");
+    element.setAttribute("data-runtime-candidate-source-revision", "source-2");
+    element.append(candidate);
+    element.setAttribute("data-runtime-last-known-good-id", "candidate-2");
+    element.setAttribute("data-runtime-last-known-good-generation", "2");
+    element.setAttribute("data-runtime-last-known-good-source-revision", "source-2");
+    oldActive.setAttribute("data-runtime-slot-role", "previous");
+    oldActive.setAttribute("data-frame-role", "runtime-previous");
+    candidate.setAttribute("data-runtime-slot-role", "active");
+    candidate.removeAttribute("data-frame-role");
+    element.removeAttribute("data-runtime-candidate-id");
+    element.removeAttribute("data-runtime-refresh-pending");
+    element.removeAttribute("data-runtime-refresh-pending-source-revision");
+    element.removeAttribute("data-runtime-refresh-pending-reason");
+    const surface = element.closest(".canvas-edit-surface");
+    surface.setAttribute("data-edit-runtime-phase", "settled");
+    surface.setAttribute("data-edit-runtime-outcome", "ready");
+  });
+
+  await expect.poll(async () => root.evaluate((element, key) => {
+    const state = globalThis[key];
+    return (state?.records?.length || 0) + (state?.lifecycleRecords?.length || 0);
+  }, OBSERVER_KEY)).toBeGreaterThan(3);
+  const stopped = await root.evaluate(stopRuntimeLifecycleObservation);
+  const summary = summarizeRuntimeObserverRecords(stopped.records);
+
+  expect(summary).toMatchObject({
+    hasRequest: true,
+    hasCandidate: true,
+    candidateId: "candidate-2",
+    hasCandidateTerminal: true,
+    hasGeneration: true,
+    hasRuntimeTerminal: true,
+    hasActiveIdentity: true,
+  });
+  expect(summary.request).toMatchObject({
+    sourceRevision: "source-2",
+    reason: "structure-edit",
+    status: "submitted",
+  });
+  expect(summary.candidateTerminal).toMatchObject({
+    candidateId: "candidate-2",
+    terminal: "ready",
+  });
+  expect(summary.generation).toMatchObject({
+    beforeGeneration: "1",
+    afterGeneration: "2",
+  });
+  expect(summary.runtimeTerminal).toMatchObject({ terminal: "ready" });
+  expect(summary.activeIdentity).toMatchObject({
+    candidateId: "candidate-2",
+    generation: "2",
+  });
+});
+
+test("lifecycle observer does not invent a Candidate from generation alone", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async ({ page }) => {
+  await page.setContent(`<section class="canvas-edit-surface" data-edit-runtime-phase="settled">
+    <main data-runtime-root>
+      <iframe data-runtime-slot-role="active" data-frame-generation="1"></iframe>
+    </main>
+  </section>`);
+  const root = page.locator("[data-runtime-root]");
+  await root.evaluate(startRuntimeLifecycleObservation);
+  await root.locator("iframe").evaluate((frame) => {
+    frame.setAttribute("data-frame-generation", "2");
+  });
+  await page.waitForTimeout(0);
+  const stopped = await root.evaluate(stopRuntimeLifecycleObservation);
+  const summary = summarizeRuntimeObserverRecords(stopped.records);
+
+  expect(summary.hasGeneration).toBe(true);
+  expect(summary.hasCandidate).toBe(false);
+  expect(summary.hasCandidateTerminal).toBe(false);
 });

@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { workspaceSourceFingerprint } from "./e2e/electron/real-html/workspace-provenance.mjs";
+import {
+  compareOriginalFileIdentity,
+  workspaceSourceFingerprint,
+} from "./e2e/electron/real-html/workspace-provenance.mjs";
 
 function git(root, args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" });
@@ -35,4 +38,34 @@ test("workspace provenance changes for untracked source bytes", () => {
   assert.notEqual(first.workspaceSourceSha256, clean.workspaceSourceSha256);
   assert.notEqual(second.workspaceSourceSha256, first.workspaceSourceSha256);
   assert.equal(second.untrackedFileCount, 1);
+});
+
+test("original file identity requires both the exact hash and exact size", () => {
+  const expected = {
+    expectedSha256: "a".repeat(64),
+    expectedSize: 128,
+  };
+  assert.deepEqual(compareOriginalFileIdentity({
+    ...expected,
+    observedSha256: "a".repeat(64),
+    observedSize: 128,
+  }), {
+    ok: true,
+    exactReason: "ORIGINAL_HASH_AND_SIZE_UNCHANGED",
+    hashMatches: true,
+    sizeMatches: true,
+    ...expected,
+    observedSha256: "a".repeat(64),
+    observedSize: 128,
+  });
+  assert.equal(compareOriginalFileIdentity({
+    ...expected,
+    observedSha256: "b".repeat(64),
+    observedSize: 128,
+  }).ok, false);
+  assert.equal(compareOriginalFileIdentity({
+    ...expected,
+    observedSha256: "a".repeat(64),
+    observedSize: 127,
+  }).ok, false);
 });

@@ -780,6 +780,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await expect(frame.locator("body")).not.toHaveAttribute("data-worker-executed", "true");
 
     await frame.locator("#runtime-generated").click();
+    const editor = page.getByTestId("html-canvas-editor");
     const toolbar = page.getByRole("toolbar");
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
@@ -789,6 +790,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await frame.locator('[data-native-case="runtime-host"]').evaluate((element) => {
       element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    await expect(editor).toHaveAttribute("data-selection-runtime-generated", "false");
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
     await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
@@ -1009,6 +1011,17 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
     const table = frame.locator("#runtime-table-first");
     await expect(table).toBeVisible();
     await table.locator("caption").click();
+    const editor = page.getByTestId("html-canvas-editor");
+    await expect(editor).toHaveAttribute("data-selection-runtime-generated", "true");
+    await expect(editor).toHaveAttribute(
+      "data-selection-runtime-source-anchor-id",
+      /pr1_[a-f0-9]{32}/u,
+    );
+    await expect(editor).toHaveAttribute("data-selection-runtime-kind", "table");
+    await expect(editor).toHaveAttribute(
+      "data-selection-runtime-path",
+      "table:nth-of-type(1)",
+    );
     await expect(toolbar).toHaveAttribute("aria-label", "评论财务数据表");
     await expect(toolbar.getByRole("button", { name: /给财务数据表留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);

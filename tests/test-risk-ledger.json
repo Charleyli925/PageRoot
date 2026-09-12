@@ -20,6 +20,12 @@
       "oracle": "canonical Candidate ID transition + independent iframe generation",
       "stage": "draft-canary"
     },
+    "tests/e2e/browser/native-dom-real-html-capability-driver.spec.mjs": {
+      "riskId": "real-html-capability-harness",
+      "primaryOwner": "real-html-test-oracles",
+      "oracle": "frozen Stable ID identity + live capability + controller-owned Runtime diagnostics",
+      "stage": "draft-canary"
+    },
     "tests/e2e/browser/native-dom-comment-stress.spec.mjs": {
       "riskId": "comment-target-layout",
       "primaryOwner": "comment-rail-layout",
