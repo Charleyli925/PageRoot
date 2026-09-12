@@ -471,7 +471,9 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 清单另冻结初始 Runtime 预期；启动和重开都先等待其明确终态，再等待 handoff 完成。
 冻结执行器在初始 Runtime 就绪后限制 Playwright 自身 Inspector 网络响应缓存：总量 64 KiB、
 单响应 8 KiB、POST 诊断内容 1 KiB，保留请求/响应/失败事件，不以 Inspector body 作为源码证据。
-适配器仅支持锁定的 Playwright 1.62.1，版本、内部会话入口缺失或运行中会话集合漂移均失败，
+适配器仅支持锁定的 Playwright 1.62.1；sandbox/OOP iframe 重建允许退休会话退出，
+新会话必须在 Playwright 首次 Network.enable 之前绑定同样的限制。绑定记录采用 WeakMap，
+不保留退休会话；版本或内部入口不匹配、未经绑定/被改写的会话和启用失败均拒绝通过，
 不得静默退回无界记录。源码与持久化核验仍读取已授权工作稿，不受调试副本淘汰影响。
 合成 Electron 正反例证明真实 fetch 数据与事件不变、调试 body 确实被淘汰；Node 反例拒绝
 未知版本、缺失入口、空会话及命令失败。未限制缓存的历史资源曲线不得用于压力放行，

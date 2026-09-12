@@ -169,6 +169,25 @@ test("frozen Inspector cache bounds response bodies without losing fetch data or
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
+test("frozen Inspector cache follows sandbox iframe replacement without accepting unbounded sessions", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  await withRuntimeProject("pageroot-inspector-sandbox-e2e-", { "runtime-report.html": STATIC_PAGE }, async ({ page }) => {
+    await waitForRuntimeHandoffSettled(page);
+    const cache = await boundFrozenInspectorCache(page);
+    for (const text of ["first sandbox document", "replacement sandbox document"]) {
+      await page.evaluate(content => {
+        document.querySelector("#inspector-sandbox-proof")?.remove();
+        const iframe = document.createElement("iframe");
+        iframe.id = "inspector-sandbox-proof"; iframe.setAttribute("sandbox", "");
+        iframe.srcdoc = `<p>${content}</p>`; document.body.append(iframe);
+      }, text);
+      await expect(page.frameLocator("#inspector-sandbox-proof").locator("p")).toHaveText(text);
+      cache.verify();
+    }
+  });
+});
+
 test("successful Candidate retirement does not retain a growing Document chain", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({}, testInfo) => {
