@@ -44,7 +44,7 @@ export type PreservedDraftSummary = Readonly<{
 }>;
 
 export type VersionFilePort = Readonly<{
-  exportHtmlCopy(input: { html: string; sourcePath: string; suggestedName?: string }): Promise<{
+  exportHtmlCopy(input: { html: string; sourcePath: string | null; suggestedName?: string }): Promise<{
     path: string; sha256: string; name?: string;
   } | { kind: "download-started" } | null>;
 }>;
@@ -59,7 +59,7 @@ export type VersionWorkflowSnapshot = Readonly<{
   export?: Readonly<{
     sequence: number;
     phase: "exporting" | "saving-version" | "exported" | "download-started" | "version-pending" | "cancelled" | "failed";
-    context: ProjectContext; path?: string; reason?: string; versionOperationId?: string;
+    context: ProjectContext | null; path?: string; reason?: string; versionOperationId?: string;
   }>;
   creation?: Readonly<{ phase: "creating" | "created" | "opening" | "opened" | "superseded" | "open-failed" | "not-created" | "unknown"; operationId: string; context: ProjectContext; result?: HistoryCreationResult }>;
   navigation: Readonly<{

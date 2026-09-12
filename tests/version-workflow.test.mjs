@@ -139,6 +139,7 @@ function createHarness({
   queryCurrent = null,
   exportHtmlCopy = null,
   checkpointSource = null,
+  hashSource = async (html) => sha256(html),
   sameSourcePathCodec = sameSourcePath,
 } = {}) {
   const projectSession = new ProjectSession();
@@ -189,6 +190,7 @@ function createHarness({
     draftAuthorities: [],
     confirmHistory: [],
     catalogAfterSettlement: [],
+    verifiedExports: [],
     order: [],
   };
   const bridgeClient = {
@@ -398,7 +400,10 @@ function createHarness({
     },
   };
   const documentWorkflow = {
-    recordVerifiedExport: async () => ({ status: "succeeded" }),
+    recordVerifiedExport: async (input) => {
+      calls.verifiedExports.push(input);
+      return { status: "succeeded" };
+    },
     observeExternalSourceChange,
     clearRecovery() {
       calls.clearRecovery += 1;
@@ -442,7 +447,7 @@ function createHarness({
     },
     ports: {
       files: exportHtmlCopy ? { exportHtmlCopy } : null,
-      hash: { sha256: async (html) => sha256(html) },
+      hash: { sha256: hashSource },
       canvas: {
         checkpointSource,
         freezeWorkingSource: () => ({ ok: true }),
@@ -583,6 +588,111 @@ test("plain export includes latest native edits and does not create a version", 
   assert.equal(exports[0].html, DRAINED_HTML);
   assert.equal(writes, 0);
   assert.equal(h.workflow.getSnapshot().export.phase, "exported");
+});
+
+for (const saveVersion of [false, true]) {
+  test(`pathless document downloads exact checkpoint bytes without persistence or version creation (saveVersion=${saveVersion})`, async () => {
+    const exports = [];
+    const hashed = [];
+    const latest = "\uFEFF<!doctype html>\r\n<html><body>latest local edit</body></html>\r\n";
+    let writes = 0;
+    let h;
+    h = createHarness({ currentPath: null,
+      checkpointSource: () => {
+        h.documentSession.update({ html: latest, editRevision: 1, persistState: "preview-dirty" });
+        return { ok: true };
+      },
+      hashSource: async (html) => { hashed.push(html); return sha256(html); },
+      exportHtmlCopy: async (input) => { exports.push(input); return { kind: "download-started" }; },
+      createCurrent: async () => { writes++; },
+    });
+    const result = await h.workflow.exportHtml({ suggestedName: "local.html", saveVersion });
+    assert.deepEqual(result.value, { downloadStarted: true });
+    assert.deepEqual(exports, [{ html: latest, sourcePath: null, suggestedName: "local.html" }]);
+    assert.deepEqual(hashed, [latest]);
+    assert.equal(h.workflow.getSnapshot().export.phase, "download-started");
+    assert.equal(h.workflow.getSnapshot().export.context, null);
+    assert.equal(h.workflow.getSnapshot().export.path, undefined);
+    assert.equal(h.documentSession.html, latest);
+    assert.equal(h.documentSession.lastPersistedRevision, 0);
+    assert.equal(h.documentSession.persistedSourceSha256, sha256(BASE_HTML));
+    assert.equal(h.documentSession.snapshot.persistState, "preview-dirty");
+    assert.equal(h.calls.verifiedExports.length, 0);
+    assert.equal((await h.workflow.saveCurrentVersion()).status, "stale");
+    assert.equal(writes, 0);
+    assert.equal(h.workflow.getSnapshot().draftVersion, undefined);
+  });
+}
+
+test("export requires an open document and never treats an unregistered file path as pathless", async () => {
+  let downloads = 0;
+  for (const sourcePath of [null, SOURCE_A]) {
+    const h = createHarness({ currentPath: null, exportHtmlCopy: async () => { downloads++; return { kind: "download-started" }; } });
+    h.projectSession.openLocator(sourcePath);
+    if (!sourcePath) h.documentSession.reset({ html: "" });
+    assert.equal((await h.workflow.exportHtml()).code, "PROJECT_CONTEXT_REQUIRED");
+  }
+  assert.equal(downloads, 0);
+});
+
+test("pathless export refuses unfinished native input", async () => {
+  let downloads = 0;
+  const h = createHarness({ currentPath: null,
+    checkpointSource: () => ({ ok: false, reason: "input pending" }),
+    exportHtmlCopy: async () => { downloads++; return { kind: "download-started" }; },
+  });
+  assert.equal((await h.workflow.exportHtml()).code, "EXPORT_EDIT_PENDING");
+  assert.equal(downloads, 0);
+});
+
+test("pathless export refuses a filesystem receipt without managed authority", async () => {
+  let writes = 0;
+  const h = createHarness({ currentPath: null,
+    exportHtmlCopy: async ({ html }) => ({ path: "/tmp/unverified.html", sha256: sha256(html) }),
+    createCurrent: async () => { writes++; },
+  });
+  assert.equal((await h.workflow.exportHtml({ saveVersion: true })).code, "EXPORT_FAILED");
+  assert.equal(h.workflow.getSnapshot().export.phase, "failed");
+  assert.equal(h.calls.verifiedExports.length, 0);
+  assert.equal(writes, 0);
+});
+
+test("switching pathless documents while hashing prevents a stale download", async () => {
+  const hashing = deferred();
+  const hashResult = deferred();
+  let downloads = 0;
+  const h = createHarness({ currentPath: null,
+    hashSource: async () => { hashing.resolve(); return hashResult.promise; },
+    exportHtmlCopy: async () => { downloads++; return { kind: "download-started" }; },
+  });
+  const exporting = h.workflow.exportHtml();
+  await hashing.promise;
+  h.projectSession.openLocator(null);
+  h.documentSession.reset({ html: B_HTML });
+  hashResult.resolve(sha256(BASE_HTML));
+  assert.equal((await exporting).status, "stale");
+  assert.equal(downloads, 0);
+  assert.equal(h.workflow.getSnapshot().export, undefined);
+});
+
+test("a late pathless download result preserves the new document and releases the export operation", async () => {
+  const started = deferred();
+  const completion = deferred();
+  let downloads = 0;
+  const h = createHarness({ currentPath: null, exportHtmlCopy: async () => {
+    if (++downloads === 1) { started.resolve(); return completion.promise; }
+    return { kind: "download-started" };
+  } });
+  const exporting = h.workflow.exportHtml();
+  await started.promise;
+  h.projectSession.openLocator(null);
+  h.documentSession.reset({ html: B_HTML });
+  completion.resolve({ kind: "download-started" });
+  assert.equal((await exporting).status, "stale");
+  assert.equal(h.workflow.getSnapshot().export, undefined);
+  assert.equal(h.documentSession.html, B_HTML);
+  assert.deepEqual((await h.workflow.exportHtml()).value, { downloadStarted: true });
+  assert.equal(h.calls.verifiedExports.length, 0);
 });
 
 test("cancelled or failed export never creates a version", async () => {

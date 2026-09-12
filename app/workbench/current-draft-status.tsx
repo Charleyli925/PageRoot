@@ -12,8 +12,8 @@ export function CurrentDraftStatus({ state, contextKey, onRetry, onShowFile }: {
   const [dismissed, setDismissed] = useState("");
   const version = state?.draftVersion;
   const exported = state?.export;
-  const belongs = (value: { context: { projectId: string; documentId: string } } | undefined) =>
-    Boolean(value && `${value.context.projectId}:${value.context.documentId}` === contextKey);
+  const belongs = (value: { context: { projectId: string; documentId: string } | null } | undefined) =>
+    Boolean(value?.context && `${value.context.projectId}:${value.context.documentId}` === contextKey);
   const showExport = belongs(exported) && exported?.phase !== "cancelled"
     && (!belongs(version) || (exported?.sequence || 0) > (version?.sequence || 0));
   const item = showExport ? exported : belongs(version) ? version : null;

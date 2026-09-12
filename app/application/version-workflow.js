@@ -915,14 +915,21 @@ export class VersionWorkflow {
     if (this.#activeExportOperation !== null) {
       return blocked("EXPORT_BUSY", "导出正在进行。");
     }
+    const locator = this.#projectSession.locator;
     let context = copyContext(this.#projectSession.context);
-    if (!context) return blocked("PROJECT_CONTEXT_REQUIRED", "请先打开项目。");
+    const localDocument = !context && !locator.sourcePath && locator.epoch > 0
+      && Boolean(this.#documentSession.html);
+    if (!context && !localDocument) return blocked("PROJECT_CONTEXT_REQUIRED", "请先打开项目。");
+    const isCurrentDocument = () => context
+      ? this.#sameCurrentDocument(context)
+      : !this.#disposed && this.#projectSession.epoch === locator.epoch && !this.#projectSession.sourcePath;
     const history = this.#versionSession.snapshot.historyPreview;
-    if (history && (history.projectId !== context.projectId || history.documentId !== context.documentId
-      || history.sourcePath !== context.sourcePath)) return stale(context);
+    if (history && (!context || history.projectId !== context.projectId || history.documentId !== context.documentId
+      || history.sourcePath !== context.sourcePath)) return stale(context || locator);
     if (!history) {
       const checkpoint = this.#canvasPort.checkpointSource?.();
       if (checkpoint && !checkpoint.ok) return blocked("EXPORT_EDIT_PENDING", checkpoint.reason || "请先完成当前文字输入。");
+      if (!isCurrentDocument()) return stale(context || locator);
       context = copyContext(this.#projectSession.context);
     }
     const html = history ? history.content : this.#documentSession.html;
@@ -930,7 +937,7 @@ export class VersionWorkflow {
     const sequence = ++this.#exportSequence;
     this.#activeExportOperation = sequence;
     const setState = (value) => {
-      if (!this.#sameCurrentDocument(context) || sequence !== this.#exportSequence) return;
+      if (!isCurrentDocument() || sequence !== this.#exportSequence) return;
       this.#snapshot = Object.freeze({ ...this.#snapshot, export: Object.freeze({ context, ...value, sequence: ++this.#resultSequence }) });
       this.#publishSnapshot();
     };
@@ -938,17 +945,20 @@ export class VersionWorkflow {
     let exported;
     try {
       const hash = await this.#hashPort.sha256(html);
+      if (!isCurrentDocument() || sequence !== this.#exportSequence) return stale(context || locator);
       const ordinal = history ? this.#versionSession.snapshot.versions.find((version) => version.id === history.versionId)?.ordinal : null;
       const name = history ? `${String(suggestedName || "项目").replace(/\.html?$/iu, "")}-V${ordinal}.html` : suggestedName;
-      exported = await this.#filePort.exportHtmlCopy({ html, sourcePath: context.sourcePath, suggestedName: name });
+      exported = await this.#filePort.exportHtmlCopy({ html, sourcePath: context?.sourcePath || null, suggestedName: name });
       if (!exported) {
         setState({ phase: "cancelled" });
         return succeeded({ cancelled: true });
       }
       if (exported.kind === "download-started") {
+        if (!isCurrentDocument()) return stale(context || locator);
         setState({ phase: "download-started" });
         return succeeded({ downloadStarted: true });
       }
+      if (!context) throw new Error("浏览器下载未提供可验证的文件保存回执。");
       if (exported.sha256 !== hash || !String(exported.path || "")) throw new Error("导出文件未通过内容校验。");
       if (!this.#sameCurrentDocument(context)) return stale(context);
       if (!history) await this.#documentWorkflow.recordVerifiedExport({ context, html, revision, exported });
@@ -973,7 +983,7 @@ export class VersionWorkflow {
       return rejected("EXPORT_FAILED", reason);
     } finally {
       if (this.#activeExportOperation === sequence) this.#activeExportOperation = null;
-      if (sequence === this.#exportSequence && !this.#sameCurrentDocument(context)) {
+      if (sequence === this.#exportSequence && !isCurrentDocument()) {
         const { export: _completedExport, ...snapshot } = this.#snapshot;
         this.#snapshot = Object.freeze(snapshot);
         this.#publishSnapshot();
