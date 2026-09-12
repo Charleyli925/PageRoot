@@ -854,8 +854,7 @@ export async function loadedDiskFrame(
 ) {
   const canonicalSourcePath = realpathSync(sourcePath);
   await waitForProjectReady(page, { timeout });
-  const extension = path.extname(canonicalSourcePath);
-  const expectedWorkingCopyName = `${path.basename(canonicalSourcePath, extension)}-V1${extension}`;
+  const expectedWorkingCopyName = path.basename(canonicalSourcePath);
   let activeSourcePath = "";
   await expect.poll(
     async () => {
@@ -874,7 +873,7 @@ export async function loadedDiskFrame(
   const canonicalActiveSourcePath = realpathSync(activeSourcePath);
   if (canonicalActiveSourcePath !== canonicalSourcePath) {
     // The desktop v4 opening boundary immediately imports every external HTML
-    // into its own V1 Working Copy. Keep fixture callers honest about that
+    // into one current draft plus an immutable V1. Keep fixture callers honest about that
     // transition instead of preserving the retired external-preview contract.
     expect(path.basename(canonicalActiveSourcePath)).toBe(expectedWorkingCopyName);
   }

@@ -615,7 +615,7 @@ export async function openRecentProject(page, sourcePath, options) {
   if (await projectRow.getAttribute("aria-expanded") !== "true") {
     await projectRow.click();
   }
-  await projectRow.locator("xpath=..").locator(".sidebar-version-file").first().click();
+  await projectRow.locator("xpath=..").locator(".sidebar-project-current-row").click();
   await waitForProjectReady(page);
   await expect.poll(async () => {
     const active = await page.evaluate(
