@@ -1654,3 +1654,16 @@ test("export blocked before local version creation never offers an unrelated ope
   assert.equal(h.workflow.getSnapshot().export.versionOperationId, undefined);
   assert.equal(h.workflow.getSnapshot().draftVersion.operationId, previous);
 });
+
+test("an old adoption receipt cannot open after current advances even with identical HTML", async () => {
+  const h = createHarness();
+  const run = readyRun();
+  const outcome = await h.workflow.openCommittedVersion({ run, payload: {
+    ...run.readyPayload, content: CANDIDATE_HTML, currentHtmlSha256: sha256(CANDIDATE_HTML),
+    openTarget: { ...run.readyPayload.openTarget, versionId: "ver_0003", sourceSha256: sha256(CANDIDATE_HTML) },
+  } });
+  assert.equal(outcome.code, "VERSION_ACTIVATION_SUPERSEDED");
+  assert.equal(h.calls.prepare.length, 0);
+  assert.equal(h.calls.commit.length, 0);
+  assert.equal(h.documentSession.html, BASE_HTML);
+});

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { loadedDiskFrame as loadedStaticDiskFrame } from "./helpers/pageroot-app-fixture.mjs";
+import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import {
   ProjectFileRepository,
   activateNativeEdit,
@@ -8,6 +9,7 @@ import {
   keyShortcut,
   closePageRootGracefully,
   createSourceFixture,
+  expectCheckpointPersisted,
   launchPageRoot,
   loadedDiskFrame,
   mkdirSync,
@@ -948,12 +950,15 @@ test("Electron local current draft saves immutable versions and exports with an 
     const identity = await currentIdentity();
     const editCurrent = async (marker) => {
       const { frame } = await loadedStaticDiskFrame(launched.page, currentPath, { expectedCase: "list-item", includeEditor: true });
+      const beforeRevision = Number(await launched.page.locator("[data-persist-state]").first().getAttribute("data-edit-revision"));
       await activateNativeEdit(frame, "list-item");
       await setTextSelection(frame, "list-item", 0, 3);
       await launched.page.keyboard.insertText(marker);
       await launched.page.keyboard.press(keyShortcut("S"));
-      await expect.poll(() => readFileSync(currentPath, "utf8")).toContain(marker);
-      return readFileSync(currentPath, "utf8");
+      await expectCheckpointPersisted(launched.page, beforeRevision);
+      const persisted = await readPublishedWorkingCopy(currentPath);
+      expect(persisted).toContain(marker);
+      return persisted;
     };
     const firstEdit = await editCurrent("LOCAL_SNAPSHOT_ONE");
     await more.click();
