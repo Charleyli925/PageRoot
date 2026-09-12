@@ -1,5 +1,15 @@
 # Design QA
 
+## 2026-09-12 — Document-owned leave boundary
+
+ProjectWorkflow now coordinates freeze/drain and consumes an operation-local DocumentWorkflow result. The result is not a cached permission: source bytes, revision, route/epoch and current protection evidence are verified again. Normal save ACKs may update the source Hash without becoming a different route; first registration and valid recovery after a failed first save remain supported. No UI layout or input affordance changes.
+
+Independent review found and closed three blockers: stale full-context Hash after successful ACK, null-to-registered context, and pre-registration identity used to check post-registration recovery evidence. Actual registration and recovery first-failure logs were retained. An earlier new ACK fixture omitted lastModifiedAt and was correctly rejected; that fixture failure is not evidence reproducing the product defect.
+
+Final frozen-source task gate `2026-09-12T10-06-22-251Z-task`: 5/5 steps, Node 428/428 across 32 files and source Electron 14/14, no selected failure/skip/flaky/missing execution. Tests include failed autosave with original disk bytes retained, recoverable edits across navigation/close/restart, managed identity, tab restart and source replacement races. The unselected existing rapid dirty A→B→A / immediate close case was additionally run once and passed with zero retries. Source fingerprints remained unchanged; all test processes exited.
+
+Scope limits: source Electron with synthetic fixtures, not installed-app or private-corpus acceptance. First-registration failure recovery is covered by real workflow Node checks, not a dedicated Electron case. Supplementary trace contains API events without PNG/screencast; no pixel equivalence or real power-loss claim. Project coordination harness assertions are distinguished from the real Document ACK/recovery integrations.
+
 ## 2026-09-08 — 独立服务配置与接入恢复
 
 - Truth: 本批三条真实旅程要求；沿用既有桌面视觉语言，共享控件但分别布局设置页与侧栏。
