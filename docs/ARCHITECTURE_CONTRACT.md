@@ -782,7 +782,9 @@ before/after Hash, source path and bootstrap mode. Comment collections and
 the current Review session are applied after a cache hit; they are not cache
 identity and never authorize Candidate adoption. The multi-entry cache is
 byte bounded at 32 MiB for those source facts only, not a second full prepared
-copy. Parsing and annotation yield between phases,
+copy. The retired shell callback/document builder and unused prepared-copy size
+estimator are absent; only complete formal projection publishes Review pages.
+Parsing and annotation yield between phases,
 and stale work stops before publication. Complete, valid and unique
 `data-pageroot-id` enables exact persistent continuity and current-frame visual
 enhancement. Absent, partial, malformed or duplicate identity makes visual
@@ -790,6 +792,15 @@ enhancement `unsupported`, but does not cancel source Review: the existing
 semantic matcher remains the historical-source fallback. When Stable-ID
 continuity exists, it distinguishes insertion from reorder and cross-parent
 movement while added/removed subtrees retain the outermost-only rule.
+
+Only pure-style evidence referenced by a `visual-change` focus region and by
+that region's corresponding `ReviewChange.evidenceStableIds` enters the optional
+outline observation plan. Text, element presence/movement, ordinary attributes,
+mixed evidence and `never` outline regions create no observation request, result
+Map or deadline. The plan is derived once per formal document pair by the existing
+paint-plan module; it owns no source facts. The challenged ports still carry
+source projection and comment highlighting even when no observation is needed,
+and each frame reload repeats the existing identity/generation handshake.
 
 Every planned observation settles internally to `changed`, `unchanged` or
 `unverified`, but those verdicts neither replace deterministic position-bound

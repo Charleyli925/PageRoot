@@ -26,7 +26,11 @@ says no locatable changes were found, never that the page has no visual change.
 Exact HTML equality has its own factual explanation and is not pixel equality.
 
 Current-frame observation remains bounded, non-authoritative diagnostic input
-for already position-bound Stable-ID hosts. It may help measure DOM
+only for pure-style Stable-ID evidence that belongs both to a `visual-change`
+focus region and its corresponding source change. Text, structure, mixed evidence
+and `never` outline regions start no observation. Shared challenged ports still
+serve source projection and comments, including after each frame reload.
+Observation may help measure DOM
 presentation, images, SVG, Canvas 2D and runtime descendants, but missing,
 stale, hidden, unsupported, unstable or budget-limited observation does not add
 a user-facing change or warning. The authored frame realm is not an isolated
@@ -35,9 +39,10 @@ security oracle. No Main/Preload/IPC/screenshot/PNG evidence owner is restored.
 Each `ReviewChange` owns a side-specific `ReviewPresentation`. Its ordered
 steps currently admit a panel key and a Stable-ID-bound `<details>` disclosure.
 The path is derived from the actual marker/evidence host, not the coarse section
-pair. Initial entry and explicit selection first coordinate both disposable
-iframes to the requested states, wait for both presentations, then focus and
-scroll. Presentation changes never persist to authored HTML.
+pair. Explicit selection coordinates both disposable iframes to the requested
+states, waits for both presentations, then focuses and scrolls. Initial navigation
+may reveal the first locatable change while keeping overview's null focus.
+Presentation changes never persist to authored HTML.
 
 Entry starts in overview with null focus. When changes exist, initial navigation
 may reveal the first locatable change without activating focus; empty facts do
@@ -70,8 +75,8 @@ element commenting is outside this ADR and remains a separate PR.
 - a simple changed selector maps only its concrete Stable-ID targets;
 - hidden Tab and closed `<details>` targets reveal on both sides before focus;
 - no Review visual/scope/attention/Toast overlay is present;
-- the AI conversation is hidden once per new Review session and can reopen;
+- the existing AI conversation decision panel opens once per new Review session and can reopen;
 - ambiguous same-parent reorder becomes one parent-level `元素顺序调整` fact;
 - uniquely attributable and cross-parent movement remain exact;
-- first-change emphasis, quiet sibling revision bars and persistent text marks;
+- initial overview with null focus, quiet sibling revision bars and persistent text marks;
 - comment marker unmount, document replacement and port-rebind cleanup.
