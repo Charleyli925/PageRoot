@@ -394,6 +394,7 @@ function createHarness({
     recoverDraft({ serverComments, serverEvents }) {
       return {
         comments: serverComments,
+        deletedCommentIds: [],
         changeEvents: serverEvents,
         composerDraft: "",
         composerCommentId: null,

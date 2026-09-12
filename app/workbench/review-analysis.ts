@@ -1,7 +1,6 @@
 import type { ReviewAnalysisSession } from "../application/review-analysis-session.js";
 import type { VersionReviewCandidate } from "../application/version-workflow.js";
 import { commentHasContent } from "./comment-relink-model.js";
-import { commentSourceAnchor } from "./comment-model";
 import {
   buildReviewShellDocuments,
   buildReviewSourceFactsAsync,
@@ -96,10 +95,10 @@ function reviewImpactFromCandidate(
 
 export function reviewCommentsForAnalysis(comments: readonly CommentItem[]): CommentItem[] {
   return comments.filter(commentHasContent).map((comment) => {
-    const sourceTarget = commentSourceAnchor(comment) || comment.target;
+    const sourceTarget = comment.sourceAnchor;
     return {
       ...comment,
-      target: {
+      sourceAnchor: {
         ...sourceTarget,
         ...(sourceTarget.sourceAnchor
           ? { sourceAnchor: { ...sourceTarget.sourceAnchor } }
@@ -117,16 +116,6 @@ export function reviewCommentsForAnalysis(comments: readonly CommentItem[]): Com
           ? { boundingBox: { ...sourceTarget.boundingBox } }
           : {}),
       },
-      ...(comment.sourceAnchor
-        ? {
-            sourceAnchor: {
-              ...sourceTarget,
-              ...(sourceTarget.sourceAnchor
-                ? { sourceAnchor: { ...sourceTarget.sourceAnchor } }
-                : {}),
-            },
-          }
-        : {}),
       ...(comment.attachments?.length
         ? { attachments: comment.attachments.map((item) => ({ ...item })) }
         : {}),
