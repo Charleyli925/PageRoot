@@ -4,6 +4,7 @@ import {
 } from "./pageroot-element-identity.js";
 import {
   applyPatchPlan,
+  planEditableIslandPatch,
   planInlineStylePatch,
   planSemanticEditableIslandPatch,
   planSemanticOperationPatch,
@@ -655,16 +656,27 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       expectedSourceSha256: state.sourceSha256,
     })
     : operation.type === "setText" && operation.contentHtml !== undefined
-    ? planSemanticEditableIslandPatch(index, {
-      type: "replace-editable-island",
-      targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
-      beforeInnerHtml: index.source.slice(
-        targetElement.contentRange.startOffset,
-        targetElement.contentRange.endOffset,
-      ),
-      nextInnerHtml: command.contentHtml,
-      expectedSourceSha256: state.sourceSha256,
-    }, operation.createdPagerootIds ?? [])
+    ? (operation.createdPagerootIds !== undefined
+      ? planSemanticEditableIslandPatch(index, {
+        type: "replace-editable-island",
+        targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
+        beforeInnerHtml: index.source.slice(
+          targetElement.contentRange.startOffset,
+          targetElement.contentRange.endOffset,
+        ),
+        nextInnerHtml: command.contentHtml,
+        expectedSourceSha256: state.sourceSha256,
+      }, operation.createdPagerootIds)
+      : planEditableIslandPatch(index, {
+        type: "replace-editable-island",
+        targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
+        beforeInnerHtml: index.source.slice(
+          targetElement.contentRange.startOffset,
+          targetElement.contentRange.endOffset,
+        ),
+        nextInnerHtml: command.contentHtml,
+        expectedSourceSha256: state.sourceSha256,
+      }, { randomUUID: options.randomUUID }))
     : operation.type === "setStyle" && operation.range
     ? (operation.createdPagerootIds
       ? planSemanticTextRangeStylePatch(index, {
@@ -697,6 +709,13 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       expectedSourceSha256: state.sourceSha256,
     })
     : planSemanticOperationPatch(index, command);
+  if (
+    operation.type === "setText"
+    && operation.contentHtml !== undefined
+    && Array.isArray(plan.metadata?.createdPagerootIds)
+  ) {
+    allocation.allocatedElementIds = [...plan.metadata.createdPagerootIds];
+  }
   const materialization = applyPatchPlan(plan, state.html, {
     baseIndex: index,
     ...(Array.isArray(options.trackedTargetRefs)
@@ -762,9 +781,25 @@ export function applySemanticOperation(inputState, operation, options = {}) {
   if (generatedRangeStyleIds.length > 0) {
     allocation.allocatedElementIds = generatedRangeStyleIds;
   }
+  const generatedEditableIslandIds = (
+    operation.type === "setText"
+    && operation.contentHtml !== undefined
+    && operation.createdPagerootIds === undefined
+    && allocation.allocatedElementIds?.length
+  )
+    ? [...allocation.allocatedElementIds]
+    : [];
   const identityOperation = generatedRangeStyleIds.length > 0
     ? { ...operation, createdPagerootIds: generatedRangeStyleIds }
-    : operation;
+    : generatedEditableIslandIds.length > 0
+      ? {
+          ...operation,
+          contentHtml: plan.metadata.nextInnerHtml,
+          createdPagerootIds: generatedEditableIslandIds,
+        }
+      : operation.type === "setText" && operation.contentHtml !== undefined
+        ? { ...operation, contentHtml: plan.metadata.nextInnerHtml }
+        : operation;
   const identityDelta = deriveSemanticOperationIdentityDelta(
     state.html,
     materialization.html,

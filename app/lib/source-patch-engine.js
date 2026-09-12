@@ -707,7 +707,7 @@ function normalizedTextRangeSegments(index, target, segments) {
   return normalized;
 }
 
-export function planEditableIslandPatch(indexOrHtml, command, replay = null) {
+export function planEditableIslandPatch(indexOrHtml, command, options = null) {
   const index = typeof indexOrHtml === "string"
     ? buildSourceIndex(indexOrHtml)
     : indexOrHtml;
@@ -735,13 +735,14 @@ export function planEditableIslandPatch(indexOrHtml, command, replay = null) {
     );
   }
 
-  const replayPagerootIds = replay?.token === EDITABLE_ISLAND_ID_REPLAY_TOKEN
-    ? replay.pagerootIds
+  const replayPagerootIds = options?.token === EDITABLE_ISLAND_ID_REPLAY_TOKEN
+    ? options.pagerootIds
     : null;
   const materialized = index.pagerootIdentity.complete
     ? materializeEditableIslandHtml(String(command.nextInnerHtml), {
         baselineInnerHtml: island.innerHtml,
         replayPagerootIds,
+        randomUUID: options?.randomUUID,
       })
     : {
         html: normalizeEditableIslandHtml(

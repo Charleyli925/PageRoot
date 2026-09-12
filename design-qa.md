@@ -1,5 +1,43 @@
 # Design QA
 
+## 2026-09-12 — Direct semantic native island and Enter commands
+
+- Scope: native text editing, Enter and managed hard-break identity now submit a
+  direct semantic editable-island operation. Canvas no longer builds or
+  translates a SourcePatch plan; the Kernel owns the single source
+  materialization, allocates fresh hard-break IDs in DOM order, and returns the
+  canonical operation and identity delta that Canvas seals after acceptance.
+- Source and interaction boundary: current HTML bytes remain authoritative;
+  exact island authorization, stale source/identity rejection, inverse replay,
+  IME/selection continuity and one-apply projection are retained. No control,
+  copy, geometry, color, motion or recovery surface changed, so no new pixel
+  comparison was required for this ownership-only refactor.
+- Focused implementation evidence: 97/97 Node tests and 3/3 exact Electron
+  journeys passed, together with typecheck, lint with zero errors,
+  architecture checks and diff validation. The Electron cases cover managed
+  Enter identity, continuous type/Enter/style/save in one Runtime document and
+  the native editable-island path without the retired Canvas adapter.
+- Independent review passed with no P0/P1. Its documentation findings were
+  repaired in the architecture, MVP and test-strategy owner documents. One P2
+  test-depth debt remains: Kernel-level collision cases for duplicate,
+  pre-existing and illegal `randomUUID` output are not yet isolated as direct
+  unit tests; production allocation still fails closed and existing identity
+  coverage remains green.
+- Final task gate `2026-09-12T16-31-28-845Z-task` passed all 10 selected suites
+  without reuse: typecheck, lint, targeted Node, contract Node, core Node
+  1876/1876, both builds, Browser 34/34, Electron 60/60 and AI 20/20. There
+  were zero selected failures, skips or not-executed results.
+- The user-designated eight-file corpus then completed one real Electron run:
+  5 passed, 3 failed and 0 skipped, with all eight originals byte-identical.
+  Every passing file completed three text hosts, two duplicate/delete cycles,
+  preview/edit re-entry, source reload and save/reopen. One failure completed
+  three text hosts before the copy action was unavailable; two found only one
+  independent text host. The single-file improvement from the recorded 4/8
+  baseline is treated as discovery noise, not broader acceptance. This is
+  rebuilt-source evidence, not an installed-app or full-corpus pass.
+- final result: passed for the scoped direct native-island ownership and
+  source/Runtime continuity.
+
 ## 2026-09-12 — Direct semantic text-range style commands
 
 - Mode: DESIGN CHANGE. Existing text-format controls, quiet refusal copy,

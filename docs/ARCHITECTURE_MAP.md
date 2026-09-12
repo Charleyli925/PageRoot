@@ -87,8 +87,8 @@ bypass hash, identity, scope or persistence checks, and do not serialize
 Runtime DOM as the save source.
 
 **Current fact.** `HtmlCanvasEditor.applySourceCommand()` materializes once
-for an accepted edit: it receives a semantic operation or lowers an island/range command,
-applies the kernel, and publishes that complete HTML/Hash plus the kernel's
+for an accepted edit: it receives a semantic operation, applies the kernel,
+and publishes that complete HTML/Hash plus the kernel's
 SourcePatch target mappings. SourcePatch remains the internal materializer
 inside the kernel; Canvas does not apply a second independent plan or compare
 two HTML results before publishing. Comment and selection tracking pass
@@ -116,13 +116,17 @@ inside that same parent; it has no ID-less parent search. Text-range context
 may similarly locate a range inside its identified host, never select a new host.
 Element styles, text-range styles and same-parent up/down commands directly
 construct `setStyle` and `moveElement` through the pure
-`html-canvas-source-commands` helpers. Canvas uses the kernel's
-`materialization.planType`, exact patches and returned range-wrapper allocation
-for direct-command projection and save evidence; it does not pre-plan these
-commands or infer semantic intent from inverse metadata. Range layout safety
-inspects that same materialization before publication. Only editable-island
-commands still pre-plan to recover their structure/allocated-ID metadata before
-the single apply.
+`html-canvas-source-commands` helpers. Native editable-island input likewise
+constructs `setText` with logical text and canonical content HTML through
+`editableIslandTextOperation`; it carries no line-break IDs at entry. Canvas
+uses the kernel's `materialization.planType`, exact patches and returned
+allocation evidence for projection and save evidence; it does not pre-plan
+commands or infer semantic intent from inverse metadata. The Kernel chooses a
+fresh editable-island plan when IDs are absent, or replays sealed IDs for undo,
+redo and persistence verification. Range layout safety inspects that same
+materialization before publication. `reconcileAllocatedLineBreakIds()` only
+copies Kernel-sealed IDs into the live DOM under its expected-mutation guard;
+it is not a second source owner.
 Opt-in `edit-pipeline-counters.js` can count
 full-document index builds, full patch applies and insertion-point full-tree
 scans in tests; it is not a Session and has no production stream. Undo/redo

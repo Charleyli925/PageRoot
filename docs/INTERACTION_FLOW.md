@@ -448,10 +448,10 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 → 浏览器提供光标 / Selection / IME，Controller 接管所有实际文字变更
 → 用户输入、删除或选择文字
 → 约 700ms 或格式、Cmd+S、目标切换、关闭、发送边界
-→ 生成 replace-editable-island EditCommand
+→ 生成带 logical text + canonical `contentHtml` 的 `editableIslandTextOperation`（不预分配换行 ID）
 → SourceIndex + TargetResolver 锁定源码范围
-→ 岛内做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
-→ 原生换行以裸 `<br>` 进入受管计划，由系统分配 fresh stable ID 后再形成 `setText`；调用方预置新 ID 失败关闭
+→ Kernel 在同一次 apply 中做岛内最小安全规范化并生成精确 range patch 与 inverse patch；无 ID 时透传受控 `randomUUID`，按 DOM 顺序分配 fresh stable ID
+→ 原生换行以裸 `<br>` 进入受管计划，再由 Kernel 封存为 `setText` 的 allocation evidence；调用方预置新 ID 仍失败关闭
 → 删除硬换行时一并退役该 `<br>` 的身份；非 `<br>` 的持久身份仍不得在岛内文字编辑中被改写或删除
 → 保存计划接受后，仅在 expected-mutation 边界把这些 ID 补到对应实时 `<br>`，保留 Selection 并继续当前编辑会话；ID 不新增 Runtime authority
 → 校验岛外字节完全不变，并重解析受影响区域
