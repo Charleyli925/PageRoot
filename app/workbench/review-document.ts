@@ -654,28 +654,6 @@ function hasPreannotatedStableDifference(pair: SectionPair): boolean {
   ));
 }
 
-export function pageSourceOnlyReviewDiagnostics(
-  beforeHtml: string,
-  afterHtml: string,
-): ReviewDiagnostic[] | null {
-  if (typeof DOMParser === "undefined" || beforeHtml === afterHtml) return null;
-  const visual = buildReviewVisualEvidence(beforeHtml, afterHtml, "source-only-check");
-  if (visual.binding.identity !== "supported" || visual.evidence.length) return null;
-  const parser = new DOMParser();
-  const beforeDocument = parser.parseFromString(beforeHtml, "text/html");
-  const afterDocument = parser.parseFromString(afterHtml, "text/html");
-  clearReservedReviewMarkup(beforeDocument);
-  clearReservedReviewMarkup(afterDocument);
-  const analysis = annotateStableSourceDifferences(beforeDocument, afterDocument);
-  if (beforeDocument.querySelector("[data-pageroot-review-structure]")
-    || afterDocument.querySelector("[data-pageroot-review-structure]")) return null;
-  const diagnostics = analysis.sourceKinds.map((kind) => ({
-    kind,
-    summary: kind === "css-source" ? "CSS 源码发生变化" : "Script 源码发生变化",
-  }));
-  return diagnostics.length ? diagnostics : null;
-}
-
 function emptySourceFacts(
   beforeHtml: string,
   afterHtml: string,

@@ -486,7 +486,10 @@ file synchronously before returning; save remains in DocumentWorkflow's drain.
 Catalog source status is a disposable projection, with per-project failure
 isolation. The live authority rules are in `SECURITY_MODEL.md`.
 
-Ready-result notifications: Workbench clears the preceding run notice only on the transition into `ready-to-open`. Repeated status observations preserve a later user-triggered Review outcome until its normal dismissal; polling does not own that notice lifetime.
+Ready-result notifications: Workbench clears the preceding run notice only on
+the transition into `ready-to-open`; repeated polls do not own notice lifetime.
+An empty Review change collection is an in-place presentation, not an
+interruption or a second owner of Candidate eligibility.
 
 Workspace response normalization is owned by the existing injected Controller
 codecs (`decodeWorkspaceResponse`), before Session publication. VersionSession
@@ -599,7 +602,16 @@ ProjectFileRepository writes terminal Request state and stable Conversation even
 
 ### Public execution progress and stop ordering
 
-The public projector bounds assembled text to 64 KiB, redacts credentials/paths/URLs and suppresses generated markup. Hidden reasoning and raw tool arguments never enter the public event allowlist. Tool activity is translated from known event categories to fixed labels, with a distinct event identity for each occurrence. HTTP starts generation progress only after actual content arrives, separately reporting response receipt and validation.
+The event reducer owns one process-private, bounded public-message accumulator,
+independent of the 2048-event diagnostic retention cap. It assembles raw fragments
+by message identity before redacting credentials/paths/URLs and suppressing
+generated markup. First appearance orders messages; later deltas update that
+same message. One projection supplies visibleText, at most 80 display updates
+and the final public summary. Earlier updates collapse without losing text.
+The execution narration limit is 65536 UTF-16 code units, including display
+separators and redaction expansion; runtime byte limits remain separate. The
+4096-character summary is derived from that same public text, with explicit
+truncation. Run progress stages come only from the domain presentation. Hidden reasoning and raw tool arguments never enter the public event allowlist. Tool activity is translated from known event categories to fixed labels, with a distinct event identity for each occurrence. HTTP starts generation progress only after actual content arrives, separately reporting response receipt and validation.
 
 For submissions, the durable stop-requested fact fences late completion inside the repository serial writer while cleanup is unconfirmed. A Candidate already authoritative before stop remains available; only an explicit discard intent rejects it. Renderer cancellation reconciles a result-ready receipt instead of clearing that result. The stop-requested fact is not a cancelled result.
 

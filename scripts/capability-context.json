@@ -10,7 +10,8 @@
         "^app/lib/runtime-comment-hint",
         "^app/workbench/comment-(?:rail|canvas)",
         "^tests/comment-",
-        "^tests/runtime-comment-hint"
+        "^tests/runtime-comment-hint",
+        "^app/lib/target-resolver"
       ],
       "entryInterfaces": [
         "app/application/comment-workflow.d.ts",
@@ -339,7 +340,8 @@
         "^app/workbench/run-conversation-outlet",
         "^app/workbench/AiConversationSidebar",
         "^tests/run-",
-        "^tests/version-"
+        "^tests/version-",
+        "^app/workbench/review-(?:analysis|document)"
       ],
       "entryInterfaces": [
         "app/application/run-workflow.d.ts",
@@ -365,7 +367,9 @@
         "app/application/run/submit-plan.js",
         "app/application/version/review-plan.js",
         "app/workbench/run-conversation-outlet.tsx",
-        "app/workbench/AiConversationSidebar.tsx"
+        "app/workbench/AiConversationSidebar.tsx",
+        "app/workbench/review-analysis.ts",
+        "app/workbench/review-document.ts"
       ],
       "focusedTests": [
         "tests/run-workflow.test.mjs",

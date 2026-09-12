@@ -181,15 +181,6 @@ export function sidebarRunProgress(options?: {
   agentTextTruncated?: boolean;
 }): SidebarRunProgress | null;
 
-export function sidebarAgentStageSteps(options?: {
-  state?: string;
-  phase?: string | null;
-}): readonly Readonly<{
-  key: string;
-  label: string;
-  state: "completed" | "current" | "pending";
-}>[];
-
 export function sidebarTimestampLabel(
   value: unknown,
   options?: { now?: number },

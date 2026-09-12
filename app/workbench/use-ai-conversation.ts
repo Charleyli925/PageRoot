@@ -9,7 +9,6 @@ import type { ActiveRun } from "../domain/run-lifecycle.js";
 import type { RunHandoffState } from "../application/run-session.js";
 import {
   conversationLoadedForView,
-  sidebarAgentStageSteps,
   sidebarConversationGroups,
   sidebarFailureRetryable,
   sidebarStateFromRun,
@@ -251,10 +250,6 @@ export function useAiConversation({
     runCommentCount: activeRun?.commentCount ?? pendingCommentCount,
     sourceFileName,
     handoffStatus: activeHandoff?.status || null,
-    runSteps: sidebarAgentStageSteps({
-      state,
-      phase: activeHandoff?.phase || (submissionPending ? "preparing-delivery" : ""),
-    }),
     // An explicit allowlist of settled loads (see conversationLoadedForView):
     // the empty-state copy must never appear before the load settles, because
     // the session drops draft writes until it has published a conversation.

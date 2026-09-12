@@ -62,6 +62,7 @@ corruption or lost user work.
 | New global `setToast` / `NoticeBar` | Extra interruption besides Confirmation and workspace safety | presentation | overlay | classified ledger | silent recover / in-place / safety banner | freeze; generic `setToast` retired; remaining N5 kinds may only shrink |
 | Access-repair resend identity | Resend continues only the stored Request/document; switching files is not authorization to retarget | authority | in-place “当前文件已变化，不会重新发送” | RunWorkflow repair intent | stay on the original document or start a new round | keep |
 | Login stop unconfirmed | User cancel is not a confirmed stop; cleanup failure must not become cancelled or signed-in | reversible | in-card “停止未确认”; cancel drain returns false | Bridge `AgentAccessAuth` job state | retry cancel or wait for a later confirmed terminal | keep |
+| Review nonempty-change admission | Locate changes only when evidence exists; it does not establish Candidate validity | presentation | formerly refused the comparison for source-only output | validated Candidate plus existing VersionWorkflow adoption | same Review with an inline empty state | retired; empty-fact adopt/discard Electron coverage replaces the presentation gate |
 
 ## Sample now exists; deletion still needs shadow
 

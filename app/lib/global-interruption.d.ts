@@ -9,7 +9,6 @@ export const GLOBAL_INTERRUPTION_KINDS: readonly [
   "open-in-browser-failed",
   "export-failed",
   "handoff-recopy",
-  "review-no-visible-change",
 ];
 
 export type GlobalInterruptionKind = (typeof GLOBAL_INTERRUPTION_KINDS)[number];
@@ -50,8 +49,7 @@ export type GlobalInterruption =
   | { kind: "show-in-folder-failed"; detail?: string }
   | { kind: "open-in-browser-failed"; detail?: string }
   | { kind: "export-failed"; detail: string }
-  | { kind: "handoff-recopy"; succeeded: boolean }
-  | { kind: "review-no-visible-change" };
+  | { kind: "handoff-recopy"; succeeded: boolean };
 
 export type GlobalInterruptionPresentation = {
   kind: GlobalInterruptionKind;

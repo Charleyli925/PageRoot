@@ -827,8 +827,12 @@ complete review.
 Exact completed review entries survive unrelated tab applications; only stale
 in-flight analysis is cancelled. Candidate-ready state does not start analysis;
 only the explicit Review command may populate the cache and it waits for complete analyzed documents before opening;
-a Candidate with diagnostics but no position-bound change stays outside Review
-and uses the existing no-effective-page-change result.
+a Candidate with diagnostics but no position-bound change opens the same Review.
+Candidate eligibility depends on validated identity, hashes, paths and preview
+construction, never a nonempty change list. Empty facts keep the overview,
+null focus and no initial navigation; the existing explicit decision workflow
+retains all adoption checks. Exact HTML equality is a content fact, not proof
+of equal runtime pixels or fulfilled comments.
 
 Successful Candidate adoption and stale Review invalidation clear the prepared
 document cache immediately. Unmounting the Review workspace then releases its
@@ -848,11 +852,12 @@ and browser Review use the same static contract.
 Each change owns a side-specific `ReviewPresentation` derived from its actual
 marker/evidence host. Ordered reveal steps currently admit a panel key and a
 Stable-ID-bound `<details>` ancestor. Review coordinates both disposable frames,
-waits for their presentation acknowledgements, then focuses the first change;
+waits for their presentation acknowledgements, then may navigate to the first
+locatable change without activating focus. Empty facts start no navigation;
 no reveal state is persisted to source. Review renders no non-blocking visual
 status, scope card, candidate-attention notice or global Toast. A new Review
-session hides the AI conversation once; an explicit user reopen remains visible
-for that session.
+session opens the existing AI conversation decision panel; the user may close
+and reopen it without replacing that Review session.
 
 Comment location remains a separate private capability. An opaque initial
 bootstrap binding may identify a frozen before target for comment geometry, but
@@ -1087,7 +1092,10 @@ Working Copy selects one official resolver contract: only the valid unique
 SourceIndex ID entry may resolve. Tag changes retain that identity; deletion
 or a missing/invalid ID is orphaned without heuristic fallback. Selector,
 ancestor-fingerprint, source-offset and text-affix scoring are not an official
-result and are not retained as a shadow path. Incomplete identity HTML may
+result and are not retained as a shadow path. Insertion targets likewise require
+a valid unique parent ID; exact source boundaries and prefix/suffix rebind may
+only locate a child boundary inside that same identified parent. They cannot
+choose or replace the parent. Incomplete identity HTML may
 resolve the same-revision source-anchor only; it cannot rebound across a
 hash change and cannot enable direct Canvas edit. A source target that survives while its
 current Canvas projection cannot display it remains the same target with a

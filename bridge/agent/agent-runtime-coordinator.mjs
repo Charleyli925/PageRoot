@@ -9,7 +9,6 @@ import { defaultAgentLeaseStore } from "./agent-lease-store.mjs";
 import {
   executionPhaseForEvent,
   publicExecutionSession,
-  publicVisibleTextUpdates,
   safePublicAgentSummary,
 } from "./agent-session-projector.mjs";
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
@@ -736,7 +735,7 @@ export class AgentRuntimeCoordinator {
       entry[textField] = reduced.projection.visibleText;
       if (textField === "replyText") entry.replyTruncated = reduced.projection.textTruncated;
       if (textField === "visibleText") {
-        entry.visibleTextUpdates = publicVisibleTextUpdates(reduced.projection.retainedEvents);
+        entry.visibleTextUpdates = reduced.projection.visibleTextUpdates;
         entry.textTruncated = reduced.projection.textTruncated;
       }
     }
@@ -1092,9 +1091,7 @@ export class AgentRuntimeCoordinator {
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
     }).finally(async () => {
-      const summary = safePublicAgentSummary(entry.visibleTextUpdates?.length
-        ? entry.visibleTextUpdates.map((update) => update.text).join("\n\n")
-        : entry.visibleText);
+      const summary = safePublicAgentSummary(entry.visibleText);
       if (summary) await this.#queueExecutionFact(entry, "public-summary", summary);
       await this.#queueExecutionFact(entry, entry.state === "failed" ? "failed" : "execution-ended");
       if (entry.historyFailure) {

@@ -478,7 +478,10 @@ popup, download, modal or host IPC capability. Parent-side capture also blocks
 anchor navigation and form submission, nested iframes receive an empty sandbox,
 and refresh/CSP meta directives are removed only from the disposable review copy
 so they cannot navigate the frame or suppress the trusted review bootstrap.
-Review facts come only from the two frozen HTML documents. The review renderer has no screenshot owner, runtime-capture IPC, PNG envelope, pixel parser or runtime binding. It reports precise text evidence and outermost element presence; movement, attributes, CSS, layout, wrapping and runtime drawing produce no Review fact.
+Review facts come only from the two frozen HTML documents. The review renderer has no screenshot owner, runtime-capture IPC, PNG envelope, pixel parser or runtime binding. Source facts include precise text, outermost presence, supported movement,
+authored attributes and mapped styles under ARCHITECTURE_CONTRACT.md. Runtime
+observation cannot invent source facts or grant adoption authority. A validated
+Candidate may have zero locatable facts and still enter the same Review.
 
 Comment location remains separately private. Each source-resolved local target
 may use an opaque initial-bootstrap binding: the element's `data-pageroot-id`,
@@ -492,8 +495,8 @@ from document bytes and later bootstrap reads. A unique source `id`, `data-*`,
 `name`, or `aria-label` is only a safe fallback; missing, ambiguous, replaced or
 disconnected targets omit the comment marker rather than rebinding by guess.
 This capability cannot discover or authorize additional Review facts. The user
-still invokes the existing fail-closed ready-version activation path through
-“直接打开” or the review confirmation “打开 AI 修改后”.
+still invokes the existing fail-closed Candidate adoption through “采用修改”
+and its confirmation; empty Review facts never bypass that boundary.
 
 Current Edit comments use a separate ADR 0061 identity boundary. On a complete
 managed Working Copy, a TargetRef resolves officially only through SourceIndex's

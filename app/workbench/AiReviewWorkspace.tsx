@@ -474,6 +474,7 @@ export default function AiReviewWorkspace({
   afterLabel,
   sessionId,
   documents,
+  sourceContentEqual = false,
   sourcePath,
   accepting,
   error,
@@ -496,6 +497,7 @@ export default function AiReviewWorkspace({
   afterLabel: string;
   sessionId: string;
   documents: ReviewDocuments;
+  sourceContentEqual?: boolean;
   sourcePath?: string;
   accepting: boolean;
   error?: string;
@@ -2435,7 +2437,7 @@ export default function AiReviewWorkspace({
 
           <div className={styles.canvasReviewBody}>
             <header className={styles.reviewDirectoryHeader}>
-              <details ref={reviewDirectoryRef} className={styles.reviewDirectory}>
+              {reviewDirectoryItems.length ? <details ref={reviewDirectoryRef} className={styles.reviewDirectory}>
                 <summary
                   ref={reviewDirectorySummaryRef}
                   aria-label={`变化目录，共 ${reviewDirectoryItems.length} 处`}
@@ -2502,7 +2504,15 @@ export default function AiReviewWorkspace({
                     );
                   })}
                 </div>
-              </details>
+              </details> : (
+                <span className={styles.reviewEmpty} data-testid="review-empty-changes">
+                  {sourceContentEqual
+                    ? "前后 HTML 内容相同。"
+                    : filter !== "all" && reviewChanges.length
+                      ? "此筛选下没有可定位的变化。"
+                      : "未定位到可标注的变化，可直接查看前后页面。"}
+                </span>
+              )}
             </header>
             <div className={styles.canvasGrid} data-view={canvasView}>
               <ReviewDocumentPane

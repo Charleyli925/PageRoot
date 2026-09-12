@@ -225,7 +225,6 @@ import {
 } from "./workbench/document-surface-presentation";
 import { markDocumentSurfacePrewarmed, markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
 import {
-  pageSourceOnlyReviewDiagnostics,
   type ReviewDocuments,
 } from "./workbench/review-document";
 import type { ReviewPresentationSnapshot } from "./workbench/review-state";
@@ -400,6 +399,7 @@ type ReadyReviewSession = {
   sessionId: string;
   documents: ReviewDocuments;
   beforeHtml: string;
+  sourceContentEqual: boolean;
   sourcePath: string;
   beforeLabel: string;
   afterLabel: string;
@@ -5219,16 +5219,6 @@ export default function Workbench() {
       ) {
         throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
       }
-      const sourceOnlyDiagnostics = pageSourceOnlyReviewDiagnostics(
-        frozenHtml,
-        candidate.content,
-      );
-      if (sourceOnlyDiagnostics) {
-        reviewAnalysisSession.clear();
-        setReadyReviewSession(null);
-        setInterruption({ kind: "review-no-visible-change" });
-        return;
-      }
       const externalBootstrap = Boolean(window.htmlAIPreview);
       const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
       const beforeLabel = run.basedOnVersionId
@@ -5253,11 +5243,6 @@ export default function Workbench() {
         || activeRunOperationKey(analyzedRun) !== operationKey
         || !isCurrentProjectContext(reviewContext)
       ) return;
-      if (!preparedReview.documents.changes.length) {
-        setReadyReviewSession(null);
-        setInterruption({ kind: "review-no-visible-change" });
-        return;
-      }
       revealAiConversation();
       setInterruption(null);
       const session: ReadyReviewSession = {
@@ -5267,6 +5252,7 @@ export default function Workbench() {
         sessionId: preparedReview.sessionId,
         documents: preparedReview.documents,
         beforeHtml: frozenHtml,
+        sourceContentEqual: candidate.sha256 === candidate.baseSnapshotSha256,
         sourcePath: preparedReview.sourcePath,
         beforeLabel,
         afterLabel,
