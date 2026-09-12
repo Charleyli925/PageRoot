@@ -4,6 +4,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- 每个项目现在只有一份“当前稿”。左侧依次显示长期规则、当前稿和默认折叠的历史版本；V1、V2、V3……全部只读，包括最新版本。新项目保留原 HTML 文件名，保存新版本或采纳 AI 不再生成多份可编辑版本文件。
+- 新增独立的“保存为新版本”，本地编辑也能主动留下历史。导出当前 HTML 可勾选“同时保存为新版本”，每次打开菜单默认关闭；无变化、取消或导出失败不会增加版本号。HTML 导出保留完整源码，不包含评论或项目包，默认使用 Downloads 或最近成功的外部目录，结果可直接显示文件。
+- 升级时保留用户实际正在编辑的稿件、原文件名、评论和附件。“找回此前的稿件…”可恢复旧工作稿或替换前内容；恢复会建立新版本并保留当前稿，不改写已有历史。AI 采纳前的本地修改同样保留。
+- Finder 中已删除或移走的非活动项目，在确认目录缺席后从普通列表隐藏；权限、读取或身份异常仍显示为不可用。当前打开项目消失时保留内容和恢复/导出出口，后台不会重新创建旧项目文件夹。
+
 - 修复中文组词、内部文字恢复与历史操作后格式化节点失去编辑能力的问题，保留对页面脚本伪造节点的保护。
 - 修复含模板内容的复杂 HTML 格式化时不必要的画布重建；重新载入成功提示现在核对可编辑状态，静态恢复解除旧只读降级。
 - 修复撤销换页后键盘焦点留在旧 iframe 导致重做无响应；同内容重新加载等待新画面完成，不再取消正在恢复的图表。
@@ -94,7 +99,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
   and continue to load in Preview and Edit from that directory. The previous
   silent import toast is gone. If the file changes while the confirmation is
   open, import is refused with “文件在确认期间被修改，没有导入.”
-- Finder 在同一受管项目目录内改名当前打开的 Working Copy 或同父目录的项目文件夹后，PageRoot 会按稳定身份自动同步新路径，并允许立刻在顶栏继续改名。顶栏先改名时也会把受管 OpenTarget 带到新路径，因此随后的 Finder 改名仍能重绑；若顶栏输入还没改、Finder 已改名，则采用 Finder 已确认的名称。重命名不创建 Project、Document、Working Copy 或 Version；跨磁盘、副本和多候选仍失败关闭。顶栏真实失败后不再强制聚焦，避免无法退出编辑。macOS 上 `/var` 与 `/private/var` 视为同一活动路径，NFC 与大小写折叠后的同一文件也不会丢掉身份；进程被杀掉后仍可从已同步路径恢复。项目目录里 `PROJECT.md` 等旁路写入只核对当前 HTML，不会把未还原的规则修改提前保存。
+- Finder 在同一受管项目目录内改名当前 HTML 或同父目录的项目文件夹后，应用按唯一稳定身份同步新路径、活动记录和监听目标；HTML 改名不等于项目改名，不新增 Version。文件标识变化不单独导致不可用，重复身份和不安全路径仍停止写入；同目录保存 `PROJECT.md` 等旁路写入不会提前保存未还原的规则修改。
+
 - Fixed the edit Canvas shaking continuously at window widths where the source
   iframe would gain or lose a vertical scrollbar. The shared page scroll stage
   now owns page-level vertical scrolling, while Canvas measures fractional
