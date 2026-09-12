@@ -684,7 +684,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
         value: operation.value,
         important: operation.important,
         expectedSourceSha256: state.sourceSha256,
-      }))
+      }, { randomUUID: options.randomUUID }))
     : operation.type === "setStyle"
     ? planInlineStylePatch(index, {
       type: "set-inline-style",
@@ -748,10 +748,27 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       );
     }
   }
+  // A range operation declares logical intent only. The one materialization
+  // owns any wrapper allocation, then binds that allocation into identity
+  // verification and returns it to the caller as accepted save evidence.
+  const generatedRangeStyleIds = (
+    operation.type === "setStyle"
+    && operation.range
+    && !operation.createdPagerootIds
+    && Array.isArray(plan.metadata?.createdPagerootIds)
+  )
+    ? [...plan.metadata.createdPagerootIds]
+    : [];
+  if (generatedRangeStyleIds.length > 0) {
+    allocation.allocatedElementIds = generatedRangeStyleIds;
+  }
+  const identityOperation = generatedRangeStyleIds.length > 0
+    ? { ...operation, createdPagerootIds: generatedRangeStyleIds }
+    : operation;
   const identityDelta = deriveSemanticOperationIdentityDelta(
     state.html,
     materialization.html,
-    operation,
+    identityOperation,
     {
       beforeIndex: index,
       afterIndex: materialization.sourceIndex,

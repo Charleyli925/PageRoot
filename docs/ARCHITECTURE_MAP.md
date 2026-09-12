@@ -114,12 +114,15 @@ owner. Geometry or outline failure still must not refuse edit entry.
 Insertion resolution keeps exact boundaries and cross-hash prefix/suffix rebind
 inside that same parent; it has no ID-less parent search. Text-range context
 may similarly locate a range inside its identified host, never select a new host.
-Element styles and same-parent up/down commands directly construct `setStyle`
-and `moveElement` through the pure `html-canvas-source-commands` helpers. Canvas
-uses the kernel's `materialization.planType` for direct-command projection;
-it does not pre-plan these commands or infer their type from inverse metadata.
-Only editable-island and text-range style commands still pre-plan to recover
-their structure/allocated-ID metadata before the single apply.
+Element styles, text-range styles and same-parent up/down commands directly
+construct `setStyle` and `moveElement` through the pure
+`html-canvas-source-commands` helpers. Canvas uses the kernel's
+`materialization.planType`, exact patches and returned range-wrapper allocation
+for direct-command projection and save evidence; it does not pre-plan these
+commands or infer semantic intent from inverse metadata. Range layout safety
+inspects that same materialization before publication. Only editable-island
+commands still pre-plan to recover their structure/allocated-ID metadata before
+the single apply.
 Opt-in `edit-pipeline-counters.js` can count
 full-document index builds, full patch applies and insertion-point full-tree
 scans in tests; it is not a Session and has no production stream. Undo/redo

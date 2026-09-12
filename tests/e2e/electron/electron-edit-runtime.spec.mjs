@@ -1966,12 +1966,25 @@ test("Runtime range styling never grants a forged clone source authority", {
     const bold = toolbar
       .getByRole("button", { name: "加粗", exact: true });
     await expect(bold).toBeEnabled();
+    await enablePipelineCounters(page);
+    await resetPipelineCounters(page);
     await bold.click();
 
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/<span[^>]*font-weight:\s*700/iu);
+    expect((await readPipelineCounters(page)).fullPatchApplies).toBe(1);
     await expect(target.locator('span[style*="font-weight"]')).toHaveCount(1);
+    await expect(target.locator('span[style*="font-weight"]'))
+      .toHaveAttribute("data-pageroot-id", /^pr1_[0-9a-f]{32}$/u);
     await expect(forged.locator('span[style*="font-weight"]')).toHaveCount(0);
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "source:requested:resumed",
+    );
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => target.evaluate((element) => (
+      element.ownerDocument.getSelection()?.toString() || ""
+    ))).toBe("甲");
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
   });
