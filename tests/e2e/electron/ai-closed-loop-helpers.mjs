@@ -1034,25 +1034,53 @@ export async function assertReviewHasNoRuntimeVisualSupplement(
   }
 }
 
-export async function assertReviewAcceptPersistence({
-  page,
-  sourcePath,
-  original,
-  expectedText,
-  versionPathPattern,
-}) {
+export async function captureReviewAcceptPersistence(page) {
+  const opened = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+  const repository = new ProjectFileRepository({
+    projectsRoot: path.dirname(path.dirname(opened.sourcePath)),
+  });
+  const { target } = await repository.workspace({ sourcePath: opened.sourcePath });
+  const snapshot = await repository.readVersionFile({ target, versionId: target.versionId });
+  expect(snapshot.kind).toBe("version");
+  return {
+    repository, target, sourcePath: opened.sourcePath,
+    snapshot, snapshotBytes: readFileSync(snapshot.path),
+  };
+}
+
+export async function assertReviewAcceptPersistence({ page, beforeAdoption, expectedText }) {
+  const { repository, target: previousTarget, snapshot, snapshotBytes } = beforeAdoption;
   await expect.poll(async () => page.evaluate(async () => {
     const project = await window.htmlAIProjects?.getActiveProject();
     const reviewVisible = Boolean(document.querySelector('[data-testid="ai-review-workspace"]'));
     return { sourcePath: project?.sourcePath || "", reviewVisible };
   }), { timeout: 30_000 }).toMatchObject({
-    sourcePath: expect.stringMatching(versionPathPattern),
+    sourcePath: beforeAdoption.sourcePath,
     reviewVisible: false,
   });
   const opened = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
-  expect(opened.sourcePath).not.toBe(sourcePath);
-  expect(opened.sourcePath).toMatch(versionPathPattern);
-  expect(readFileSync(sourcePath).equals(original)).toBe(true);
-  expect(readFileSync(opened.sourcePath, "utf8")).toContain(expectedText);
+  const { target } = await repository.workspace({ sourcePath: opened.sourcePath });
+  expect(target).toMatchObject({
+    projectId: previousTarget.projectId,
+    documentId: previousTarget.documentId,
+    workingCopyId: previousTarget.workingCopyId,
+    exactSourcePath: previousTarget.exactSourcePath,
+  });
+  expect(target.versionId).not.toBe(previousTarget.versionId);
+  const adopted = await repository.readVersionFile({ target, versionId: target.versionId });
+  expect(adopted.kind).toBe("version");
+  expect(adopted.version.ordinal).toBe(snapshot.version.ordinal + 1);
+  expect(adopted.version.basedOnVersionId).toBe(previousTarget.versionId);
+  const currentBytes = readFileSync(opened.sourcePath);
+  expect(currentBytes.toString("utf8")).toContain(expectedText);
+  expect(readFileSync(adopted.path).equals(currentBytes)).toBe(true);
+  expect(adopted.sha256).toBe(sha256(currentBytes));
+  const historical = await repository.readVersionFile({
+    target, versionId: previousTarget.versionId,
+  });
+  expect(historical.kind).toBe("version");
+  expect(historical.content).toBe(snapshot.content);
+  expect(historical.sha256).toBe(snapshot.sha256);
+  expect(readFileSync(historical.path).equals(snapshotBytes)).toBe(true);
   return opened;
 }

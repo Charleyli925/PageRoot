@@ -31,6 +31,7 @@ import {
   assertReviewHasNoRuntimeVisualSupplement,
   caseSelector,
   candidateHtmlFiles,
+  captureReviewAcceptPersistence,
   closePageRootGracefully,
   createSourceFixture,
   existsSync,
@@ -232,6 +233,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         targetSelector: ".review-comment-ordinary-target[data-pageroot-id]",
       }],
     );
+    const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
     const attemptRoot = path.join(
       request.requestRoot,
       "attempts",
@@ -2058,11 +2060,10 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.getByRole("button", { name: "确认并采纳" }).click();
     const opened = await assertReviewAcceptPersistence({
       page: launched.page,
-      sourcePath: fixture.sourcePath,
-      original: fixture.original,
+      beforeAdoption,
       expectedText: UPDATED_TEXT,
-      versionPathPattern: /\/generated-ai-loop-V2(?:-V2)*\.html$/u,
     });
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(await launched.page.evaluate(() => {
       window.__pagerootHandoffObserver?.disconnect();
       return window.__pagerootHandoffFlashEvents;
@@ -3051,6 +3052,7 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
       launched.electronApp,
       fixture.sourcePath,
     );
+    const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
     writeAiOutput(request.requestRoot, (base) => preserveCandidateSourceIdsForFixture(
       base,
       base.replace(ORIGINAL_TEXT, UPDATED_TEXT),
@@ -3126,7 +3128,11 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     });
     const unlocked = await readActiveAcceptSnapshot(launched.page);
     expect(["preparing", "static"]).toContain(unlocked.runtimePhase);
-    expect(unlocked.sourcePath).toMatch(/\/accept-static-first-V2\.html$/u);
+    const adopted = await assertReviewAcceptPersistence({
+      page: launched.page, beforeAdoption, expectedText: UPDATED_TEXT,
+    });
+    expect(unlocked.sourcePath).toBe(adopted.sourcePath);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     const expectedSha256 = sha256(readFileSync(unlocked.sourcePath));
     expect(unlocked.workingSha256).toBe(expectedSha256);
     const unlocksAtStatic = unlocked.unlockCount;
