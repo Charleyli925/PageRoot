@@ -609,3 +609,22 @@ B 在预检时根据当前产品能力生成只读清单，对用户可触达、
 同时断言左侧选中、标签标题、工具栏历史/审阅标识与编辑权限。
 该组同时保留原有 project-lifecycle / review 标签，进入对应交付门禁。
 纯函数测试不能替代这组真实 Electron 证据。
+
+
+## Single current draft and immutable history
+
+The current-draft Repository owner covers explicit local snapshot/no-op,
+same-current adoption/history/recovery, actual active older-WC migration,
+preserved comments/attachments, restart fault stages and confirmed Finder
+absence/return/duplicate isolation. Snapshot bytes and current bytes are
+independent oracles. Old per-Version editable fixtures remain explicit migration
+inputs, never the expected result of a new import.
+
+VersionWorkflow and ProjectWorkflow tests cover frozen export bytes, no Version
+on plain/cancelled/failed export, partial export/version reconciliation, stale
+project-switch completion and same-path complete OpenTarget publication.
+Electron project lifecycle exercises local editing, explicit V2 save, immutable
+V1/V2 viewing, current return, default export and optional V3 creation with no
+duplicate on unchanged content. Shared sidebar helpers select the current row
+or explicitly expand and select historical Vn; first-row selectors cannot stand
+in for current identity.

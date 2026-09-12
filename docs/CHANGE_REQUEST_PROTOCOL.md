@@ -29,14 +29,18 @@ v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧�
 - 只因 HTML 在固定窗口内未变化就自动成功。
 - 把非权威摘要文件当作可选或替代完成信号。
 
-## v4 手动历史创建补充（E）
+## v4 当前稿与手动建版
 
-手动历史创建不走 AI Request、Candidate 或 finalizer，也不使用本文件归档的
-`restore`/`local-editor` Version 类型。v4 manifest 新增可选 `sourceType`，新手动
-记录取 `history-copy`，以 `sourceOperationId` 绑定事务，AI 来源字段保持 null。
-其来源快照 Hash、前序 Version、幂等操作、提交和恢复合同统一见
-[版本与项目文件产品需求的历史创建章节](VERSION_AND_PROJECT_FILES_PRD.md#历史创建e-的事务合同与-f-的入口切换)。
-现有 v4 记录不迁移；客户端必须识别该来源，不能把它解释为初始导入或 AI 生成。
+当前合同见 [ADR 0072](decisions/0072-single-current-draft.md) 和
+[版本与项目文件需求](VERSION_AND_PROJECT_FILES_PRD.md)。下文 v3 旧工作文件规则
+不是当前 v4 的写入合同，也不是本次迁移的来源。
+
+v4 本地保存使用 sourceType=local-save，历史创建使用 history-copy，保留稿件
+恢复使用 recovery-copy。它们不生成 AI Request/Candidate/finalizer，来源 AI
+字段为 null，以 sourceOperationId 幂等绑定事务；基于版本与前序版本仍独立记录。
+一个项目只维护一份当前 Working Copy，AI 采纳也更新同一身份和路径；冻结的
+Request 输入、既有 Version 快照和 Candidate 校验边界保持不变。
+v4 独立工作稿迁移由 Repository 在真实活动稿上完成并保全其他稿件；不迁移 v3。
 
 ## 1. 协议原则
 
