@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
 import { tmpdir } from "node:os";
 import { closePageRootGracefully, expect, launchPageRoot, managedWorkingCopyPath, removeIsolatedUserData, stopPageRoot,
   waitForProjectReady, waitForRuntimeHandoffSettled } from "./electron-native-harness.mjs";
@@ -60,6 +61,7 @@ let workingPath;
 let expectedFinal = plan.seed;
 let observedEditor;
 let readComments;
+let inspectorCache;
 if (plan.operation === "mixed") {
   delete report.textOperations;
   delete report.operation;
@@ -74,6 +76,8 @@ try {
   await expect(editor).toHaveCount(1);
   await expect(editor).toHaveAttribute("aria-readonly", "false");
   report.initialRuntime = await waitInitialRuntime(page, plan.initialRuntime, `sha256:${plan.seed.sha256}`);
+  inspectorCache = await boundFrozenInspectorCache(page);
+  report.inspectorCache = inspectorCache.evidence;
   await editor.evaluate(startRuntimeLifecycleObservation);
   observedEditor = editor;
   workingPath = await managedWorkingCopyPath(page, importPath);
@@ -129,6 +133,7 @@ try {
   report.lifecycle = await observedEditor.evaluate(stopRuntimeLifecycleObservation);
   observedEditor = null;
   if (plan.reopen) {
+    inspectorCache.verify();
     const started = performance.now();
     try {
       await closePageRootGracefully(session.electronApp, page);
@@ -136,6 +141,8 @@ try {
       session = await launchPageRoot({ isolatedUserData: session.isolatedUserData });
       await waitForProjectReady(session.page);
       report.reopen.initialRuntime = await waitInitialRuntime(session.page, plan.initialRuntime, `sha256:${expectedFinal.sha256}`);
+      inspectorCache = await boundFrozenInspectorCache(session.page);
+      report.reopen.inspectorCache = inspectorCache.evidence;
       const reopenedEditor = session.page.getByTestId("html-canvas-editor").filter({ visible: true });
       await expect(reopenedEditor).toHaveCount(1);
       const reopenedActive = reopenedEditor.locator('iframe[data-runtime-slot-role="active"]');
@@ -162,6 +169,7 @@ try {
     } finally { report.reopen.durationMs = performance.now() - started; }
   }
   report.state = "PASS";
+  inspectorCache.verify();
 } catch (error) {
   report.state = "FAIL";
   report.firstFailure = { code: error.code || error.name, details: error.details,

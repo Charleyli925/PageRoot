@@ -467,6 +467,13 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 微验收入口 `frozen-html-operation.mjs` 消费 `PAGEROOT_FROZEN_MANIFEST` 与独立传入的
 `PAGEROOT_FROZEN_MANIFEST_SHA256`，精确绑定工作稿种子字节、源码指纹和单行 A→B 目标。
 清单另冻结初始 Runtime 预期；启动和重开都先等待其明确终态，再等待 handoff 完成。
+冻结执行器在初始 Runtime 就绪后限制 Playwright 自身 Inspector 网络响应缓存：总量 64 KiB、
+单响应 8 KiB、POST 诊断内容 1 KiB，保留请求/响应/失败事件，不以 Inspector body 作为源码证据。
+适配器仅支持锁定的 Playwright 1.62.1，版本、内部会话入口缺失或运行中会话集合漂移均失败，
+不得静默退回无界记录。源码与持久化核验仍读取已授权工作稿，不受调试副本淘汰影响。
+合成 Electron 正反例证明真实 fetch 数据与事件不变、调试 body 确实被淘汰；Node 反例拒绝
+未知版本、缺失入口、空会话及命令失败。未限制缓存的历史资源曲线不得用于压力放行，
+修复后需重新自证、task:finish、8 文件核心验收，再从新 session 的 0 次开始。
 资源仍 preparing 时的临时静态 iframe 不能提前通过；动态预期下的 fallback 必须保留失败归因。
 执行只开放固定 ID 查找和当前选择状态读取；一次真实点击后核对选择与源码字节。
 它不提供发现、替换或映射推断接口。清单也可显式冻结单个 plain-leaf 文字目标，

@@ -1,4 +1,6 @@
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
+import { createServer } from "node:http";
+import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
 import { expect, test } from "@playwright/test";
 
 import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-contract.js";
@@ -133,6 +135,39 @@ const STATIC_PAGE = `<!doctype html>
   </main>
   <div aria-hidden="true" style="height:1800px"></div>
 </body></html>`;
+
+test("frozen Inspector cache bounds response bodies without losing fetch data or network events", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const body = "synthetic-response-".repeat(8192);
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "Access-Control-Allow-Origin": "*", "Content-Type": "text/plain" });
+    response.end(body);
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await withRuntimeProject("pageroot-inspector-cache-e2e-", { "runtime-report.html": STATIC_PAGE }, async ({ page }) => {
+      await waitForRuntimeHandoffSettled(page);
+      const endpoint = `http://127.0.0.1:${server.address().port}`;
+      const fetchResponse = async suffix => {
+        const url = `${endpoint}/${suffix}`;
+        const [response, length] = await Promise.all([
+          page.waitForResponse(r => r.url() === url),
+          page.evaluate(async address => (await (await fetch(address)).text()).length, url),
+        ]);
+        expect(length).toBe(body.length); expect(response.status()).toBe(200);
+        return response;
+      };
+      // The uncontrolled path retains the body; this would fail the bounded oracle.
+      const before = await fetchResponse("unbounded");
+      expect((await before.body()).length).toBe(body.length);
+      const cache = await boundFrozenInspectorCache(page);
+      const after = await fetchResponse("bounded");
+      await expect(after.body()).rejects.toThrow(/evict|No resource|No data/u);
+      cache.verify();
+    });
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
 
 test("successful Candidate retirement does not retain a growing Document chain", {
   tag: ["@gate-smoke", "@smoke-editing"],
