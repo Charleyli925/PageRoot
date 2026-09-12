@@ -2741,6 +2741,36 @@ test("Review keeps Candidate scope diagnostics out of the comparison canvas", {
   }
 });
 
+async function installReviewObservationProbe(page, { dropObservations = false } = {}) {
+  await page.evaluate(({ dropObservations }) => {
+    const probe = { projections: [], observations: [], deadlines: 0 };
+    window.__reviewObservationProbe = probe;
+    const post = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function(message, ...rest) {
+      if (message?.type === "verdicts") probe.projections.push(message.side);
+      if (message?.type === "observe") {
+        probe.observations.push({ side: message.side, generation: message.generation, candidates: message.candidates });
+        if (dropObservations) return;
+      }
+      return Reflect.apply(post, this, [message, ...rest]);
+    };
+    const schedule = window.setTimeout;
+    window.setTimeout = function(callback, delay, ...args) {
+      // Observe the real optional-outline deadline without changing its duration.
+      if (delay === 4_000 && typeof callback === "function") {
+        return schedule(() => { probe.deadlines += 1; callback(...args); }, delay);
+      }
+      return schedule(callback, delay, ...args);
+    };
+  }, { dropObservations });
+}
+
+async function expectReviewProjectionWithoutObservations(page) {
+  await expect.poll(() => page.evaluate(() => [...new Set(window.__reviewObservationProbe.projections)].sort()))
+    .toEqual(["after", "before"]);
+  expect(await page.evaluate(() => window.__reviewObservationProbe.observations)).toEqual([]);
+}
+
 function emptyReviewScenario(scenario) {
   return async ({}, testInfo) => {
     test.setTimeout(120_000);
@@ -2748,6 +2778,7 @@ function emptyReviewScenario(scenario) {
     const original = readFileSync(fixture.sourcePath);
     const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
     try {
+      await installReviewObservationProbe(launched.page);
       const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
       writeAiOutput(request.requestRoot, (base) => scenario.script
         ? base.replace('document.documentElement.dataset.authorScriptRan = "true";',
@@ -2768,6 +2799,7 @@ function emptyReviewScenario(scenario) {
         await expect(frame.locator("body")).toBeVisible();
         await expect(frame.locator("[data-pageroot-review-marker]")).toHaveCount(0);
       }
+      await expectReviewProjectionWithoutObservations(launched.page);
       if (scenario.script) await expect(after.locator("body")).toHaveCSS("background-color", "rgb(210, 230, 250)");
       for (const frame of [before, after]) {
         await expect(frame.locator("html")).toHaveAttribute("data-pageroot-review-focus", "all");
@@ -2851,9 +2883,73 @@ test("a safe simple CSS selector creates one position-bound element change", {
   }
 });
 
+for (const scenario of ["confirmed", "mixed", "unverified"]) {
+  test(`Review observes only optional inline-style outlines: ${scenario}`, async ({}, testInfo) => {
+    test.setTimeout(120_000);
+    const fixture = createSourceFixture("optional-style-review.html", (source) => source.replace(
+      "  </main>",
+      '    <div data-review-observe-style style="color: rgb(20, 40, 60)">可选样式观察</div>\n  </main>',
+    ));
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    try {
+      await installReviewObservationProbe(launched.page, { dropObservations: scenario === "unverified" });
+      const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
+      writeAiOutput(request.requestRoot, (base) => {
+        const styled = base.replace('style="color: rgb(20, 40, 60)"', 'style="color: rgb(180, 20, 30)"');
+        expect(styled).not.toBe(base);
+        return scenario === "mixed" ? styled.replace("可选样式观察", "文字与样式同时修改") : styled;
+      });
+      runOfficialFinalizer(request.requestRoot, request.changeRequest);
+      await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+        .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
+      await launched.page.getByRole("button", { name: "查看修改" }).click();
+      await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible({ timeout: 30_000 });
+      const before = launched.page.frameLocator('iframe[title^="修改前"]');
+      const after = launched.page.frameLocator('iframe[title^="修改后"]');
+      const host = after.locator("[data-review-observe-style]");
+      await expect(host).toHaveAttribute("data-pageroot-review-structure", "style");
+      const stableId = await host.getAttribute("data-pageroot-id");
+      if (scenario === "mixed") {
+        await expectReviewProjectionWithoutObservations(launched.page);
+      } else {
+        await expect.poll(() => launched.page.evaluate(() => (
+          [...new Set(window.__reviewObservationProbe.observations.map((item) => item.side))].sort()
+        ))).toEqual(["after", "before"]);
+        const observations = await launched.page.evaluate(() => window.__reviewObservationProbe.observations);
+        for (const observation of observations) {
+          expect(observation.candidates).toEqual([{ stableId, positionSensitive: false, present: true }]);
+        }
+      }
+      if (scenario === "unverified") {
+        await expect.poll(() => launched.page.evaluate(() => window.__reviewObservationProbe.deadlines), { timeout: 8_000 })
+          .toBeGreaterThan(0);
+      }
+      const styleGroup = await host.evaluate((element) => {
+        const facts = JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]");
+        const style = facts.find((fact) => fact.structureChange === "style");
+        return style ? `focus-${style.displayGroupId || `display-fact-${style.id}`}` : "";
+      });
+      expect(styleGroup).toBeTruthy();
+      await after.locator(`[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${styleGroup}"]`)
+        .first().evaluate((bar) => bar.click());
+      for (const frame of [before, after]) {
+        await expect(frame.locator("html")).toHaveAttribute("data-pageroot-review-focus-group", styleGroup);
+        await expect(frame.locator("[data-pageroot-review-overlay-box]"))
+          .toHaveCount(scenario === "confirmed" ? 1 : 0);
+      }
+      await expect(launched.page.getByRole("button", { name: "采用修改", exact: true })).toBeEnabled();
+      await expect(launched.page.getByRole("button", { name: "不用这次", exact: true })).toBeEnabled();
+      await launched.page.screenshot({ path: testInfo.outputPath(`style-${scenario}-focus.png`), animations: "disabled" });
+    } finally {
+      await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+      removeSourceFixture(fixture.sourceDirectory);
+    }
+  });
+}
+
 test("source Review preserves multi-host text evidence and hidden changes without visual confirmation", {
   tag: ["@gate-smoke", "@smoke-review"],
-}, async () => {
+}, async ({}, testInfo) => {
   test.setTimeout(120_000);
   const SECTION_ID = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
   const FIRST_ID = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
@@ -2870,6 +2966,7 @@ test("source Review preserves multi-host text evidence and hidden changes withou
   ));
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
+    await installReviewObservationProbe(launched.page);
     const request = await addCommentAndSubmit(
       launched.page,
       launched.electronApp,
@@ -2907,6 +3004,8 @@ test("source Review preserves multi-host text evidence and hidden changes withou
     await expect(hiddenAfter.locator('[data-pageroot-review-text="added"]'))
       .toHaveAttribute("data-pageroot-review-confirmed", "true");
     await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
+    await expectReviewProjectionWithoutObservations(launched.page);
+    await launched.page.screenshot({ path: testInfo.outputPath("text-review-overview.png"), animations: "disabled" });
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
