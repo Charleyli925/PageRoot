@@ -22,6 +22,7 @@ import {
   stopPageRoot,
   tmpdir,
   writeFileSync,
+  waitForRuntimeHandoffSettled,
 } from "./electron-native-harness.mjs";
 
 async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
@@ -132,6 +133,39 @@ const STATIC_PAGE = `<!doctype html>
   </main>
   <div aria-hidden="true" style="height:1800px"></div>
 </body></html>`;
+
+test("successful Candidate retirement does not retain a growing Document chain", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async ({}, testInfo) => {
+  const source = '<!doctype html><html><head><title>Retirement memory</title></head><body><p data-native-case="retirement-copy">Fixed copy target</p><script>window.authoredReady=true;</script></body></html>';
+  await withRuntimeProject("pageroot-retirement-memory-e2e-", { "runtime-report.html": source }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, "retirement-copy");
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true });
+    await waitForRuntimeHandoffSettled(page);
+    const active = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const id = await active.locator('[data-native-case="retirement-copy"]').getAttribute("data-pageroot-id");
+    expect(id).toMatch(/^pr1_[a-f0-9]{32}$/u);
+    const cdp = await page.context().newCDPSession(page);
+    const samples = [];
+    try {
+      for (let cycle = 0; cycle < 4; cycle += 1) {
+        const generation = Number(await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute("data-frame-generation"));
+        await active.locator(`[data-pageroot-id="${id}"]`).click();
+        await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+        await waitForRuntimeHandoffSettled(page, { priorGeneration: generation, requireGenerationAdvance: true });
+        await expect(active.locator('[data-native-case="retirement-copy"]')).toHaveCount(cycle + 2);
+        await cdp.send("HeapProfiler.collectGarbage");
+        samples.push(await cdp.send("Memory.getDOMCounters"));
+      }
+      // Compare settled promotions, not cold startup. Two-slot replacement and
+      // the current canonical source may overlap; historical frames must not accumulate.
+      expect(samples[3].documents, JSON.stringify(samples)).toBeLessThanOrEqual(samples[0].documents + 2);
+    } finally {
+      await testInfo.attach("retirement-dom-counts", { body: JSON.stringify(samples), contentType: "application/json" });
+      await cdp.detach();
+    }
+  });
+});
 
 const NESTED_SCROLL_PAGE = `<!doctype html>
 <html><head><title>Nested scroll continuity</title></head><body>
