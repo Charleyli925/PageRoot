@@ -4,6 +4,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Agent 同阶段活动与达到上限后的重复进度不再反复写入历史文件；保留结束、停止和结果记录，以及中断后补齐会话索引的恢复能力。
 - 已生成的合法 AI 候选即使没有可定位变化，也能进入原有审阅页查看前后页面并明确采用或不用；空态原位说明，不再弹提示后挡在入口外。
 - Agent 执行正文、消息块和摘要共用一个有界来源，修复诊断事件较多时尾部文字消失的问题；保留草稿入口、消息顺序和明确截断提示。
 
