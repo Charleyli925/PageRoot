@@ -14,7 +14,11 @@
 - 测试修正：空态不复用强制非空 marker 的旧助手；使用正式嵌入式工具栏名称；
   head 中的合成脚本在 DOMContentLoaded 后访问 body。先前测试脚本失败的报告保留，未计为通过。
 - 验收边界：此证据覆盖已存在合法 Candidate 的零事实审阅，不证明上游原始同内容输出
-  已从 no-change 改为 Candidate；后者属于独立 R2。私人全目录 HTML 验收尚待明确目录。
+  已从 no-change 改为 Candidate；后者属于独立 R2。
+- 私人 HTML 全目录：8/8 文件执行，4 通过、4 失败，原件 Hash 全部不变。两类文件级失败为复制按钮不可用，
+  以及既有 pending refresh 的 sourceRevision 更新触发旧整对象相等断言；后续未执行步骤未计通过。
+  两类代表文件在未含本次产品修改的主干基线均复现相同失败。此归因不等同于全目录验收通过；
+  通过文件中的候选宿主 rejection 也保留在本机完整报告，私人名称、路径和截图不提交。
 - final result: scoped empty-Review Electron flows and screenshot inspection passed; broader gate results are recorded separately.
 
 ## 2026-09-08 — 独立服务配置与接入恢复
