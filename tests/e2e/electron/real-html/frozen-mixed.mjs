@@ -11,6 +11,9 @@ function requireFact(condition, code, details) {
 export const frozenRows = (operations, targetId) => operations.map(operation => ({ operation, targetId,
   state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null }));
 
+export const mixedCheckpointOperations = plan => ["reopen-cumulative",
+  ...Array.from({ length: plan.cycles }, (_, index) => `delete-comment-${index + 1}`)];
+
 export function mixedCycleRows(plan) {
   const [text, structure] = plan.targets;
   return Array.from({ length: plan.cycles }, (_, index) => ({ cycle: index + 1,
@@ -191,5 +194,5 @@ export async function finishFrozenMixed({ plan, page, editor, readSource, readCo
     });
   }
   requireFact((await readComments()).length === 0, "FROZEN_COMMENT_DELETE_INCOMPLETE");
-  requireTextOperationLedger(report.checkpoint, ["reopen-cumulative", "delete-comment-1", "delete-comment-2", "delete-comment-3"]);
+  requireTextOperationLedger(report.checkpoint, mixedCheckpointOperations(plan));
 }

@@ -189,6 +189,12 @@ The fixed structure prefix must still match before each copy. Each rebuild has
 a no-refocus input probe followed by explicit same-ID text reentry. Comments use
 persisted comment ID/source anchor, survive the final reopen, then are deleted.
 This representative diagnostic is neither an eight-file result nor a pressure run.
+The separate `core-pressure-20` scope reuses this fixed chain for exactly twenty
+cycles in one fresh session, with all twenty comments checked after reopening
+and individually deleted. Run it only after same-version eight-file core
+acceptance; the scope alone does not attest that prerequisite. Three-cycle
+diagnostics and different sessions cannot be added to its count. Any failure
+stops the run; fifty/hundred-cycle plans are not accepted by this entry point.
 Initial load and reopen also wait for the manifest's declared Runtime terminal
 before the handoff barrier: an idle temporary static iframe during resource
 preparation is not a completed dynamic startup. Fallback remains explicit failure.

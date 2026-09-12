@@ -46,7 +46,7 @@ import { assertReadOnlyCorpusMode, frozenInitialRuntimeDecision, FROZEN_COPY_DEN
 import { requireTextOperationLedger, verifyEndedHistorySession, verifyFrozenHistory } from "./e2e/electron/real-html/frozen-text.mjs";
 import { verifyFrozenCopyCapability, verifyFrozenDenialWitness, verifyFrozenEndedContinuation, verifyFrozenStructureLifecycle } from "./e2e/electron/real-html/frozen-structure.mjs";
 import { publicDiagnosticValue } from "./e2e/electron/real-html/diagnostic-sanitizer.mjs";
-import { verifyFrozenComment, mixedCycleRows, verifyFreshCommentStorage } from "./e2e/electron/real-html/frozen-mixed.mjs";
+import { verifyFrozenComment, mixedCycleRows, mixedCheckpointOperations, verifyFreshCommentStorage } from "./e2e/electron/real-html/frozen-mixed.mjs";
 import {
   CAPABILITY_EXPECTATION_RULES,
   attachOperationGroupsToAuthoredDenominator,
@@ -1026,6 +1026,13 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
   assert.doesNotThrow(() => readMixed(mixed));
   const pending = mixedCycleRows(readMixed(mixed));
   assert.equal(pending.length, 3);
+  assert.deepEqual(mixedCheckpointOperations(mixed), ["reopen-cumulative", "delete-comment-1", "delete-comment-2", "delete-comment-3"]);
+  const pressure = readMixed({ ...mixed, scope: "core-pressure-20", cycles: 20 });
+  assert.equal(mixedCycleRows(pressure).length, 20);
+  assert.equal(mixedCheckpointOperations(pressure).length, 21);
+  assert.equal(mixedCheckpointOperations(pressure).at(-1), "delete-comment-20");
+  for (const cycles of [0, 3, 19, 21, 50, 100, "20"])
+    assert.throws(() => readMixed({ ...mixed, scope: "core-pressure-20", cycles }), { code: "FROZEN_MIXED_PLAN_INVALID" });
   assert.equal(pending.flatMap(cycle => [...cycle.control, ...cycle.text, ...cycle.structure, ...cycle.continuation])
     .every(row => row.state === "NOT_EXECUTED" && row.reason === "DEPENDENCY_NOT_COMPLETED"), true);
   for (const change of [{ cycles: 20 }, { initialRuntime: "static" }, { commentBasis: "LIVE_UI" },

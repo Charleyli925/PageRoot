@@ -8,7 +8,7 @@ import { executeFrozenSelection, frozenDigest, frozenFrameAccess, frozenInitialR
 import { workspaceSourceFingerprint } from "./real-html/workspace-provenance.mjs";
 import { executeFrozenText } from "./real-html/frozen-text.mjs";
 import { executeFrozenCopyDenied, executeFrozenStructure } from "./real-html/frozen-structure.mjs";
-import { executeFrozenMixed, finishFrozenMixed, frozenRows, mixedCycleRows, verifyFreshCommentStorage } from "./real-html/frozen-mixed.mjs";
+import { executeFrozenMixed, finishFrozenMixed, frozenRows, mixedCycleRows, mixedCheckpointOperations, verifyFreshCommentStorage } from "./real-html/frozen-mixed.mjs";
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { startRuntimeLifecycleObservation, stopRuntimeLifecycleObservation }
   from "./real-html/runtime-observer.mjs";
@@ -63,9 +63,8 @@ let readComments;
 if (plan.operation === "mixed") {
   delete report.textOperations;
   delete report.operation;
-  report.mixed = { cycles: mixedCycleRows(plan), checkpoint: frozenRows([
-    "reopen-cumulative", "delete-comment-1", "delete-comment-2", "delete-comment-3",
-  ], plan.targets[0].selectedId) };
+  report.mixed = { cycles: mixedCycleRows(plan), checkpoint: frozenRows(
+    mixedCheckpointOperations(plan), plan.targets[0].selectedId) };
 }
 try {
   session = await launchPageRoot({ activeSourcePath: importPath });
