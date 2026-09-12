@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  editableIslandTextOperation,
   inlineStyleOperation,
   siblingReorderOperation,
   textRangeStyleCreatesWrapper,
@@ -167,6 +168,56 @@ test("direct range style carries the exact logical quote and uses one Kernel mat
   } finally {
     disableEditPipelineCounters();
   }
+});
+
+test("editable island text factory emits a complete envelope without preallocating line-break IDs", () => {
+  const source = `${prefix}<p data-pageroot-id="${ids.a}">Alpha <strong data-pageroot-id="${ids.b}">Beta</strong> tail</p><aside data-pageroot-id="${ids.c}">outside</aside>${suffix}`;
+  const { index, state } = setup(source);
+  const operation = editableIslandTextOperation(index, {
+    elementId: ids.a,
+    baseRevision: state.revision,
+    operationId: "op_canvas_island_text_01",
+    text: "Alpha Beta\ntail",
+    contentHtml: `Alpha <strong data-pageroot-id="${ids.b}">Beta</strong><br>tail`,
+  });
+  assert.deepEqual(Object.keys(operation).sort(), [
+    "baseRevision",
+    "contentHtml",
+    "expectedSourceSha256",
+    "operationId",
+    "schemaVersion",
+    "target",
+    "text",
+    "type",
+  ]);
+  assert.equal(operation.schemaVersion, 1);
+  assert.equal(operation.operationId, "op_canvas_island_text_01");
+  assert.equal(operation.baseRevision, 0);
+  assert.equal(operation.expectedSourceSha256, index.sourceSha256);
+  assert.equal(operation.type, "setText");
+  assert.deepEqual(operation.target, {
+    elementId: ids.a,
+    tagName: "p",
+    expectedOuterHtmlSha256: operation.target.expectedOuterHtmlSha256,
+  });
+  assert.match(operation.target.expectedOuterHtmlSha256, /^sha256:[0-9a-f]{64}$/u);
+  assert.equal(operation.text, "Alpha Beta\ntail");
+  assert.equal(
+    operation.contentHtml,
+    `Alpha <strong data-pageroot-id="${ids.b}">Beta</strong><br>tail`,
+  );
+  assert.equal(Object.hasOwn(operation, "createdPagerootIds"), false);
+
+  const breakId = "pr1_000000000000400080000000000000b1";
+  const result = applySemanticOperation(state, operation, {
+    randomUUID: () => "00000000-0000-4000-8000-0000000000b1",
+  });
+  assert.deepEqual(result.allocatedElementIds, [breakId]);
+  assert.deepEqual(result.identityDelta.addedElementIds, [breakId]);
+  assert.match(result.html, new RegExp(`<br data-pageroot-id="${breakId}">`, "u"));
+  const undo = applySemanticOperation(result.nextState, result.inverseOperation);
+  assert.equal(undo.html, source);
+  assert.equal(applySemanticOperation(undo.nextState, undo.inverseOperation).html, result.html);
 });
 
 test("direct range style avoids wrapper allocation for no-change and existing-wrapper projections", () => {

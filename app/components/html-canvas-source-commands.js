@@ -42,6 +42,22 @@ export function textRangeStyleOperation(sourceIndex, options) {
   };
 }
 
+export function editableIslandTextOperation(sourceIndex, options) {
+  if (typeof options.text !== "string" || typeof options.contentHtml !== "string") {
+    throw new TypeError("可编辑岛文字语义操作需要 text 与 canonical contentHtml。");
+  }
+  return {
+    schemaVersion: 1,
+    operationId: options.operationId || createSourceOperationId(),
+    baseRevision: options.baseRevision,
+    expectedSourceSha256: sourceIndex.sourceSha256,
+    type: "setText",
+    target: createSemanticElementPrecondition(sourceIndex, options.elementId),
+    text: options.text,
+    contentHtml: options.contentHtml,
+  };
+}
+
 export function textRangeStyleCreatesWrapper(materialization) {
   return Array.isArray(materialization?.patches)
     && materialization.patches.some((patch) => patch?.kind === "text-range-style-open");

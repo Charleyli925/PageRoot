@@ -32,8 +32,8 @@ import {
   recordRuntimeContinuityEvent,
 } from "./runtime-continuity-probe.js";
 import { installEditPipelineTestHooks } from "../lib/edit-pipeline-counters.js";
-import { createSourceOperationId } from "../domain/source-history.js";
 import {
+  editableIslandTextOperation,
   inlineStyleOperation,
   siblingReorderOperation,
   textRangeStyleCreatesWrapper,
@@ -52,7 +52,6 @@ import {
   applyPatchPlan,
   buildSourceIndex,
   createTargetRef,
-  planSourcePatch,
   resolveTargetRef,
 } from "../lib/source-patch-core.js";
 import {
@@ -66,7 +65,6 @@ import {
 import {
   applySemanticOperation,
   createSemanticDocumentState,
-  createSemanticElementPrecondition,
   type SemanticOperation,
 } from "../lib/semantic-operation-kernel.js";
 import {
@@ -796,20 +794,16 @@ type FinishNativeEditingOptions = {
 };
 
 
-type EditableIslandSourcePatchCommand = {
-  type: "replace-editable-island";
-  targetRef: SourceTargetRef;
-  expectedSourceSha256: string;
-  elementId?: string;
-  beforeInnerHtml: string;
-  nextInnerHtml: string;
-};
 type DirectSemanticCommand = {
   type: "direct-semantic-operation";
   operation: SemanticOperation;
 };
-type CanvasSourceCommand = EditableIslandSourcePatchCommand | DirectSemanticCommand;
-type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
+type CanvasSourceCommand = DirectSemanticCommand;
+type SourcePatchResult = ReturnType<typeof applyPatchPlan>;
+type ForwardProjectionPlan = {
+  type: string;
+  targetRefs: SourceTargetRef[];
+};
 type InlineStylePriority = "" | "important";
 type InlineStyleFacts = {
   inlineValue: string | null;
@@ -837,44 +831,6 @@ type PagePresentationActionCache = {
   currentContext: PageViewContext | null;
   action: PagePresentationAction | null;
 };
-
-function semanticOperationForEditableIslandCommand(
-  command: EditableIslandSourcePatchCommand,
-  forwardPlan: SourcePatchPlan,
-  sourceIndex: SourceIndexValue,
-  mutation: HtmlCanvasMutation,
-  baseRevision: number,
-): SemanticOperation | null {
-  const targetRef = "targetRef" in command ? command.targetRef : null;
-  const resolution = targetRef ? resolveTargetRef(sourceIndex, targetRef) : null;
-  const sourceTarget = resolution?.target;
-  if (sourceTarget?.type !== "element" || !sourceTarget.pagerootId) {
-    return null;
-  }
-  const target = createSemanticElementPrecondition(sourceIndex, sourceTarget.pagerootId);
-  const envelope = {
-    schemaVersion: 1 as const,
-    operationId: createSourceOperationId(),
-    baseRevision,
-    expectedSourceSha256: sourceIndex.sourceSha256,
-  };
-  const after = mutation.after as { text?: unknown } | null;
-  const metadata = forwardPlan.metadata as {
-    nextInnerHtml?: unknown;
-    createdPagerootIds?: unknown;
-  };
-  const createdPagerootIds = Array.isArray(metadata.createdPagerootIds)
-    ? metadata.createdPagerootIds.map(String)
-    : [];
-  return {
-    ...envelope,
-    type: "setText",
-    target,
-    text: String(after?.text ?? ""),
-    contentHtml: String(metadata.nextInnerHtml ?? ""),
-    ...(createdPagerootIds.length > 0 ? { createdPagerootIds } : {}),
-  };
-}
 
 function computedCssValue(element: HTMLElement, cssProperty: string): string {
   return element.ownerDocument.defaultView
@@ -3334,8 +3290,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
   const synchronizeStablePreview = useCallback((
     previousIndex: SourceIndexValue,
-    result: ReturnType<typeof applyPatchPlan>,
-    plan: SourcePatchPlan,
+    result: SourcePatchResult,
+    plan: ForwardProjectionPlan,
     originalMutation: HtmlCanvasMutation,
     appliedMutation: HtmlCanvasMutation,
     provedRuntimeMutationElement: HTMLElement | null,
@@ -3506,11 +3462,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           const imported = reconcileRangeStyleInPlace(liveTarget, detachedTarget, previousIndex, result.sourceIndex);
           if (!imported) return failPreviewSync("runtime-subtree-needs-candidate");
           if (targetedRuntimeSync) trustedImportedRuntimeElements = [...imported];
-          const openingPatches = plan.patches.filter(
+          const openingPatches = result.patches.filter(
             (patch: { kind?: string }) => patch.kind === "text-range-style-open",
           );
           const insertedSpanNodeIds = openingPatches.flatMap((openingPatch) => {
-            const shiftedStartOffset = openingPatch.startOffset + plan.patches.reduce(
+            const shiftedStartOffset = openingPatch.startOffset + result.patches.reduce(
               (total: number, patch: { startOffset: number; before: string; after: string }) => (
                 patch.startOffset < openingPatch.startOffset
                   ? total + patch.after.length - patch.before.length
@@ -3534,9 +3490,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           if (selectedRangeElements.length !== openingPatches.length) {
             return failPreviewSync("range-wrapper-count");
           }
-          const coalescedElementId = (
-            plan.metadata as { coalescedTextRangeElementId?: string }
-          ).coalescedTextRangeElementId;
+          const coalescedElementId = result.patches.find(
+            (patch: { nodeId?: string }) => typeof patch.nodeId === "string",
+          )?.nodeId;
           if (openingPatches.length === 0 && coalescedElementId) {
             const previousStyleElementIndex = previousElements.findIndex(
               (element) => element.pagerootId === coalescedElementId
@@ -3760,14 +3716,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     command: CanvasSourceCommand,
     mutation: HtmlCanvasMutation,
     options: {
-      validateResult?: (result: ReturnType<typeof applyPatchPlan>) => void;
+      validateResult?: (result: SourcePatchResult) => void;
       onUnchanged?: () => void;
       islandTextCommit?: {
         selection: NativeEditSelection;
         deferPreviewReconcile?: boolean;
       };
     } = {},
-  ): ReturnType<typeof applyPatchPlan> | null => {
+  ): SourcePatchResult | null => {
     const sourceIndex = sourceIndexRef.current;
     const currentSource = frameSourceHtmlRef.current;
     const blockedDetailAtCommandStart = containerRef.current?.getAttribute(
@@ -3810,25 +3766,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         revision: semanticRevisionRef.current,
         sourceIndex,
       });
-      const directSemanticOperation = command.type === "direct-semantic-operation"
-        ? command.operation
-        : null;
-      const plannedCommand = directSemanticOperation
-        ? null
-        : planSourcePatch(command, sourceIndex) as SourcePatchPlan;
-      const semanticOperation = directSemanticOperation
-        || semanticOperationForEditableIslandCommand(
-          command as EditableIslandSourcePatchCommand,
-          plannedCommand as SourcePatchPlan,
-          sourceIndex,
-          mutation,
-          semanticRevisionRef.current,
-        );
-      if (!semanticOperation) {
-        throw new Error("当前画布命令无法降低为语义操作。");
-      }
-      const operationTargetRefs = plannedCommand?.targetRefs
-        ?? [sourceTargetRefForSelection(mutation.target)];
+      const semanticOperation = command.operation;
+      const operationTargetRefs = [sourceTargetRefForSelection(mutation.target)];
       const ambientTargets = uniqueSelections([
         ...commentedTargetsRef.current.map((entry) => entry.target),
         ...trackedTargetsRef.current,
@@ -3843,7 +3782,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         // subregion TargetRef. Keep the caller's presentation-level identity
         // (for example a module selection) in the same apply as a tracked
         // mapping so the Canvas can restore its original targetId and level.
-        directSemanticOperation ? [] : operationTargetRefs,
+        [],
       );
       const semanticResult = applySemanticOperation(
         documentState,
@@ -3859,14 +3798,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         options.onUnchanged?.();
         return null;
       }
-      const forwardPlan = plannedCommand ?? {
-        version: 1,
-        type: semanticResult.materialization.planType,
-        sourceSha256: result.previousSourceSha256,
-        patches: result.patches,
+      const forwardPlan: ForwardProjectionPlan = {
+        type: semanticResult.materialization.planType || "source-patch",
         targetRefs: operationTargetRefs,
-        metadata: result.inversePlan.metadata,
-      } as SourcePatchPlan;
+      };
       options.validateResult?.(result);
       const currentRuntime = runtimeFrameRef.current;
       const runtimeIsCurrent = Boolean(
@@ -3930,17 +3865,39 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // Range wrappers are allocated by the same Kernel materialization. Seal
       // those returned IDs into the accepted save evidence only after every
       // caller validation has passed; Canvas never precomputes them.
-      const acceptedSemanticOperation = (
-        semanticOperation.type === "setStyle"
-        && semanticOperation.range
-        && !semanticOperation.createdPagerootIds
-        && semanticResult.allocatedElementIds?.length
-      )
-        ? {
-            ...semanticOperation,
-            createdPagerootIds: [...semanticResult.allocatedElementIds],
-          }
-        : semanticOperation;
+      const acceptedSemanticOperation = (() => {
+        if (
+          semanticOperation.type !== "setStyle"
+          && semanticOperation.type !== "setText"
+        ) return semanticOperation;
+        const nextTarget = result.sourceIndex.byPagerootId.get(
+          semanticOperation.target.elementId,
+        );
+        const canonicalContentHtml = semanticOperation.type === "setText"
+          && semanticOperation.contentHtml !== undefined
+          && nextTarget?.type === "element"
+          ? result.sourceIndex.source.slice(
+            nextTarget.contentRange.startOffset,
+            nextTarget.contentRange.endOffset,
+          )
+          : null;
+        return {
+          ...semanticOperation,
+          ...(canonicalContentHtml !== null ? { contentHtml: canonicalContentHtml } : {}),
+          ...(semanticOperation.type === "setStyle"
+            && semanticOperation.range
+            && !semanticOperation.createdPagerootIds
+            && semanticResult.allocatedElementIds?.length
+            ? { createdPagerootIds: [...semanticResult.allocatedElementIds] }
+            : {}),
+          ...(semanticOperation.type === "setText"
+            && semanticOperation.contentHtml !== undefined
+            && !semanticOperation.createdPagerootIds
+            && semanticResult.allocatedElementIds?.length
+            ? { createdPagerootIds: [...semanticResult.allocatedElementIds] }
+            : {}),
+        } as SemanticOperation;
+      })();
       const sourceTransaction: HtmlCanvasSourceTransaction = {
         kind: appliedMutation.kind,
         ...(appliedMutation.property
@@ -4454,13 +4411,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
       let validatedSourceInnerHtml: string | null = null;
       let validationSucceeded = false;
-      const command = {
-        type: "replace-editable-island" as const,
-        targetRef: active.rootTargetRef,
-        elementId: active.liveElementId ?? undefined,
-        beforeInnerHtml: previousInnerHtml,
-        nextInnerHtml,
-        expectedSourceSha256: active.projection.sourceSha256,
+      const operation = editableIslandTextOperation(sourceIndex, {
+        elementId: active.liveElementId ?? active.rootTargetRef.elementId ?? "",
+        baseRevision: semanticRevisionRef.current,
+        text: nextText,
+        contentHtml: nextInnerHtml,
+      });
+      const command: CanvasSourceCommand = {
+        type: "direct-semantic-operation",
+        operation,
       };
       const result = applySourceCommand(command, mutation, {
         islandTextCommit: {

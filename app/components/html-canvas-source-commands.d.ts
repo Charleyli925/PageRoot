@@ -23,6 +23,11 @@ export function textRangeStyleOperation(
   },
 ): Extract<SemanticOperation, { type: "setStyle" }>;
 
+export function editableIslandTextOperation(
+  sourceIndex: SourceIndexValue,
+  options: OperationOptions & { text: string; contentHtml: string },
+): Extract<SemanticOperation, { type: "setText" }>;
+
 export function textRangeStyleCreatesWrapper(
   materialization: { patches: readonly { kind?: string }[] },
 ): boolean;
