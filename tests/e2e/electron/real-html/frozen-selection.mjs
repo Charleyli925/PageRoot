@@ -42,9 +42,11 @@ export function readFrozenSelection(bytes, expectedDigest) {
   requireFact(HASH.test(expectedDigest || "") && frozenDigest(bytes) === expectedDigest,
     "FROZEN_MANIFEST_DIGEST_MISMATCH");
   const plan = JSON.parse(bytes.toString("utf8"));
-  if (plan.scope === "core-three-cycle" || plan.scope === "core-pressure-20") {
+  const mixedCycles = new Map([["core-three-cycle", 3], ["core-pressure-20", 20],
+    ["core-pressure-50", 50], ["core-pressure-100", 100]]).get(plan.scope);
+  if (mixedCycles !== undefined) {
     requireFact(plan.operation === "mixed" && plan.initialRuntime === "runtime" && plan.reopen === true
-      && plan.cycles === (plan.scope === "core-pressure-20" ? 20 : 3)
+      && plan.cycles === mixedCycles
       && Array.isArray(plan.targets) && plan.targets.length === 2,
     "FROZEN_MIXED_PLAN_INVALID");
     // Reuse the existing ingress contracts, not another target fact store.

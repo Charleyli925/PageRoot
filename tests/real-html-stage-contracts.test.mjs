@@ -1033,6 +1033,13 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
   assert.equal(mixedCheckpointOperations(pressure).at(-1), "delete-comment-20");
   for (const cycles of [0, 3, 19, 21, 50, 100, "20"])
     assert.throws(() => readMixed({ ...mixed, scope: "core-pressure-20", cycles }), { code: "FROZEN_MIXED_PLAN_INVALID" });
+  for (const limit of [50, 100]) {
+    const plan = readMixed({ ...mixed, scope: `core-pressure-${limit}`, cycles: limit });
+    assert.equal(mixedCycleRows(plan).length, limit);
+    assert.equal(mixedCheckpointOperations(plan).length, limit + 1);
+    for (const cycles of [0, 3, 20, limit - 1, limit + 1, String(limit)])
+      assert.throws(() => readMixed({ ...mixed, scope: `core-pressure-${limit}`, cycles }), { code: "FROZEN_MIXED_PLAN_INVALID" });
+  }
   assert.equal(pending.flatMap(cycle => [...cycle.control, ...cycle.text, ...cycle.structure, ...cycle.continuation])
     .every(row => row.state === "NOT_EXECUTED" && row.reason === "DEPENDENCY_NOT_COMPLETED"), true);
   for (const change of [{ cycles: 20 }, { initialRuntime: "static" }, { commentBasis: "LIVE_UI" },
