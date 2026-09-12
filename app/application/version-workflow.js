@@ -545,6 +545,7 @@ export class VersionWorkflow {
         payload: {
           ...ready.readyPayload,
           ...activatedPayload,
+          openTarget: activatedPayload.openTarget || null,
           completion: ready.readyPayload.completion,
           outcome: ready.readyPayload.outcome,
           version: activatedPayload.version || ready.readyPayload.version,
@@ -1262,6 +1263,9 @@ export class VersionWorkflow {
   }) {
     perfMark("pageroot:accept:open-start");
     const completion = this.#committedPayload(run, payload);
+    if (payload.openTarget && payload.openTarget.versionId !== completion.versionId) {
+      return blocked("VERSION_ACTIVATION_SUPERSEDED", "当前稿已进入后续版本，原有采纳结果保留在历史中。");
+    }
     const committedSourcePath = String(
       payload.sourcePath
       || payload.currentPath
