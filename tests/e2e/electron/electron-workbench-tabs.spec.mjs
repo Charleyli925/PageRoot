@@ -948,6 +948,13 @@ test("Electron local current draft saves immutable versions and exports with an 
       workingCopyId: target.workingCopyId, exactSourcePath: target.exactSourcePath,
     }));
     const identity = await currentIdentity();
+    await more.click();
+    await launched.page.getByRole("menuitem", { name: "找回此前的稿件…", exact: true }).click();
+    const recoveryDialog = launched.page.getByRole("dialog", { name: "找回此前的稿件", exact: true });
+    await expect(recoveryDialog).toContainText("暂无需要找回的稿件。");
+    await launched.page.screenshot({ path: test.info().outputPath("preserved-drafts-empty.png") });
+    await recoveryDialog.getByRole("button", { name: "关闭", exact: true }).click();
+    await expect(recoveryDialog).toHaveCount(0);
     const editCurrent = async (marker) => {
       const { frame } = await loadedStaticDiskFrame(launched.page, currentPath, { expectedCase: "list-item", includeEditor: true });
       const beforeRevision = Number(await launched.page.locator("[data-persist-state]").first().getAttribute("data-edit-revision"));
