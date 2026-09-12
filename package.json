@@ -386,6 +386,10 @@
         "to": "bridge/project-file-repository/save-retirement.mjs"
       },
       {
+        "from": "bridge/project-file-repository/current-draft.mjs",
+        "to": "bridge/project-file-repository/current-draft.mjs"
+      },
+      {
         "from": "bridge/project-file-repository/constants.mjs",
         "to": "bridge/project-file-repository/constants.mjs"
       },
@@ -733,8 +737,10 @@
           "conversation-index.v1.schema.json",
           "conversation-draft.v1.schema.json",
           "conversation-draft.v2.schema.json",
+          "current-version-transaction.v1.schema.json",
           "input-manifest.v1.schema.json",
           "pageroot-element-identity.v1.schema.json",
+          "preserved-draft.v1.schema.json",
           "project-state.v3.schema.json",
           "project-identity.v4.schema.json",
           "project-registry.v4.schema.json",
