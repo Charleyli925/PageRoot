@@ -339,6 +339,9 @@
         "^app/workbench/AiReviewWorkspace",
         "^app/workbench/run-conversation-outlet",
         "^app/workbench/AiConversationSidebar",
+        "^bridge/conversation-repository\\.mjs$",
+        "^bridge/project-file-repository/submission\\.mjs$",
+        "^shared/conversation\\.mjs$",
         "^tests/run-",
         "^tests/version-",
         "^app/workbench/review-(?:analysis|document)"
@@ -369,7 +372,10 @@
         "app/workbench/run-conversation-outlet.tsx",
         "app/workbench/AiConversationSidebar.tsx",
         "app/workbench/review-analysis.ts",
-        "app/workbench/review-document.ts"
+        "app/workbench/review-document.ts",
+        "bridge/conversation-repository.mjs",
+        "bridge/project-file-repository/submission.mjs",
+        "shared/conversation.mjs"
       ],
       "focusedTests": [
         "tests/run-workflow.test.mjs",
@@ -377,6 +383,8 @@
         "tests/run-submit-plan.test.mjs",
         "tests/version-review-plan.test.mjs",
         "tests/ai-conversation-sidebar.test.mjs",
+        "tests/submission-noop-write.test.mjs",
+        "tests/conversation-repository.test.mjs",
         "tests/workbench-render-snapshot.test.mjs",
         "tests/workspace-controller.test.mjs"
       ],
