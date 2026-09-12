@@ -105,6 +105,7 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   activeVersionId: string | null;
   projectRulesActive: boolean;
   currentDraftActive: boolean;
+  currentProjectBusy?: boolean;
   onToggle(): void;
   onOpenLocal(): void;
   onOpenCurrentProject(project: RegisteredProject): void;
