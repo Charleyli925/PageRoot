@@ -2398,13 +2398,14 @@
         "^tests/e2e/electron/helpers/clipboard-snapshot\\.mjs$",
         "^tests/e2e/electron/real-html/.*\\.mjs$",
         "^tests/helpers/source-byte-region-oracle\\.mjs$",
-        "^tests/(?:clipboard-snapshot|real-html-result-model|real-html-source-scope|real-html-stage-contracts|source-byte-region-oracle|workspace-provenance)\\.test\\.mjs$"
+        "^tests/(?:clipboard-snapshot|real-html-extended-format-evidence|real-html-result-model|real-html-source-scope|real-html-stage-contracts|source-byte-region-oracle|workspace-provenance)\\.test\\.mjs$"
       ],
       "suites": [
         "browser-editing-smoke"
       ],
       "nodeTests": [
         "tests/clipboard-snapshot.test.mjs",
+        "tests/real-html-extended-format-evidence.test.mjs",
         "tests/real-html-result-model.test.mjs",
         "tests/real-html-source-scope.test.mjs",
         "tests/real-html-stage-contracts.test.mjs",

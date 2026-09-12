@@ -9182,6 +9182,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       data-element-copy-availability={elementCopyAssessment.availability}
       data-element-copy-reason={elementCopyAssessment.reason}
       data-element-copy-diagnostic={elementCopyAssessment.diagnostic}
+      data-selection-runtime-generated={selection
+        ? runtimeGeneratedSelection ? "true" : "false"
+        : undefined}
+      data-selection-runtime-generation={runtimeGeneratedSelection
+        ? String(frameLoadGenerationRef.current)
+        : undefined}
+      data-selection-runtime-source-anchor-id={runtimeGeneratedSelection
+        ? selection?.commentAnchor?.elementId
+        : undefined}
+      data-selection-runtime-kind={runtimeGeneratedSelection
+        ? selection?.visualHint?.kind
+        : undefined}
+      data-selection-runtime-path={runtimeGeneratedSelection
+        ? selection?.visualHint?.relativePath
+        : undefined}
       data-interaction-mode={renderedMode} data-runtime-library-origins={editRuntimeGrant?.libraryOrigins?.join(",") || undefined}
       data-runtime-libraries={editRuntimeGrant?.runtimeLibraries?.join(",") || undefined}
       aria-readonly={effectiveReadOnly || interactionLocked}

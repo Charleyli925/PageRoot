@@ -96,7 +96,7 @@ test("a failed category stage blocks only its own operations", () => {
   assert.equal(model.state, "FAIL");
 });
 
-test("an operation failure blocks later operations in the same category only", () => {
+test("an operation failure preserves later independent facts in the same category", () => {
   let model = createResultModel({
     files: [{
       id: "page-a.html",
@@ -118,8 +118,8 @@ test("an operation failure blocks later operations in the same category only", (
   assert.ok(downstream.length > 0);
   assert.equal(downstream.every((row) => (
     row.state === "NOT_EXECUTED"
-    && row.reasonCode === RESULT_REASON_CODES.UPSTREAM_OPERATION_FAILED
-      && row.blockedBy === failedOperation
+    && row.reasonCode === RESULT_REASON_CODES.NOT_STARTED
+    && row.blockedBy === null
   )), true);
   const laterStage = model.rows.filter((row) => row.fileId === "page-a.html" && row.stageId === "second");
   assert.equal(laterStage.every((row) => row.reasonCode === RESULT_REASON_CODES.NOT_STARTED), true);
@@ -128,10 +128,10 @@ test("an operation failure blocks later operations in the same category only", (
   assert.equal(model.summary.levels.stage.denominator, 0);
   assert.equal(model.summary.levels.operation.denominator, 1);
   assert.equal(model.summary.levels.operation.failed, 1);
-  assert.throws(
-    () => recordPass(model, resultRowId.operation("page-a.html", "first", "op-2")),
-    /already blocked or not executed/u,
-  );
+  model = recordPass(model, resultRowId.operation("page-a.html", "first", "op-2"));
+  assert.equal(model.rows.find(
+    (row) => row.id === resultRowId.operation("page-a.html", "first", "op-2"),
+  ).state, "PASS");
 });
 
 test("page-specific fixture stays NOT_APPLICABLE and does not become failed coverage", () => {

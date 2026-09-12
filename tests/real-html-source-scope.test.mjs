@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   compareElementScopedMutation,
   compareElementSourceDelta,
+  compareElementStyleMutation,
   formattedMarkerAppendedPattern,
   SOURCE_SCOPE_POLICIES,
 } from "./e2e/electron/real-html/source-scope.mjs";
@@ -57,6 +58,122 @@ test("source-scope helper requires an explicit subrange", () => {
     }),
     (error) => error?.code === "SOURCE_SCOPE_RANGE_REQUIRED",
   );
+});
+
+test("element-style oracle accepts exactly one independently expected declaration", () => {
+  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<main data-pageroot-id="${parentId}"><p class="sample" data-pageroot-id="${SOURCE_ID}">Original</p><aside>Sibling</aside></main>`;
+  const after = `<main data-pageroot-id="${parentId}"><p class="sample" data-pageroot-id="${SOURCE_ID}" style="font-size: 29px">Original</p><aside>Sibling</aside></main>`;
+  const report = compareElementStyleMutation({
+    before,
+    after,
+    sourceId: SOURCE_ID,
+    expectedProperty: "font-size",
+    expectedValue: "29px",
+  });
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.changedProperties, ["font-size"]);
+  assert.equal(report.outsideElementUnchanged, true);
+  assert.equal(report.nonStyleAttributesUnchanged, true);
+  assert.equal(report.elementContentAndClosingUnchanged, true);
+});
+
+test("element-style oracle rejects an extra declaration and a wrong expected value", () => {
+  const before = `<p style="color: #111111" data-pageroot-id="${SOURCE_ID}">Original</p>`;
+  const after = `<p style="color: #123456; margin-top: 9px" data-pageroot-id="${SOURCE_ID}">Original</p>`;
+  const extra = compareElementStyleMutation({
+    before,
+    after,
+    sourceId: SOURCE_ID,
+    expectedProperty: "color",
+    expectedValue: "#123456",
+  });
+  assert.equal(extra.ok, false);
+  assert.deepEqual(extra.changedProperties, ["color", "margin-top"]);
+  assert.equal(extra.expectedPropertyChanged, false);
+
+  const wrongValue = compareElementStyleMutation({
+    before,
+    after: `<p style="color: #123456" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+    sourceId: SOURCE_ID,
+    expectedProperty: "color",
+    expectedValue: "#654321",
+  });
+  assert.equal(wrongValue.ok, false);
+  assert.equal(wrongValue.expectedValueApplied, false);
+});
+
+test("element-style oracle rejects target content and outside-byte corruption", () => {
+  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<main data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}">Original</p></main>`;
+  const contentChanged = compareElementStyleMutation({
+    before,
+    after: `<main data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}" style="line-height: 53px">Changed</p></main>`,
+    sourceId: SOURCE_ID,
+    expectedProperty: "line-height",
+    expectedValue: "53px",
+  });
+  assert.equal(contentChanged.ok, false);
+  assert.equal(contentChanged.elementContentAndClosingUnchanged, false);
+
+  const outsideChanged = compareElementStyleMutation({
+    before,
+    after: `<main class="corrupt" data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}" style="line-height: 53px">Original</p></main>`,
+    sourceId: SOURCE_ID,
+    expectedProperty: "line-height",
+    expectedValue: "53px",
+  });
+  assert.equal(outsideChanged.ok, false);
+  assert.equal(outsideChanged.outsideElementUnchanged, false);
+});
+
+test("element-style oracle rejects duplicate style syntax and unrelated target attributes", () => {
+  const before = `<p class="sample" data-pageroot-id="${SOURCE_ID}">Original</p>`;
+  const duplicateAttribute = compareElementStyleMutation({
+    before,
+    after: `<p class="sample" style="color:#123456" style="margin-top:9px" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+    sourceId: SOURCE_ID,
+    expectedProperty: "color",
+    expectedValue: "#123456",
+  });
+  assert.equal(duplicateAttribute.ok, false);
+  assert.equal(duplicateAttribute.styleSyntaxValid, false);
+
+  const duplicateProperty = compareElementStyleMutation({
+    before,
+    after: `<p class="sample" style="color:#111111;color:#123456" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+    sourceId: SOURCE_ID,
+    expectedProperty: "color",
+    expectedValue: "#123456",
+  });
+  assert.equal(duplicateProperty.ok, false);
+  assert.equal(duplicateProperty.styleSyntaxValid, false);
+
+  const attributeChanged = compareElementStyleMutation({
+    before,
+    after: `<p class="changed" style="color:#123456" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+    sourceId: SOURCE_ID,
+    expectedProperty: "color",
+    expectedValue: "#123456",
+  });
+  assert.equal(attributeChanged.ok, false);
+  assert.equal(attributeChanged.nonStyleAttributesUnchanged, false);
+
+  for (const injected of [
+    "font-size: 29px; GARBAGE",
+    "font-size: 29px; /* injected */",
+  ]) {
+    const invalidTail = compareElementStyleMutation({
+      before,
+      after: `<p class="sample" style="${injected}" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+      sourceId: SOURCE_ID,
+      expectedProperty: "font-size",
+      expectedValue: "29px",
+    });
+    assert.equal(invalidTail.ok, false, injected);
+    assert.equal(invalidTail.styleSyntaxValid, false, injected);
+    assert.equal(invalidTail.syntaxComplete.after, false, injected);
+  }
 });
 
 test("operation-scoped oracle rejects changes outside the Stable-ID element", () => {

@@ -255,11 +255,11 @@ function downstreamRows(rows, sourceRow) {
   if (sourceRow.level === "file") {
     return rows.filter((row) => row.fileId === sourceRow.fileId && row.order > sourceRow.order);
   }
-  // A, B and C are independent categories.  A stage failure may only block
+  // A, B, C, D and E are independent categories. A stage failure may only block
   // work that belongs to that same category; it must never turn a later
-  // category into NOT_EXECUTED.  Operation failures retain the same boundary
-  // because their remaining operations are the only rows with an implicit
-  // sequential dependency in this plan.
+  // category into NOT_EXECUTED. Planned operation failures are independent
+  // result facts and do not call this helper; explicit missing-target or
+  // environment blockers may still stop downstream work in that category.
   if (sourceRow.level === "stage" || sourceRow.level === "operation") {
     return rows.filter((row) => (
       row.fileId === sourceRow.fileId
@@ -537,8 +537,6 @@ export function recordResult(model, selector, outcomeValue) {
     blockRows(next.rows, updated, RESULT_REASON_CODES.UPSTREAM_FILE_FAILED);
   } else if (updated.state === "FAIL" && updated.level === "stage") {
     blockRows(next.rows, updated, RESULT_REASON_CODES.UPSTREAM_STAGE_FAILED);
-  } else if (updated.state === "FAIL" && updated.level === "operation") {
-    blockRows(next.rows, updated, RESULT_REASON_CODES.UPSTREAM_OPERATION_FAILED);
   } else if (updated.state === "NOT_EXECUTED" && (
     updated.level === "file"
     || updated.level === "stage"
@@ -635,6 +633,22 @@ export function summarizeResultModel(model) {
     state: recomputeModelState(model),
     levels,
     reasonCodes: reasonCounts(model.rows),
+  };
+}
+
+export function qualificationResultIssues(modelOrRows, { includeFileRows = false } = {}) {
+  const rows = Array.isArray(modelOrRows) ? modelOrRows : modelOrRows?.rows;
+  if (!Array.isArray(rows)) {
+    fail("RESULT_ROWS_INVALID", "Qualification audit requires result rows.");
+  }
+  const scopedRows = includeFileRows ? rows : rows.filter((row) => row.level !== "file");
+  return {
+    unexplainedNotApplicable: scopedRows.filter((row) => (
+      row.state === "NOT_APPLICABLE"
+      && (typeof row.details?.exactReason !== "string"
+        || row.details.exactReason.trim() === "")
+    )),
+    unresolvedRows: scopedRows.filter((row) => row.state === "NOT_EXECUTED"),
   };
 }
 

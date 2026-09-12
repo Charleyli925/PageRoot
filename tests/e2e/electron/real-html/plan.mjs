@@ -1,11 +1,14 @@
 // Explicit stages for local real-HTML acceptance.  The plan is materialized
 // before the runner opens a file so a missing target cannot shrink coverage.
-// A = authored text editing, B = element structure, C = Runtime/iframe.
+// A = authored text editing, B = element structure, C = Runtime/iframe,
+// D = frozen authored-element capability and behavior coverage.
 
 export const REAL_HTML_STAGE_IDS = Object.freeze({
   TEXT_EDITING: "A-text-editing",
   ELEMENT_STRUCTURE: "B-element-structure",
   RUNTIME_IFRAME: "C-runtime-iframe",
+  CAPABILITY_MATRIX: "D-capability-matrix",
+  CONTINUITY_CHAIN: "E-continuity-chain",
 });
 
 export const REAL_HTML_OPERATION_IDS = Object.freeze({
@@ -28,13 +31,33 @@ export const REAL_HTML_OPERATION_IDS = Object.freeze({
   RUNTIME_VIEWPORT: "viewport-continuity",
   RUNTIME_REOPEN: "managed-project-reopen",
   ORIGINAL_SOURCE_IMMUTABLE: "original-source-immutable",
+  CAPABILITY_MATRIX_RESULT: "capability-matrix-result",
+  CAPABILITY_RUNTIME_GENERATED_BOUNDARY: "capability-runtime-generated-boundary",
+  CONTINUITY_CHAIN_RESULT: "continuity-chain-result",
 });
 
-// These selectors are intentionally fixed and test-owned.  The explicit
-// marker, rather than an element tag, defines copyability.  The runner takes
-// the first document-order match of each selector and never substitutes
-// another target after a failed operation.  A real page without the marker
-// records that operation as NOT_APPLICABLE with its exact reason.
+// Cross-stage capability sampling is a pure plan concern.  The Electron
+// runner remains responsible for execution; this frozen contract records the
+// denominator, ordering and dimension obligations that its result matrix must
+// satisfy once a runner is wired in.
+export const REAL_HTML_CAPABILITY_PLAN = Object.freeze({
+  schemaVersion: 1,
+  minimumCoverage: 0.6,
+  minimumCoverageRule: "ceil(valid-authored-live-elements * 0.6)",
+  ordering: "tabId/sourceOrder/StableID",
+  requiredDimensions: Object.freeze([
+    "capability-family",
+    "region-top-middle-bottom",
+    "authored-tab",
+    "major-element-type",
+  ]),
+  rowKinds: Object.freeze(["capability-observation", "actual-behavior"]),
+  noReplacementAfterFailure: true,
+});
+
+// Synthetic fixture selectors used only by the public marker-boundary tests.
+// Private real HTML never needs these attributes: the local corpus runner
+// freezes its own Stable-ID capability manifest before executing operations.
 export const FIXED_STRUCTURE_SAMPLES = Object.freeze({
   expectedCopyable: Object.freeze({
     id: "expected-copyable-paragraph",
@@ -70,9 +93,9 @@ const STAGE_DEFINITIONS = Object.freeze([
     label: "B 元素结构",
     category: "element-structure",
     operations: Object.freeze([
-      Object.freeze({ id: REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE, label: "expected-copyable 固定样本" }),
+      Object.freeze({ id: REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE, label: "冻结可复制 Stable ID" }),
       Object.freeze({ id: REAL_HTML_OPERATION_IDS.STRUCTURE_DELETE_DUPLICATE, label: "删除复制元素" }),
-      Object.freeze({ id: REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE, label: "expected-non-copyable 固定样本" }),
+      Object.freeze({ id: REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE, label: "冻结不可复制 Stable ID" }),
     ]),
   }),
   Object.freeze({
@@ -89,6 +112,26 @@ const STAGE_DEFINITIONS = Object.freeze([
       Object.freeze({ id: REAL_HTML_OPERATION_IDS.RUNTIME_VIEWPORT, label: "viewport 连续性" }),
       Object.freeze({ id: REAL_HTML_OPERATION_IDS.RUNTIME_REOPEN, label: "托管项目重开" }),
       Object.freeze({ id: REAL_HTML_OPERATION_IDS.ORIGINAL_SOURCE_IMMUTABLE, label: "原始 HTML 不变" }),
+    ]),
+  }),
+  Object.freeze({
+    id: REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+    label: "D 元素能力与行为覆盖",
+    category: "capability-matrix",
+    operations: Object.freeze([
+      Object.freeze({ id: REAL_HTML_OPERATION_IDS.CAPABILITY_MATRIX_RESULT, label: "冻结清单与覆盖矩阵" }),
+      Object.freeze({
+        id: REAL_HTML_OPERATION_IDS.CAPABILITY_RUNTIME_GENERATED_BOUNDARY,
+        label: "Runtime-generated 评论与不支持能力边界",
+      }),
+    ]),
+  }),
+  Object.freeze({
+    id: REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN,
+    label: "E 编辑→重建→继续编辑",
+    category: "continuity-chain",
+    operations: Object.freeze([
+      Object.freeze({ id: REAL_HTML_OPERATION_IDS.CONTINUITY_CHAIN_RESULT, label: "三次连续重建链" }),
     ]),
   }),
 ]);
@@ -136,8 +179,15 @@ export function createRealHtmlPlan(files, metadata = {}) {
     label: "Real HTML trustworthy acceptance",
     metadata: {
       lane: "real-html-electron",
-      categories: ["A:text-editing", "B:element-structure", "C:runtime-iframe"],
       ...metadata,
+      categories: [
+        "A:text-editing",
+        "B:element-structure",
+        "C:runtime-iframe",
+        "D:capability-matrix",
+        "E:continuity-chain",
+      ],
+      capabilityPlan: REAL_HTML_CAPABILITY_PLAN,
     },
     files: files.map(asFileDescriptor),
   };

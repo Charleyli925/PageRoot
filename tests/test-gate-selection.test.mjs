@@ -728,6 +728,7 @@ test("real-HTML result and byte oracles select their focused Node tests", () => 
   });
   assert.deepEqual(plan.selectedNodeTests, [
     "tests/clipboard-snapshot.test.mjs",
+    "tests/real-html-extended-format-evidence.test.mjs",
     "tests/real-html-result-model.test.mjs",
     "tests/real-html-source-scope.test.mjs",
     "tests/real-html-stage-contracts.test.mjs",
@@ -742,6 +743,7 @@ test("real-HTML result and byte oracles select their focused Node tests", () => 
   ]) {
     const runnerPlan = selectGatePlan({ map, lane: "edit", changedFiles: [changedFile] });
     assert.equal(runnerPlan.selectedNodeTests.includes("tests/clipboard-snapshot.test.mjs"), true);
+    assert.equal(runnerPlan.selectedNodeTests.includes("tests/real-html-extended-format-evidence.test.mjs"), true);
     assert.equal(runnerPlan.selectedNodeTests.includes("tests/real-html-source-scope.test.mjs"), true);
     assert.equal(runnerPlan.selectedNodeTests.includes("tests/real-html-stage-contracts.test.mjs"), true);
   }

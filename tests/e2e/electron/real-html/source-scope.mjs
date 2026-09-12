@@ -1,4 +1,5 @@
 import { buildSourceIndex } from "../../../../app/lib/source-index.js";
+import { parseInlineStyle } from "../../../../app/lib/source-patch-core.js";
 import {
   compareSourceByteRegions,
   utf8ByteRange,
@@ -87,6 +88,61 @@ function relativeChangedRange(before, after) {
     before: { start: prefix, end: before.length - suffix },
     after: { start: prefix, end: after.length - suffix },
   };
+}
+
+function styleDeclarationMap(element) {
+  const attributes = element.attributesByName.get("style") || [];
+  if (attributes.length > 1) {
+    return {
+      duplicateStyleAttributes: true,
+      duplicateProperties: [],
+      declarations: new Map(),
+      syntaxComplete: false,
+      unparsedRanges: [],
+    };
+  }
+  const rawStyle = attributes[0]?.rawValue || "";
+  const parsed = parseInlineStyle(rawStyle);
+  const covered = new Uint8Array(rawStyle.length);
+  for (const declaration of parsed) {
+    covered.fill(1, declaration.segmentStartOffset, declaration.separatorEndOffset);
+  }
+  const unparsedRanges = [];
+  let unparsedStart = null;
+  for (let index = 0; index < rawStyle.length; index += 1) {
+    const allowedUncovered = covered[index] === 1 || /[;\s]/u.test(rawStyle[index]);
+    if (!allowedUncovered && unparsedStart === null) unparsedStart = index;
+    if (allowedUncovered && unparsedStart !== null) {
+      unparsedRanges.push({ start: unparsedStart, end: index });
+      unparsedStart = null;
+    }
+  }
+  if (unparsedStart !== null) {
+    unparsedRanges.push({ start: unparsedStart, end: rawStyle.length });
+  }
+  const duplicateProperties = [];
+  const declarations = new Map();
+  for (const declaration of parsed) {
+    if (declarations.has(declaration.normalizedProperty)) {
+      duplicateProperties.push(declaration.normalizedProperty);
+      continue;
+    }
+    declarations.set(declaration.normalizedProperty, {
+      value: declaration.value,
+      important: declaration.important,
+    });
+  }
+  return {
+    duplicateStyleAttributes: false,
+    duplicateProperties,
+    declarations,
+    syntaxComplete: unparsedRanges.length === 0 && !rawStyle.includes("/*"),
+    unparsedRanges,
+  };
+}
+
+function declarationChanged(before, after) {
+  return before?.value !== after?.value || before?.important !== after?.important;
 }
 
 function escapeRegExp(value) {
@@ -276,4 +332,131 @@ export function compareElementSourceDelta({
     after: afterBytes,
     allowedRegions: [region],
   });
+}
+
+/**
+ * Verify one element-level style control. The only semantic source change may
+ * be the independently declared CSS property/value on the frozen Stable ID.
+ * All non-style attributes, element content, closing tag, sibling bytes and
+ * document identity must remain unchanged.
+ */
+export function compareElementStyleMutation({
+  before,
+  after,
+  sourceId,
+  expectedProperty,
+  expectedValue,
+} = {}) {
+  const property = String(expectedProperty || "").trim().toLowerCase();
+  if (!property) {
+    const error = new Error("expectedProperty is required for an element style oracle.");
+    error.code = "SOURCE_SCOPE_STYLE_PROPERTY_REQUIRED";
+    throw error;
+  }
+  if (expectedValue == null) {
+    const error = new Error("expectedValue must be independently declared for an element style oracle.");
+    error.code = "SOURCE_SCOPE_EXPECTATION_REQUIRED";
+    throw error;
+  }
+  const expected = String(expectedValue);
+  const beforeBytes = Buffer.isBuffer(before) ? Buffer.from(before) : Buffer.from(before, "utf8");
+  const afterBytes = Buffer.isBuffer(after) ? Buffer.from(after) : Buffer.from(after, "utf8");
+  const beforeElement = sourceElementRange(beforeBytes, sourceId, "before");
+  const afterElement = sourceElementRange(afterBytes, sourceId, "after");
+  const beforeNode = beforeElement.sourceIndex.byPagerootId.get(sourceId);
+  const afterNode = afterElement.sourceIndex.byPagerootId.get(sourceId);
+  const beforeStyle = styleDeclarationMap(beforeNode);
+  const afterStyle = styleDeclarationMap(afterNode);
+  const allProperties = new Set([
+    ...beforeStyle.declarations.keys(),
+    ...afterStyle.declarations.keys(),
+  ]);
+  const changedProperties = [...allProperties]
+    .filter((name) => declarationChanged(
+      beforeStyle.declarations.get(name),
+      afterStyle.declarations.get(name),
+    ))
+    .sort();
+  const expectedDeclaration = afterStyle.declarations.get(property) || null;
+  const expectedPropertyChanged = changedProperties.length === 1
+    && changedProperties[0] === property;
+  const expectedValueApplied = expectedDeclaration?.value === expected;
+  const beforeNonStyleAttributes = beforeNode.attributes
+    .filter((attribute) => attribute.name !== "style")
+    .map((attribute) => attribute.raw);
+  const afterNonStyleAttributes = afterNode.attributes
+    .filter((attribute) => attribute.name !== "style")
+    .map((attribute) => attribute.raw);
+  const nonStyleAttributesUnchanged = JSON.stringify(beforeNonStyleAttributes)
+    === JSON.stringify(afterNonStyleAttributes);
+  const elementContentAndClosingUnchanged = beforeElement.sourceIndex.source.slice(
+    beforeNode.startTagRange.endOffset,
+    beforeNode.range.endOffset,
+  ) === afterElement.sourceIndex.source.slice(
+    afterNode.startTagRange.endOffset,
+    afterNode.range.endOffset,
+  );
+  const outsideElementUnchanged = beforeBytes.subarray(0, beforeElement.byteRange.start)
+    .equals(afterBytes.subarray(0, afterElement.byteRange.start))
+    && beforeBytes.subarray(beforeElement.byteRange.end)
+      .equals(afterBytes.subarray(afterElement.byteRange.end));
+  const sourceIdentityValid = beforeElement.sourceIndex.pagerootIdentity?.valid === true
+    && afterElement.sourceIndex.pagerootIdentity?.valid === true;
+  const styleSyntaxValid = !beforeStyle.duplicateStyleAttributes
+    && !afterStyle.duplicateStyleAttributes
+    && beforeStyle.syntaxComplete
+    && afterStyle.syntaxComplete
+    && beforeStyle.duplicateProperties.length === 0
+    && afterStyle.duplicateProperties.length === 0;
+  const tagNameUnchanged = beforeNode.tagName === afterNode.tagName;
+  const relative = relativeChangedRange(beforeBytes, afterBytes);
+  return {
+    ok: outsideElementUnchanged
+      && tagNameUnchanged
+      && nonStyleAttributesUnchanged
+      && elementContentAndClosingUnchanged
+      && sourceIdentityValid
+      && styleSyntaxValid
+      && expectedPropertyChanged
+      && expectedValueApplied,
+    sourceId,
+    expectedProperty: property,
+    expectedValue: expected,
+    observedBefore: beforeStyle.declarations.get(property) || null,
+    observedAfter: expectedDeclaration,
+    changedProperties,
+    expectedPropertyChanged,
+    expectedValueApplied,
+    outsideElementUnchanged,
+    tagNameUnchanged,
+    nonStyleAttributesUnchanged,
+    elementContentAndClosingUnchanged,
+    sourceIdentityValid,
+    styleSyntaxValid,
+    duplicateStyleAttributes: {
+      before: beforeStyle.duplicateStyleAttributes,
+      after: afterStyle.duplicateStyleAttributes,
+    },
+    duplicateProperties: {
+      before: beforeStyle.duplicateProperties,
+      after: afterStyle.duplicateProperties,
+    },
+    syntaxComplete: {
+      before: beforeStyle.syntaxComplete,
+      after: afterStyle.syntaxComplete,
+    },
+    unparsedStyleRanges: {
+      before: beforeStyle.unparsedRanges,
+      after: afterStyle.unparsedRanges,
+    },
+    identityIssueCodes: [
+      ...(beforeElement.sourceIndex.pagerootIdentity?.issues || []),
+      ...(afterElement.sourceIndex.pagerootIdentity?.issues || []),
+    ].map((issue) => issue.code),
+    changedRanges: relative,
+    elementRanges: {
+      before: beforeElement.byteRange,
+      after: afterElement.byteRange,
+    },
+  };
 }

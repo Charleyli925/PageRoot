@@ -32,21 +32,43 @@ import { withRestoredElectronClipboard } from "./helpers/clipboard-snapshot.mjs"
 import {
   RealHtmlResultReport,
 } from "./real-html/result-report.mjs";
+import { qualificationResultIssues } from "./real-html/result-model.mjs";
 import {
   REAL_HTML_OPERATION_IDS,
   REAL_HTML_STAGE_IDS,
-  FIXED_STRUCTURE_SAMPLES,
 } from "./real-html/plan.mjs";
 import {
-  FIXED_STRUCTURE_REASON_CODES,
-  inspectFixedStructureSamples,
-} from "./real-html/structure-editing.mjs";
+  CAPABILITY_MATRIX_REASONS,
+  createCapabilityManifest,
+  createCapabilityMatrix,
+  selectCapabilityTargets,
+} from "./real-html/capability-manifest.mjs";
+import {
+  collectVisibleAuthoredCandidates,
+  discoverRuntimeGeneratedTargets,
+  majorElementType,
+  probeAuthoredCapability,
+  runtimeGeneratedDiagnosticsIssue,
+  sourceElementsForCapabilityManifest,
+} from "./real-html/capability-driver.mjs";
 import {
   runtimeOperationOutcomes,
 } from "./real-html/runtime-lifecycle.mjs";
 import {
+  evaluateContinuityChain,
+  evaluateStaleCandidateFence,
+  runtimeProjectionStale,
+} from "./real-html/continuity-chain.mjs";
+import {
+  evaluateExtendedFormatEvidence,
+  formatFailureRows,
+} from "./real-html/extended-format-evidence.mjs";
+import {
+  startRuntimeLifecycleObservation as startFullRuntimeLifecycleObservation,
   startRuntimeCandidateObservation,
+  stopRuntimeLifecycleObservation as stopFullRuntimeLifecycleObservation,
   stopRuntimeCandidateObservation,
+  summarizeRuntimeObserverRecords,
 } from "./real-html/runtime-observer.mjs";
 import {
   createFixedTextTargetPlan,
@@ -58,10 +80,14 @@ import {
 } from "./real-html/text-targets.mjs";
 import {
   compareElementScopedMutation,
+  compareElementStyleMutation,
   formattedMarkerAppendedPattern,
   SOURCE_SCOPE_POLICIES,
 } from "./real-html/source-scope.mjs";
-import { workspaceSourceFingerprint } from "./real-html/workspace-provenance.mjs";
+import {
+  compareOriginalFileIdentity,
+  workspaceSourceFingerprint,
+} from "./real-html/workspace-provenance.mjs";
 import {
   buildSourceIndex as buildPatchSourceIndex,
   createTargetRef,
@@ -98,6 +124,11 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const resultReport = new RealHtmlResultReport(files, {
   reportKind: "private-real-html-electron",
 });
+const REAL_HTML_LAUNCH_OPTIONS = Object.freeze({
+  injectedEnv: Object.freeze({
+    PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+  }),
+});
 const sourceProvenance = workspaceSourceFingerprint();
 const report = {
   schemaVersion: 4,
@@ -110,11 +141,15 @@ const report = {
   minimumTextHostsPerFile: 3,
   structureCyclesWhenExpectedCopyableApplies: 2,
   minimumOrdinaryContinuityChecksPerFile: 3,
-  inputAuthority: "Playwright mouse and keyboard events; DOM evaluation is discovery/oracle only",
+  minimumAuthoredElementCoverage: 0.6,
+  minimumDynamicContinuityCyclesPerFile: 3,
+  inputAuthority: "Real mouse/keyboard for fixed text flows; native color controls use bounded input/change event injection and are labeled per behavior row",
   categories: {
     A: "文字编辑",
-    B: "元素结构（固定 expected-copyable / expected-non-copyable）",
+    B: "元素结构（冻结 Stable ID 与实时能力）",
     C: "Runtime/iframe（独立生命周期事实）",
+    D: "元素能力清单与行为覆盖矩阵",
+    E: "编辑→重建→继续编辑长会话",
   },
   resultPlan: resultReport.plan,
   results: [],
@@ -296,6 +331,16 @@ async function runtimeContractSnapshot(page) {
     ...identity,
     candidateId: await editor.getAttribute("data-runtime-candidate-id"),
     candidatePhase: await editor.getAttribute("data-runtime-candidate-phase"),
+    lastKnownGoodId: await editor.getAttribute("data-runtime-last-known-good-id"),
+    lastKnownGoodGeneration: await editor.getAttribute(
+      "data-runtime-last-known-good-generation",
+    ),
+    lastKnownGoodSourceRevision: await editor.getAttribute(
+      "data-runtime-last-known-good-source-revision",
+    ),
+    workingSourceSha256: await editor.getAttribute("data-working-source-sha256"),
+    renderedProjectionSha256: await editor.getAttribute("data-rendered-projection-sha256"),
+    renderedProjectionStale: await editor.getAttribute("data-rendered-projection-stale"),
     candidateCount: await candidate.count(),
     renderVerified: await editor.getAttribute("data-render-verified"),
     runtimePhase: await surface.getAttribute("data-edit-runtime-phase"),
@@ -513,7 +558,180 @@ async function clickAuthoredTab(page, tabId) {
     exact: true,
   });
   if (await activate.count()) await activate.click();
-  await page.waitForTimeout(200);
+  await expect.poll(async () => {
+    const currentFrame = await currentEditorFrame(page);
+    const currentTab = currentFrame.locator(`[data-pageroot-id="${tabId}"]`);
+    if (await currentTab.count() !== 1) return false;
+    const ariaSelected = await currentTab.getAttribute("aria-selected");
+    const controls = await currentTab.getAttribute("aria-controls");
+    const controlledVisible = controls
+      ? await currentFrame.locator(`[id=${JSON.stringify(controls)}]`).isVisible().catch(() => false)
+      : false;
+    return ariaSelected === "true" || controlledVisible;
+  }, { timeout: 5_000 }).toBe(true);
+}
+
+async function authoredTabIds(page) {
+  const frame = await currentEditorFrame(page);
+  const ids = await frame.locator('[role="tab"][data-pageroot-id]').evaluateAll((elements) => (
+    elements.filter((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return element.isConnected
+        && rect.width > 1
+        && rect.height > 1
+        && style.display !== "none"
+        && style.visibility !== "hidden";
+    }).map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
+  ));
+  return ids.length > 0 ? [...new Set(ids)] : [null];
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const nested of Object.values(value)) deepFreeze(nested);
+  return Object.freeze(value);
+}
+
+async function freezeCapabilityManifest(page, workingCopyPath) {
+  const source = readFileSync(workingCopyPath, "utf8");
+  const sourceElements = sourceElementsForCapabilityManifest(source);
+  const candidates = [];
+  const runtimeGeneratedTargets = [];
+  const runtimeGeneratedDiagnostics = [];
+  for (const tabId of await authoredTabIds(page)) {
+    await clickAuthoredTab(page, tabId);
+    const frame = await currentEditorFrame(page);
+    candidates.push(...await collectVisibleAuthoredCandidates(frame, sourceElements, tabId));
+    const runtimeGenerated = await discoverRuntimeGeneratedTargets({
+      page,
+      frame,
+      editor: editorFor(page),
+      tabId,
+    });
+    runtimeGeneratedTargets.push(...runtimeGenerated.targets);
+    runtimeGeneratedDiagnostics.push({ tabId, ...runtimeGenerated.diagnostics });
+  }
+
+  const candidatesById = new Map();
+  for (const candidate of candidates) {
+    const group = candidatesById.get(candidate.stableId) || [];
+    group.push(candidate);
+    candidatesById.set(candidate.stableId, group);
+  }
+  const probed = [];
+  for (const group of candidatesById.values()) {
+    const visible = group.filter((candidate) => candidate.visible === true);
+    const duplicateInOneView = visible.some((candidate) => (
+      visible.filter((other) => other.tabId === candidate.tabId).length > 1
+    ));
+    if (duplicateInOneView) {
+      probed.push(...group.map((candidate) => ({
+        ...candidate,
+        type: majorElementType(candidate.tag),
+        capabilityFamilies: [],
+        behaviorFamilies: [],
+        probeReason: "LIVE_DUPLICATE_STABLE_ID",
+      })));
+      continue;
+    }
+    const candidate = visible[0] || group[0];
+    if (!candidate.visible) {
+      probed.push({
+        ...candidate,
+        type: majorElementType(candidate.tag),
+        capabilityFamilies: [],
+        behaviorFamilies: [],
+        probeReason: "HIDDEN_ELEMENT",
+      });
+      continue;
+    }
+    await clickAuthoredTab(page, candidate.tabId);
+    const frame = await currentEditorFrame(page);
+    const observation = await probeAuthoredCapability({
+      page,
+      frame,
+      editor: editorFor(page),
+      candidate,
+    });
+    probed.push({ ...observation, type: majorElementType(candidate.tag) });
+  }
+  const manifest = createCapabilityManifest({
+    sourceIndex: { elements: sourceElements },
+    liveDom: probed,
+  });
+  const observationsById = new Map(probed.map((entry) => [entry.stableId, entry]));
+  manifest.entries = manifest.entries.map((entry) => ({
+    ...entry,
+    capabilitySnapshot: {
+      copyAvailability: observationsById.get(entry.elementId)?.copyAvailability || null,
+      copyReason: observationsById.get(entry.elementId)?.copyReason || null,
+      probeReason: observationsById.get(entry.elementId)?.probeReason || null,
+    },
+  }));
+  const selection = selectCapabilityTargets(manifest);
+  return deepFreeze({
+    manifest,
+    selection,
+    runtimeGeneratedTargets,
+    runtimeGeneratedDiagnostics,
+    fingerprint: sha256(Buffer.from(JSON.stringify({
+      schemaVersion: manifest.schemaVersion,
+      entries: manifest.entries,
+      excluded: manifest.excluded,
+      selected: selection.selected.map((entry) => entry.elementId),
+      runtimeGeneratedTargets,
+      runtimeGeneratedDiagnostics,
+    }))),
+  });
+}
+
+async function executeCapabilityObservations(page, frozen) {
+  const observations = [];
+  for (const entry of frozen.selection.selected) {
+    await clickAuthoredTab(page, entry.tabId);
+    await waitUntilEditable(page);
+    const current = await probeAuthoredCapability({
+      page,
+      frame: await currentEditorFrame(page),
+      editor: editorFor(page),
+      candidate: {
+        stableId: entry.elementId,
+        tag: entry.tag,
+        sourceEditable: entry.capabilityFamilies.includes("text"),
+        visible: true,
+        isConnected: true,
+        inert: false,
+        runtimeGenerated: false,
+        tabId: entry.tabId,
+        region: entry.region,
+        scrollContainer: entry.scrollContainer,
+      },
+    });
+    const expectedCapabilities = [...entry.capabilityFamilies].sort();
+    const observedCapabilities = [...current.capabilityFamilies].sort();
+    const identityMatches = current.selectedId === entry.elementId
+      && current.runtimeGenerated === false
+      && current.tag === entry.tag;
+    const capabilityMatches = JSON.stringify(observedCapabilities)
+      === JSON.stringify(expectedCapabilities);
+    observations.push({
+      elementId: entry.elementId,
+      capabilityFamily: expectedCapabilities.join("+"),
+      state: identityMatches && capabilityMatches ? "PASS" : "FAIL",
+      reasonCode: identityMatches && capabilityMatches
+        ? CAPABILITY_MATRIX_REASONS.OBSERVED
+        : "FROZEN_CAPABILITY_DRIFT",
+      details: {
+        identityMatches,
+        capabilityMatches,
+        expectedCapabilities,
+        observedCapabilities,
+        probeReason: current.probeReason,
+      },
+    });
+  }
+  return observations;
 }
 
 function editableSourceElementCapabilities(sourceBytes) {
@@ -817,6 +1035,8 @@ async function runInputDeleteOperation({ page, workingCopyPath, plans, fileIndex
     const marker = `PRQA_${fileIndex}_${targetIndex}_TEXT`;
     const backspaceMarker = `PRQA_${fileIndex}_${targetIndex}_BACKSPACE`;
     const deleteMarker = `PRQA_${fileIndex}_${targetIndex}_DELETE`;
+    const replaceOldMarker = `PRQA_${fileIndex}_${targetIndex}_REPLACE_OLD`;
+    const replaceMarker = `PRQA_${fileIndex}_${targetIndex}_REPLACED`;
     const before = readFileSync(workingCopyPath);
     const beforeRevision = await currentRevision(page);
     const target = await enterNativeEdit(page, plan);
@@ -826,23 +1046,35 @@ async function runInputDeleteOperation({ page, workingCopyPath, plans, fileIndex
     await page.keyboard.insertText(` ${deleteMarker}X`);
     await page.keyboard.press("ArrowLeft");
     await page.keyboard.press("Delete");
+    await page.keyboard.insertText(` ${replaceOldMarker}`);
+    await selectTrailingText(target, page, replaceOldMarker.length);
+    await page.keyboard.insertText(replaceMarker);
     await expect(target).toContainText(marker);
     await expect(target).not.toContainText(`${backspaceMarker}X`);
     await expect(target).not.toContainText(`${deleteMarker}X`);
+    await expect(target).not.toContainText(replaceOldMarker);
+    await expect(target).toContainText(replaceMarker);
     await saveAndExitTextOperation(page, beforeRevision);
     const sourceScope = assertScopedMutation({
       before,
       workingCopyPath,
       plan,
       normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
-      expectedAfterContains: [marker, backspaceMarker, deleteMarker],
-      expectedAfterExcludes: [`${backspaceMarker}X`, `${deleteMarker}X`],
+      expectedAfterContains: [marker, backspaceMarker, deleteMarker, replaceMarker],
+      expectedAfterExcludes: [`${backspaceMarker}X`, `${deleteMarker}X`, replaceOldMarker],
       expectedAppendedPattern: new RegExp(
-        ` ${marker} ${backspaceMarker} ${deleteMarker}`,
+        ` ${marker} ${backspaceMarker} ${deleteMarker} ${replaceMarker}`,
         "u",
       ),
     });
-    samples.push({ plan, marker, backspaceMarker, deleteMarker, sourceScope });
+    samples.push({
+      plan,
+      marker,
+      backspaceMarker,
+      deleteMarker,
+      replaceMarker,
+      sourceScope,
+    });
   }
   return { samples };
 }
@@ -873,6 +1105,7 @@ async function runNewlineOperation({ page, workingCopyPath, plan, fileIndex }) {
     "u",
   ));
   return {
+    targetId: plan.id,
     beforeMarker,
     marker,
     beforeBreakIds,
@@ -905,6 +1138,7 @@ async function runUndoRedoOperation({ page, workingCopyPath, plan, fileIndex }) 
   await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8")).toContain(marker);
   await saveAndExitTextOperation(page, beforeRevision);
   return {
+    targetId: plan.id,
     marker,
     sourceScope: assertScopedMutation({
       before,
@@ -950,6 +1184,7 @@ async function runFormatOperation({ page, workingCopyPath, plan, fileIndex }) {
   const saved = await readPublishedWorkingCopy(workingCopyPath, "utf8");
   expectFormattedMarker(saved, marker);
   return {
+    targetId: plan.id,
     marker,
     formatTransitions,
     sourceScope: assertScopedMutation({
@@ -963,19 +1198,26 @@ async function runFormatOperation({ page, workingCopyPath, plan, fileIndex }) {
   };
 }
 
+function directSiblingStableIds(workingCopyPath, targetId) {
+  const index = buildPatchSourceIndex(readFileSync(workingCopyPath, "utf8"));
+  const target = index.byPagerootId.get(targetId);
+  const parent = target?.parentId ? index.byNodeId.get(target.parentId) : null;
+  if (target?.type !== "element" || parent?.type !== "element") return null;
+  return parent.childElementIds.map((nodeId) => index.byNodeId.get(nodeId)?.pagerootId)
+    .filter(Boolean);
+}
+
 async function duplicateFixedStructureTarget({
   page,
   workingCopyPath,
   originalSha256,
   plan,
-  selector,
 }) {
   await clickAuthoredTab(page, plan.tabId);
   let frame = await currentEditorFrame(page);
   const original = frame.locator(`[data-pageroot-id="${plan.id}"]`);
-  const beforeIds = await frame.locator(selector).evaluateAll((elements) => (
-    elements.map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
-  ));
+  const beforeIds = directSiblingStableIds(workingCopyPath, plan.id);
+  if (!beforeIds) throw new Error("The frozen copy target has no source-backed parent.");
   expect(beforeIds).toContain(plan.id);
   const relocatedCount = await original.count();
   let relocated = {
@@ -1012,7 +1254,11 @@ async function duplicateFixedStructureTarget({
     failWithCopyDiagnostic("Planned copy target could not be uniquely re-located", diagnostic);
   }
   await original.scrollIntoViewIfNeeded();
-  await original.click({ timeout: 5_000 });
+  await original.click({ modifiers: ["Alt"], timeout: 5_000 });
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
+    "data-pageroot-id",
+    plan.id,
+  );
   await page.waitForTimeout(0);
   relocated.selectedMarker = await original.getAttribute("data-html-canvas-selected") !== null;
   const diagnostic = await copyCapabilitySnapshot({
@@ -1045,9 +1291,22 @@ async function duplicateFixedStructureTarget({
   if (!diagnostic.source.workingEqualsDisplayed) {
     failWithCopyDiagnostic("Working source and displayed source diverged before copy", diagnostic);
   }
+  const editor = editorFor(page);
+  const copyButton = editor.getByRole("button", { name: "复制元素", exact: true });
+  const uiAvailability = diagnostic.uiProjection.availability;
+  const uiReason = diagnostic.uiProjection.reason;
   const beforeDuplicate = await currentRevision(page);
-  await editorFor(page).getByRole("button", { name: "复制元素", exact: true })
-    .click({ timeout: 5_000 });
+  const beforeRuntime = await runtimeContractSnapshot(page);
+  await editor.evaluate(startFullRuntimeLifecycleObservation);
+  let observed;
+  try {
+    await copyButton.click({ timeout: 5_000 });
+    await waitForRuntimeHandoffSettled(page);
+    await waitUntilEditable(page);
+    await expectCheckpointPersisted(page, beforeDuplicate);
+  } finally {
+    observed = await editorFor(page).evaluate(stopFullRuntimeLifecycleObservation);
+  }
   diagnostic.commandBoundary.executedAvailability = await editorFor(page).getAttribute(
     "data-element-copy-command-availability",
   );
@@ -1060,24 +1319,36 @@ async function duplicateFixedStructureTarget({
   ) {
     failWithCopyDiagnostic("Copy command was refused at the live command boundary", diagnostic);
   }
-  await waitForRuntimeHandoffSettled(page);
-  await waitUntilEditable(page);
-  await expectCheckpointPersisted(page, beforeDuplicate);
+  const runtime = summarizeRuntimeObserverRecords(observed.records);
+  const afterRuntime = await runtimeContractSnapshot(page);
 
   frame = await currentEditorFrame(page);
-  const afterDuplicateIds = await frame.locator(selector).evaluateAll((elements) => (
-    elements.map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
-  ));
+  const afterDuplicateIds = directSiblingStableIds(workingCopyPath, plan.id);
+  if (!afterDuplicateIds) throw new Error("The copied target parent disappeared from source.");
   const addedIds = afterDuplicateIds.filter((id) => !beforeIds.includes(id));
   expect(
     addedIds,
     "Duplicate must add exactly one marked element with a distinct Stable ID",
   ).toHaveLength(1);
   const duplicateId = addedIds[0];
-  return { duplicateId, beforeIds, afterDuplicateIds, diagnostic };
+  return {
+    duplicateId,
+    beforeIds,
+    afterDuplicateIds,
+    capability: {
+      uiAvailability,
+      uiReason,
+      commandAvailability: await editorFor(page).getAttribute(
+        "data-element-copy-command-availability",
+      ),
+      commandReason: await editorFor(page).getAttribute("data-element-copy-command-reason"),
+    },
+    runtime: { before: beforeRuntime, after: afterRuntime, summary: runtime },
+    diagnostic,
+  };
 }
 
-async function deleteFixedStructureTargets({ page, plan, selector, duplicateIds, originalIds }) {
+async function deleteFixedStructureTargets({ page, workingCopyPath, plan, duplicateIds, originalIds }) {
   for (const duplicateId of duplicateIds) {
     let frame = await currentEditorFrame(page);
     const duplicate = frame.locator(`[data-pageroot-id="${duplicateId}"]`);
@@ -1094,11 +1365,1169 @@ async function deleteFixedStructureTargets({ page, plan, selector, duplicateIds,
     await expect(frame.locator(`[data-pageroot-id="${duplicateId}"]`)).toHaveCount(0);
   }
   const frame = await currentEditorFrame(page);
-  expect(await frame.locator(selector).evaluateAll((elements) => (
-    elements.map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
-  ))).toEqual(originalIds);
+  expect(directSiblingStableIds(workingCopyPath, plan.id)).toEqual(originalIds);
   const original = frame.locator(`[data-pageroot-id="${plan.id}"]`);
   await expect(original).toHaveCount(1);
+}
+
+async function createAndEditManifestComment(page, entry, marker) {
+  await clickAuthoredTab(page, entry.tabId);
+  const frame = await currentEditorFrame(page);
+  const target = frame.locator(`[data-pageroot-id=${JSON.stringify(entry.elementId)}]`);
+  await target.scrollIntoViewIfNeeded();
+  await target.click({ modifiers: ["Alt"] });
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
+    "data-pageroot-id",
+    entry.elementId,
+  );
+  const commentButton = editorFor(page).getByRole("button", { name: /留评论/u });
+  if (await commentButton.count() !== 1) {
+    const error = new Error("The frozen comment capability disappeared.");
+    error.code = "COMMENT_CAPABILITY_UNAVAILABLE";
+    throw error;
+  }
+  await commentButton.click();
+  const composer = page.getByRole("region", { name: "添加评论" });
+  await composer.getByRole("textbox", { name: "评论内容" }).fill(marker);
+  await composer.getByRole("button", { name: "评论", exact: true }).click();
+  let card = page.locator(".comment-card").filter({ hasText: marker });
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
+  const updatedMarker = `${marker}_EDITED`;
+  await card.getByRole("button", { name: "编辑评论", exact: true }).click();
+  await card.getByRole("textbox", { name: /编辑评论/u }).fill(updatedMarker);
+  await card.getByRole("button", { name: "确认修改", exact: true }).click();
+  card = page.locator(".comment-card").filter({ hasText: updatedMarker });
+  await expect(card).toHaveCount(1);
+  return { targetId: entry.elementId, marker: updatedMarker };
+}
+
+async function verifyAndDeleteManifestComment(page, comment) {
+  const card = page.locator(".comment-card").filter({ hasText: comment.marker });
+  await expect(card).toHaveCount(1);
+  const resolution = await card.getAttribute("data-resolution");
+  expect(["exact", "rebound"]).toContain(resolution);
+  await card.getByRole("button", { name: "删除评论", exact: true }).click();
+  await card.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  return { ...comment, resolution, deleted: true };
+}
+
+async function selectFrozenRuntimeGeneratedTarget(page, target) {
+  await clickAuthoredTab(page, target.tabId);
+  const frame = await currentEditorFrame(page);
+  const anchor = frame.locator(
+    `[data-pageroot-id=${JSON.stringify(target.sourceAnchorId)}]`,
+  );
+  if (await anchor.count() !== 1) {
+    const error = new Error("The frozen Runtime-generated source anchor is not unique.");
+    error.code = "RUNTIME_GENERATED_SOURCE_ANCHOR_MISMATCH";
+    throw error;
+  }
+  const runtimeTarget = anchor.locator(target.relativePath);
+  if (await runtimeTarget.count() !== 1 || !await runtimeTarget.isVisible().catch(() => false)) {
+    const error = new Error("The frozen Runtime-generated visual target cannot be re-resolved.");
+    error.code = "RUNTIME_GENERATED_TARGET_MISMATCH";
+    throw error;
+  }
+  await runtimeTarget.scrollIntoViewIfNeeded();
+  await runtimeTarget.click();
+  const editor = editorFor(page);
+  await expect(editor).toHaveAttribute("data-selection-runtime-generated", "true");
+  await expect(editor).toHaveAttribute(
+    "data-selection-runtime-source-anchor-id",
+    target.sourceAnchorId,
+  );
+  await expect(editor).toHaveAttribute("data-selection-runtime-kind", target.kind);
+  await expect(editor).toHaveAttribute("data-selection-runtime-path", target.relativePath);
+  const toolbar = editor.getByRole("toolbar").filter({ visible: true }).first();
+  await expect(toolbar.getByRole("button", { name: /留评论/u })).toHaveCount(1);
+  for (const name of ["编辑", "复制元素", "上移", "下移", "删除元素"]) {
+    await expect(toolbar.getByRole("button", { name, exact: true })).toHaveCount(0);
+  }
+  return {
+    targetKey: target.targetKey,
+    sourceAnchorId: target.sourceAnchorId,
+    kind: target.kind,
+    relativePath: target.relativePath,
+    frozenGeneration: target.generation,
+    observedGeneration: await editor.getAttribute("data-selection-runtime-generation"),
+  };
+}
+
+async function createRuntimeGeneratedComment(page, target, marker) {
+  const boundary = await selectFrozenRuntimeGeneratedTarget(page, target);
+  const toolbar = editorFor(page).getByRole("toolbar").filter({ visible: true }).first();
+  await toolbar.getByRole("button", { name: /留评论/u }).click();
+  const composer = page.getByRole("region", { name: "添加评论" });
+  await composer.getByRole("textbox", { name: "评论内容" }).fill(marker);
+  await composer.getByRole("button", { name: "评论", exact: true }).click();
+  const card = page.locator(".comment-card").filter({ hasText: marker });
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
+  return { ...boundary, marker };
+}
+
+async function verifyEditDeleteRuntimeGeneratedComment(page, target, comment) {
+  let card = page.locator(".comment-card").filter({ hasText: comment.marker });
+  await expect(card).toHaveCount(1);
+  await card.click();
+  await expect(editorFor(page)).toHaveAttribute("data-selection-runtime-generated", "true");
+  await expect(editorFor(page)).toHaveAttribute(
+    "data-selection-runtime-source-anchor-id",
+    target.sourceAnchorId,
+  );
+  await expect(editorFor(page)).toHaveAttribute("data-selection-runtime-kind", target.kind);
+  await expect(editorFor(page)).toHaveAttribute("data-selection-runtime-path", target.relativePath);
+  const updatedMarker = `${comment.marker}_EDITED`;
+  await card.getByRole("button", { name: "编辑评论", exact: true }).click();
+  await card.getByRole("textbox", { name: /编辑评论/u }).fill(updatedMarker);
+  await card.getByRole("button", { name: "确认修改", exact: true }).click();
+  card = page.locator(".comment-card").filter({ hasText: updatedMarker });
+  await expect(card).toHaveCount(1);
+  await card.getByRole("button", { name: "删除评论", exact: true }).click();
+  await card.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  return { ...comment, marker: updatedMarker, reopened: true, edited: true, deleted: true };
+}
+
+function behaviorResultRows(entry, capabilityFamily, families, state, reasonCode, details = null) {
+  return families.map((behaviorFamily) => ({
+    elementId: entry.elementId,
+    capabilityFamily,
+    behaviorFamily,
+    assigned: true,
+    state,
+    reasonCode,
+    ...(details ? { details } : {}),
+  }));
+}
+
+const EXTENDED_FORMAT_CASES = Object.freeze([
+  Object.freeze({
+    behaviorFamily: "font-size",
+    cssProperty: "font-size",
+    label: "字号（像素）",
+    candidates: ["29", "31"],
+    sourceValue: (value) => `${value}px`,
+  }),
+  Object.freeze({
+    behaviorFamily: "text-color",
+    cssProperty: "color",
+    label: "文字颜色",
+    candidates: ["#123456", "#654321"],
+    sourceValue: (value) => value,
+    color: true,
+  }),
+  Object.freeze({
+    behaviorFamily: "fill-color",
+    cssProperty: "background-color",
+    label: "元素填充色",
+    candidates: ["#cdefab", "#abcdef"],
+    sourceValue: (value) => value,
+    color: true,
+  }),
+  Object.freeze({
+    behaviorFamily: "padding",
+    cssProperty: "padding-top",
+    label: "内边距（像素）",
+    candidates: ["37", "39"],
+    sourceValue: (value) => `${value}px`,
+  }),
+  Object.freeze({
+    behaviorFamily: "margin",
+    cssProperty: "margin-top",
+    label: "外间距（像素）",
+    candidates: ["-17", "-19"],
+    sourceValue: (value) => `${value}px`,
+  }),
+  Object.freeze({
+    behaviorFamily: "line-height",
+    cssProperty: "line-height",
+    label: "行距（像素）",
+    candidates: ["53", "57"],
+    sourceValue: (value) => `${value}px`,
+  }),
+]);
+
+async function setColorControlValue(control, value) {
+  await control.evaluate((element, nextValue) => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    if (!setter) throw new Error("Native color input value setter is unavailable.");
+    setter.call(element, nextValue);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
+async function runExtendedFormatBehaviors(page, workingCopyPath, entry) {
+  const rows = [];
+  for (const [formatIndex, formatCase] of EXTENDED_FORMAT_CASES.entries()) {
+    const operationId = `format-${formatCase.behaviorFamily}`;
+    try {
+      await clickAuthoredTab(page, entry.tabId);
+      await page.keyboard.press("Escape");
+      await waitUntilEditable(page);
+      const frame = await currentEditorFrame(page);
+      const live = await probeAuthoredCapability({
+        page,
+        frame,
+        editor: editorFor(page),
+        candidate: {
+          stableId: entry.elementId,
+          tag: entry.tag,
+          sourceEditable: true,
+          visible: true,
+          isConnected: true,
+          inert: false,
+          runtimeGenerated: false,
+          tabId: entry.tabId,
+          region: entry.region,
+          scrollContainer: entry.scrollContainer,
+        },
+      });
+      if (
+        live.selectedId !== entry.elementId
+        || live.tag !== entry.tag
+        || !live.capabilityFamilies.includes("format")
+      ) {
+        const error = new Error("The frozen format target failed live identity or capability revalidation.");
+        error.code = "FORMAT_TARGET_CAPABILITY_DRIFT";
+        error.details = {
+          expectedId: entry.elementId,
+          observedId: live.selectedId,
+          expectedTag: entry.tag,
+          observedTag: live.tag,
+          observedCapabilities: live.capabilityFamilies,
+          probeReason: live.probeReason,
+        };
+        throw error;
+      }
+      const toolbar = editorFor(page).getByRole("toolbar").filter({ visible: true }).first();
+      const summary = toolbar.locator("summary").filter({ hasText: "样式与间距" });
+      const details = summary.locator("xpath=..");
+      if (await details.getAttribute("open") === null) await summary.click();
+      const control = toolbar.getByLabel(formatCase.label, { exact: true });
+      await expect(control).toBeVisible();
+      await expect(control).toBeEnabled();
+      const beforeControlValue = (await control.inputValue()).toLowerCase();
+      const targetValue = formatCase.candidates.find(
+        (candidate) => candidate.toLowerCase() !== beforeControlValue,
+      );
+      if (!targetValue) {
+        const error = new Error("No independently fixed format value differs from the live control value.");
+        error.code = "FORMAT_EXPECTATION_NOT_DISTINCT";
+        throw error;
+      }
+      const expectedSourceValue = formatCase.sourceValue(targetValue);
+      const before = readFileSync(workingCopyPath);
+      const beforeRevision = await currentRevision(page);
+      const beforeIdentity = await currentFrameIdentity(page);
+      if (formatCase.color) await setColorControlValue(control, targetValue);
+      else await control.fill(targetValue);
+      await expectCheckpointPersisted(page, beforeRevision);
+      const after = readFileSync(workingCopyPath);
+      const sourceScope = compareElementStyleMutation({
+        before,
+        after,
+        sourceId: entry.elementId,
+        expectedProperty: formatCase.cssProperty,
+        expectedValue: expectedSourceValue,
+      });
+      const activeFrame = await currentEditorFrame(page);
+      const target = activeFrame.locator(
+        `[data-pageroot-id=${JSON.stringify(entry.elementId)}]`,
+      );
+      await expect(target).toHaveCount(1);
+      const observedInlineValue = await target.evaluate(
+        (element, property) => element.style.getPropertyValue(property).trim(),
+        formatCase.cssProperty,
+      );
+      const observedComputedValue = await target.evaluate(
+        (element, property) => element.ownerDocument.defaultView
+          ?.getComputedStyle(element).getPropertyValue(property).trim() || "",
+        formatCase.cssProperty,
+      );
+      const observedControlValue = (await control.inputValue()).toLowerCase();
+      const afterIdentity = await currentFrameIdentity(page);
+      const evidence = evaluateExtendedFormatEvidence({
+        sourceScope,
+        color: formatCase.color === true,
+        expectedControlValue: targetValue,
+        observedControlValue,
+        expectedSourceValue,
+        observedInlineValue,
+        observedComputedValue,
+        beforeIdentity,
+        afterIdentity,
+      });
+      if (!evidence.ok) {
+        const error = new Error("The extended format behavior failed a trust oracle.");
+        error.code = evidence.failures[0] || "EXTENDED_FORMAT_EVIDENCE_FAILED";
+        error.details = { conditions: evidence.conditions, failures: evidence.failures };
+        if (!evidence.conditions.sourceScopeOk) error.oracle = sourceScope;
+        throw error;
+      }
+      rows.push({
+        elementId: entry.elementId,
+        capabilityFamily: "format",
+        behaviorFamily: formatCase.behaviorFamily,
+        operationId,
+        assigned: true,
+        state: "PASS",
+        reasonCode: CAPABILITY_MATRIX_REASONS.BEHAVIOR_OBSERVED,
+        details: {
+          beforeControlValue,
+          expectedControlValue: targetValue,
+          observedControlValue,
+          observedInlineValue,
+          observedComputedValue,
+          sourceScope,
+          beforeIdentity,
+          afterIdentity,
+          evidence: evidence.conditions,
+          inputAuthority: formatCase.color
+            ? "bounded native color-input value setter with input/change events"
+            : "Playwright keyboard fill on the visible native number input",
+        },
+      });
+    } catch (cause) {
+      let recoveryCause = null;
+      try {
+        await page.keyboard.press("Escape");
+        await waitUntilEditable(page);
+      } catch (cleanupCause) {
+        recoveryCause = cleanupCause;
+      }
+      const failure = formatFailureRows({
+        formatCases: EXTENDED_FORMAT_CASES,
+        failedIndex: formatIndex,
+        entry,
+        operationId,
+        operationFailure: errorDetails(cause),
+        recoveryFailure: recoveryCause ? errorDetails(recoveryCause) : null,
+      });
+      rows.push(...failure.rows);
+      if (failure.stop) return rows;
+    }
+  }
+  return rows;
+}
+
+async function moveManifestTarget(page, workingCopyPath, entry) {
+  await clickAuthoredTab(page, entry.tabId);
+  const frame = await currentEditorFrame(page);
+  const target = frame.locator(`[data-pageroot-id=${JSON.stringify(entry.elementId)}]`);
+  await target.scrollIntoViewIfNeeded();
+  await target.click({ modifiers: ["Alt"] });
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
+    "data-pageroot-id",
+    entry.elementId,
+  );
+  const direction = entry.capabilityFamilies.includes("move-up") ? "up" : "down";
+  const name = direction === "up" ? "上移" : "下移";
+  const inverseName = direction === "up" ? "下移" : "上移";
+  const beforeOrder = directSiblingStableIds(workingCopyPath, entry.elementId);
+  const beforeRevision = await currentRevision(page);
+  const beforeIdentity = await currentFrameIdentity(page);
+  const button = editorFor(page).getByRole("button", { name, exact: true });
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expectCheckpointPersisted(page, beforeRevision);
+  const afterIdentity = await currentFrameIdentity(page);
+  const afterOrder = directSiblingStableIds(workingCopyPath, entry.elementId);
+  expect(afterOrder).not.toEqual(beforeOrder);
+  expect(afterIdentity.document).toBe(beforeIdentity.document);
+  expect(afterIdentity.generation).toBe(beforeIdentity.generation);
+  const restoreRevision = await currentRevision(page);
+  const inverse = editorFor(page).getByRole("button", { name: inverseName, exact: true });
+  await expect(inverse).toBeEnabled();
+  await inverse.click();
+  await expectCheckpointPersisted(page, restoreRevision);
+  expect(directSiblingStableIds(workingCopyPath, entry.elementId)).toEqual(beforeOrder);
+  return {
+    targetId: entry.elementId,
+    direction,
+    beforeIdentity,
+    afterIdentity,
+    restored: true,
+  };
+}
+
+async function runDedicatedCapabilityStage({
+  session,
+  copyPath,
+  frozenCapability,
+  fileIndex,
+}) {
+  let activeSession = session;
+  let activePage = activeSession.page;
+  let workingCopyPath = await managedWorkingCopyPath(activePage, copyPath);
+  const observations = await executeCapabilityObservations(activePage, frozenCapability);
+  const rows = [];
+  const formatEntry = frozenCapability.manifest.entries.find((entry) => (
+    entry.capabilityFamilies.includes("format")
+  )) || null;
+  if (formatEntry) {
+    rows.push(...await runExtendedFormatBehaviors(
+      activePage,
+      workingCopyPath,
+      formatEntry,
+    ));
+  }
+  const runtimeBoundaries = [];
+  let runtimeComment = null;
+  for (const [targetIndex, target] of frozenCapability.runtimeGeneratedTargets.entries()) {
+    const matrixEntry = { elementId: `runtime:${target.targetKey}` };
+    try {
+      const boundary = targetIndex === 0
+        ? await createRuntimeGeneratedComment(
+          activePage,
+          target,
+          `PRQA_${fileIndex}_RUNTIME_COMMENT`,
+        )
+        : await selectFrozenRuntimeGeneratedTarget(activePage, target);
+      runtimeBoundaries.push({ ...target, ...boundary });
+      if (targetIndex === 0) runtimeComment = boundary;
+      rows.push(...behaviorResultRows(
+        matrixEntry,
+        "runtime-generated",
+        ["runtime-capability-boundary"],
+        "PASS",
+        CAPABILITY_MATRIX_REASONS.BEHAVIOR_OBSERVED,
+        boundary,
+      ));
+    } catch (cause) {
+      rows.push(...behaviorResultRows(
+        matrixEntry,
+        "runtime-generated",
+        ["runtime-capability-boundary"],
+        "FAIL",
+        cause?.code || "RUNTIME_GENERATED_BOUNDARY_FAILED",
+      ));
+    }
+  }
+  const commentEntry = frozenCapability.manifest.entries.find((entry) => (
+    entry.capabilityFamilies.includes("comment")
+  )) || null;
+  let comment = null;
+  if (commentEntry) {
+    try {
+      comment = await createAndEditManifestComment(
+        activePage,
+        commentEntry,
+        `PRQA_${fileIndex}_COMMENT`,
+      );
+    } catch (cause) {
+      rows.push(...behaviorResultRows(
+        commentEntry,
+        "comment",
+        ["comment-create", "comment-edit", "comment-delete", "comment-reopen"],
+        "FAIL",
+        cause?.code || "COMMENT_LIFECYCLE_FAILED",
+      ));
+    }
+  }
+  const moveEntry = frozenCapability.manifest.entries.find((entry) => (
+    entry.capabilityFamilies.includes("move-up")
+    || entry.capabilityFamilies.includes("move-down")
+  )) || null;
+  if (moveEntry) {
+    try {
+      const moved = await moveManifestTarget(activePage, workingCopyPath, moveEntry);
+      rows.push(...behaviorResultRows(
+        moveEntry,
+        "move",
+        ["move"],
+        "PASS",
+        CAPABILITY_MATRIX_REASONS.BEHAVIOR_OBSERVED,
+        moved,
+      ));
+    } catch (cause) {
+      rows.push(...behaviorResultRows(
+        moveEntry,
+        "move",
+        ["move"],
+        "FAIL",
+        cause?.code || "MOVE_BEHAVIOR_FAILED",
+      ));
+    }
+  }
+
+  const isolatedUserData = activeSession.isolatedUserData;
+  await stopPageRoot(activeSession.electronApp, isolatedUserData, { cleanup: false });
+  activeSession = await launchPageRoot({ isolatedUserData, ...REAL_HTML_LAUNCH_OPTIONS });
+  activePage = activeSession.page;
+  await waitForProjectReady(activePage);
+  await waitUntilEditable(activePage);
+  workingCopyPath = await managedWorkingCopyPath(activePage, copyPath);
+
+  if (comment) {
+    try {
+      const reopened = await verifyAndDeleteManifestComment(activePage, comment);
+      rows.push(...behaviorResultRows(
+        commentEntry,
+        "comment",
+        ["comment-create", "comment-edit", "comment-delete", "comment-reopen"],
+        "PASS",
+        CAPABILITY_MATRIX_REASONS.BEHAVIOR_OBSERVED,
+        reopened,
+      ));
+    } catch (cause) {
+      rows.push(...behaviorResultRows(
+        commentEntry,
+        "comment",
+        ["comment-create", "comment-edit", "comment-delete", "comment-reopen"],
+        "FAIL",
+        cause?.code || "COMMENT_REOPEN_DELETE_FAILED",
+      ));
+    }
+  }
+  if (runtimeComment) {
+    const runtimeTarget = frozenCapability.runtimeGeneratedTargets[0];
+    const matrixEntry = { elementId: `runtime:${runtimeTarget.targetKey}` };
+    try {
+      const reopened = await verifyEditDeleteRuntimeGeneratedComment(
+        activePage,
+        runtimeTarget,
+        runtimeComment,
+      );
+      rows.push(...behaviorResultRows(
+        matrixEntry,
+        "runtime-generated",
+        ["runtime-comment-create", "runtime-comment-edit", "runtime-comment-reopen", "runtime-comment-delete"],
+        "PASS",
+        CAPABILITY_MATRIX_REASONS.BEHAVIOR_OBSERVED,
+        reopened,
+      ));
+    } catch (cause) {
+      rows.push(...behaviorResultRows(
+        matrixEntry,
+        "runtime-generated",
+        ["runtime-comment-create", "runtime-comment-edit", "runtime-comment-reopen", "runtime-comment-delete"],
+        "FAIL",
+        cause?.code || "RUNTIME_GENERATED_COMMENT_LIFECYCLE_FAILED",
+      ));
+    }
+  }
+  const identityEntry = frozenCapability.manifest.entries[0] || null;
+  if (identityEntry) {
+    await clickAuthoredTab(activePage, identityEntry.tabId);
+    const count = await (await currentEditorFrame(activePage))
+      .locator(`[data-pageroot-id=${JSON.stringify(identityEntry.elementId)}]`).count();
+    const state = count === 1 ? "PASS" : "FAIL";
+    rows.push(...behaviorResultRows(
+      identityEntry,
+      "selection",
+      ["persistence", "stable-id"],
+      state,
+      state === "PASS"
+        ? CAPABILITY_MATRIX_REASONS.BEHAVIOR_OBSERVED
+        : "REOPENED_STABLE_ID_MISMATCH",
+      { reopenedCount: count },
+    ));
+  }
+  return {
+    session: activeSession,
+    page: activePage,
+    workingCopyPath,
+    observations,
+    rows,
+    runtimeGenerated: {
+      targets: frozenCapability.runtimeGeneratedTargets,
+      diagnostics: frozenCapability.runtimeGeneratedDiagnostics,
+      boundaries: runtimeBoundaries,
+      comment: runtimeComment,
+    },
+  };
+}
+
+async function twoAnimationFrames(page) {
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+}
+
+async function markerDeliverySnapshot(page, marker) {
+  const frame = await currentEditorFrame(page);
+  const frameFocus = await frame.evaluate((value) => {
+    const active = document.activeElement;
+    const host = active?.closest?.("[data-pageroot-id]") || null;
+    const content = active && "value" in active ? String(active.value) : active?.textContent || "";
+    return {
+      elementId: host?.getAttribute("data-pageroot-id") || null,
+      markerPresent: Boolean(host && content.includes(value)),
+    };
+  }, marker);
+  const outerFocus = await page.evaluate((value) => {
+    const active = document.activeElement;
+    const editable = active instanceof HTMLInputElement
+      || active instanceof HTMLTextAreaElement
+      || active?.isContentEditable === true;
+    const content = active && "value" in active ? String(active.value) : active?.textContent || "";
+    return {
+      editable,
+      markerPresent: editable && content.includes(value),
+      tag: active?.localName || null,
+    };
+  }, marker);
+  return { frameFocus, outerFocus };
+}
+
+async function nativeSelectionEvidence(page, expectedElementId) {
+  const frame = await currentEditorFrame(page);
+  return frame.evaluate((expectedId) => {
+    const nearestId = (node) => {
+      const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      return element?.closest?.("[data-pageroot-id]")
+        ?.getAttribute("data-pageroot-id") || null;
+    };
+    const selection = document.getSelection();
+    const activeElementId = nearestId(document.activeElement);
+    const active = document.querySelector(`[data-pageroot-id="${expectedId}"]`);
+    return {
+      expectedElementId: expectedId,
+      after: {
+        elementId: activeElementId,
+        connected: active?.isConnected === true,
+      },
+      focus: {
+        activeElementId,
+        anchorElementId: nearestId(selection?.anchorNode),
+        focusElementId: nearestId(selection?.focusNode),
+      },
+    };
+  }, expectedElementId);
+}
+
+function runtimeTerminalSnapshot(snapshot) {
+  const terminal = ["settled", "static", "static-fallback"].includes(snapshot.runtimePhase)
+    && typeof snapshot.runtimeOutcome === "string"
+    && snapshot.runtimeOutcome !== "";
+  return {
+    terminal,
+    phase: snapshot.runtimePhase,
+    outcome: snapshot.runtimeOutcome,
+  };
+}
+
+async function runContinuityCycle({
+  page,
+  workingCopyPath,
+  textPlan,
+  copyEntry,
+  fileIndex,
+  cycleIndex,
+  retainedMarkers,
+}) {
+  const ordinaryMarker = `PRQA_${fileIndex}_CHAIN_${cycleIndex}_ORDINARY`;
+  const ordinaryBefore = await currentFrameIdentity(page);
+  await editorFor(page).evaluate(startFullRuntimeLifecycleObservation);
+  let ordinaryObserved;
+  try {
+    const ordinaryRevision = await currentRevision(page);
+    const ordinaryTarget = await enterNativeEdit(page, textPlan);
+    await ordinaryTarget.press(keyShortcut("ArrowDown"));
+    await page.keyboard.insertText(` ${ordinaryMarker}`);
+    await saveAndExitTextOperation(page, ordinaryRevision);
+  } finally {
+    ordinaryObserved = await editorFor(page).evaluate(stopFullRuntimeLifecycleObservation);
+  }
+  const ordinarySummary = summarizeRuntimeObserverRecords(ordinaryObserved.records);
+  const ordinaryAfter = await currentFrameIdentity(page);
+  const ordinaryEdit = {
+    before: {
+      documentId: ordinaryBefore.document,
+      generation: Number(ordinaryBefore.generation),
+    },
+    after: {
+      documentId: ordinaryAfter.document,
+      generation: Number(ordinaryAfter.generation),
+    },
+    rebuilt: ordinarySummary.hasRequest
+      || ordinarySummary.hasCandidate
+      || ordinarySummary.hasGeneration,
+    observations: ordinaryObserved.records,
+  };
+
+  await clickAuthoredTab(page, copyEntry.tabId);
+  let frame = await currentEditorFrame(page);
+  const structureTarget = frame.locator(
+    `[data-pageroot-id=${JSON.stringify(copyEntry.elementId)}]`,
+  );
+  await structureTarget.scrollIntoViewIfNeeded();
+  await structureTarget.click({ modifiers: ["Alt"] });
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
+    "data-pageroot-id",
+    copyEntry.elementId,
+  );
+  const copyButton = editorFor(page).getByRole("button", { name: "复制元素", exact: true });
+  await expect(copyButton).toBeEnabled();
+  const beforeIds = directSiblingStableIds(workingCopyPath, copyEntry.elementId);
+  const rebuildBefore = await runtimeContractSnapshot(page);
+  const oldFrame = frame;
+  const oldTarget = oldFrame.locator(
+    `[data-pageroot-id=${JSON.stringify(textPlan.id)}]`,
+  );
+  const oldTargetHandle = await oldTarget.elementHandle();
+  const structureRevision = await currentRevision(page);
+  await editorFor(page).evaluate(startFullRuntimeLifecycleObservation);
+  let rebuildObserved;
+  try {
+    await copyButton.click();
+    await expectCheckpointPersisted(page, structureRevision);
+    await waitForRuntimeHandoffSettled(page);
+    await waitUntilEditable(page);
+  } finally {
+    rebuildObserved = await editorFor(page).evaluate(stopFullRuntimeLifecycleObservation);
+  }
+  const rebuildSummary = summarizeRuntimeObserverRecords(rebuildObserved.records);
+  const rebuildAfter = await runtimeContractSnapshot(page);
+  const rebuildSourceBytes = readFileSync(workingCopyPath);
+  const rebuildSource = {
+    hash: sha256(rebuildSourceBytes),
+    size: rebuildSourceBytes.length,
+  };
+  const afterIds = directSiblingStableIds(workingCopyPath, copyEntry.elementId);
+  const duplicateIds = afterIds?.filter((id) => !beforeIds?.includes(id)) || [];
+  expect(duplicateIds).toHaveLength(1);
+
+  let previousTargetRetired = false;
+  try {
+    previousTargetRetired = await oldTargetHandle?.evaluate((element) => !element.isConnected)
+      ?? false;
+  } catch {
+    previousTargetRetired = true;
+  }
+  await oldTargetHandle?.dispose().catch(() => {});
+
+  const directMarker = `PRQA_${fileIndex}_CHAIN_${cycleIndex}_DIRECT`;
+  const continuationRevision = await currentRevision(page);
+  await page.keyboard.insertText(` ${directMarker}`);
+  await twoAnimationFrames(page);
+  const directDelivery = await markerDeliverySnapshot(page, directMarker);
+  const directInputApplied = directDelivery.frameFocus.markerPresent
+    || directDelivery.outerFocus.markerPresent;
+  const directTargetId = directDelivery.frameFocus.markerPresent
+    ? directDelivery.frameFocus.elementId
+    : directDelivery.outerFocus.markerPresent
+      ? `outer:${directDelivery.outerFocus.tag || "unknown"}`
+      : null;
+  let continuationMode = "without-refocus";
+  let relocatedElementId = null;
+  let relocatedInputApplied = false;
+  let selectionEvidence = null;
+  if (!directInputApplied) {
+    continuationMode = "session-ended";
+    const relocated = await enterNativeEdit(page, textPlan);
+    relocatedElementId = await relocated.getAttribute("data-pageroot-id");
+    const relocatedMarker = `PRQA_${fileIndex}_CHAIN_${cycleIndex}_RELOCATED`;
+    await relocated.press(keyShortcut("ArrowDown"));
+    await page.keyboard.insertText(` ${relocatedMarker}`);
+    await expect(relocated).toContainText(relocatedMarker);
+    relocatedInputApplied = true;
+    selectionEvidence = await nativeSelectionEvidence(page, textPlan.id);
+    retainedMarkers.push(relocatedMarker);
+  } else if (directTargetId === textPlan.id) {
+    relocatedElementId = textPlan.id;
+    relocatedInputApplied = true;
+    selectionEvidence = await nativeSelectionEvidence(page, textPlan.id);
+  }
+  await saveAndExitTextOperation(page, continuationRevision);
+  retainedMarkers.push(ordinaryMarker, directInputApplied ? directMarker : null);
+
+  const currentSource = readFileSync(workingCopyPath);
+  for (const marker of retainedMarkers.filter(Boolean)) {
+    expect(currentSource.toString("utf8")).toContain(marker);
+  }
+  const workingSource = { hash: sha256(currentSource), size: currentSource.length };
+  const finalRuntime = await runtimeContractSnapshot(page);
+  const generationRecord = rebuildSummary.generation;
+  const candidate = rebuildSummary.candidate;
+  const candidateTerminal = rebuildSummary.candidateTerminal;
+  const evidence = {
+    request: rebuildSummary.request ? {
+      sourceRevision: rebuildSummary.request.sourceRevision,
+      reason: rebuildSummary.request.reason,
+      status: rebuildSummary.request.status || "submitted",
+    } : null,
+    candidate: candidate ? {
+      candidateId: candidate.candidateId,
+      sourceRevision: candidate.sourceRevision,
+      status: candidateTerminal?.terminal || null,
+    } : null,
+    generation: {
+      before: Number(rebuildBefore.generation),
+      after: Number(rebuildAfter.generation),
+      observed: Boolean(generationRecord),
+    },
+    active: {
+      candidateId: rebuildAfter.lastKnownGoodId || null,
+      generation: Number(rebuildAfter.generation),
+      documentId: rebuildAfter.document,
+    },
+    runtime: runtimeTerminalSnapshot(finalRuntime),
+    rebuildSource,
+    workingSource,
+    displayedSource: {
+      hash: finalRuntime.renderedProjectionSha256,
+      workingProjectionHash: finalRuntime.workingSourceSha256,
+      stale: runtimeProjectionStale(finalRuntime.renderedProjectionStale),
+      size: null,
+    },
+    ordinaryEdit,
+    previousTargetRetired,
+    selection: selectionEvidence,
+    continuation: {
+      mode: continuationMode,
+      expectedElementId: textPlan.id,
+      directInputApplied,
+      directTargetId,
+      sessionEnded: !directInputApplied,
+      relocatedElementId,
+      relocatedInputApplied,
+    },
+  };
+  const verdict = evaluateContinuityChain(evidence);
+  return {
+    ok: verdict.ok,
+    cycleIndex,
+    textTargetId: textPlan.id,
+    structureTargetId: copyEntry.elementId,
+    duplicateId: duplicateIds[0],
+    previousTargetRetired,
+    evidence,
+    verdict,
+    observations: rebuildObserved.records,
+  };
+}
+
+async function armRuntimeCommitHold(page) {
+  await page.evaluate(() => {
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = [];
+  });
+}
+
+async function waitForHeldRuntimeCommit(page) {
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+  )), { timeout: 60_000 }).toBeGreaterThan(0);
+}
+
+async function releaseHeldRuntimeCommits(page) {
+  await page.evaluate(() => {
+    const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ || [];
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = undefined;
+    releases.forEach((release) => release());
+  });
+}
+
+async function runStaleCandidateFence({
+  page,
+  workingCopyPath,
+  textPlan,
+  copyEntry,
+  fileIndex,
+  retainedMarkers,
+}) {
+  await clickAuthoredTab(page, copyEntry.tabId);
+  const frame = await currentEditorFrame(page);
+  const structureTarget = frame.locator(
+    `[data-pageroot-id=${JSON.stringify(copyEntry.elementId)}]`,
+  );
+  await structureTarget.scrollIntoViewIfNeeded();
+  await structureTarget.click({ modifiers: ["Alt"] });
+  await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
+    "data-pageroot-id",
+    copyEntry.elementId,
+  );
+  const copyButton = editorFor(page).getByRole("button", { name: "复制元素", exact: true });
+  await expect(copyButton).toBeEnabled();
+  const beforeIds = directSiblingStableIds(workingCopyPath, copyEntry.elementId);
+  const beforeRevision = await currentRevision(page);
+  await armRuntimeCommitHold(page);
+  await editorFor(page).evaluate(startFullRuntimeLifecycleObservation);
+  let observations;
+  let released = false;
+  try {
+    await copyButton.click();
+    await expectCheckpointPersisted(page, beforeRevision);
+    await waitForHeldRuntimeCommit(page);
+    const held = await runtimeContractSnapshot(page);
+    expect(held.candidateId).toBeTruthy();
+    expect(held.candidatePhase).toBeTruthy();
+    const heldSource = readFileSync(workingCopyPath);
+    const heldSourceHash = sha256(heldSource);
+    expect(held.candidateId).not.toBe(held.lastKnownGoodId);
+
+    const directMarker = `PRQA_${fileIndex}_STALE_DIRECT`;
+    const continuationRevision = await currentRevision(page);
+    await page.keyboard.insertText(` ${directMarker}`);
+    await twoAnimationFrames(page);
+    const direct = await markerDeliverySnapshot(page, directMarker);
+    const directInputApplied = direct.frameFocus.markerPresent || direct.outerFocus.markerPresent;
+    const directTargetId = direct.frameFocus.markerPresent
+      ? direct.frameFocus.elementId
+      : direct.outerFocus.markerPresent
+        ? `outer:${direct.outerFocus.tag || "unknown"}`
+        : null;
+    if (directInputApplied && directTargetId !== textPlan.id) {
+      const error = new Error("Held Candidate continuation landed before exact relocation.");
+      error.code = "STALE_CANDIDATE_DIRECT_INPUT_WRONG_TARGET";
+      throw error;
+    }
+
+    let latestMarker = directMarker;
+    let relocatedElementId = null;
+    let relocatedInputApplied = false;
+    if (!directInputApplied) {
+      latestMarker = `PRQA_${fileIndex}_STALE_LATEST`;
+      const relocated = await enterNativeEdit(page, textPlan);
+      relocatedElementId = await relocated.getAttribute("data-pageroot-id");
+      await relocated.press(keyShortcut("ArrowDown"));
+      await page.keyboard.insertText(` ${latestMarker}`);
+      await expect(relocated).toContainText(latestMarker);
+      relocatedInputApplied = true;
+    }
+    const selection = await nativeSelectionEvidence(page, textPlan.id);
+    expect(selection).toMatchObject({
+      expectedElementId: textPlan.id,
+      after: { elementId: textPlan.id, connected: true },
+      focus: {
+        activeElementId: textPlan.id,
+        anchorElementId: textPlan.id,
+        focusElementId: textPlan.id,
+      },
+    });
+    await page.keyboard.press(keyShortcut("s"));
+    await expectCheckpointPersisted(page, continuationRevision);
+    await page.keyboard.press("Escape");
+    const latestSource = readFileSync(workingCopyPath);
+    const latestSourceHash = sha256(latestSource);
+    expect(latestSourceHash).not.toBe(heldSourceHash);
+    retainedMarkers.push(latestMarker);
+
+    await releaseHeldRuntimeCommits(page);
+    released = true;
+    await waitForRuntimeHandoffSettled(page);
+    await waitUntilEditable(page);
+    const finalSource = readFileSync(workingCopyPath);
+    const finalRuntime = await runtimeContractSnapshot(page);
+    const finalSourceHash = sha256(finalSource);
+    const verdict = evaluateStaleCandidateFence({
+      heldCandidate: {
+        candidateId: held.candidateId,
+        activeCandidateId: held.lastKnownGoodId,
+        sourceRevision: held.candidateSourceRevision,
+      },
+      heldSource: { hash: heldSourceHash, size: heldSource.length },
+      latestSource: { hash: latestSourceHash, size: latestSource.length },
+      continuation: {
+        expectedElementId: textPlan.id,
+        directInputApplied,
+        directTargetId,
+        sessionEnded: !directInputApplied,
+        relocatedElementId,
+        relocatedInputApplied,
+      },
+      finalSource: {
+        hash: finalSourceHash,
+        workingHash: finalRuntime.workingSourceSha256,
+        displayedHash: finalRuntime.renderedProjectionSha256,
+        stale: runtimeProjectionStale(finalRuntime.renderedProjectionStale),
+        latestMarkerPresent: finalSource.toString("utf8").includes(latestMarker),
+      },
+    });
+    if (!verdict.ok) {
+      const error = new Error("A held Candidate overwrote or obscured a later accepted edit.");
+      error.code = verdict.failures[0]?.code || "STALE_CANDIDATE_FENCE_FAILED";
+      error.details = { failures: verdict.failures };
+      throw error;
+    }
+    observations = await editorFor(page).evaluate(stopFullRuntimeLifecycleObservation);
+    const afterIds = directSiblingStableIds(workingCopyPath, copyEntry.elementId);
+    const duplicateIds = afterIds?.filter((id) => !beforeIds?.includes(id)) || [];
+    expect(duplicateIds).toHaveLength(1);
+    return {
+      state: "PASS",
+      reasonCode: "STALE_CANDIDATE_DID_NOT_OVERWRITE_LATEST_SOURCE",
+      duplicateId: duplicateIds[0],
+      heldCandidate: {
+        candidateId: held.candidateId,
+        sourceRevision: held.candidateSourceRevision,
+        activeCandidateId: held.lastKnownGoodId,
+      },
+      continuation: {
+        directInputApplied,
+        directTargetId,
+        relocatedElementId,
+        relocatedInputApplied,
+      },
+      heldSourceHash,
+      latestSourceHash,
+      finalSourceHash,
+      verdict,
+      observations: observations.records,
+    };
+  } finally {
+    if (!released) await releaseHeldRuntimeCommits(page).catch(() => {});
+    if (!observations) {
+      await editorFor(page).evaluate(stopFullRuntimeLifecycleObservation).catch(() => {});
+    }
+  }
+}
+
+async function runContinuityQualification({
+  page,
+  workingCopyPath,
+  textPlans,
+  copyEntry,
+  fileIndex,
+}) {
+  const retainedMarkers = [];
+  const cycles = [];
+  const originalIds = directSiblingStableIds(workingCopyPath, copyEntry.elementId);
+  for (let cycleIndex = 0; cycleIndex < 3; cycleIndex += 1) {
+    const cycle = await runContinuityCycle({
+      page,
+      workingCopyPath,
+      textPlan: textPlans[cycleIndex % textPlans.length],
+      copyEntry,
+      fileIndex,
+      cycleIndex,
+      retainedMarkers,
+    });
+    cycles.push(cycle);
+    if (!cycle.ok) {
+      const error = new Error("A continuity cycle failed its independent trust oracles.");
+      error.code = cycle.verdict.failures[0]?.code || "CONTINUITY_CHAIN_FAILED";
+      error.details = { cycleIndex, failures: cycle.verdict.failures };
+      throw error;
+    }
+  }
+  const staleCandidateFence = await runStaleCandidateFence({
+    page,
+    workingCopyPath,
+    textPlan: textPlans[0],
+    copyEntry,
+    fileIndex,
+    retainedMarkers,
+  });
+  await deleteFixedStructureTargets({
+    page,
+    workingCopyPath,
+    plan: { id: copyEntry.elementId, tabId: copyEntry.tabId },
+    duplicateIds: [
+      ...cycles.map((cycle) => cycle.duplicateId),
+      staleCandidateFence.duplicateId,
+    ],
+    originalIds,
+  });
+  return {
+    cycles,
+    staleCandidateFence,
+    retainedMarkers: retainedMarkers.filter(Boolean),
+  };
+}
+
+function capabilityBehaviorRows(fileId, frozen, manualRows = []) {
+  if (!frozen) return [];
+  const operationRows = new Map(resultReport.rowsForFile(fileId)
+    .filter((row) => row.level === "operation")
+    .map((row) => [row.operationId, row]));
+  const mappings = [
+    [REAL_HTML_OPERATION_IDS.TEXT_ACTIVATE, ["activation"], "text"],
+    [REAL_HTML_OPERATION_IDS.TEXT_INPUT_DELETE, ["input", "backspace", "delete-key", "selection-replace"], "text"],
+    [REAL_HTML_OPERATION_IDS.TEXT_NEWLINE, ["enter"], "text"],
+    [REAL_HTML_OPERATION_IDS.TEXT_PASTE, ["paste"], "text"],
+    [REAL_HTML_OPERATION_IDS.TEXT_UNDO_REDO, ["undo-redo"], "text"],
+    [REAL_HTML_OPERATION_IDS.TEXT_FORMAT, ["bold", "italic", "underline"], "format"],
+    [REAL_HTML_OPERATION_IDS.TEXT_SOURCE_SCOPE, ["source-scope"], "text"],
+    [REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE, ["duplicate", "edit-duplicate"], "copy"],
+    [REAL_HTML_OPERATION_IDS.STRUCTURE_DELETE_DUPLICATE, ["delete-duplicate"], "copy"],
+  ];
+  const required = new Set(frozen.manifest.behaviorFamilies);
+  const rows = [];
+  for (const [operationId, families, capabilityPrefix] of mappings) {
+    const operation = operationRows.get(operationId);
+    const applicableFamilies = families.filter((family) => required.has(family));
+    if (applicableFamilies.length === 0) continue;
+    for (const behaviorFamily of applicableFamilies) {
+      const recordedTargetId = behaviorFamily === "edit-duplicate"
+        ? operation?.details?.duplicateEditTargetId
+        : behaviorFamily === "delete-duplicate"
+          ? operation?.details?.duplicateIds?.[0]
+          : operation?.details?.targetId
+        || operation?.details?.targets?.[0]?.id
+        || operation?.details?.samples?.[0]?.plan?.id
+        || operation?.details?.checks?.[0]?.targetId
+        || operation?.details?.sourceId
+        || null;
+      const entry = frozen.manifest.entries.find((candidate) => (
+        candidate.elementId === recordedTargetId
+      ));
+      rows.push({
+        elementId: recordedTargetId || null,
+        capabilityFamily: capabilityPrefix,
+        behaviorFamily,
+        assigned: Boolean(recordedTargetId && (entry || behaviorFamily.includes("duplicate"))),
+        state: recordedTargetId ? operation?.state || "NOT_EXECUTED" : "NOT_EXECUTED",
+        reasonCode: !recordedTargetId
+          ? "BEHAVIOR_TARGET_NOT_RECORDED"
+          : operation?.state === "PASS"
+          ? CAPABILITY_MATRIX_REASONS.BEHAVIOR_OBSERVED
+          : operation?.details?.exactReason || operation?.reasonCode || "BEHAVIOR_NOT_RECORDED",
+        operationId,
+      });
+    }
+  }
+  return [...rows, ...manualRows];
+}
+
+function fullElementBehaviorMatrix(manifest, selection, observations, behaviors) {
+  const selectedIds = new Set(selection.selected.map((entry) => entry.elementId));
+  const observationById = new Map(observations.map((entry) => [entry.elementId, entry]));
+  const behaviorByElement = new Map();
+  for (const behavior of behaviors) {
+    const rows = behaviorByElement.get(behavior.elementId) || [];
+    rows.push(behavior);
+    behaviorByElement.set(behavior.elementId, rows);
+  }
+  const authored = manifest.entries.map((entry) => ({
+    elementId: entry.elementId,
+    tag: entry.tag,
+    type: entry.type,
+    tabId: entry.tabId,
+    region: entry.region,
+    scrollContainer: entry.scrollContainer,
+    capabilities: entry.capabilityFamilies.map((capabilityFamily) => ({
+      capabilityFamily,
+      state: selectedIds.has(entry.elementId)
+        ? observationById.get(entry.elementId)?.state || "NOT_EXECUTED"
+        : "NOT_APPLICABLE",
+      reasonCode: selectedIds.has(entry.elementId)
+        ? observationById.get(entry.elementId)?.reasonCode || "CAPABILITY_OBSERVATION_MISSING"
+        : "NOT_SELECTED_BY_FROZEN_COVERAGE_SAMPLE",
+    })),
+    behaviors: entry.behaviorFamilies.map((behaviorFamily) => {
+      const actual = (behaviorByElement.get(entry.elementId) || [])
+        .find((row) => row.behaviorFamily === behaviorFamily);
+      return actual || {
+        elementId: entry.elementId,
+        behaviorFamily,
+        assigned: false,
+        state: "NOT_APPLICABLE",
+        reasonCode: "BEHAVIOR_NOT_ASSIGNED_TO_THIS_ELEMENT",
+      };
+    }),
+  }));
+  const generated = behaviors.filter((row) => !manifest.entries.some(
+    (entry) => entry.elementId === row.elementId,
+  ));
+  return { authored, generated };
 }
 
 async function runDeterministicPasteProbe({
@@ -1129,6 +2558,7 @@ async function runDeterministicPasteProbe({
       .toContain(pasteMarker);
   });
   return {
+    targetId: plan.id,
     marker: pasteMarker,
     inputAuthority: "Playwright keyboard shortcut with restored Electron clipboard",
     sourceScope: assertScopedMutation({
@@ -1189,6 +2619,7 @@ for (const filename of files) {
   const row = {
     filename,
     originalSha256: null,
+    originalSize: null,
     status: "NOT_EXECUTED",
     plannedTargets: [],
     completedTargets: [],
@@ -1202,10 +2633,15 @@ for (const filename of files) {
   let plans = [];
   let selectedPlans = [];
   let successful = [];
+  let frozenCapability = null;
+  let capabilityObservations = [];
+  const behaviorRows = [];
+  let capabilityFailure = null;
   try {
     try {
       original = readFileSync(originalPath);
       row.originalSha256 = sha256(original);
+      row.originalSize = original.length;
       mkdirSync(copyDir, { recursive: true });
       writeFileSync(copyPath, original);
     } catch (cause) {
@@ -1216,7 +2652,7 @@ for (const filename of files) {
       throw cause;
     }
     try {
-      session = await launchPageRoot({ activeSourcePath: copyPath });
+      session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
     } catch (cause) {
       resultReport.blockFile(filename, "ENVIRONMENT_BLOCKED", {
         exactReason: "ELECTRON_LAUNCH_FAILED",
@@ -1228,6 +2664,34 @@ for (const filename of files) {
     await waitForProjectReady(page);
     await waitUntilEditable(page);
     workingCopyPath = await managedWorkingCopyPath(page, copyPath);
+    try {
+      frozenCapability = await freezeCapabilityManifest(page, workingCopyPath);
+      row.capabilityManifest = {
+        fingerprint: frozenCapability.fingerprint,
+        denominator: frozenCapability.manifest.denominator,
+        selected: frozenCapability.selection.selected.length,
+        excluded: frozenCapability.manifest.excluded.length,
+        regions: frozenCapability.manifest.regions,
+        majorTypes: frozenCapability.manifest.majorTypes,
+        capabilityFamilies: frozenCapability.manifest.capabilityFamilies,
+        behaviorFamilies: frozenCapability.manifest.behaviorFamilies,
+        runtimeGeneratedTargets: frozenCapability.runtimeGeneratedTargets,
+        runtimeGeneratedDiagnostics: frozenCapability.runtimeGeneratedDiagnostics,
+        entries: frozenCapability.manifest.entries,
+        exclusions: frozenCapability.manifest.excluded,
+        selection: {
+          selectedIds: frozenCapability.selection.selected.map((entry) => entry.elementId),
+          threshold: frozenCapability.selection.threshold,
+          required: frozenCapability.selection.required,
+          replacements: frozenCapability.selection.replacements,
+        },
+      };
+    } catch (cause) {
+      row.capabilityError = errorDetails(cause);
+      capabilityFailure = cause;
+      await page.keyboard.press("Escape").catch(() => {});
+      await waitUntilEditable(page).catch(() => {});
+    }
     try {
     plans = await planTextTargets(page, workingCopyPath);
     selectedPlans = plans.slice(0, TEXT_TARGET_COUNT);
@@ -1396,77 +2860,87 @@ for (const filename of files) {
     await stopPageRoot(session.electronApp, session.isolatedUserData);
     session = undefined;
     writeFileSync(copyPath, original);
-    session = await launchPageRoot({ activeSourcePath: copyPath });
+    session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
     page = session.page;
     await waitForProjectReady(page);
     await waitUntilEditable(page);
     workingCopyPath = await managedWorkingCopyPath(page, copyPath);
 
     try {
-    const structureFrame = await currentEditorFrame(page);
-    const structureSamples = await inspectFixedStructureSamples(structureFrame);
-    row.structureSamples = structureSamples;
-    const copyable = structureSamples.expectedCopyable;
-    const nonCopyable = structureSamples.expectedNonCopyable;
-    let duplicateIds = [];
+    const copyableEntries = frozenCapability?.manifest.entries.filter((entry) => (
+      entry.capabilityFamilies.includes("copy")
+    )) || [];
+    const copyable = copyableEntries.find((entry) => entry.capabilityFamilies.includes("text"))
+      || copyableEntries[0]
+      || null;
+    const nonCopyable = frozenCapability?.manifest.entries.find((entry) => (
+      entry.capabilitySnapshot?.copyAvailability === "unsupported"
+      && !entry.capabilityFamilies.includes("copy")
+    )) || null;
+    const duplicateIds = [];
     const deferredStructureFailures = [];
-    if (copyable.status === "invalid") {
-      const error = new Error("The expected-copyable marker must resolve to exactly one valid target.");
-      error.code = copyable.reason;
-      deferredStructureFailures.push({
-        operationId: REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
-        error,
-      });
-    }
-    if (copyable.status === "missing") {
+    if (!copyable) {
       resultReport.notApplicableOperation(
         filename,
         REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
         REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
-        {
-          exactReason: FIXED_STRUCTURE_REASON_CODES.SAMPLE_NOT_FOUND,
-          sampleId: FIXED_STRUCTURE_SAMPLES.expectedCopyable.id,
-          selector: FIXED_STRUCTURE_SAMPLES.expectedCopyable.selector,
-        },
+        { exactReason: "NO_FROZEN_COPYABLE_AUTHORED_ELEMENT" },
       );
       resultReport.notApplicableOperation(
         filename,
         REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
         REAL_HTML_OPERATION_IDS.STRUCTURE_DELETE_DUPLICATE,
-        { exactReason: "COPYABLE_SAMPLE_NOT_AVAILABLE" },
+        { exactReason: "NO_DUPLICATE_CREATED" },
       );
-    } else if (copyable.status !== "invalid") {
+    } else {
       const copyablePlan = {
-        id: copyable.sourceId,
-        tag: copyable.tagName,
-        tabId: null,
+        id: copyable.elementId,
+        tag: copyable.tag,
+        tabId: copyable.tabId,
       };
       let originalIds;
+      let duplicateEditTargetId = null;
       let copyableError = null;
       try {
-        const fixedCopyableTarget = (await currentEditorFrame(page))
-          .locator(FIXED_STRUCTURE_SAMPLES.expectedCopyable.selector);
-        await fixedCopyableTarget.click();
-        await expect(
-          editorFor(page).getByRole("button", { name: "复制元素", exact: true }),
-        ).toBeVisible();
         for (let cycle = 0; cycle < 2; cycle += 1) {
           const duplicate = await duplicateFixedStructureTarget({
             page,
             workingCopyPath,
             originalSha256: row.originalSha256,
             plan: copyablePlan,
-            selector: FIXED_STRUCTURE_SAMPLES.expectedCopyable.selector,
+          });
+          expect(duplicate.capability).toMatchObject({
+            uiAvailability: "available",
+            uiReason: "available",
+            commandAvailability: "available",
+            commandReason: "available",
           });
           originalIds ||= duplicate.beforeIds;
           duplicateIds.push(duplicate.duplicateId);
           row.structureCycles.push({
             cycle,
-            originalId: copyable.sourceId,
+            originalId: copyable.elementId,
             duplicateId: duplicate.duplicateId,
             result: "copied",
             diagnostic: duplicate.diagnostic,
+            capability: duplicate.capability,
+            runtime: duplicate.runtime,
           });
+          if (cycle === 0 && copyable.capabilityFamilies.includes("text")) {
+            const duplicatePlan = { ...copyablePlan, id: duplicate.duplicateId };
+            duplicateEditTargetId = duplicate.duplicateId;
+            const duplicateMarker = `PRQA_${fileIndex}_DUPLICATE_EDIT`;
+            const beforeEditRevision = await currentRevision(page);
+            const duplicateTarget = await enterNativeEdit(page, duplicatePlan);
+            await duplicateTarget.press(keyShortcut("ArrowDown"));
+            await page.keyboard.insertText(` ${duplicateMarker}`);
+            await saveAndExitTextOperation(page, beforeEditRevision);
+            expect(readFileSync(workingCopyPath, "utf8")).toContain(duplicateMarker);
+            row.structureCycles[row.structureCycles.length - 1].duplicateEdit = {
+              marker: duplicateMarker,
+              result: "edited",
+            };
+          }
         }
       } catch (cause) {
         copyableError = cause;
@@ -1482,16 +2956,18 @@ for (const filename of files) {
           REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
           REAL_HTML_OPERATION_IDS.STRUCTURE_COPYABLE,
           {
-            sampleId: copyable.sampleId,
-            sourceId: copyable.sourceId,
+            sourceId: copyable.elementId,
             expectedCopyable: true,
+            frozenCapability: copyable.capabilitySnapshot,
+            cycles: row.structureCycles.length,
+            duplicateEditTargetId,
           },
         );
         try {
           await deleteFixedStructureTargets({
             page,
+            workingCopyPath,
             plan: copyablePlan,
-            selector: FIXED_STRUCTURE_SAMPLES.expectedCopyable.selector,
             duplicateIds,
             originalIds,
           });
@@ -1511,37 +2987,47 @@ for (const filename of files) {
       }
     }
 
-    if (nonCopyable.status === "invalid") {
-      const error = new Error(
-        "The expected-non-copyable marker must resolve to exactly one valid target.",
-      );
-      error.code = nonCopyable.reason;
-      deferredStructureFailures.push({
-        operationId: REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE,
-        error,
-      });
-    }
-    if (nonCopyable.status === "missing") {
+    if (!nonCopyable) {
       resultReport.notApplicableOperation(
         filename,
         REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
         REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE,
-        {
-          exactReason: FIXED_STRUCTURE_REASON_CODES.SAMPLE_NOT_FOUND,
-          sampleId: FIXED_STRUCTURE_SAMPLES.expectedNonCopyable.id,
-          selector: FIXED_STRUCTURE_SAMPLES.expectedNonCopyable.selector,
-        },
+        { exactReason: "NO_FROZEN_NON_COPYABLE_AUTHORED_ELEMENT" },
       );
     } else {
       try {
-        const nonCopyableTarget = (await currentEditorFrame(page))
-          .locator(FIXED_STRUCTURE_SAMPLES.expectedNonCopyable.selector);
-        await nonCopyableTarget.click();
+        await clickAuthoredTab(page, nonCopyable.tabId);
+        const observed = await probeAuthoredCapability({
+          page,
+          frame: await currentEditorFrame(page),
+          editor: editorFor(page),
+          candidate: {
+            stableId: nonCopyable.elementId,
+            tag: nonCopyable.tag,
+            sourceEditable: nonCopyable.capabilityFamilies.includes("text"),
+            visible: true,
+            isConnected: true,
+            inert: false,
+            runtimeGenerated: false,
+            tabId: nonCopyable.tabId,
+            region: nonCopyable.region,
+            scrollContainer: nonCopyable.scrollContainer,
+          },
+        });
+        expect(observed.selectedId).toBe(nonCopyable.elementId);
+        expect(observed.copyAvailability).toBe("unsupported");
+        expect(typeof observed.copyReason === "string" && observed.copyReason.length > 0).toBe(true);
+        expect(await editorFor(page).getByRole(
+          "button",
+          { name: "复制元素", exact: true },
+        ).count()).toBe(0);
         const nonCopyablePlan = {
-          id: nonCopyable.sourceId,
-          tag: nonCopyable.tagName,
-          tabId: null,
+          id: nonCopyable.elementId,
+          tag: nonCopyable.tag,
+          tabId: nonCopyable.tabId,
         };
+        const nonCopyableTarget = (await currentEditorFrame(page))
+          .locator(`[data-pageroot-id=${JSON.stringify(nonCopyable.elementId)}]`);
         const relocated = await nonCopyableTarget.evaluate((element, expected) => ({
           count: 1,
           stableId: element.getAttribute("data-pageroot-id"),
@@ -1559,33 +3045,23 @@ for (const filename of files) {
           originalSha256: row.originalSha256,
           relocated,
         });
-        await expect(
-          editorFor(page).getByRole("button", { name: "复制元素", exact: true }),
-        ).toHaveCount(0);
         expect(await nonCopyableTarget.evaluate(
           (element) => element.isContentEditable,
         )).toBe(false);
-        const copyAvailability = await editorFor(page)
-          .getAttribute("data-element-copy-availability");
-        expect(copyAvailability).toBe("unsupported");
-        const capabilityReason = await editorFor(page)
-          .getAttribute("data-element-copy-reason");
-        expect(capabilityReason).toBeTruthy();
         expect(diagnostic.commandBoundary.availability).toBe("unsupported");
         expect(diagnostic.commandBoundary.reason).toBeTruthy();
         expect(diagnostic.commandBoundary.reason).not.toBe("available");
-        expect(diagnostic.commandBoundary.targetStableId).toBe(nonCopyable.sourceId);
+        expect(diagnostic.commandBoundary.targetStableId).toBe(nonCopyable.elementId);
         resultReport.passOperation(
           filename,
           REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
           REAL_HTML_OPERATION_IDS.STRUCTURE_NON_COPYABLE,
           {
-            sampleId: nonCopyable.sampleId,
-            sourceId: nonCopyable.sourceId,
+            sourceId: nonCopyable.elementId,
             expectedCopyable: false,
             contentEditable: false,
-            copyAvailability,
-            capabilityReason,
+            copyAvailability: observed.copyAvailability,
+            capabilityReason: observed.copyReason,
             diagnostic,
           },
         );
@@ -1613,11 +3089,11 @@ for (const filename of files) {
     }
     if (structureRows.every((resultRow) => resultRow.state === "NOT_APPLICABLE")) {
       resultReport.notApplicableStage(filename, REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE, {
-        exactReason: "FIXED_STRUCTURE_SAMPLES_UNAVAILABLE",
+        exactReason: "NO_APPLICABLE_FROZEN_STRUCTURE_TARGETS",
       });
     } else {
       resultReport.passStage(filename, REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE, {
-        fixedSamples: structureSamples,
+        frozenManifestFingerprint: frozenCapability?.fingerprint || null,
       });
     }
 
@@ -1640,7 +3116,7 @@ for (const filename of files) {
     await stopPageRoot(session.electronApp, session.isolatedUserData);
     session = undefined;
     writeFileSync(copyPath, original);
-    session = await launchPageRoot({ activeSourcePath: copyPath });
+    session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
     page = session.page;
     await waitForProjectReady(page);
     await waitUntilEditable(page);
@@ -1674,25 +3150,24 @@ for (const filename of files) {
 
     const reloadBefore = await runtimeContractSnapshot(page);
     await startRuntimeLifecycleObservation(page);
-    await page.getByRole("button", { name: "更多", exact: true }).click();
-    await page.getByRole("menuitem", { name: "从磁盘重新载入 HTML", exact: true }).click();
-    await expect(page.locator(".workbench-chrome-status"))
-      .toHaveText("页面已重新加载，可以继续编辑", { timeout: 60_000 });
-    await waitUntilEditable(page);
-    await waitForRuntimeReloadTerminal(page);
-    const runtimeObservations = await stopRuntimeLifecycleObservation(page);
+    let runtimeObservations;
+    try {
+      await page.getByRole("button", { name: "更多", exact: true }).click();
+      await page.getByRole("menuitem", { name: "从磁盘重新载入 HTML", exact: true }).click();
+      await expect(page.locator(".workbench-chrome-status"))
+        .toHaveText("页面已重新加载，可以继续编辑", { timeout: 60_000 });
+      await waitUntilEditable(page);
+      await waitForRuntimeReloadTerminal(page);
+    } finally {
+      runtimeObservations = await stopRuntimeLifecycleObservation(page);
+    }
     const reloadAfter = await runtimeContractSnapshot(page);
     const candidateNotApplicableReason = (
       reloadAfter.runtimePhase === "static"
       && reloadAfter.runtimeOutcome === "not-candidate"
     )
       ? "STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE"
-      : (
-        reloadAfter.runtimePhase === "static-fallback"
-        && reloadAfter.runtimeOutcome === "prepare-failed"
-      )
-        ? "RUNTIME_PREPARATION_FAILED_BEFORE_CANDIDATE"
-        : null;
+      : null;
     row.runtime = {
       ordinaryBefore: null,
       ordinaryAfter: null,
@@ -1735,7 +3210,6 @@ for (const filename of files) {
         operationId,
         outcome,
       );
-      if (outcome.state === "FAIL") break;
     }
     const runtimeRows = resultReport.rowsForFile(filename).filter(
       (resultRow) => resultRow.level === "operation"
@@ -1801,7 +3275,7 @@ for (const filename of files) {
     await stopPageRoot(session.electronApp, isolatedUserData, { cleanup: false });
     session = undefined;
     try {
-      session = await launchPageRoot({ isolatedUserData });
+      session = await launchPageRoot({ isolatedUserData, ...REAL_HTML_LAUNCH_OPTIONS });
       await waitForProjectReady(session.page);
       await waitUntilEditable(session.page);
       if (!runtimePlan) {
@@ -1857,7 +3331,7 @@ for (const filename of files) {
       filename,
       REAL_HTML_STAGE_IDS.RUNTIME_IFRAME,
       REAL_HTML_OPERATION_IDS.ORIGINAL_SOURCE_IMMUTABLE,
-      { originalSha256: row.originalSha256 },
+      { originalSha256: row.originalSha256, originalSize: original.length },
     );
     resultReport.passStage(filename, REAL_HTML_STAGE_IDS.RUNTIME_IFRAME, {
       observations: runtimeObservations,
@@ -1879,10 +3353,321 @@ for (const filename of files) {
       await waitUntilEditable(page).catch(() => {});
     }
 
-    const failedStages = resultReport.rowsForFile(filename).filter(
+    try {
+      if (session) {
+        await stopPageRoot(session.electronApp, session.isolatedUserData);
+        session = undefined;
+      }
+      writeFileSync(copyPath, original);
+      session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
+      page = session.page;
+      await waitForProjectReady(page);
+      await waitUntilEditable(page);
+      workingCopyPath = await managedWorkingCopyPath(page, copyPath);
+      const runtimeState = await runtimeContractSnapshot(page);
+      const staticReason = runtimeState.runtimePhase === "static"
+        && runtimeState.runtimeOutcome === "not-candidate"
+        ? "STATIC_DOCUMENT_HAS_NO_RUNTIME_CANDIDATE"
+        : null;
+      if (
+        runtimeState.runtimePhase === "static-fallback"
+        && runtimeState.runtimeOutcome === "prepare-failed"
+      ) {
+        const error = new Error("Dynamic Runtime preparation failed before continuity qualification.");
+        error.code = "RUNTIME_PREPARATION_FAILED_BEFORE_CONTINUITY";
+        throw error;
+      }
+      if (staticReason) {
+        resultReport.notApplicableOperation(
+          filename,
+          REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN,
+          REAL_HTML_OPERATION_IDS.CONTINUITY_CHAIN_RESULT,
+          { exactReason: staticReason },
+        );
+        resultReport.notApplicableStage(filename, REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN, {
+          exactReason: staticReason,
+        });
+      } else {
+        const continuityPlans = await planTextTargets(page, workingCopyPath, {
+          limit: 2,
+          requireFormatTarget: false,
+        });
+        const continuityCopyEntry = frozenCapability?.manifest.entries.find((entry) => (
+          entry.capabilityFamilies.includes("copy")
+        )) || null;
+        if (!continuityCopyEntry) {
+          resultReport.notApplicableOperation(
+            filename,
+            REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN,
+            REAL_HTML_OPERATION_IDS.CONTINUITY_CHAIN_RESULT,
+            { exactReason: "NO_FROZEN_COPYABLE_AUTHORED_ELEMENT_FOR_CONTINUITY" },
+          );
+          resultReport.notApplicableStage(filename, REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN, {
+            exactReason: "NO_FROZEN_COPYABLE_AUTHORED_ELEMENT_FOR_CONTINUITY",
+          });
+        } else if (continuityPlans.length < 2) {
+          resultReport.notApplicableOperation(
+            filename,
+            REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN,
+            REAL_HTML_OPERATION_IDS.CONTINUITY_CHAIN_RESULT,
+            { exactReason: "INSUFFICIENT_FROZEN_TEXT_TARGETS_FOR_CONTINUITY" },
+          );
+          resultReport.notApplicableStage(filename, REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN, {
+            exactReason: "INSUFFICIENT_FROZEN_TEXT_TARGETS_FOR_CONTINUITY",
+          });
+        } else {
+          const continuity = await runContinuityQualification({
+            page,
+            workingCopyPath,
+            textPlans: continuityPlans,
+            copyEntry: continuityCopyEntry,
+            fileIndex,
+          });
+          row.continuity = continuity;
+          resultReport.passOperation(
+            filename,
+            REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN,
+            REAL_HTML_OPERATION_IDS.CONTINUITY_CHAIN_RESULT,
+            {
+              cycleCount: continuity.cycles.length,
+              cycles: continuity.cycles,
+            },
+          );
+          resultReport.passStage(filename, REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN, {
+            cycleCount: continuity.cycles.length,
+          });
+        }
+      }
+    } catch (cause) {
+      row.continuityError = errorDetails(cause);
+      recordOperationFailure(
+        filename,
+        REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN,
+        REAL_HTML_OPERATION_IDS.CONTINUITY_CHAIN_RESULT,
+        cause,
+      );
+      resultReport.failStage(
+        filename,
+        REAL_HTML_STAGE_IDS.CONTINUITY_CHAIN,
+        errorDetails(cause),
+      );
+      await page.keyboard.press("Escape").catch(() => {});
+      await waitUntilEditable(page).catch(() => {});
+    }
+
+    if (frozenCapability) {
+      try {
+        if (session) {
+          await stopPageRoot(session.electronApp, session.isolatedUserData);
+          session = undefined;
+        }
+        writeFileSync(copyPath, original);
+        session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
+        page = session.page;
+        await waitForProjectReady(page);
+        await waitUntilEditable(page);
+        const capabilityRun = await runDedicatedCapabilityStage({
+          session,
+          copyPath,
+          frozenCapability,
+          fileIndex,
+        });
+        session = capabilityRun.session;
+        page = capabilityRun.page;
+        workingCopyPath = capabilityRun.workingCopyPath;
+        capabilityObservations = capabilityRun.observations;
+        behaviorRows.push(...capabilityRun.rows);
+        row.runtimeGeneratedCoverage = capabilityRun.runtimeGenerated;
+        const runtimeGeneratedRows = capabilityRun.rows.filter((entry) => (
+          entry.capabilityFamily === "runtime-generated"
+        ));
+        const runtimeDiagnosticsIssue = runtimeGeneratedDiagnosticsIssue(
+          frozenCapability.runtimeGeneratedDiagnostics,
+        );
+        if (runtimeDiagnosticsIssue) {
+          const error = new Error("Runtime-generated target diagnostics were incomplete.");
+          error.code = runtimeDiagnosticsIssue;
+          error.details = {
+            diagnostics: frozenCapability.runtimeGeneratedDiagnostics,
+          };
+          recordOperationFailure(
+            filename,
+            REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+            REAL_HTML_OPERATION_IDS.CAPABILITY_RUNTIME_GENERATED_BOUNDARY,
+            error,
+          );
+          capabilityFailure ||= error;
+        } else if (frozenCapability.runtimeGeneratedTargets.length === 0) {
+          resultReport.notApplicableOperation(
+            filename,
+            REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+            REAL_HTML_OPERATION_IDS.CAPABILITY_RUNTIME_GENERATED_BOUNDARY,
+            {
+              exactReason: "NO_PROVABLE_RUNTIME_GENERATED_TARGET",
+              diagnostics: frozenCapability.runtimeGeneratedDiagnostics,
+            },
+          );
+        } else if (runtimeGeneratedRows.some((entry) => entry.state !== "PASS")) {
+          const error = new Error("A frozen Runtime-generated target failed its boundary check.");
+          error.code = "RUNTIME_GENERATED_BOUNDARY_FAILED";
+          error.details = {
+            failures: runtimeGeneratedRows.filter((entry) => entry.state !== "PASS"),
+          };
+          recordOperationFailure(
+            filename,
+            REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+            REAL_HTML_OPERATION_IDS.CAPABILITY_RUNTIME_GENERATED_BOUNDARY,
+            error,
+          );
+          capabilityFailure ||= error;
+        } else {
+          resultReport.passOperation(
+            filename,
+            REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+            REAL_HTML_OPERATION_IDS.CAPABILITY_RUNTIME_GENERATED_BOUNDARY,
+            capabilityRun.runtimeGenerated,
+          );
+        }
+      } catch (cause) {
+        capabilityFailure ||= cause;
+        row.capabilityExecutionError = errorDetails(cause);
+        const runtimeOperation = resultReport.rowsForFile(filename).find((entry) => (
+          entry.level === "operation"
+          && entry.operationId === REAL_HTML_OPERATION_IDS.CAPABILITY_RUNTIME_GENERATED_BOUNDARY
+        ));
+        if (runtimeOperation?.state === "NOT_EXECUTED" && runtimeOperation.reasonCode === "NOT_STARTED") {
+          recordOperationFailure(
+            filename,
+            REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+            REAL_HTML_OPERATION_IDS.CAPABILITY_RUNTIME_GENERATED_BOUNDARY,
+            cause,
+          );
+        }
+      }
+    }
+
+    if (frozenCapability) {
+      const matrixBehaviors = capabilityBehaviorRows(
+        filename,
+        frozenCapability,
+        behaviorRows,
+      );
+      const matrix = createCapabilityMatrix({
+        manifest: frozenCapability.manifest,
+        selection: frozenCapability.selection,
+        observations: capabilityObservations,
+        behaviors: matrixBehaviors,
+        originalSource: { hash: row.originalSha256, size: original.length },
+        observedSource: {
+          hash: sha256(readFileSync(originalPath)),
+          size: readFileSync(originalPath).length,
+        },
+      });
+      row.capabilityMatrix = {
+        coverage: matrix.verdict.coverage,
+        observationCount: matrix.observations.length,
+        behaviorCount: matrix.actualBehaviors.length,
+        failures: matrix.verdict.failures,
+        observations: matrix.observations,
+        actualBehaviors: matrix.actualBehaviors,
+        elementCapabilityBehaviorMatrix: fullElementBehaviorMatrix(
+          frozenCapability.manifest,
+          frozenCapability.selection,
+          matrix.observations,
+          matrix.actualBehaviors,
+        ),
+        manifest: row.capabilityManifest,
+        sourceFence: {
+          original: { hash: row.originalSha256, size: original.length },
+          observed: {
+            hash: sha256(readFileSync(originalPath)),
+            size: readFileSync(originalPath).length,
+          },
+        },
+      };
+      if (matrix.verdict.ok && !capabilityFailure) {
+        resultReport.passOperation(
+          filename,
+          REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+          REAL_HTML_OPERATION_IDS.CAPABILITY_MATRIX_RESULT,
+          row.capabilityMatrix,
+        );
+        resultReport.passStage(filename, REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX, {
+          manifestFingerprint: frozenCapability.fingerprint,
+          coverage: matrix.verdict.coverage,
+        });
+      } else {
+        const error = capabilityFailure
+          || new Error("The frozen element capability and behavior matrix failed.");
+        error.code ||= "CAPABILITY_BEHAVIOR_MATRIX_FAILED";
+        error.details ||= { failures: matrix.verdict.failures };
+        recordOperationFailure(
+          filename,
+          REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+          REAL_HTML_OPERATION_IDS.CAPABILITY_MATRIX_RESULT,
+          error,
+        );
+        resultReport.failStage(filename, REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX, errorDetails(error));
+      }
+    } else {
+      const error = capabilityFailure || new Error("Capability manifest was not produced.");
+      error.code ||= "CAPABILITY_MANIFEST_MISSING";
+      recordOperationFailure(
+        filename,
+        REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+        REAL_HTML_OPERATION_IDS.CAPABILITY_RUNTIME_GENERATED_BOUNDARY,
+        error,
+      );
+      recordOperationFailure(
+        filename,
+        REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX,
+        REAL_HTML_OPERATION_IDS.CAPABILITY_MATRIX_RESULT,
+        error,
+      );
+      resultReport.failStage(filename, REAL_HTML_STAGE_IDS.CAPABILITY_MATRIX, errorDetails(error));
+    }
+
+    if (session) {
+      await stopPageRoot(session.electronApp, session.isolatedUserData);
+      session = undefined;
+    }
+    let finalOriginalIssue = null;
+    try {
+      const finalOriginal = readFileSync(originalPath);
+      row.originalFinalSha256 = sha256(finalOriginal);
+      row.originalFinalSize = finalOriginal.length;
+      const identity = compareOriginalFileIdentity({
+        expectedSha256: row.originalSha256,
+        expectedSize: row.originalSize,
+        observedSha256: row.originalFinalSha256,
+        observedSize: row.originalFinalSize,
+      });
+      row.originalUnchanged = identity.ok;
+      if (!identity.ok) finalOriginalIssue = identity;
+    } catch (cause) {
+      row.originalUnchanged = null;
+      row.originalVerificationError = String(cause?.stack || cause);
+      finalOriginalIssue = {
+        exactReason: "FINAL_ORIGINAL_VERIFICATION_FAILED",
+        ...errorDetails(cause),
+      };
+    }
+    const fileRowsBeforeVerdict = resultReport.rowsForFile(filename);
+    const { unexplainedNotApplicable, unresolvedRows } = qualificationResultIssues(
+      fileRowsBeforeVerdict,
+    );
+    const failedStages = fileRowsBeforeVerdict.filter(
       (resultRow) => resultRow.level === "stage" && resultRow.state === "FAIL",
     );
-    if (failedStages.length > 0) {
+    if (finalOriginalIssue) {
+      resultReport.failFile(filename, finalOriginalIssue);
+    } else if (unexplainedNotApplicable.length > 0 || unresolvedRows.length > 0) {
+      resultReport.failFile(filename, {
+        exactReason: "INCOMPLETE_QUALIFICATION_RESULT_MODEL",
+        unexplainedNotApplicable: unexplainedNotApplicable.map((entry) => entry.id),
+        unresolvedRows: unresolvedRows.map((entry) => entry.id),
+      });
+    } else if (failedStages.length > 0) {
       resultReport.failFile(filename, {
         exactReason: "CATEGORY_FAILED",
         failedStages: failedStages.map((stage) => stage.stageId),
@@ -1912,9 +3697,17 @@ for (const filename of files) {
         row.cleanupError = String(cause?.stack || cause);
       });
     }
-    if (original) {
+    if (original && row.originalFinalSize == null) {
       try {
-        row.originalUnchanged = sha256(readFileSync(originalPath)) === row.originalSha256;
+        const finalOriginal = readFileSync(originalPath);
+        row.originalFinalSha256 = sha256(finalOriginal);
+        row.originalFinalSize = finalOriginal.length;
+        row.originalUnchanged = compareOriginalFileIdentity({
+          expectedSha256: row.originalSha256,
+          expectedSize: row.originalSize,
+          observedSha256: row.originalFinalSha256,
+          observedSize: row.originalFinalSize,
+        }).ok;
       } catch (cause) {
         row.originalUnchanged = null;
         row.originalVerificationError = String(cause?.stack || cause);

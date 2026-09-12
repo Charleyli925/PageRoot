@@ -2,7 +2,77 @@
 // Keep all state on the renderer global so the same observer can be exercised
 // by a tiny DOM fixture without launching the real-HTML corpus runner.
 
-export function startRuntimeCandidateObservation(element) {
+export const RUNTIME_OBSERVER_RECORD_KINDS = Object.freeze({
+  REQUEST: "rebuild-request",
+  CANDIDATE: "candidate-created",
+  GENERATION: "generation",
+  CANDIDATE_TERMINAL: "candidate-terminal",
+  RUNTIME_TERMINAL: "runtime-terminal",
+  ACTIVE_IDENTITY: "active-identity",
+});
+
+function nonEmpty(value) {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+function number(value) {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+  if (typeof value === "string" && /^\d+$/u.test(value.trim())) {
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+/**
+ * Reduce observer records to independent lifecycle facts.  A caller may feed
+ * this result into the continuity-chain oracle; no fact is inferred from a
+ * neighbouring kind of record.
+ */
+export function summarizeRuntimeObserverRecords(records) {
+  const all = Array.isArray(records) ? records : [];
+  const requests = all.filter((record) => record?.kind === RUNTIME_OBSERVER_RECORD_KINDS.REQUEST);
+  const candidates = all.filter((record) => record?.kind === RUNTIME_OBSERVER_RECORD_KINDS.CANDIDATE);
+  const generations = all.filter((record) => record?.kind === RUNTIME_OBSERVER_RECORD_KINDS.GENERATION);
+  const candidateTerminals = all.filter((record) => record?.kind === RUNTIME_OBSERVER_RECORD_KINDS.CANDIDATE_TERMINAL);
+  const runtimeTerminals = all.filter((record) => record?.kind === RUNTIME_OBSERVER_RECORD_KINDS.RUNTIME_TERMINAL);
+  const activeIdentities = all.filter((record) => record?.kind === RUNTIME_OBSERVER_RECORD_KINDS.ACTIVE_IDENTITY);
+  const candidate = candidates.find((record) => nonEmpty(record.candidateId)) || null;
+  const generation = generations.find((record) => (
+    number(record.beforeGeneration) != null && number(record.afterGeneration) != null
+  )) || null;
+  const candidateTerminal = candidateTerminals.find((record) => (
+    nonEmpty(record.terminal)
+    && (!candidate || record.candidateId === candidate.candidateId)
+  )) || null;
+  const runtimeTerminal = runtimeTerminals.findLast((record) => (
+    nonEmpty(record.terminal)
+    && ["settled", "static", "static-fallback"].includes(record.phase)
+  )) || null;
+  const activeIdentity = activeIdentities.find((record) => (
+    nonEmpty(record.candidateId) || nonEmpty(record.documentId)
+  )) || null;
+  return {
+    records: all,
+    request: requests.find((record) => nonEmpty(record.sourceRevision)) || null,
+    candidate,
+    candidateId: candidate?.candidateId || null,
+    candidateTerminal,
+    generation,
+    runtimeTerminal,
+    activeIdentity,
+    hasRequest: requests.some((record) => nonEmpty(record.sourceRevision)),
+    hasCandidate: Boolean(candidate),
+    hasCandidateTerminal: Boolean(candidateTerminal),
+    hasGeneration: Boolean(generation),
+    hasRuntimeTerminal: Boolean(runtimeTerminal),
+    hasActiveIdentity: Boolean(activeIdentity),
+  };
+}
+
+export const classifyRuntimeObserverRecords = summarizeRuntimeObserverRecords;
+
+export function startRuntimeCandidateObservation(element, options = {}) {
   const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
   globalThis[key]?.observer?.disconnect();
   const candidate = element.querySelector('iframe[data-frame-role="runtime-candidate"]');
@@ -11,6 +81,15 @@ export function startRuntimeCandidateObservation(element) {
     throw new Error("Runtime Candidate observation requires a clean absent precondition.");
   }
   const records = [];
+  const lifecycleRecords = [];
+  // Lifecycle facts are always collected separately.  The legacy stop
+  // function still returns only candidate records, so existing callers keep
+  // their contract while the lifecycle stop function can expose the full
+  // independent set.
+  const includeLifecycle = options?.includeLifecycle !== false && options?.lifecycle !== false;
+  let lastActiveGeneration = element.querySelector(
+    'iframe[data-runtime-slot-role="active"]',
+  )?.getAttribute("data-frame-generation") || null;
   const recorded = new Set();
   const observer = new MutationObserver((mutations) => {
     const recordCandidate = (evidence, candidateValue, generation = null) => {
@@ -23,9 +102,82 @@ export function startRuntimeCandidateObservation(element) {
         evidence,
         candidateId: candidateValue,
         generation,
+        sourceRevision: element.getAttribute("data-runtime-candidate-source-revision")
+          || mutations.findLast((entry) => (
+            entry.type === "attributes"
+            && entry.target === element
+            && entry.attributeName === "data-runtime-candidate-source-revision"
+            && typeof entry.oldValue === "string"
+            && entry.oldValue.trim() !== ""
+          ))?.oldValue
+          || null,
       });
     };
+    const recordLifecycle = (record) => {
+      if (!includeLifecycle) return;
+      const recordKey = [
+        record.kind,
+        record.evidence,
+        record.candidateId || "unknown",
+        record.generation || "unknown",
+        record.beforeGeneration || "unknown",
+        record.afterGeneration || "unknown",
+        record.terminal || "unknown",
+        record.documentId || "unknown",
+        record.sourceRevision || "unknown",
+        record.reason || "unknown",
+        record.phase || "unknown",
+        record.outcome || "unknown",
+      ].join(":");
+      if (recorded.has(`lifecycle:${recordKey}`)) return;
+      recorded.add(`lifecycle:${recordKey}`);
+      lifecycleRecords.push(record);
+    };
     for (const [index, mutation] of mutations.entries()) {
+      if (
+        includeLifecycle
+        && mutation.type === "attributes"
+        && mutation.target === element
+        && [
+          "data-runtime-refresh-pending",
+          "data-runtime-refresh-pending-source-revision",
+          "data-runtime-refresh-pending-reason",
+        ].includes(mutation.attributeName)
+      ) {
+        const requestWasRaised = element.hasAttribute("data-runtime-refresh-pending")
+          || mutations.some((entry) => (
+            entry.type === "attributes"
+            && entry.target === element
+            && entry.attributeName === "data-runtime-refresh-pending"
+            && entry.oldValue === null
+          ));
+        const sourceMutation = mutations.findLast((entry) => (
+          entry.type === "attributes"
+          && entry.target === element
+          && entry.attributeName === "data-runtime-refresh-pending-source-revision"
+          && typeof entry.oldValue === "string"
+          && entry.oldValue.trim() !== ""
+        ));
+        const reasonMutation = mutations.findLast((entry) => (
+          entry.type === "attributes"
+          && entry.target === element
+          && entry.attributeName === "data-runtime-refresh-pending-reason"
+          && typeof entry.oldValue === "string"
+          && entry.oldValue.trim() !== ""
+        ));
+        if (!requestWasRaised) continue;
+        recordLifecycle({
+          kind: "rebuild-request",
+          evidence: "runtime-refresh-pending",
+          status: "submitted",
+          sourceRevision: element.getAttribute("data-runtime-refresh-pending-source-revision")
+            || sourceMutation?.oldValue
+            || null,
+          reason: element.getAttribute("data-runtime-refresh-pending-reason")
+            || reasonMutation?.oldValue
+            || null,
+        });
+      }
       if (
         mutation.type === "attributes"
         && mutation.target === element
@@ -40,6 +192,30 @@ export function startRuntimeCandidateObservation(element) {
           && later.oldValue
         ));
         recordCandidate("candidate-id-absent-to-present", current || removedLater?.oldValue);
+      }
+      if (
+        includeLifecycle
+        && mutation.type === "attributes"
+        && mutation.target === element
+        && mutation.attributeName === "data-runtime-candidate-id"
+        && mutation.oldValue
+        && mutation.oldValue !== element.getAttribute("data-runtime-candidate-id")
+      ) {
+        const candidateId = mutation.oldValue;
+        const promoted = element.getAttribute("data-runtime-last-known-good-id") === candidateId;
+        const replacementId = element.getAttribute("data-runtime-candidate-id");
+        const surface = element.closest(".canvas-edit-surface");
+        recordLifecycle({
+          kind: "candidate-terminal",
+          evidence: "candidate-id-terminal-transition",
+          candidateId,
+          terminal: promoted
+            ? "ready"
+            : replacementId
+              ? "superseded"
+              : surface?.getAttribute("data-edit-runtime-outcome") || "failed",
+          sourceRevision: element.getAttribute("data-runtime-last-known-good-source-revision"),
+        });
       }
       if (
         mutation.type === "attributes"
@@ -63,6 +239,83 @@ export function startRuntimeCandidateObservation(element) {
           );
         }
       }
+      if (
+        includeLifecycle
+        && mutation.type === "attributes"
+        && mutation.attributeName === "data-frame-generation"
+      ) {
+        const beforeGeneration = mutation.oldValue;
+        const afterGeneration = mutation.target.getAttribute("data-frame-generation");
+        if (beforeGeneration !== afterGeneration) {
+          recordLifecycle({
+            kind: "generation",
+            evidence: "frame-generation-attribute-transition",
+            beforeGeneration,
+            afterGeneration,
+            generation: afterGeneration,
+            candidateId: element.getAttribute("data-runtime-candidate-id"),
+          });
+          if (mutation.target.getAttribute("data-runtime-slot-role") === "active") {
+            lastActiveGeneration = afterGeneration;
+          }
+        }
+      }
+      if (
+        includeLifecycle
+        && mutation.type === "attributes"
+        && mutation.attributeName === "data-runtime-slot-role"
+        && mutation.target.getAttribute("data-runtime-slot-role") === "active"
+      ) {
+        const frame = mutation.target;
+        const generation = frame.getAttribute("data-frame-generation");
+        if (lastActiveGeneration && generation && lastActiveGeneration !== generation) {
+          recordLifecycle({
+            kind: "generation",
+            evidence: "active-slot-promotion",
+            beforeGeneration: lastActiveGeneration,
+            afterGeneration: generation,
+            generation,
+            candidateId: element.getAttribute("data-runtime-last-known-good-id"),
+          });
+        }
+        lastActiveGeneration = generation || lastActiveGeneration;
+        let documentId = null;
+        try {
+          documentId = frame.contentWindow?.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ || null;
+        } catch {
+          documentId = null;
+        }
+        recordLifecycle({
+          kind: "active-identity",
+          evidence: "active-slot-promotion",
+          candidateId: element.getAttribute("data-runtime-last-known-good-id"),
+          generation,
+          documentId,
+        });
+      }
+      if (
+        includeLifecycle
+        && mutation.type === "attributes"
+        && mutation.target === element.closest(".canvas-edit-surface")
+        && ["data-edit-runtime-phase", "data-edit-runtime-outcome"].includes(
+          mutation.attributeName,
+        )
+      ) {
+        const phase = mutation.target.getAttribute("data-edit-runtime-phase");
+        const outcome = mutation.target.getAttribute("data-edit-runtime-outcome");
+        if (phase || outcome) {
+          recordLifecycle({
+            kind: "runtime-terminal",
+            evidence: "edit-runtime-terminal-transition",
+            terminal: outcome || phase,
+            phase,
+            outcome,
+            candidateId: element.getAttribute("data-runtime-last-known-good-id"),
+            generation: element.querySelector('iframe[data-runtime-slot-role="active"]')
+              ?.getAttribute("data-frame-generation") || null,
+          });
+        }
+      }
       if (mutation.type !== "childList") continue;
       for (const node of mutation.addedNodes) {
         if (!(node instanceof element.ownerDocument.defaultView.Element)) continue;
@@ -74,6 +327,14 @@ export function startRuntimeCandidateObservation(element) {
               element.getAttribute("data-runtime-candidate-id"),
               frame.getAttribute("data-frame-generation"),
             );
+            recordLifecycle({
+              kind: "generation",
+              evidence: "candidate-frame-added-generation",
+              beforeGeneration: null,
+              afterGeneration: frame.getAttribute("data-frame-generation"),
+              generation: frame.getAttribute("data-frame-generation"),
+              candidateId: element.getAttribute("data-runtime-candidate-id"),
+            });
           }
         }
       }
@@ -86,14 +347,31 @@ export function startRuntimeCandidateObservation(element) {
     subtree: true,
     attributeFilter: [
       "data-runtime-candidate-id",
+      "data-runtime-refresh-pending",
+      "data-runtime-refresh-pending-source-revision",
+      "data-runtime-refresh-pending-reason",
       "data-runtime-candidate-phase",
+      "data-runtime-activation",
+      "data-render-verified",
       "data-runtime-slot-role",
       "data-frame-role",
       "data-frame-generation",
     ],
   });
-  globalThis[key] = { observer, records };
+  const surface = element.closest(".canvas-edit-surface");
+  if (surface && surface !== element) {
+    observer.observe(surface, {
+      attributes: true,
+      attributeOldValue: true,
+      attributeFilter: ["data-edit-runtime-phase", "data-edit-runtime-outcome"],
+    });
+  }
+  globalThis[key] = { observer, records, lifecycleRecords, includeLifecycle };
 }
+
+// Alias the same self-contained callback so Playwright can serialize either
+// entry point without maintaining a second observer implementation.
+export const startRuntimeLifecycleObservation = startRuntimeCandidateObservation;
 
 export function stopRuntimeCandidateObservation() {
   const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
@@ -101,4 +379,19 @@ export function stopRuntimeCandidateObservation() {
   state?.observer?.disconnect();
   delete globalThis[key];
   return state?.records || [];
+}
+
+/** Return candidate and lifecycle records for new trust-chain consumers. */
+export function stopRuntimeLifecycleObservation() {
+  const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
+  const state = globalThis[key];
+  state?.observer?.disconnect();
+  delete globalThis[key];
+  const candidateRecords = state?.records || [];
+  const lifecycleRecords = state?.lifecycleRecords || [];
+  return {
+    candidateRecords,
+    lifecycleRecords,
+    records: [...candidateRecords, ...lifecycleRecords],
+  };
 }
