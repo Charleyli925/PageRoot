@@ -2244,7 +2244,8 @@ export class ProjectWorkflow {
         const outcome = await this.#documentWorkflow.flush({
           throughRevision: this.#documentSession.editRevision,
         });
-        if (outcome.status === "succeeded") return true;
+        if (outcome.status === "succeeded"
+          && this.#inspectSourceObligation(boundary).state === "resolved") return true;
         if (boundary !== "switch" && boundary !== "close") return false;
         const protectedOutcome = await this.#documentWorkflow.protectForDetach?.({
           context: this.#projectSession.context,

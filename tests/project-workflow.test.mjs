@@ -677,6 +677,78 @@ test("close protects the latest source without claiming a stale projection is cu
   )), true);
 });
 
+test("an idle source flush still requires verified recovery before detaching a conflicted or failed document", async (t) => {
+  for (const boundary of ["switch", "close"]) {
+    for (const persistState of ["conflict", "failed"]) {
+      for (const journalSucceeds of [true, false]) {
+        await t.test(`${boundary}: ${persistState}, journal ${journalSucceeds ? "verified" : "failed"}`, async (t) => {
+          let checkpointVerified = false;
+          let protectionAttempts = 0;
+          const harness = createHarness({
+            documentWorkflow: {
+              async flush() {
+                return succeeded({ revision: 0, idle: true });
+              },
+              canProtectForDetach() { return true; },
+              hasVerifiedProtectionEvidence({ revision } = {}) {
+                return checkpointVerified && revision === 0;
+              },
+              verifiedProtectionEvidence({ revision } = {}) {
+                return checkpointVerified && revision === 0
+                  ? { kind: "recoveryVerified", revision, htmlSha256: sha256(OLD_HTML) }
+                  : null;
+              },
+              async protectForDetach({ context }) {
+                protectionAttempts += 1;
+                assert.deepEqual(context, harness.projectSession.context);
+                assert.equal(harness.documentSession.html, OLD_HTML);
+                if (!journalSucceeds) {
+                  return {
+                    status: "rejected",
+                    code: "DOCUMENT_RECOVERY_CHECKPOINT_FAILED",
+                    reason: "journal readback failed",
+                  };
+                }
+                checkpointVerified = true;
+                return succeeded({ protected: true, evidence: "recoveryVerified" });
+              },
+            },
+          });
+          t.after(() => harness.workflow.dispose());
+          harness.documentSession.setPersistence({ state: persistState, error: "source replaced" });
+          const before = {
+            html: harness.documentSession.html,
+            workingHtmlSha256: harness.documentSession.workingHtmlSha256,
+            persistedSourceSha256: harness.documentSession.persistedSourceSha256,
+          };
+
+          const outcome = boundary === "switch"
+            ? await harness.workflow.prepareSwitch()
+            : await harness.workflow.prepareClose({
+                requestId: `close_idle_${persistState}_${journalSucceeds}`,
+                deadlineAt: Date.now() + 5_000,
+              });
+
+          assert.equal(protectionAttempts, 1);
+          assert.equal(checkpointVerified, journalSucceeds);
+          if (boundary === "switch") {
+            assert.equal(outcome.status, journalSucceeds ? "succeeded" : "blocked", JSON.stringify(outcome));
+          } else {
+            assert.equal(outcome.ready, journalSucceeds, JSON.stringify(outcome));
+          }
+          assert.equal(harness.documentSession.html, before.html);
+          assert.equal(harness.documentSession.workingHtmlSha256, before.workingHtmlSha256);
+          assert.equal(harness.documentSession.persistedSourceSha256, before.persistedSourceSha256);
+          assert.equal(harness.documentSession.persistState, persistState);
+          assert.equal(harness.documentSession.editRevision, 0);
+          assert.equal(harness.documentSession.lastPersistedRevision, 0);
+          assert.equal(harness.documentSession.pendingWrite, null);
+        });
+      }
+    }
+  }
+});
+
 test("a failed source write can switch only after an exact recovery checkpoint", async (t) => {
   let checkpointVerified = false;
   const harness = createHarness({
