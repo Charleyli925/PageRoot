@@ -157,10 +157,23 @@ test("caption selection promotes rich children to one canonical visual host", as
   });
   const first = frame.locator(caseSelector("rich-child-a"));
   const second = frame.locator(caseSelector("rich-child-b"));
+  const canonicalTarget = frame.locator(caseSelector("selected-overlay-target"));
   const hint = editor.getByTestId("canvas-capability-hint");
 
   await first.hover();
   await expect(hint).toBeVisible();
+  const canonicalTargetId = await canonicalTarget.getAttribute("data-pageroot-id");
+  const activeGeneration = await editor
+    .locator('iframe[data-runtime-slot-role="active"]')
+    .getAttribute("data-frame-generation");
+  await expect(hint).toHaveAttribute("data-capability-target-id", canonicalTargetId || "");
+  await expect(hint).toHaveAttribute("data-capability-target-key", `element:${canonicalTargetId}`);
+  await expect(hint).toHaveAttribute("data-capability-active-frame-generation", activeGeneration || "");
+  const targetDomGeneration = await hint.getAttribute("data-capability-target-dom-generation");
+  await expect(hint).toHaveAttribute(
+    "data-capability-current-dom-generation",
+    targetDomGeneration || "",
+  );
   await second.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     element.dispatchEvent(new PointerEvent("pointermove", {

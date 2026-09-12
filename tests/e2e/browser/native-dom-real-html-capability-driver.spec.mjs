@@ -198,8 +198,8 @@ async function capabilityFixture(
     window.__capabilityProbeClickCount = 0;
     document.querySelectorAll("[data-pageroot-id]").forEach((target) => {
       target.addEventListener("click", (event) => {
-        if (!event.altKey) return;
         window.__capabilityProbeClickCount += 1;
+        window.__capabilityProbeAltKey = event.altKey;
         document.querySelectorAll("[data-html-canvas-selected]")
           .forEach((candidate) => candidate.removeAttribute("data-html-canvas-selected"));
         const nextId = payload.selectedId || target.getAttribute("data-pageroot-id");
@@ -266,6 +266,7 @@ test("capability probe accepts only the exact selected Stable ID", HARNESS_TEST_
     "margin",
     "line-height",
   ]));
+  expect(await page.evaluate(() => window.__capabilityProbeAltKey)).toBe(false);
 });
 
 test("capability probe closes A's toolbar before the next exact click on B", HARNESS_TEST_OPTIONS, async ({ page }) => {
@@ -415,8 +416,7 @@ test("capability probe rejects an iframe host overlay that appears on pointer mo
   `);
   await child.locator("#target").evaluate((element) => {
     window.__capabilityProbeClickCount = 0;
-    element.addEventListener("click", (event) => {
-      if (!event.altKey) return;
+    element.addEventListener("click", () => {
       window.__capabilityProbeClickCount += 1;
       element.setAttribute("data-html-canvas-selected", "");
     });
@@ -438,6 +438,157 @@ test("capability probe rejects an iframe host overlay that appears on pointer mo
   });
   expect(Date.now() - startedAt).toBeLessThan(5_000);
   expect(await child.evaluate(() => window.__capabilityProbeClickCount)).toBe(0);
+});
+
+async function installIframeCapabilityHintFixture(page, {
+  hintTargetId = CORRECT_ID,
+  hintTargetDomGeneration = "11",
+  hintCurrentDomGeneration = "11",
+  hintActiveFrameGeneration = "7",
+  selectedId = CORRECT_ID,
+} = {}) {
+  await page.setContent(`
+    <style>
+      iframe { width: 320px; height: 180px; border: 0; }
+      [data-testid="canvas-capability-hint"] {
+        position: fixed; left: 8px; top: 8px; width: 320px; height: 180px; z-index: 20;
+      }
+    </style>
+    <main data-runtime-root data-element-copy-availability="available" data-element-copy-reason="available">
+      <iframe data-runtime-slot-role="active" data-frame-generation="7"></iframe>
+      <button
+        data-testid="canvas-capability-hint"
+        data-capability-target-id="${hintTargetId}"
+        data-capability-target-key="element:${hintTargetId}"
+        data-capability-target-dom-generation="${hintTargetDomGeneration}"
+        data-capability-current-dom-generation="${hintCurrentDomGeneration}"
+        data-capability-active-frame-generation="${hintActiveFrameGeneration}"
+        hidden
+      >Select exact target</button>
+      <div role="toolbar" aria-label="元素工具栏" hidden>
+        <button aria-label="留评论"></button>
+        <button aria-label="编辑"></button>
+        <button aria-label="复制元素"></button>
+      </div>
+    </main>
+  `);
+  const iframeElement = await page.locator("iframe").elementHandle();
+  const child = await iframeElement.contentFrame();
+  await child.setContent(`
+    <p id="target" data-pageroot-id="${CORRECT_ID}" style="display:block;width:240px;height:80px">
+      iframe authored target
+    </p>
+    <p data-pageroot-id="${WRONG_ID}">wrong target</p>
+  `);
+  await page.evaluate((nextSelectedId) => {
+    window.__capabilityHintClickCount = 0;
+    const iframe = document.querySelector("iframe");
+    const hint = document.querySelector('[data-testid="canvas-capability-hint"]');
+    iframe?.addEventListener("mouseenter", () => hint?.removeAttribute("hidden"));
+    hint?.addEventListener("click", () => {
+      window.__capabilityHintClickCount += 1;
+      const childDocument = iframe?.contentDocument;
+      childDocument?.querySelectorAll("[data-html-canvas-selected]")
+        .forEach((element) => element.removeAttribute("data-html-canvas-selected"));
+      childDocument?.querySelector(`[data-pageroot-id="${nextSelectedId}"]`)
+        ?.setAttribute("data-html-canvas-selected", "subregion");
+      document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
+    });
+  }, selectedId);
+  await page.mouse.move(0, 0);
+  return child;
+}
+
+test("capability probe accepts an exact product hover hint when DOM generation validly differs from frame generation", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  const child = await installIframeCapabilityHintFixture(page);
+  const observed = await probeAuthoredCapability({
+    page,
+    frame: child,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: candidate(),
+  });
+  expect(observed).toMatchObject({
+    probeReason: "CAPABILITY_OBSERVED",
+    selectedId: CORRECT_ID,
+  });
+  expect(await page.evaluate(() => window.__capabilityHintClickCount)).toBe(1);
+});
+
+test("capability probe rejects wrong-target, stale-frame, and stale-DOM product hover hints before click", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  const child = await installIframeCapabilityHintFixture(page, { hintTargetId: WRONG_ID });
+  const input = {
+    page,
+    frame: child,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: candidate(),
+  };
+  await expect(probeAuthoredCapability(input)).rejects.toMatchObject({
+    code: "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED",
+    details: { hitKind: "capability-hint-identity-mismatch" },
+  });
+  expect(await page.evaluate(() => window.__capabilityHintClickCount)).toBe(0);
+
+  await page.getByTestId("canvas-capability-hint").evaluate((hint, stableId) => {
+    hint.setAttribute("data-capability-target-id", stableId);
+    hint.setAttribute("data-capability-target-key", `element:${stableId}`);
+    hint.setAttribute("data-capability-active-frame-generation", "6");
+  }, CORRECT_ID);
+  await expect(probeAuthoredCapability(input)).rejects.toMatchObject({
+    code: "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED",
+    details: { hitKind: "capability-hint-identity-mismatch" },
+  });
+  expect(await page.evaluate(() => window.__capabilityHintClickCount)).toBe(0);
+
+  await page.getByTestId("canvas-capability-hint").evaluate((hint) => {
+    hint.setAttribute("data-capability-active-frame-generation", "7");
+    hint.setAttribute("data-capability-target-dom-generation", "10");
+    hint.setAttribute("data-capability-current-dom-generation", "11");
+  });
+  await expect(probeAuthoredCapability(input)).rejects.toMatchObject({
+    code: "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED",
+    details: { hitKind: "capability-hint-identity-mismatch" },
+  });
+  expect(await page.evaluate(() => window.__capabilityHintClickCount)).toBe(0);
+});
+
+test("capability probe rejects every incomplete product hover generation diagnostic before click", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  const missingGenerationCases = [
+    ["[data-runtime-slot-role=active]", "data-frame-generation"],
+    ["[data-testid=canvas-capability-hint]", "data-capability-target-dom-generation"],
+    ["[data-testid=canvas-capability-hint]", "data-capability-current-dom-generation"],
+    ["[data-testid=canvas-capability-hint]", "data-capability-active-frame-generation"],
+  ];
+  for (const [selector, attribute] of missingGenerationCases) {
+    const child = await installIframeCapabilityHintFixture(page);
+    await page.locator(selector).evaluate((element, name) => element.removeAttribute(name), attribute);
+    await expect(probeAuthoredCapability({
+      page,
+      frame: child,
+      editor: page.locator("[data-runtime-root]"),
+      candidate: candidate(),
+    })).rejects.toMatchObject({
+      code: "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED",
+      details: { hitKind: "capability-hint-identity-mismatch" },
+    });
+    expect(await page.evaluate(() => window.__capabilityHintClickCount)).toBe(0);
+  }
+
+  for (const invalidGeneration of ["01", "9007199254740992"]) {
+    const invalidChild = await installIframeCapabilityHintFixture(page, {
+      hintTargetDomGeneration: invalidGeneration,
+      hintCurrentDomGeneration: invalidGeneration,
+    });
+    await expect(probeAuthoredCapability({
+      page,
+      frame: invalidChild,
+      editor: page.locator("[data-runtime-root]"),
+      candidate: candidate(),
+    })).rejects.toMatchObject({
+      code: "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED",
+      details: { hitKind: "capability-hint-identity-mismatch" },
+    });
+    expect(await page.evaluate(() => window.__capabilityHintClickCount)).toBe(0);
+  }
 });
 
 test("capability probe reports a same-ID wrong DOM tag instead of echoing the frozen tag", HARNESS_TEST_OPTIONS, async ({ page }) => {
