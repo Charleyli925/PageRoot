@@ -36,14 +36,12 @@ import {
   ensureManagedWelcomeHtml,
   managedWelcomeSourcePath,
   readHtmlFile,
-  writeHtmlCopy,
 } from "./project-files.mjs";
 import { WELCOME_LOGO_RELATIVE_PATH } from "./welcome-project-content.mjs";
 import {
-  createSafeExportDefaultPath,
-  isProtectedExportDestination,
+  exportHtmlCopyToFile,
+  createExportRevealAccess,
   normalizeHtmlExportPath,
-  selectExportDestination,
 } from "./export-copy.mjs";
 import {
   createWorkspaceRecoveryMailbox,
@@ -384,6 +382,7 @@ let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let editRuntimeProtocolController = null;
 const editRuntimePreparationFence = createEditRuntimePreparationFence();
+const exportRevealAccess = createExportRevealAccess();
 const sourceFileWatcher = createSourceFileWatcher({
   debounceMs: 200,
   onChange(info) {
@@ -448,7 +447,7 @@ async function recoverWatchedManagedSource(info) {
       }
       const missing = await lstat(activePath).then(
         (information) => !information.isFile() || information.isSymbolicLink(),
-        (error) => error?.code === "ENOENT",
+        () => true,
       );
       if (!missing) {
         publishSourceFileMayHaveChanged({ ...hint, sourceMissing: false });
@@ -2083,7 +2082,7 @@ async function readHtml(sourcePathInput) {
 
 async function showInFolder(sourcePathInput) {
   const sourcePath = assertReadPayload(sourcePathInput);
-  await assertKnownProjectPath(sourcePath);
+  if (!exportRevealAccess.allows(sourcePath)) await assertKnownProjectPath(sourcePath);
   await inspectHtmlFile(sourcePath);
   shell.showItemInFolder(sourcePath);
   return { sourcePath };
@@ -3154,25 +3153,12 @@ async function revealAiTask(payload) {
 async function exportHtmlCopy(payload) {
   const { html, sourcePath, suggestedName } = assertExportPayload(payload);
   const activePath = await currentActivePath();
-  const defaultDirectory = sourcePath
-    ? path.dirname(sourcePath)
-      : activePath
-        ? path.dirname(activePath)
-        : path.dirname(projectsRootPath());
-  const requestedName = suggestedName
-    || (sourcePath ? path.basename(sourcePath) : null)
-    || (activePath ? path.basename(activePath) : null)
-    || "HTML.html";
-  const protectedPaths = [sourcePath, activePath].filter(Boolean);
-  const defaultPath = await createSafeExportDefaultPath({
-    directoryPath: defaultDirectory,
-    suggestedName: requestedName,
-    sourcePath,
-    activePath,
-  });
-  const destinationPath = await selectExportDestination({
-    defaultPath,
-    protectedPaths,
+  const receipt = await exportHtmlCopyToFile({
+    html, sourcePath, activePath, suggestedName,
+    projectsRoot: projectsRootPath(),
+    downloadsDirectory: app.getPath("downloads"),
+    userDataPath: app.getPath("userData"),
+    maxHtmlBytes: MAX_HTML_BYTES,
     normalizeDestination: (value) => assertHtmlPath(normalizeHtmlExportPath(value)),
     showSaveDialog: (safeDefaultPath) => dialog.showSaveDialog(mainWindow, {
       title: "导出 HTML 副本",
@@ -3184,27 +3170,8 @@ async function exportHtmlCopy(payload) {
       ],
     }),
   });
-  if (!destinationPath) return null;
-
-  // Recheck immediately before writing so a path alias or hard link created
-  // while the save dialog was open still cannot target the source file.
-  if (await isProtectedExportDestination(destinationPath, protectedPaths)) {
-    throw new ProjectFileError(
-      "EXPORT_OVER_SOURCE",
-      "导出位置刚刚发生变化，源文件没有被改动。请重新选择位置。",
-      { destinationPath },
-    );
-  }
-  const exported = await writeHtmlCopy({
-    destinationPath,
-    html,
-    maxHtmlBytes: MAX_HTML_BYTES,
-  });
-  // Export is deliberately not activated and does not mutate recent files.
-  return {
-    ...exported,
-    exported: true,
-  };
+  exportRevealAccess.record(receipt);
+  return receipt;
 }
 
 async function listRecentProjects() {

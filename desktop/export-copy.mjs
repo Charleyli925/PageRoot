@@ -1,7 +1,8 @@
-import { lstat, stat } from "node:fs/promises";
+import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { ProjectFileError } from "./project-files.mjs";
+import { ProjectFileError, writeHtmlCopy } from "./project-files.mjs";
+import { readLastExportDirectory, recordLastExportDirectory } from "./ui-preferences.mjs";
 
 export const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
 export const PROJECT_IPC_VERSION = 1;
@@ -164,6 +165,62 @@ export async function isProtectedExportDestination(
       return true;
     }
   }
+  const roots = [...new Set((options.protectedRoots || []).filter(Boolean))];
+  if (!roots.length) return false;
+  const destination = await canonicalDestination(destinationPath);
+  for (const root of roots) {
+    if (insideRoot(destinationPath, root, options.platform)
+      || insideRoot(destination, await canonicalDestination(root), options.platform)) return true;
+  }
+  const information = await stat(destinationPath).catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (information?.isFile() && information.nlink > 1) {
+    for (const root of roots) {
+      if (await containsFileIdentity(root, information)) return true;
+    }
+  }
+  return false;
+}
+
+function insideRoot(filePath, rootPath, platform = process.platform) {
+  const relative = path.relative(normalizedPathKey(rootPath, platform), normalizedPathKey(filePath, platform));
+  return !relative || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+async function canonicalDestination(filePath) {
+  try {
+    return await realpath(filePath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    const parent = path.dirname(filePath);
+    if (parent === filePath) throw error;
+    return path.join(await canonicalDestination(parent), path.basename(filePath));
+  }
+}
+
+async function containsFileIdentity(directory, identity) {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (await containsFileIdentity(entryPath, identity)) return true;
+    } else if (entry.isFile()) {
+      const information = await lstat(entryPath).catch((error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (information?.isFile() && information.dev === identity.dev && information.ino === identity.ino) return true;
+    }
+  }
   return false;
 }
 
@@ -194,6 +251,7 @@ export async function createSafeExportDefaultPath({
   platform = process.platform,
   lstatFile = lstat,
   statFile = stat,
+  protectedRoots = [],
 }) {
   const { stem, extension } = exportNameParts(suggestedName);
   const protectedPaths = [sourcePath, activePath].filter(Boolean);
@@ -206,6 +264,7 @@ export async function createSafeExportDefaultPath({
       {
         platform,
         statFile,
+        protectedRoots,
       },
     );
     if (protectedDestination) continue;
@@ -229,7 +288,7 @@ export async function selectExportDestination({
   normalizeDestination = (value) => path.resolve(value),
   platform = process.platform,
   statFile = stat,
-  lstatFile = lstat,
+  protectedRoots = [],
 }) {
   const result = await showSaveDialog(defaultPath);
   if (!result || result.canceled || !result.filePath) return null;
@@ -238,17 +297,65 @@ export async function selectExportDestination({
   if (!await isProtectedExportDestination(destinationPath, protectedPaths, {
     platform,
     statFile,
+    protectedRoots,
   })) {
     return destinationPath;
   }
 
-  return createSafeExportDefaultPath({
-    directoryPath: path.dirname(destinationPath),
-    suggestedName: path.basename(destinationPath),
-    sourcePath: protectedPaths[0],
-    activePath: protectedPaths[1],
-    platform,
-    lstatFile,
-    statFile,
+  throw new ProjectFileError(
+    "EXPORT_OVER_SOURCE",
+    "无法导出到源文件或项目文件夹内，请选择其他位置。",
+  );
+}
+
+export async function exportHtmlCopyToFile({
+  html, sourcePath, activePath, suggestedName, projectsRoot, downloadsDirectory,
+  userDataPath, showSaveDialog, normalizeDestination = normalizeHtmlExportPath,
+  maxHtmlBytes, writeCopy = writeHtmlCopy,
+}) {
+  const protectedPaths = [sourcePath, activePath].filter(Boolean);
+  const protectedRoots = [projectsRoot].filter(Boolean);
+  const protection = { protectedRoots };
+  const remembered = await readLastExportDirectory({ userDataPath });
+  let directoryPath = downloadsDirectory;
+  if (remembered
+    && await stat(remembered).then((value) => value.isDirectory(), () => false)
+    && !await isProtectedExportDestination(remembered, [], protection)) directoryPath = remembered;
+  const defaultPath = await createSafeExportDefaultPath({
+    directoryPath,
+    suggestedName: suggestedName || (sourcePath && path.basename(sourcePath))
+      || (activePath && path.basename(activePath)) || "HTML.html",
+    sourcePath, activePath, protectedRoots,
   });
+  const destinationPath = await selectExportDestination({
+    defaultPath, protectedPaths, protectedRoots, showSaveDialog, normalizeDestination,
+  });
+  if (!destinationPath) return null;
+  const assertDestination = async (target) => {
+    if (await isProtectedExportDestination(target, protectedPaths, protection)) {
+      throw new ProjectFileError("EXPORT_OVER_SOURCE", "导出位置刚刚发生变化，源文件没有被改动。请重新选择位置。");
+    }
+  };
+  await assertDestination(destinationPath);
+  const exported = await writeCopy({ destinationPath, html, maxHtmlBytes, assertDestination });
+  // Remember only an acknowledged export. Preference failure cannot turn a
+  // verified external copy into an apparent failed export or duplicate retry.
+  await recordLastExportDirectory({ userDataPath, directoryPath: path.dirname(exported.path) }).catch(() => {});
+  return { ...exported, exported: true };
+}
+
+export function createExportRevealAccess() {
+  const exportedPaths = new Set();
+  return {
+    record(receipt) {
+      if (receipt?.exported !== true || !path.isAbsolute(receipt.path || "")) return;
+      const key = normalizedPathKey(receipt.path);
+      exportedPaths.delete(key);
+      exportedPaths.add(key);
+      if (exportedPaths.size > 32) exportedPaths.delete(exportedPaths.values().next().value);
+    },
+    allows(sourcePath) {
+      return typeof sourcePath === "string" && exportedPaths.has(normalizedPathKey(sourcePath));
+    },
+  };
 }

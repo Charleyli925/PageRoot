@@ -25,6 +25,8 @@ export function createSourceFileWatcher({
   let watcherGeneration = 0;
   let timer = null;
   let pending = false;
+  let sourceMissing = false;
+  let sourceObservation = null;
 
   function clearTimer() {
     if (!timer) return;
@@ -50,11 +52,14 @@ export function createSourceFileWatcher({
   }
 
   function close() {
+    watcherGeneration += 1;
     clearTimer();
     pending = false;
     stopMissingProbe();
     closeWatchers();
     watchedPath = "";
+    sourceMissing = false;
+    sourceObservation = null;
   }
 
   function emit() {
@@ -62,6 +67,7 @@ export function createSourceFileWatcher({
     onChange({
       sourcePath: watchedPath,
       watcherGeneration,
+      sourceMissing,
     });
   }
 
@@ -85,7 +91,6 @@ export function createSourceFileWatcher({
     if (watchedPath === nextPath && directoryWatcher) return;
     close();
     watchedPath = nextPath;
-    watcherGeneration += 1;
     const generation = watcherGeneration;
     const attachWatcher = (targetPath) => {
       const nextWatcher = watch(targetPath, { persistent: true }, () => {
@@ -99,7 +104,19 @@ export function createSourceFileWatcher({
       return nextWatcher;
     };
     const directoryPath = path.dirname(nextPath);
-    directoryWatcher = attachWatcher(directoryPath);
+    const attachDirectory = () => {
+      try {
+        directoryWatcher = attachWatcher(directoryPath);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+        directoryWatcher = null;
+      }
+    };
+    attachDirectory();
+    if (!directoryWatcher) {
+      sourceMissing = true;
+      schedule();
+    }
     const parentPath = path.dirname(directoryPath);
     if (parentPath && parentPath !== directoryPath) {
       try {
@@ -112,10 +129,24 @@ export function createSourceFileWatcher({
       if (generation !== watcherGeneration) return;
       lstat(nextPath, (error, information) => {
         if (generation !== watcherGeneration) return;
-        if (error?.code === "ENOENT" || (information && !information.isFile())) {
-          stopMissingProbe();
+        const missing = Boolean(error || !information?.isFile() || information.isSymbolicLink());
+        const observation = missing ? null
+          : `${information.dev}:${information.ino}:${information.size}:${information.mtimeMs}:${information.ctimeMs}`;
+        if (missing && directoryWatcher) {
+          directoryWatcher.close();
+          directoryWatcher = null;
+        }
+        if (!missing && !directoryWatcher) {
+          try { attachDirectory(); } catch { /* The parent/probe still observes recovery. */ }
+        }
+        // Some native directory watches do not resume after Finder moves a
+        // directory away and back. The existing bounded stat probe also owns
+        // this recovery signal, without reading HTML or recreating paths.
+        if (missing !== sourceMissing || (sourceObservation && observation !== sourceObservation)) {
+          sourceMissing = missing;
           schedule();
         }
+        sourceObservation = observation;
       });
     }, MISSING_PATH_PROBE_MS);
     missingProbe.unref?.();

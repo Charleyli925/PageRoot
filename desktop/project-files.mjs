@@ -507,6 +507,7 @@ export async function writeHtmlCopy({
   destinationPath,
   html,
   maxHtmlBytes = DEFAULT_MAX_HTML_BYTES,
+  assertDestination,
 }) {
   const resolvedPath = path.resolve(destinationPath);
   validateHtml(html, maxHtmlBytes);
@@ -541,6 +542,7 @@ export async function writeHtmlCopy({
       maxHtmlBytes,
     });
     try {
+      await assertDestination?.(resolvedPath);
       await rename(temporary.temporaryPath, resolvedPath);
       await syncDirectory(path.dirname(resolvedPath));
       const persistedHtml = decodeUtf8Html(
