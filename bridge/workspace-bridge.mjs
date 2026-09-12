@@ -1875,12 +1875,6 @@ async function projectFileVersionFile(sourcePath, versionId) {
       target: projectFileTargetFromWorkspace(workspace),
       versionId,
     });
-    const visibleWorkingCopy = file.kind === "version"
-      ? await projectFileRepository.resolveVersionWorkingCopy({
-        target: projectFileTargetFromWorkspace(workspace),
-        versionId,
-      })
-      : null;
     return {
       ok: true,
       projectFileSchemaVersion: "4.0.0",
@@ -1896,11 +1890,6 @@ async function projectFileVersionFile(sourcePath, versionId) {
         ? file.candidate.outputRelativePath
         : file.version.snapshotRelativePath,
       readOnly: true,
-      ...(visibleWorkingCopy ? {
-        workingCopyId: visibleWorkingCopy.workingCopyId,
-        visibleWorkingCopyPath: visibleWorkingCopy.workingCopyPath,
-        workingCopySha256: visibleWorkingCopy.sourceSha256,
-      } : {}),
       ...(file.kind === "candidate" ? { candidate: file.candidate } : {}),
     };
   } catch (cause) {
