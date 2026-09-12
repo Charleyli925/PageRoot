@@ -70,6 +70,7 @@ export type BridgeClient = {
   createVersionFromHistory(body: BridgeJson): Promise<BridgeJson>;
   createVersionFromCurrent(body: BridgeJson): Promise<BridgeJson>;
   queryCurrentVersionCreation(body: BridgeJson): Promise<BridgeJson>;
+  verifyReplacedCurrentDraft(body: BridgeJson): Promise<BridgeJson>;
   listPreservedDrafts(body: BridgeJson): Promise<BridgeJson>;
   readPreservedDraft(body: BridgeJson): Promise<BridgeJson>;
   restorePreservedDraft(body: BridgeJson): Promise<BridgeJson>;
