@@ -973,6 +973,7 @@ test("Electron local current draft saves immutable versions and exports with an 
     await expect(current).toHaveAttribute("aria-current", "page");
     await expect(project.locator(".sidebar-project-history-toggle")).toHaveAttribute("aria-expanded", "false");
     await expect(project.locator(".sidebar-version-file")).toHaveCount(0);
+    await launched.page.screenshot({ path: test.info().outputPath("current-draft-sidebar.png") });
     await project.locator(".sidebar-project-history-toggle").click();
     await expect(project.locator(".sidebar-version-index")).toHaveText(["V1", "V2"]);
     await project.getByRole("button", { name: "V1，历史版本", exact: true }).click();
@@ -984,6 +985,7 @@ test("Electron local current draft saves immutable versions and exports with an 
     await expect(preview.locator(caseSelector("list-item"))).toContainText("LOCAL_SNAPSHOT_ONE");
     await expect(mode).toHaveAttribute("data-view-label", "历史");
     expect(readFileSync(currentPath, "utf8")).toBe(firstEdit);
+    await launched.page.screenshot({ path: test.info().outputPath("immutable-history.png") });
     await current.click();
     await expect(mode).toHaveAttribute("data-view-label", "当前");
     await expect(current).toHaveAttribute("aria-current", "page");
@@ -998,6 +1000,7 @@ test("Electron local current draft saves immutable versions and exports with an 
     const exportMenuItem = launched.page.getByRole("menuitem", { name: "导出当前 HTML…", exact: true });
     await more.click();
     await expect(exportCheckbox).toHaveAttribute("aria-checked", "false");
+    await launched.page.screenshot({ path: test.info().outputPath("current-draft-export-menu.png") });
     await exportMenuItem.click();
     await expect(workbench).toHaveAttribute("data-html-export-state", "exported");
     await expect.poll(() => { try { return readFileSync(exportPath, "utf8"); } catch { return null; } }).toBe(secondEdit);
