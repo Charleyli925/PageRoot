@@ -536,6 +536,11 @@ export default function Workbench() {
   const automaticProjectRegistrationRef = useRef("");
   const projectRegistrationPreparationRef = useRef("");
   const pendingSidebarHistoryRef = useRef<ProjectVersionSummary | null>(null);
+  const pendingSidebarHistoryAttemptRef = useRef<ProjectVersionSummary | null>(null);
+  useEffect(() => () => {
+    pendingSidebarHistoryRef.current = null;
+    pendingSidebarHistoryAttemptRef.current = null;
+  }, []);
   const overlayReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const [workspaceController, setWorkspaceController] =
@@ -5423,9 +5428,9 @@ export default function Workbench() {
       .viewHistory({ version, context, deadlineAt: Date.now() + 15_000 });
     if (outcome.status === "succeeded") {
       editorRef.current?.clearSelection();
-      return true;
+      return "opened";
     }
-    if (outcome.status === "stale") return false;
+    if (outcome.status === "stale") return "stale";
     setFileStatusNotice(outcome.reason || "历史版本没有打开，当前工作内容仍保留。");
     reportInternalFailure({
       area: "history",
@@ -5434,7 +5439,7 @@ export default function Workbench() {
       recovered: false,
       cause: outcome.reason,
     });
-    return false;
+    return "rejected";
   }, [
     captureProjectContext,
     isViewTransitioning,
@@ -5501,6 +5506,7 @@ export default function Workbench() {
   }, [versions]);
 
   const openCurrentSidebarProject = useCallback((project: RegisteredProject) => {
+    pendingSidebarHistoryRef.current = null;
     if (project.projectId === projectId && project.documentId === documentId && viewMode === "history") {
       void returnToCurrent();
       return;
@@ -5512,6 +5518,7 @@ export default function Workbench() {
     project: RegisteredProject,
     summary: ProjectVersionSummary,
   ) => {
+    pendingSidebarHistoryRef.current = null;
     if (
       project.projectId === projectId
       && project.documentId === documentId
@@ -5519,13 +5526,14 @@ export default function Workbench() {
       void viewHistoryVersion(sidebarSummaryVersion(summary));
       return;
     }
-    pendingSidebarHistoryRef.current = summary;
+    const intent = { ...summary };
+    pendingSidebarHistoryRef.current = intent;
     void openRegisteredWorkbenchProject(project).then((outcome) => {
       if (
         outcome
         && outcome.status !== "succeeded"
         && outcome.committed !== true
-        && pendingSidebarHistoryRef.current?.versionId === summary.versionId
+        && pendingSidebarHistoryRef.current === intent
       ) {
         pendingSidebarHistoryRef.current = null;
       }
@@ -5554,37 +5562,35 @@ export default function Workbench() {
       pendingSidebarHistoryRef.current = null;
       return;
     }
-    let cancelled = false;
+    if (pendingSidebarHistoryAttemptRef.current === pending) return;
+    pendingSidebarHistoryAttemptRef.current = pending;
     const retryDelay = () => new Promise<void>((resolve) => {
       window.setTimeout(resolve, 50);
     });
     const openPendingHistory = async () => {
       const deadlineAt = Date.now() + 15_000;
-      while (!cancelled && Date.now() < deadlineAt) {
-        while (!cancelled && isViewTransitioning() && Date.now() < deadlineAt) {
+      try {
+        while (pendingSidebarHistoryRef.current === pending && Date.now() < deadlineAt) {
+          if (isViewTransitioning()) {
+            await retryDelay();
+            continue;
+          }
+          const opened = await viewHistoryVersion(sidebarSummaryVersion(pending));
+          // Only a replaced project context can invalidate an admitted intent.
+          // A definitive rejection is terminal and requires a fresh user click.
+          if (opened !== "stale") return;
           await retryDelay();
         }
-        if (cancelled) return;
-        const current = pendingSidebarHistoryRef.current;
-        if (!current || current.versionId !== pending.versionId) return;
-        const opened = await viewHistoryVersion(sidebarSummaryVersion(current));
-        if (opened === true) {
-          if (pendingSidebarHistoryRef.current?.versionId === current.versionId) {
-            pendingSidebarHistoryRef.current = null;
-          }
-          return;
+      } finally {
+        if (pendingSidebarHistoryRef.current === pending) {
+          pendingSidebarHistoryRef.current = null;
         }
-        // Project activation can invalidate the first history request after it
-        // was admitted. Preserve the explicit sidebar intent and retry against
-        // the newly applied project context instead of settling on its Working
-        // Copy. The existing deadline keeps deterministic failures bounded.
-        await retryDelay();
+        if (pendingSidebarHistoryAttemptRef.current === pending) {
+          pendingSidebarHistoryAttemptRef.current = null;
+        }
       }
     };
     void openPendingHistory();
-    return () => {
-      cancelled = true;
-    };
   }, [
     documentId,
     isViewTransitioning,
