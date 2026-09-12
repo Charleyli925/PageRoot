@@ -104,10 +104,11 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   currentProjectSourcePath: string | null;
   activeVersionId: string | null;
   projectRulesActive: boolean;
+  currentDraftActive: boolean;
   onToggle(): void;
   onOpenLocal(): void;
-  onOpenCurrentVersion(version: ProjectVersionSummary): void;
-  onOpenRegisteredVersion(
+  onOpenCurrentProject(project: RegisteredProject): void;
+  onOpenHistoryVersion(
     project: RegisteredProject,
     version: ProjectVersionSummary,
   ): void;
@@ -118,7 +119,7 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   updateBadgeLabel: string;
   onOpenAbout(): void;
   onOpenSettings(): void;
-  onOpenProjectRules(): void;
+  onOpenProjectRules(project: RegisteredProject): void;
   onDownloadOrRestartUpdate(): void;
   onResizeCommit?(width: number): void;
   openHtmlError?: string | null;
