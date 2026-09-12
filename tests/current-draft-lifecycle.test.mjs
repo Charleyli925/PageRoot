@@ -167,3 +167,52 @@ for(const [field,mutate] of [
  const transactionFile=path.join(target.projectRootPath,'.pageroot/transactions','current_promote_'+candidateId,'transaction.json');const transaction=await json(transactionFile);mutate(transaction);await writeFile(transactionFile,JSON.stringify(transaction));
  const restarted=new ProjectFileRepository({projectsRoot:v.projects});await assert.rejects(restarted.recoverProject({projectRootPath:target.projectRootPath}));assert.equal(await readFile(target.exactSourcePath,'utf8'),html('V1'));assert.equal((await json(manifestPath(target))).versions.length,1);
 });
+
+test('completed adoption replay preserves a newer real Request and Candidate through restart', async (t) => {
+  const value = await fixture(t);
+  const { target } = await importSource(value);
+  const prepare = async (active, requestId) => value.repository.prepareRequest({
+    target: active, requestId, attemptId: 'attempt_001', expectedSourceSha256: active.sourceSha256,
+    request: { comments: [{ commentId: 'comment_replay', text: 'Revise heading', target: { targetId: 'target_replay' }, attachments: [] }],
+      targets: [{ targetId: 'target_replay' }], agentDelivery: { mode: 'clipboard' } }, prompt: 'Frozen request',
+  });
+  await prepare(target, 'req_adoption_replay_a');
+  const first = await value.repository.completeRequest({ target, requestId: 'req_adoption_replay_a',
+    attemptId: 'attempt_001', html: html('first adopted') });
+  const firstInput = { target, candidateId: first.candidate.candidateId,
+    expectedSourceSha256: target.sourceSha256, decisionOperationId: `promote_${first.candidate.candidateId}` };
+  const adopted = await value.repository.promoteCandidate(firstInput);
+  assert.equal(adopted.version.versionId, 'ver_0002');
+  await prepare(adopted.target, 'req_adoption_replay_b');
+  const runtimeFile = path.join(target.projectRootPath, '.pageroot/runtime-state.json');
+  const processing = await readFile(runtimeFile);
+  assert.equal((await value.repository.promoteCandidate(firstInput)).version.versionId, 'ver_0002');
+  assert.deepEqual(await readFile(runtimeFile), processing);
+  const second = await value.repository.completeRequest({ target: adopted.target, requestId: 'req_adoption_replay_b',
+    attemptId: 'attempt_001', html: html('second candidate') });
+  const pending = await readFile(runtimeFile);
+  const sourceBefore = await readFile(adopted.target.exactSourcePath);
+  const requestFile = path.join(target.projectRootPath, '.pageroot/requests/req_adoption_replay_b/request.json');
+  const requestBefore = await readFile(requestFile);
+  const replay = await value.repository.promoteCandidate(firstInput);
+  assert.equal(replay.version.versionId, 'ver_0002');
+  assert.deepEqual(await readFile(runtimeFile), pending);
+  assert.deepEqual(await readFile(requestFile), requestBefore);
+  assert.deepEqual(await readFile(adopted.target.exactSourcePath), sourceBefore);
+  await assert.rejects(value.repository.createVersionFromCurrent({ target: adopted.target,
+    operationId: 'snapshot_locked_after_replay', expectedSourceSha256: adopted.target.sourceSha256 }), { code: 'HISTORY_CREATION_RUN_LOCKED' });
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  assert.equal((await json(runtimeFile)).activeCandidateId, second.candidate.candidateId);
+  await restarted.promoteCandidate(firstInput);
+  assert.deepEqual(await readFile(runtimeFile), pending);
+  const next = await restarted.promoteCandidate({ target: adopted.target, candidateId: second.candidate.candidateId,
+    expectedSourceSha256: adopted.target.sourceSha256 });
+  assert.equal(next.version.versionId, 'ver_0003');
+  const completed = await readFile(runtimeFile);
+  const older = await restarted.promoteCandidate(firstInput);
+  assert.equal(older.version.versionId, 'ver_0002');
+  assert.equal(older.target.versionId, 'ver_0003');
+  assert.deepEqual(await readFile(runtimeFile), completed);
+  assert.equal(await readFile(next.target.exactSourcePath, 'utf8'), html('second candidate'));
+});
