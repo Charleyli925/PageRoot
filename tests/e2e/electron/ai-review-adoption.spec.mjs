@@ -2124,15 +2124,11 @@ test("two AI versions activate in order and survive relaunch without identity dr
     runOfficialFinalizer(firstRequest.requestRoot, firstRequest.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
+    const beforeFirstAdoption = await captureReviewAcceptPersistence(launched.page);
     await adoptReadyResult(launched.page);
-    await expect.poll(async () => (
-      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-    ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/sequential-ai-loop-V2\.html$/u),
+    const firstActive = await assertReviewAcceptPersistence({
+      page: launched.page, beforeAdoption: beforeFirstAdoption, expectedText: UPDATED_TEXT,
     });
-    const firstActive = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
     await expect((await loadedDiskFrame(
       launched.page,
       firstActive.sourcePath,
@@ -2151,18 +2147,13 @@ test("two AI versions activate in order and survive relaunch without identity dr
     runOfficialFinalizer(secondRequest.requestRoot, secondRequest.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
+    const beforeSecondAdoption = await captureReviewAcceptPersistence(launched.page);
     await adoptReadyResult(launched.page);
-    await expect.poll(async () => (
-      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-    ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/sequential-ai-loop-V3\.html$/u),
+    const secondActive = await assertReviewAcceptPersistence({
+      page: launched.page, beforeAdoption: beforeSecondAdoption, expectedText: SECOND_UPDATED_TEXT,
     });
-    const secondActive = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
-    expect(readFileSync(firstActive.sourcePath, "utf8")).toContain(UPDATED_TEXT);
-    expect(readFileSync(firstActive.sourcePath, "utf8"))
-      .not.toContain(SECOND_UPDATED_TEXT);
+    expect(secondActive.sourcePath).toBe(firstActive.sourcePath);
+    expect(readFileSync(beforeFirstAdoption.snapshot.path).equals(beforeFirstAdoption.snapshotBytes)).toBe(true);
     expect(readFileSync(secondActive.sourcePath, "utf8"))
       .toContain(SECOND_UPDATED_TEXT);
     await expect((await loadedDiskFrame(
