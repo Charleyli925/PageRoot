@@ -19,7 +19,6 @@ import {
 } from "../bridge/project-file-finalizer.mjs";
 import {
   DEFAULT_PROJECT_RULES_TEMPLATE,
-  ProjectFileRepository,
 } from "../bridge/project-file-repository.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 
@@ -57,7 +56,7 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.equal(ensured.body.projectFileSchemaVersion, "4.0.0");
   assert.equal(ensured.body.imported, true);
   assert.equal(ensured.body.importSourceSha256, preview.body.currentHtmlSha256);
-  assert.match(ensured.body.sourcePath, /external-V1\.htm$/u);
+  assert.match(ensured.body.sourcePath, /external\.htm$/u);
   assert.equal(ensured.body.openTarget.workingCopyId, "work_ver_0001");
   assert.equal(Number.isFinite(ensured.body.performanceTiming.workspaceTotalMs), true);
   const envelope = await bridge.requestJson(
@@ -95,6 +94,11 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+  const editedWorkspace = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`);
+  assert.equal(editedWorkspace.response.status, 200, JSON.stringify(editedWorkspace.body));
+  assert.equal(editedWorkspace.body.versions[0].displayFileName, "external.htm");
+  assert.equal(editedWorkspace.body.versions[0].modifiedAt, manifest.versions[0].createdAt);
+  assert.equal(editedWorkspace.body.versions[0].contentSha256, manifest.versions[0].contentSha256);
 });
 
 test("the Bridge exposes every Registry member and opens one only by projectId", async (t) => {
@@ -279,7 +283,7 @@ test("a new v4 import never enters or mutates the legacy v3 project main path", 
   assert.equal(imported.body.projectFileSchemaVersion, "4.0.0");
   assert.equal(imported.body.imported, true);
   assert.notEqual(imported.body.projectId, legacyProjectId);
-  assert.match(imported.body.sourcePath, /pre-v4-V1\.html$/u);
+  assert.match(imported.body.sourcePath, /pre-v4\.html$/u);
   const managedProjectsRoot = await realpath(join(environment.root, "project-files"));
   assert.equal(
     (await realpath(imported.body.projectRoot)).startsWith(`${managedProjectsRoot}/`),
@@ -307,132 +311,131 @@ test("a new v4 import never enters or mutates the legacy v3 project main path", 
   assert.equal(reopened.body.projectId, imported.body.projectId);
 });
 
-test("Bridge continues a historical Version through one durable Working Copy receipt", async (t) => {
-  const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-history-bridge-",
-  });
+test("Bridge creates from history in the same current draft and exposes local snapshot recovery routes", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, { prefix: "stemmio-current-bridge-" });
   const projectsRoot = join(environment.root, "project-files");
-  const sourcePath = await environment.createSource("history-bridge.html", html("external V1"));
+  const sourcePath = await environment.createSource("history-bridge.html", html("initial"));
   const bridge = await environment.start({ HTML_AI_PROJECT_FILES_ROOT: projectsRoot });
-  const preview = await bridge.requestJson(
-    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
-  );
+  const preview = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(sourcePath)}`);
+  const ensured = await postJson(bridge, "/project/ensure", { sourcePath, expectedSourceSha256: preview.body.currentHtmlSha256, projectStorageVersion: "4.0.0" });
+  assert.equal(ensured.response.status, 200);
+  const target = ensured.body.openTarget;
+  const noChange = await postJson(bridge, "/current-version/create", { target, operationId: "bridge_unchanged_0001", expectedSourceSha256: target.sourceSha256 });
+  assert.equal(noChange.response.status, 200); assert.equal(noChange.body.status, "unchanged");
+  const autosaved = await postJson(bridge, "/autosave", { projectId: target.projectId, documentId: target.documentId,
+    sourcePath: target.exactSourcePath, expectedSourceSha256: target.sourceSha256, editRevision: 1, html: html("local") });
+  assert.equal(autosaved.response.status, 200, JSON.stringify(autosaved.body));
+  const localSha = sha256(Buffer.from(html("local")));
+  const snapshotInput = { target, operationId: "bridge_snapshot_0001", expectedSourceSha256: localSha };
+  const saved = await postJson(bridge, "/current-version/create", snapshotInput);
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body)); assert.equal(saved.body.versionId, "ver_0002");
+  assert.equal(saved.body.sourcePath, target.exactSourcePath); assert.equal(saved.body.workingCopyId, target.workingCopyId);
+  assert.deepEqual((await postJson(bridge, "/current-version/result", { target, operationId: snapshotInput.operationId })).body, saved.body);
+  const history = await postJson(bridge, "/history-version/create", { target, operationId: "bridge_current_history_01", versionId: "ver_0001",
+    expectedSourceSha256: localSha, expectedSnapshotSha256: ensured.body.versions[0].contentSha256 });
+  assert.equal(history.response.status, 200, JSON.stringify(history.body)); assert.equal(history.body.versionId, "ver_0003");
+  const afterHistory = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(target.exactSourcePath)}`);
+  const journal = { projectId: target.projectId, documentId: target.documentId, workingCopyId: target.workingCopyId,
+    sourcePath: target.exactSourcePath, expectedSourceSha256: localSha, recoveryHtmlSha256: localSha,
+    journalSha256: sha256(Buffer.from('verified Main journal')), revision: 1, html: html('local') };
+  const proof = await postJson(bridge, '/current-draft/replacement-proof', { target: afterHistory.body.openTarget, journal });
+  assert.equal(proof.response.status, 200, JSON.stringify(proof.body));
+  assert.equal(proof.body.verified, true);
+  assert.equal(proof.body.proof.currentVersionId, 'ver_0003');
+  assert.equal(proof.body.proof.operationId, 'bridge_current_history_01');
+  assert.match(proof.body.proof.preservedRecoveryId, /^replaced_/u);
+  assert.equal(proof.body.proof.journalSha256, journal.journalSha256);
+  const newHtml = await postJson(bridge, '/current-draft/replacement-proof', {
+    target: afterHistory.body.openTarget, journal: { ...journal, html: html('unsaved new content') },
+  });
+  assert.deepEqual(newHtml.body, { verified: false });
+  const records = await bridge.requestJson(`/preserved-drafts?projectId=${target.projectId}`);
+  assert.equal(records.response.status, 200); assert.equal(records.body.drafts.length, 1);
+  const recoveryId = records.body.drafts[0].recoveryId;
+  const read = await bridge.requestJson(`/preserved-draft?projectId=${target.projectId}&recoveryId=${recoveryId}`);
+  assert.equal(read.body.html, html("local"));
+  const restored = await postJson(bridge, "/preserved-draft/restore", { target, operationId: "bridge_restore_0001", recoveryId, expectedSourceSha256: history.body.sourceSha256 });
+  assert.equal(restored.response.status, 200, JSON.stringify(restored.body)); assert.equal(restored.body.versionId, "ver_0004");
+  const queried = await postJson(bridge, "/preserved-draft/result", { target, operationId: "bridge_restore_0001" });
+  assert.deepEqual(queried.body, restored.body); assert.equal(await readFile(target.exactSourcePath, "utf8"), html("local"));
+  const workspace = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(target.exactSourcePath)}`);
+  assert.equal(workspace.body.versions.at(-1).sourceType, "recovery-copy");
+});
+
+test("Bridge reads immutable V1 and V2 after saving V2 in the single current draft", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "stemmio-history-snapshot-bridge-",
+  });
+  const original = html("initial immutable V1");
+  const edited = html("local immutable V2");
+  const sourcePath = await environment.createSource("history.html", original);
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+  const preview = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(sourcePath)}`);
   const ensured = await postJson(bridge, "/project/ensure", {
     sourcePath,
     expectedSourceSha256: preview.body.currentHtmlSha256,
     projectStorageVersion: "4.0.0",
   });
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  const target = ensured.body.openTarget;
+  const autosaved = await postJson(bridge, "/autosave", {
+    projectId: target.projectId,
+    documentId: target.documentId,
+    sourcePath: target.exactSourcePath,
+    expectedSourceSha256: target.sourceSha256,
+    editRevision: 1,
+    html: edited,
+  });
+  assert.equal(autosaved.response.status, 200, JSON.stringify(autosaved.body));
+  const saved = await postJson(bridge, "/current-version/create", {
+    target,
+    operationId: "bridge_history_snapshot_0001",
+    expectedSourceSha256: sha256(Buffer.from(edited)),
+  });
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.versionId, "ver_0002");
+  assert.equal(saved.body.workingCopyId, target.workingCopyId);
 
-  const repository = new ProjectFileRepository({ projectsRoot });
-  let active = (await repository.workspace({ sourcePath: ensured.body.sourcePath })).target;
-  let v2WorkingCopyPath = null;
-  const v2Html = html("immutable V2");
-  for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
-    const candidate = await repository.createCandidate({
-      target: active,
-      requestId: `req_bridge_history_${ordinal}`,
-      candidateId: `candidate_bridge_history_${ordinal}_0001`,
-      html: ordinal === 2 ? v2Html : html(`V${ordinal}`),
-      expectedSourceSha256: active.sourceSha256,
-    });
-    active = (await repository.promoteCandidate({
-      target: active,
-      candidateId: candidate.candidate.candidateId,
-    })).target;
-    if (ordinal === 2) v2WorkingCopyPath = active.exactSourcePath;
+  const manifestPath = join(ensured.body.projectRoot, ".pageroot", "manifest.json");
+  const manifestBefore = await readFile(manifestPath, "utf8");
+  const manifest = JSON.parse(manifestBefore);
+  assert.equal(manifest.workingCopies.length, 1);
+  assert.equal(manifest.workingCopies[0].versionId, "ver_0002");
+  const workspace = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(target.exactSourcePath)}`);
+  assert.equal(workspace.response.status, 200, JSON.stringify(workspace.body));
+  assert.deepEqual(workspace.body.versions.map((version) => ({
+    versionId: version.versionId, ordinal: version.ordinal, displayFileName: version.displayFileName,
+    modifiedAt: version.modifiedAt, contentSha256: version.contentSha256,
+  })), manifest.versions.map((version) => ({
+    versionId: version.versionId, ordinal: version.ordinal, displayFileName: "history.html",
+    modifiedAt: version.createdAt, contentSha256: version.contentSha256,
+  })));
+  const readVersion = (versionId) => bridge.requestJson(
+    `/version-file?sourcePath=${encodeURIComponent(target.exactSourcePath)}&versionId=${versionId}`,
+  );
+  for (const [versionId, content] of [["ver_0001", original], ["ver_0002", edited]]) {
+    const result = await readVersion(versionId);
+    assert.equal(result.response.status, 200, JSON.stringify(result.body));
+    assert.equal(result.body.projectId, target.projectId);
+    assert.equal(result.body.documentId, target.documentId);
+    assert.equal(result.body.versionId, versionId);
+    assert.equal(result.body.readOnly, true);
+    assert.equal(result.body.content, content);
+    assert.equal(result.body.sha256, sha256(Buffer.from(content)));
+    assert.equal(result.body.contentSha256, result.body.sha256);
   }
-  assert.equal(active.versionId, "ver_0006");
+  assert.equal(await readFile(manifestPath, "utf8"), manifestBefore);
+  assert.equal(await readFile(target.exactSourcePath, "utf8"), edited);
+  assert.equal(await readFile(sourcePath, "utf8"), original);
 
-  const finderRenamedV2 = join(
-    ensured.body.projectRoot,
-    "history-bridge-V2 Finder renamed.html",
-  );
-  await rename(v2WorkingCopyPath, finderRenamedV2);
-
-  const viewed = await bridge.requestJson(
-    `/version-file?sourcePath=${encodeURIComponent(active.exactSourcePath)}&versionId=ver_0002`,
-  );
-  assert.equal(viewed.response.status, 200, JSON.stringify(viewed.body));
-  assert.equal(viewed.body.readOnly, true);
-  assert.equal(viewed.body.content, v2Html);
-  assert.equal(viewed.body.projectFileSchemaVersion, "4.0.0");
-  assert.equal(viewed.body.workingCopyId, "work_ver_0002");
-  assert.equal(viewed.body.visibleWorkingCopyPath, finderRenamedV2);
-  assert.equal(viewed.body.visibleWorkingCopyPath.includes("/.pageroot/"), false);
-  assert.match(viewed.body.workingCopySha256, /^sha256:[a-f0-9]{64}$/u);
-  const reboundManifest = JSON.parse(await readFile(
-    join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
-    "utf8",
-  ));
-  assert.equal(
-    reboundManifest.workingCopies.find(
-      (entry) => entry.workingCopyId === "work_ver_0002",
-    )?.sourceRelativePath,
-    "history-bridge-V2 Finder renamed.html",
-  );
-  const beforeContinue = await bridge.requestJson(
-    `/workspace?sourcePath=${encodeURIComponent(active.exactSourcePath)}`,
-  );
-  assert.equal(beforeContinue.body.sourcePath, active.exactSourcePath);
-  assert.equal(beforeContinue.body.latestVersionId, "ver_0006");
-
-  const request = {
-    sourcePath: active.exactSourcePath,
-    projectId: active.projectId,
-    documentId: active.documentId,
-    versionId: "ver_0002",
-    operationId: "bridge_history_continue_v2_0001",
-  };
-  const continued = await postJson(bridge, "/history-version/continue", request);
-  assert.equal(continued.response.status, 200, JSON.stringify(continued.body));
-  assert.equal(continued.body.openTarget.workingCopyId, "work_ver_0002");
-  assert.equal(continued.body.historyActivation.state, "desktop-pending");
-  assert.equal(continued.body.operationId, request.operationId);
-
-  const replayedAfterLostResponse = await postJson(bridge, "/history-version/continue", {
-    ...request,
-    operationId: "bridge_history_retry_after_loss_0001",
-  });
-  assert.equal(replayedAfterLostResponse.response.status, 200, JSON.stringify(replayedAfterLostResponse.body));
-  assert.equal(replayedAfterLostResponse.body.replayed, true);
-  assert.equal(replayedAfterLostResponse.body.operationId, request.operationId);
-
-  const confirmation = {
-    sourcePath: active.exactSourcePath,
-    projectId: active.projectId,
-    documentId: active.documentId,
-    previousWorkingCopyId: "work_ver_0006",
-    activatedWorkingCopyId: "work_ver_0002",
-    versionId: "ver_0002",
-    operationId: request.operationId,
-  };
-  const confirmed = await postJson(bridge, "/history-version/desktop-confirmed", confirmation);
-  assert.equal(confirmed.response.status, 200, JSON.stringify(confirmed.body));
-  assert.equal(confirmed.body.confirmed, true);
-  assert.equal(confirmed.body.historyActivation.state, "desktop-confirmed");
-  const confirmedReplay = await postJson(
-    bridge,
-    "/history-version/desktop-confirmed",
-    confirmation,
-  );
-  assert.equal(confirmedReplay.response.status, 200, JSON.stringify(confirmedReplay.body));
-  assert.equal(confirmedReplay.body.confirmed, false);
-
-  const replayedAfterConfirmationLoss = await postJson(bridge, "/history-version/continue", {
-    ...request,
-    operationId: "bridge_history_retry_after_confirm_0001",
-  });
-  assert.equal(replayedAfterConfirmationLoss.response.status, 200, JSON.stringify(replayedAfterConfirmationLoss.body));
-  assert.equal(replayedAfterConfirmationLoss.body.operationId, request.operationId);
-
-  const stale = await postJson(bridge, "/history-version/continue", {
-    ...request,
-    versionId: "ver_0003",
-    operationId: "bridge_history_stale_v3_0001",
-  });
-  assert.equal(stale.response.status, 409, JSON.stringify(stale.body));
-  assert.equal(stale.body.error.code, "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT");
+  const versionOne = manifest.versions.find((version) => version.versionId === "ver_0001");
+  await writeFile(join(ensured.body.projectRoot, ".pageroot", versionOne.snapshotRelativePath), html("tampered V1"));
+  const rejected = await readVersion("ver_0001");
+  assert.equal(rejected.response.ok, false);
+  assert.equal(rejected.body.error.code, "VERSION_HASH_MISMATCH");
+  assert.equal(await readFile(target.exactSourcePath, "utf8"), edited);
 });
 
 test("project-file PROJECT.md remains available through the shared project-file inspector", async (t) => {
@@ -685,7 +688,7 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   });
   assert.equal(adopted.response.status, 200, JSON.stringify(adopted.body));
   assert.equal(adopted.body.versionId, "ver_0002");
-  assert.match(adopted.body.sourcePath, /candidate-V2\.html$/u);
+  assert.equal(adopted.body.sourcePath, ensured.body.sourcePath);
   const afterAdoption = JSON.parse(await readFile(
     join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
     "utf8",
@@ -1088,7 +1091,7 @@ test("open-classification is read-only and returns A/B/C without source keys or 
   assert.equal(beforeImport.response.status, 200, JSON.stringify(beforeImport.body));
   assert.equal(beforeImport.body.kind, "new-external");
   assert.equal(beforeImport.body.sourceFileName, "classify-me.html");
-  assert.equal(beforeImport.body.visibleV1FileName, "classify-me-V1.html");
+  assert.equal(beforeImport.body.visibleV1FileName, "classify-me.html");
   assert.equal(beforeImport.body.sourceSha256, sha256(Buffer.from(original, "utf8")));
   assert.equal("importSourceKey" in beforeImport.body, false);
   assert.equal(JSON.stringify(beforeImport.body).includes(sourcePath), false);

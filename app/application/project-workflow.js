@@ -2244,7 +2244,8 @@ export class ProjectWorkflow {
         const outcome = await this.#documentWorkflow.flush({
           throughRevision: this.#documentSession.editRevision,
         });
-        if (outcome.status === "succeeded") return true;
+        if (outcome.status === "succeeded"
+          && this.#inspectSourceObligation(boundary).state === "resolved") return true;
         if (boundary !== "switch" && boundary !== "close") return false;
         const protectedOutcome = await this.#documentWorkflow.protectForDetach?.({
           context: this.#projectSession.context,
@@ -3635,6 +3636,12 @@ export class ProjectWorkflow {
           serverRevision,
         });
         if (!this.#projectSession.matches(context)) return stale(context);
+        if (recoveredLocally.status === "stale") return recoveredLocally;
+        if (recoveredLocally.status !== "succeeded") {
+          throw Object.assign(new Error(recoveredLocally.reason || "恢复副本尚未完成安全核对。"), {
+            code: recoveredLocally.code || "DOCUMENT_RECOVERY_REJECTED",
+          });
+        }
         if (
           recoveredLocally.status === "succeeded"
           && !recoveredLocally.value.recovered
@@ -4082,7 +4089,7 @@ export class ProjectWorkflow {
           documentId: prepared.documentId,
           openTarget: prepared.openTarget,
         })
-      : this.#projectSession.context || this.#projectSession.register({
+      : this.#projectSession.register({
           epoch: this.#projectSession.epoch,
           projectId: prepared.projectId,
           documentId: prepared.documentId,

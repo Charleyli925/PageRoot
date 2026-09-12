@@ -30,7 +30,37 @@ export type HistoryCreationResult = Readonly<{
 
 export type VersionNavigationPhase = "idle" | "activating" | "opening" | "history" | "current" | "creating";
 
+export type CurrentVersionResult = Readonly<{
+  status: "created" | "unchanged" | "not-created";
+  operationId: string; projectId: string; documentId: string;
+  versionId?: string; versionOrdinal?: number; sourceSha256?: string;
+  sourcePath?: string; workingCopyId?: string; recoveryId?: string;
+}>;
+
+export type PreservedDraftSummary = Readonly<{
+  recoveryId: string; originalWorkingCopyId: string; basedOnVersionId: string;
+  sourceSha256: string; createdAt: string; reason: string;
+  hasComments: boolean; attachmentCount: number;
+}>;
+
+export type VersionFilePort = Readonly<{
+  exportHtmlCopy(input: { html: string; sourcePath: string | null; suggestedName?: string }): Promise<{
+    path: string; sha256: string; name?: string;
+  } | { kind: "download-started" } | null>;
+}>;
+
 export type VersionWorkflowSnapshot = Readonly<{
+  draftVersion?: Readonly<{
+    sequence: number;
+    phase: "saving" | "saved" | "unchanged" | "unknown" | "failed" | "refresh-pending";
+    operationId: string; context: ProjectContext; recoveryId: string | null;
+    expectedSourceSha256: string | null; reason?: string; result?: CurrentVersionResult;
+  }>;
+  export?: Readonly<{
+    sequence: number;
+    phase: "exporting" | "saving-version" | "exported" | "download-started" | "version-pending" | "cancelled" | "failed";
+    context: ProjectContext | null; path?: string; reason?: string; versionOperationId?: string;
+  }>;
   creation?: Readonly<{ phase: "creating" | "created" | "opening" | "opened" | "superseded" | "open-failed" | "not-created" | "unknown"; operationId: string; context: ProjectContext; result?: HistoryCreationResult }>;
   navigation: Readonly<{
     phase: VersionNavigationPhase;
@@ -80,6 +110,7 @@ export type VersionWorkflowCodecs = Readonly<{
 }>;
 
 export type VersionWorkflowCanvasPort = Readonly<{
+  checkpointSource?(): Readonly<{ ok: boolean; reason?: string }> | undefined;
   deferCommand?(
     kind: string,
     run: () => void,
@@ -105,6 +136,8 @@ export type VersionWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
     "workspace" | "createVersionFromHistory" | "queryHistoryCreation" | "confirmHistoryCreationOpened" | "versionFile"
+      | "createVersionFromCurrent" | "queryCurrentVersionCreation" | "listPreservedDrafts"
+      | "readPreservedDraft" | "restorePreservedDraft" | "queryPreservedDraftRestore"
       | "source"
       | "activateReadyVersion"
       | "continueEditingHistoryVersion"
@@ -121,6 +154,7 @@ export type VersionWorkflowConstruction = Readonly<{
   draftSession: DraftSession;
   codecs: VersionWorkflowCodecs;
   ports: Readonly<{
+    files?: VersionFilePort;
     hash: Readonly<{ sha256(html: string): Promise<string> }>;
     canvas: VersionWorkflowCanvasPort;
   }>;
@@ -160,6 +194,11 @@ export class VersionWorkflow {
   restoreHistoryCreation(input: { operationId: string; context: ProjectContext }): Promise<void>;
   openCreatedHistoryVersion(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<HistoryCreationResult>>;
   queryHistoryCreation(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<HistoryCreationResult>>;
+  saveCurrentVersion(input?: { operationId?: string; context?: ProjectContext | null; expectedSourceSha256?: string }): Promise<VersionWorkflowOutcome<CurrentVersionResult>>;
+  retryCurrentVersion(input?: Record<string, unknown>): Promise<VersionWorkflowOutcome<CurrentVersionResult>>;
+  restorePreservedDraft(input: { recoveryId: string; operationId?: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<CurrentVersionResult>>;
+  loadPreservedDrafts(): Promise<VersionWorkflowOutcome<{ context: ProjectContext; entries: PreservedDraftSummary[] }>>;
+  exportHtml(input?: { suggestedName?: string; saveVersion?: boolean }): Promise<VersionWorkflowOutcome>;
   continueEditingHistoryVersion(input?: {
     versionId?: string | null;
     context?: ProjectContext | null;

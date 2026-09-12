@@ -1434,6 +1434,168 @@ test("DocumentWorkflow restores a matching crash journal into the same durable q
   assert.equal(harness.documentSession.persistState, "idle");
 });
 
+function replacedRecoveryHarness({ mutateJournal, verify, remove } = {}) {
+  const oldHtml = "<!doctype html><html><body><p>V8 current</p></body></html>";
+  const currentHtml = oldHtml.replace("V8 current", "V9 current");
+  const journal = {
+    schemaVersion: "2.0.0", projectId: PROJECT_ID, documentId: DOCUMENT_ID,
+    sourcePath: SOURCE_PATH, workingCopyId: "work_ver_0001",
+    expectedSourceSha256: sha256(oldHtml), html: oldHtml,
+    recoveryHtmlSha256: sha256(oldHtml), journalSha256: sha256("V8 journal"),
+    revision: 12, updatedAt: "2026-09-01T00:00:00.000Z",
+  };
+  mutateJournal?.(journal);
+  const removals = [];
+  const verifications = [];
+  const recoveryJournal = {
+    async readVerified() { return structuredClone(journal); },
+    async remove(input) {
+      removals.push(input);
+      return remove ? remove(input) : { removed: true };
+    },
+    async commit(input) {
+      return { ...input, recoveryHtmlSha256: sha256(input.html), journalSha256: sha256("queued journal") };
+    },
+  };
+  const harness = createHarness({ html: currentHtml, recoveryJournal });
+  const context = harness.projectSession.register({
+    ...harness.context,
+    projectRootPath: "/tmp/replacement-project", targetKind: "working-copy",
+    workingCopyId: journal.workingCopyId, versionId: "ver_0009",
+    exactSourcePath: SOURCE_PATH, sourceSha256: sha256(currentHtml),
+  });
+  const proof = {
+    projectId: PROJECT_ID, documentId: DOCUMENT_ID, workingCopyId: context.workingCopyId,
+    currentVersionId: context.versionId, currentSourcePath: SOURCE_PATH,
+    currentSourceSha256: sha256(currentHtml), replacementVersionId: "ver_0009",
+    operationId: "history_replacement_test", preservedRecoveryId: "replaced_test_proof",
+    replacedSourceSha256: sha256(oldHtml), journalSha256: journal.journalSha256,
+    journalRevision: journal.revision,
+  };
+  harness.client.verifyReplacedCurrentDraft = async (input) => {
+    verifications.push(input);
+    return verify ? verify({ input, proof, harness }) : { verified: true, proof };
+  };
+  return { ...harness, context, journal, proof, removals, verifications, oldHtml, currentHtml,
+    recover: () => harness.workflow.recoverAutosave({ context, currentSourceSha256: sha256(currentHtml) }) };
+}
+
+test("DocumentWorkflow retires only an exact verified replacement journal and retains current Version HTML", async (t) => {
+  const h = replacedRecoveryHarness();
+  t.after(() => h.workflow.dispose());
+  const result = await h.recover();
+  assert.equal(result.status, "succeeded");
+  assert.deepEqual(result.value, { recovered: false, replaced: true, preservedRecoveryId: h.proof.preservedRecoveryId });
+  assert.deepEqual(h.verifications, [{ target: h.context, journal: h.journal }]);
+  assert.deepEqual(h.removals, [{
+    projectId: PROJECT_ID, documentId: DOCUMENT_ID, sourcePath: SOURCE_PATH,
+    workingCopyId: h.context.workingCopyId, revision: h.journal.revision,
+    recoveryHtmlSha256: h.journal.recoveryHtmlSha256, expectedJournalSha256: h.journal.journalSha256,
+  }]);
+  assert.equal(h.documentSession.html, h.currentHtml);
+  assert.equal(h.documentSession.workingHtmlSha256, sha256(h.currentHtml));
+  assert.equal(h.documentSession.persistedSourceSha256, sha256(h.currentHtml));
+  assert.equal(h.documentSession.editRevision, 0);
+  assert.equal(h.documentSession.lastPersistedRevision, 0);
+  assert.equal(h.documentSession.persistState, "idle");
+  assert.equal(h.documentSession.pendingWrite, null);
+  assert.equal(h.canvas.invalidations, 0);
+});
+
+test("DocumentWorkflow retains original recovery behavior without an exact replacement proof", async (t) => {
+  const mismatches = [
+    "projectId", "documentId", "workingCopyId", "currentVersionId", "currentSourcePath",
+    "currentSourceSha256", "replacedSourceSha256", "journalSha256", "journalRevision",
+  ];
+  for (const variant of ["absent", "unavailable", ...mismatches]) {
+    await t.test(variant, async (t) => {
+      const h = replacedRecoveryHarness({
+        verify: ({ proof }) => {
+          if (variant === "unavailable") throw new Error("Bridge unavailable");
+          return variant === "absent" ? { verified: false }
+            : { verified: true, proof: { ...proof, [variant]: "unrelated" } };
+        },
+      });
+      t.after(() => h.workflow.dispose());
+      const result = await h.recover();
+      assert.equal(result.status, "succeeded");
+      assert.equal(result.value.conflict, true);
+      assert.equal(h.documentSession.html, h.oldHtml);
+      assert.equal(h.documentSession.persistedSourceSha256, sha256(h.currentHtml));
+      assert.equal(h.documentSession.workingHtmlSha256, sha256(h.oldHtml));
+      assert.equal(h.documentSession.pendingWrite.html, h.oldHtml);
+      assert.equal(h.removals.length, 0);
+    });
+  }
+});
+
+test("DocumentWorkflow never discards unsaved journal bytes just because their base was replaced", async (t) => {
+  const h = replacedRecoveryHarness({
+    mutateJournal(journal) {
+      journal.html = journal.html.replace("V8 current", "unsaved local changes");
+      journal.recoveryHtmlSha256 = sha256(journal.html);
+    },
+  });
+  t.after(() => h.workflow.dispose());
+  const result = await h.recover();
+  assert.equal(result.value.conflict, true);
+  assert.equal(h.documentSession.html, h.journal.html);
+  assert.equal(h.documentSession.workingHtmlSha256, sha256(h.journal.html));
+  assert.equal(h.documentSession.pendingWrite.html, h.journal.html);
+  assert.equal(h.verifications.length, 0);
+  assert.equal(h.removals.length, 0);
+});
+
+test("DocumentWorkflow fences delayed replacement proof against a newer local edit", async (t) => {
+  let releaseProof;
+  let markProofStarted;
+  const proofStarted = new Promise((resolve) => { markProofStarted = resolve; });
+  const h = replacedRecoveryHarness({
+    verify: ({ proof }) => new Promise((resolve) => {
+      releaseProof = () => resolve({ verified: true, proof });
+      markProofStarted();
+    }),
+  });
+  t.after(() => h.workflow.dispose());
+  const recovering = h.recover();
+  await proofStarted;
+  const localHtml = h.currentHtml.replace("V9 current", "new local edit");
+  h.documentSession.beginEdit(localHtml);
+  releaseProof();
+  const result = await recovering;
+  assert.equal(result.status, "stale");
+  assert.equal(h.documentSession.html, localHtml);
+  assert.equal(h.documentSession.editRevision, 1);
+  assert.equal(h.removals.length, 0);
+});
+
+test("DocumentWorkflow leaves a newer Main journal and current HTML intact when replacement retirement loses CAS", async (t) => {
+  const h = replacedRecoveryHarness({
+    remove(input) {
+      assert.notEqual(input.expectedJournalSha256, h.journal.journalSha256);
+      throw new Error("RECOVERY_JOURNAL_CAS_MISMATCH");
+    },
+    verify({ proof }) {
+      h.journal.html = "<!doctype html><html><body>newer recovery</body></html>";
+      h.journal.revision += 1;
+      h.journal.journalSha256 = sha256("newer journal");
+      h.journal.recoveryHtmlSha256 = sha256(h.journal.html);
+      return { verified: true, proof };
+    },
+  });
+  t.after(() => h.workflow.dispose());
+  const result = await h.recover();
+  assert.equal(result.status, "blocked");
+  assert.equal(result.code, "DOCUMENT_REPLACED_RECOVERY_RETIRE_FAILED");
+  assert.equal(h.removals[0].expectedJournalSha256, sha256("V8 journal"));
+  assert.equal(h.documentSession.html, h.currentHtml);
+  assert.equal(h.documentSession.workingHtmlSha256, sha256(h.currentHtml));
+  assert.equal(h.documentSession.persistedSourceSha256, sha256(h.currentHtml));
+  assert.equal(h.documentSession.pendingWrite, null);
+  assert.equal(h.journal.revision, 13);
+  assert.equal(h.journal.html, "<!doctype html><html><body>newer recovery</body></html>");
+});
+
 test("DocumentWorkflow does not recover document HTML without a Main journal", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const harness = createHarness({ html: before });

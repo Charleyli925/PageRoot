@@ -20,6 +20,7 @@ import {
   fixture,
   html,
   importSource,
+  importLegacySource,
   json,
 } from "./project-file-repository-harness.mjs";
 
@@ -63,7 +64,7 @@ test("a Candidate is not a Version until adoption, rejection consumes no ordinal
   });
   assert.equal(promoted.promoted, true);
   assert.equal(promoted.version.versionId, "ver_0002");
-  assert.equal(promoted.target.workingCopyId, "work_ver_0002");
+  assert.equal(promoted.target.workingCopyId, imported.target.workingCopyId);
 
   const repeated = await value.repository.promoteCandidate({
     target: imported.target,
@@ -110,7 +111,7 @@ test("promotion preserves the identity-normalized Candidate in its Version and W
   assert.equal(managedHtml, candidateHtml);
   assert.equal(inspectSourceElementIdentity(managedHtml).complete, true);
   assert.equal(promoted.target.sourceSha256, sha256(Buffer.from(managedHtml, "utf8")));
-  const state = await json(path.join(controlRoot, "working-copies", "work_ver_0002.json"));
+  const state = await json(path.join(controlRoot, "working-copies", imported.target.workingCopyId + ".json"));
   assert.equal(state.baseSha256, candidate.candidate.outputSha256);
   assert.equal(state.currentSha256, promoted.target.sourceSha256);
   assert.equal(state.differsFromBase, false);
@@ -118,11 +119,11 @@ test("promotion preserves the identity-normalized Candidate in its Version and W
   const transaction = await json(path.join(
     controlRoot,
     "transactions",
-    `promote_${candidate.candidate.candidateId}`,
+    `current_promote_${candidate.candidate.candidateId}`,
     "transaction.json",
   ));
-  assert.equal(transaction.candidateOutputSha256, candidate.candidate.outputSha256);
-  assert.equal(transaction.workingCopySourceSha256, promoted.target.sourceSha256);
+  assert.equal(transaction.version.contentSha256, candidate.candidate.outputSha256);
+  assert.equal(transaction.afterSha256, promoted.target.sourceSha256);
 });
 
 test("legacy Promotion journals without a Working Copy hash remain recoverable", async (t) => {
@@ -131,7 +132,7 @@ test("legacy Promotion journals without a Working Copy hash remain recoverable",
     "promotion-working-copy-prepared",
   ]) {
     const value = await fixture(t);
-    const imported = await importSource(value, `legacy-${failpoint}.html`);
+    const imported = await importLegacySource(value, `legacy-${failpoint}.html`);
     const candidateHtml = html(`legacy ${failpoint}`);
     const suffix = failpoint.replaceAll("-", "_");
     const candidate = await value.repository.createCandidate({
@@ -175,9 +176,8 @@ test("legacy Promotion journals without a Working Copy hash remain recoverable",
     const recovery = new ProjectFileRepository({
       projectsRoot: value.projects,
     });
-    const reopened = await recovery.workspace({
-      sourcePath: imported.target.exactSourcePath,
-    });
+    const active = await recovery.resolveRegisteredProjectOpenTarget({ projectId: imported.target.projectId });
+    const reopened = await recovery.workspace({ sourcePath: active.target.exactSourcePath });
     assert.equal(reopened.manifest.latestOfficialVersionId, "ver_0002");
     const recoveredWorkingCopy = reopened.manifest.workingCopies.find(
       (workingCopy) => workingCopy.workingCopyId === "work_ver_0002",
@@ -196,180 +196,27 @@ test("legacy Promotion journals without a Working Copy hash remain recoverable",
   }
 });
 
-test("a historical Version reactivates its original Working Copy without changing its immutable snapshot", async (t) => {
+test("historical editing replaces the one current draft and preserves its replaced content", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "history-lineage.html");
-  let active = imported.target;
-  let v2Target = null;
-  const v2Snapshot = html("immutable V2");
+  const imported = await importSource(value);
+  let current = imported.target;
   for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
-    const candidate = await value.repository.createCandidate({
-      target: active,
-      requestId: `req_history_${ordinal}`,
-      candidateId: `candidate_history_${ordinal}_0001`,
-      html: ordinal === 2 ? v2Snapshot : html(`V${ordinal}`),
-      expectedSourceSha256: active.sourceSha256,
-    });
-    const promoted = await value.repository.promoteCandidate({
-      target: active,
-      candidateId: candidate.candidate.candidateId,
-    });
-    active = promoted.target;
-    if (ordinal === 2) v2Target = active;
+    const candidate = await value.repository.createCandidate({ target: current, requestId: `req_history_${ordinal}`,
+      candidateId: `candidate_history_${ordinal}_0001`, html: html(`V${ordinal}`), expectedSourceSha256: current.sourceSha256 });
+    current = (await value.repository.promoteCandidate({ target: current, candidateId: candidate.candidate.candidateId })).target;
   }
-  assert.equal(active.versionId, "ver_0006");
-  assert.equal(v2Target?.workingCopyId, "work_ver_0002");
-
-  const workspaceBeforeHistory = await value.repository.workspace({
-    sourcePath: active.exactSourcePath,
-  });
-  assert.deepEqual(
-    workspaceBeforeHistory.workingCopies.find(
-      (workingCopy) => workingCopy.workingCopyId === "work_ver_0002",
-    ),
-    {
-      workingCopyId: "work_ver_0002",
-      versionId: "ver_0002",
-      basedOnVersionId: "ver_0002",
-      differsFromBase: false,
-      saveState: "saved",
-    },
-  );
-  const visibleV2 = await value.repository.resolveVersionWorkingCopy({
-    target: active,
-    versionId: "ver_0002",
-  });
-  assert.equal(visibleV2.workingCopyId, "work_ver_0002");
-  assert.equal(visibleV2.workingCopyPath, v2Target?.exactSourcePath);
-  assert.equal(visibleV2.sourceSha256, v2Target?.sourceSha256);
-
-  const activated = await value.repository.activateVersionWorkingCopy({
-    target: active,
-    versionId: "ver_0002",
-    operationId: "history_continue_v2_0001",
-    expectedActiveWorkingCopyId: "work_ver_0006",
-  });
-  assert.equal(activated.activated, true);
-  assert.equal(activated.previousWorkingCopyId, "work_ver_0006");
-  assert.equal(activated.target.versionId, "ver_0002");
-  assert.equal(activated.target.workingCopyId, "work_ver_0002");
-  assert.equal(activated.historyActivation.state, "desktop-pending");
-  const retried = await value.repository.activateVersionWorkingCopy({
-    target: active,
-    versionId: "ver_0002",
-    operationId: "history_continue_v2_0001",
-    expectedActiveWorkingCopyId: "work_ver_0006",
-  });
-  assert.equal(retried.activated, false);
-  assert.equal(retried.replayed, true);
-  assert.equal(retried.previousWorkingCopyId, "work_ver_0006");
-  assert.equal(retried.target.workingCopyId, activated.target.workingCopyId);
-
-  const resumedAfterLostResponse = await value.repository.activateVersionWorkingCopy({
-    target: active,
-    versionId: "ver_0002",
-    operationId: "history_retry_after_lost_response_0001",
-    expectedActiveWorkingCopyId: "work_ver_0006",
-  });
-  assert.equal(resumedAfterLostResponse.replayed, true);
-  assert.equal(
-    resumedAfterLostResponse.historyActivation.operationId,
-    "history_continue_v2_0001",
-  );
-
-  const confirmed = await value.repository.confirmVersionWorkingCopyActivation({
-    target: active,
-    operationId: "history_continue_v2_0001",
-    previousWorkingCopyId: "work_ver_0006",
-    activatedWorkingCopyId: "work_ver_0002",
-    versionId: "ver_0002",
-  });
-  assert.equal(confirmed.confirmed, true);
-  assert.equal(confirmed.historyActivation.state, "desktop-confirmed");
-  const confirmRetry = await value.repository.confirmVersionWorkingCopyActivation({
-    target: active,
-    operationId: "history_continue_v2_0001",
-    previousWorkingCopyId: "work_ver_0006",
-    activatedWorkingCopyId: "work_ver_0002",
-    versionId: "ver_0002",
-  });
-  assert.equal(confirmRetry.confirmed, false);
-  const runtimeAfterActivation = await json(path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "runtime-state.json",
-  ));
-  assert.equal(runtimeAfterActivation.activeWorkingCopyId, "work_ver_0002");
-  assert.equal(runtimeAfterActivation.historyActivation.state, "desktop-confirmed");
-
-  const resumedAfterConfirmationLoss = await value.repository.activateVersionWorkingCopy({
-    target: active,
-    versionId: "ver_0002",
-    operationId: "history_retry_after_confirmation_loss_0001",
-    expectedActiveWorkingCopyId: "work_ver_0006",
-  });
-  assert.equal(resumedAfterConfirmationLoss.replayed, true);
-  assert.equal(
-    resumedAfterConfirmationLoss.historyActivation.operationId,
-    "history_continue_v2_0001",
-  );
-
-  await assert.rejects(
-    value.repository.activateVersionWorkingCopy({
-      target: active,
-      versionId: "ver_0003",
-      operationId: "history_stale_v3_0001",
-      expectedActiveWorkingCopyId: "work_ver_0006",
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
-  );
-
-  const v2Edited = html("editable V2 after history continuation");
-  const saved = await value.repository.saveWorkingCopy({
-    target: activated.target,
-    html: v2Edited,
-    expectedSourceSha256: activated.target.sourceSha256,
-    editRevision: 1,
-  });
-  assert.equal(await readFile(
-    path.join(saved.target.projectRootPath, ".pageroot", "versions", "ver_0002", "index.html"),
-    "utf8",
-  ), v2Snapshot);
-  const revealedEditedV2 = await value.repository.resolveVersionWorkingCopy({
-    target: saved.target,
-    versionId: "ver_0002",
-  });
-  assert.equal(revealedEditedV2.workingCopyPath, saved.target.exactSourcePath);
-  assert.equal(revealedEditedV2.sourceSha256, saved.target.sourceSha256);
-  assert.equal(revealedEditedV2.workingCopyState.differsFromBase, true);
-
-  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
-  const reopened = await restarted.workspace({ sourcePath: saved.target.exactSourcePath });
-  assert.equal(reopened.target.versionId, "ver_0002");
-  assert.equal(reopened.target.workingCopyId, "work_ver_0002");
-  assert.equal(reopened.content, v2Edited);
-
-  const candidate = await restarted.createCandidate({
-    target: reopened.target,
-    requestId: "req_history_v7",
-    candidateId: "candidate_history_v7_0001",
-    html: html("V7 based on V2"),
-    expectedSourceSha256: reopened.target.sourceSha256,
-  });
-  const promoted = await restarted.promoteCandidate({
-    target: reopened.target,
-    candidateId: candidate.candidate.candidateId,
-  });
-  assert.equal(promoted.version.versionId, "ver_0007");
-  assert.equal(promoted.version.basedOnVersionId, "ver_0002");
-  assert.equal(promoted.version.previousVersionId, "ver_0006");
-  const runtimeAfterPromotion = await json(path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "runtime-state.json",
-  ));
-  assert.equal(runtimeAfterPromotion.historyActivation, null);
+  await assert.rejects(value.repository.activateVersionWorkingCopy({ target: current, versionId: "ver_0002",
+    operationId: "retired_activation_0001", expectedActiveWorkingCopyId: current.workingCopyId }), { code: "HISTORY_ACTIVATION_RETIRED" });
+  const old = await value.repository.readVersionFile({ target: current, versionId: "ver_0002" });
+  const created = await value.repository.createVersionFromHistory({ target: current, versionId: "ver_0002",
+    operationId: "current_history_v7", expectedSourceSha256: current.sourceSha256, expectedSnapshotSha256: old.sha256 });
+  assert.equal(created.versionId, "ver_0007");
+  assert.equal(created.workingCopyId, imported.target.workingCopyId);
+  assert.equal(created.sourcePath, imported.target.exactSourcePath);
+  assert.equal(await readFile(created.sourcePath, "utf8"), html("V2"));
+  assert.equal((await value.repository.readVersionFile({ target: current, versionId: "ver_0002" })).sha256, old.sha256);
+  const records = await value.repository.listPreservedDrafts({ projectId: current.projectId });
+  assert.ok(records.some((entry) => entry.sourceSha256 === sha256(Buffer.from(html("V6")))));
 });
 
 test("blocked Candidate validation never reserves a Version", async (t) => {
@@ -555,7 +402,7 @@ test("request recovery promotes a prepared Candidate only when its runtime seal 
 
 test("Promotion recovery does not bypass the runtime-sealed Candidate record", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "sealed-promotion.html");
+  const imported = await importLegacySource(value, "sealed-promotion.html");
   const candidate = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_sealed_promotion",
@@ -622,7 +469,7 @@ test("Promotion recovery re-derives every Candidate-backed transaction field", a
   ];
   for (const [index, [label, mutate]] of mutations.entries()) {
     const value = await fixture(t);
-    const imported = await importSource(value, `transaction-authority-${index}.html`);
+    const imported = await importLegacySource(value, `transaction-authority-${index}.html`);
     const candidate = await value.repository.createCandidate({
       target: imported.target,
       requestId: `req_transaction_authority_${index}`,
@@ -673,7 +520,7 @@ test("Promotion recovery re-derives every Candidate-backed transaction field", a
 
 test("Promotion recovery validates the recorded Working Copy against sealed authority", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "promotion-working-copy-authority.html");
+  const imported = await importLegacySource(value, "promotion-working-copy-authority.html");
   const candidate = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_promotion_working_copy_authority",
@@ -767,7 +614,7 @@ test("a Candidate cannot be adopted after its frozen Working Copy changes", asyn
 
 test("promotion rechecks the Candidate base before manifest publication and recovery", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "promotion-boundary.html");
+  const imported = await importLegacySource(value, "promotion-boundary.html");
   const candidate = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_promotion_boundary",
@@ -821,7 +668,7 @@ test("promotion rechecks the Candidate base before manifest publication and reco
 
 test("promotion uses the latest Working Copy name and allocates around file, directory and symlink collisions", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "A.html");
+  const imported = await importLegacySource(value, "A.html");
   const candidate = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_renamed_promotion",
@@ -858,7 +705,7 @@ test("promotion uses the latest Working Copy name and allocates around file, dir
 
 test("promotion retries the next same-ordinal path after an OS no-replace collision", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "A.html");
+  const imported = await importLegacySource(value, "A.html");
   const candidateHtml = html("same bytes as concurrent user file");
   const candidate = await value.repository.createCandidate({
     target: imported.target,
@@ -1074,7 +921,7 @@ test("request finalization treats a comment root and its descendants as one allo
 
 test("a replaced private promotion file fails recovery without deleting user bytes", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "promotion-tamper.html");
+  const imported = await importLegacySource(value, "promotion-tamper.html");
   const candidate = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_tampered_promotion",
@@ -1123,7 +970,7 @@ test("a replaced private promotion file fails recovery without deleting user byt
 
 test("a replaced published promotion file fails recovery without deleting user bytes", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "published-promotion.html");
+  const imported = await importLegacySource(value, "published-promotion.html");
   const candidate = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_replaced_published_promotion",
@@ -1186,7 +1033,7 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
     "promotion-completed",
   ]) {
     const value = await fixture(t);
-    const imported = await importSource(value);
+    const imported = await importLegacySource(value);
     const candidate = await value.repository.createCandidate({
       target: imported.target,
       requestId: "req_fault",
@@ -1208,9 +1055,8 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
       failpoint,
     );
     const recovery = new ProjectFileRepository({ projectsRoot: value.projects });
-    const reopened = await recovery.workspace({
-      sourcePath: imported.target.exactSourcePath,
-    });
+    const active = await recovery.resolveRegisteredProjectOpenTarget({ projectId: imported.target.projectId });
+    const reopened = await recovery.workspace({ sourcePath: active.target.exactSourcePath });
     assert.equal(reopened.manifest.latestOfficialVersionId, "ver_0002");
     const recovered = await recovery.recoverProject({
       projectRootPath: imported.target.projectRootPath,

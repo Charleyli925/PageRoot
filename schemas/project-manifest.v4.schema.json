@@ -12,7 +12,12 @@
     "versions",
     "workingCopies"
   ],
+  "allOf": [
+    {"if": {"required": ["currentDraftSchemaVersion"]}, "then": {"properties": {"workingCopies": {"type": "array", "maxItems": 1}}}},
+    {"if": {"required": ["retiredWorkingCopies"]}, "then": {"required": ["currentDraftSchemaVersion"]}}
+  ],
   "properties": {
+    "currentDraftSchemaVersion": { "const": "1.0.0" },
     "schemaVersion": { "const": "4.0.0" },
     "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
     "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
@@ -33,7 +38,7 @@
           "sourceCandidateId",
           "createdAt"
         ],
-        "allOf": [{"if": {"required": ["sourceType"], "properties": {"sourceType": {"const": "history-copy"}}}, "then": {"required": ["sourceOperationId"], "properties": {"ordinal": {"type": "integer", "minimum": 2}, "basedOnVersionId": {"type": "string"}, "previousVersionId": {"type": "string"}, "sourceRequestId": {"type": "null"}, "sourceCandidateId": {"type": "null"}}}}],
+        "allOf": [{"if": {"required": ["sourceType"], "properties": {"sourceType": {"enum": ["history-copy", "local-save", "recovery-copy"]}}}, "then": {"required": ["sourceOperationId"], "properties": {"ordinal": {"type": "integer", "minimum": 2}, "basedOnVersionId": {"type": "string"}, "previousVersionId": {"type": "string"}, "sourceRequestId": {"type": "null"}, "sourceCandidateId": {"type": "null"}}}}],
         "properties": {
           "versionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
           "ordinal": { "type": "integer", "minimum": 1 },
@@ -41,12 +46,25 @@
           "previousVersionId": { "type": ["string", "null"], "pattern": "^ver_\\d{4,}$" },
           "contentSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
           "snapshotRelativePath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+" },
-          "sourceType": { "enum": ["initial", "internal-ai", "history-copy"] },
+          "sourceType": { "enum": ["initial", "internal-ai", "history-copy", "local-save", "recovery-copy"] },
           "sourceOperationId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,160}$" },
           "sourceRequestId": { "type": ["string", "null"] },
           "sourceCandidateId": { "type": ["string", "null"] },
           "createdAt": { "type": "string", "format": "date-time" }
         }
+      }
+    },
+    "retiredWorkingCopies": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/properties/workingCopies/items" },
+          {
+            "type": "object",
+            "required": ["recoveryId"],
+            "properties": { "recoveryId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,160}$" } }
+          }
+        ]
       }
     },
     "workingCopies": {

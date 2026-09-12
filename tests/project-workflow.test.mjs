@@ -677,6 +677,78 @@ test("close protects the latest source without claiming a stale projection is cu
   )), true);
 });
 
+test("an idle source flush still requires verified recovery before detaching a conflicted or failed document", async (t) => {
+  for (const boundary of ["switch", "close"]) {
+    for (const persistState of ["conflict", "failed"]) {
+      for (const journalSucceeds of [true, false]) {
+        await t.test(`${boundary}: ${persistState}, journal ${journalSucceeds ? "verified" : "failed"}`, async (t) => {
+          let checkpointVerified = false;
+          let protectionAttempts = 0;
+          const harness = createHarness({
+            documentWorkflow: {
+              async flush() {
+                return succeeded({ revision: 0, idle: true });
+              },
+              canProtectForDetach() { return true; },
+              hasVerifiedProtectionEvidence({ revision } = {}) {
+                return checkpointVerified && revision === 0;
+              },
+              verifiedProtectionEvidence({ revision } = {}) {
+                return checkpointVerified && revision === 0
+                  ? { kind: "recoveryVerified", revision, htmlSha256: sha256(OLD_HTML) }
+                  : null;
+              },
+              async protectForDetach({ context }) {
+                protectionAttempts += 1;
+                assert.deepEqual(context, harness.projectSession.context);
+                assert.equal(harness.documentSession.html, OLD_HTML);
+                if (!journalSucceeds) {
+                  return {
+                    status: "rejected",
+                    code: "DOCUMENT_RECOVERY_CHECKPOINT_FAILED",
+                    reason: "journal readback failed",
+                  };
+                }
+                checkpointVerified = true;
+                return succeeded({ protected: true, evidence: "recoveryVerified" });
+              },
+            },
+          });
+          t.after(() => harness.workflow.dispose());
+          harness.documentSession.setPersistence({ state: persistState, error: "source replaced" });
+          const before = {
+            html: harness.documentSession.html,
+            workingHtmlSha256: harness.documentSession.workingHtmlSha256,
+            persistedSourceSha256: harness.documentSession.persistedSourceSha256,
+          };
+
+          const outcome = boundary === "switch"
+            ? await harness.workflow.prepareSwitch()
+            : await harness.workflow.prepareClose({
+                requestId: `close_idle_${persistState}_${journalSucceeds}`,
+                deadlineAt: Date.now() + 5_000,
+              });
+
+          assert.equal(protectionAttempts, 1);
+          assert.equal(checkpointVerified, journalSucceeds);
+          if (boundary === "switch") {
+            assert.equal(outcome.status, journalSucceeds ? "succeeded" : "blocked", JSON.stringify(outcome));
+          } else {
+            assert.equal(outcome.ready, journalSucceeds, JSON.stringify(outcome));
+          }
+          assert.equal(harness.documentSession.html, before.html);
+          assert.equal(harness.documentSession.workingHtmlSha256, before.workingHtmlSha256);
+          assert.equal(harness.documentSession.persistedSourceSha256, before.persistedSourceSha256);
+          assert.equal(harness.documentSession.persistState, persistState);
+          assert.equal(harness.documentSession.editRevision, 0);
+          assert.equal(harness.documentSession.lastPersistedRevision, 0);
+          assert.equal(harness.documentSession.pendingWrite, null);
+        });
+      }
+    }
+  }
+});
+
 test("a failed source write can switch only after an exact recovery checkpoint", async (t) => {
   let checkpointVerified = false;
   const harness = createHarness({
@@ -2505,6 +2577,24 @@ test("a stuck immutable hydration can close without waiting for the remote read"
   assert.equal(harness.unlockCount, unlocksBeforeClose);
 });
 
+test("a recovery journal retirement conflict prevents project readiness without loading old recovery HTML", async (t) => {
+  const harness = createHarness({
+    documentWorkflow: {
+      async recoverAutosave() {
+        return { status: "blocked", code: "DOCUMENT_REPLACED_RECOVERY_RETIRE_FAILED", reason: "newer journal retained" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  const result = harness.workflow.acceptProject({ name: "B", sourcePath: B_PATH, html: B_HTML, sha256: sha256(B_HTML) });
+  assert.equal(result.status, "succeeded");
+  await waitFor(() => Boolean(harness.workflow.projectLoadError));
+  assert.equal(harness.workflow.projectLoadError, "newer journal retained");
+  assert.equal(harness.documentSession.html, B_HTML);
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(B_HTML));
+  assert.equal(harness.events.some((event) => event.type === "project-core-ready"), false);
+});
+
 test("a Canvas acknowledgement failure rolls the hydration publication back", async (t) => {
   const canonicalHtml = "<!doctype html><html><body><p>canonical</p></body></html>";
   const harness = createHarness({
@@ -3627,4 +3717,28 @@ test("catalog stops after one reread when authority keeps changing", async (t) =
   assert.equal((await h.workflow.refreshRegisteredProjects()).status, "stale");
   assert.equal(revision, 2);
   assert.equal(h.events.some((event) => event.type === "project-catalog-loaded"), false);
+});
+
+
+test("same-path managed publication advances the entire OpenTarget without replacing current identity", () => {
+  const target = { projectId: "project_old", documentId: "document_old", projectRootPath: "/tmp/project",
+    targetKind: "working-copy", workingCopyId: "work_current", versionId: "ver_0001",
+    exactSourcePath: OLD_PATH, sourceSha256: sha256(OLD_HTML) };
+  const h = createHarness({ openTarget: target });
+  const epoch = h.projectSession.epoch;
+  const nextTarget = { ...target, versionId: "ver_0002", sourceSha256: sha256(A_HTML) };
+  let publishedContext;
+  const result = h.workflow.commitManagedSourceTransition({
+    prepared: { updatesCurrentProject: true, previousSourcePath: OLD_PATH, nextSourcePath: OLD_PATH,
+      projectId: target.projectId, documentId: target.documentId, openTarget: nextTarget },
+    html: A_HTML, sourceSha256: sha256(A_HTML),
+    publishSessions: (context) => { publishedContext = context; },
+  });
+  assert.equal(h.projectSession.epoch, epoch);
+  assert.equal(result.workingCopyId, target.workingCopyId);
+  assert.equal(result.versionId, "ver_0002");
+  assert.equal(result.sourceSha256, sha256(A_HTML));
+  assert.deepEqual(publishedContext, result);
+  assert.equal(h.documentSession.html, A_HTML);
+  assert.equal(h.documentSession.persistedSourceSha256, result.sourceSha256);
 });

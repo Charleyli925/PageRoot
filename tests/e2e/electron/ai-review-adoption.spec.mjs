@@ -31,6 +31,7 @@ import {
   assertReviewHasNoRuntimeVisualSupplement,
   caseSelector,
   candidateHtmlFiles,
+  captureReviewAcceptPersistence,
   closePageRootGracefully,
   createSourceFixture,
   existsSync,
@@ -232,6 +233,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         targetSelector: ".review-comment-ordinary-target[data-pageroot-id]",
       }],
     );
+    const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
     const attemptRoot = path.join(
       request.requestRoot,
       "attempts",
@@ -2058,11 +2060,10 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.getByRole("button", { name: "确认并采纳" }).click();
     const opened = await assertReviewAcceptPersistence({
       page: launched.page,
-      sourcePath: fixture.sourcePath,
-      original: fixture.original,
+      beforeAdoption,
       expectedText: UPDATED_TEXT,
-      versionPathPattern: /\/generated-ai-loop-V2(?:-V2)*\.html$/u,
     });
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(await launched.page.evaluate(() => {
       window.__pagerootHandoffObserver?.disconnect();
       return window.__pagerootHandoffFlashEvents;
@@ -2123,15 +2124,11 @@ test("two AI versions activate in order and survive relaunch without identity dr
     runOfficialFinalizer(firstRequest.requestRoot, firstRequest.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
+    const beforeFirstAdoption = await captureReviewAcceptPersistence(launched.page);
     await adoptReadyResult(launched.page);
-    await expect.poll(async () => (
-      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-    ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/sequential-ai-loop-V2\.html$/u),
+    const firstActive = await assertReviewAcceptPersistence({
+      page: launched.page, beforeAdoption: beforeFirstAdoption, expectedText: UPDATED_TEXT,
     });
-    const firstActive = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
     await expect((await loadedDiskFrame(
       launched.page,
       firstActive.sourcePath,
@@ -2150,18 +2147,13 @@ test("two AI versions activate in order and survive relaunch without identity dr
     runOfficialFinalizer(secondRequest.requestRoot, secondRequest.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
+    const beforeSecondAdoption = await captureReviewAcceptPersistence(launched.page);
     await adoptReadyResult(launched.page);
-    await expect.poll(async () => (
-      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-    ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/sequential-ai-loop-V3\.html$/u),
+    const secondActive = await assertReviewAcceptPersistence({
+      page: launched.page, beforeAdoption: beforeSecondAdoption, expectedText: SECOND_UPDATED_TEXT,
     });
-    const secondActive = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
-    expect(readFileSync(firstActive.sourcePath, "utf8")).toContain(UPDATED_TEXT);
-    expect(readFileSync(firstActive.sourcePath, "utf8"))
-      .not.toContain(SECOND_UPDATED_TEXT);
+    expect(secondActive.sourcePath).toBe(firstActive.sourcePath);
+    expect(readFileSync(beforeFirstAdoption.snapshot.path).equals(beforeFirstAdoption.snapshotBytes)).toBe(true);
     expect(readFileSync(secondActive.sourcePath, "utf8"))
       .toContain(SECOND_UPDATED_TEXT);
     await expect((await loadedDiskFrame(
@@ -2366,35 +2358,50 @@ test("a broad but related AI return is accepted without a target-scope error", {
   }
 });
 
-test("a committed version that the desktop cannot activate stays visibly blocked", async () => {
+test("a committed version with unreadable current bytes stays blocked and retries without a duplicate", async () => {
   const fixture = createSourceFixture();
-  const launched = await launchPageRoot({
-    activeSourcePath: fixture.sourcePath,
-    injectedEnv: { PAGEROOT_E2E_GENERATED_VERSION_OPEN_FAILURE: "1" },
-  });
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
-    const request = await addCommentAndSubmit(
-      launched.page,
-      launched.electronApp,
-      fixture.sourcePath,
-    );
+    const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
+    const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
+    // The stable current path needs no Desktop file switch. Exercise the real
+    // read-back boundary when a committed receipt carries no inline HTML.
+    const withoutInlineHtml = async (route) => {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.fulfill({ response, json: { ...await response.json(), content: null } });
+    };
+    let failedReads = 0;
+    const unreadableCurrent = async (route) => {
+      failedReads += 1;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({
+        error: { code: "E2E_CURRENT_DRAFT_OPEN_FAILED", message: "新版本文件暂时无法打开。" },
+      }) });
+    };
+    await launched.page.route("**/ready-version/activate", withoutInlineHtml);
+    await launched.page.route("**/source?*", unreadableCurrent);
     await adoptReadyResult(launched.page);
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
-      .filter({ visible: true }).first())
-      .toBeVisible({ timeout: 30_000 });
-    const active = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
-    expect(active.sourcePath).toBe(realpathSync(request.sourcePath));
-    await expect.poll(
-      () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
-      { timeout: 20_000 },
-    ).toBe(2);
+      .filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    expect(failedReads).toBeGreaterThan(0);
+    await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
+    const active = await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+    expect(active.sourcePath).toBe(beforeAdoption.sourcePath);
+    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
+    const committed = await beforeAdoption.repository.workspace({ sourcePath: active.sourcePath });
+    expect(committed.target.versionId).toBe("ver_0002");
+    expect((await beforeAdoption.repository.listRegisteredProjectVersionSummaries({ projectId: committed.target.projectId })).versions).toHaveLength(2);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+
+    await launched.page.unroute("**/source?*", unreadableCurrent);
+    await launched.page.unroute("**/ready-version/activate", withoutInlineHtml);
+    await adoptReadyResult(launched.page);
+    await assertReviewAcceptPersistence({ page: launched.page, beforeAdoption, expectedText: UPDATED_TEXT });
+    expect((await beforeAdoption.repository.listRegisteredProjectVersionSummaries({ projectId: committed.target.projectId })).versions).toHaveLength(2);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -3051,6 +3058,7 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
       launched.electronApp,
       fixture.sourcePath,
     );
+    const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
     writeAiOutput(request.requestRoot, (base) => preserveCandidateSourceIdsForFixture(
       base,
       base.replace(ORIGINAL_TEXT, UPDATED_TEXT),
@@ -3126,7 +3134,11 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     });
     const unlocked = await readActiveAcceptSnapshot(launched.page);
     expect(["preparing", "static"]).toContain(unlocked.runtimePhase);
-    expect(unlocked.sourcePath).toMatch(/\/accept-static-first-V2\.html$/u);
+    const adopted = await assertReviewAcceptPersistence({
+      page: launched.page, beforeAdoption, expectedText: UPDATED_TEXT,
+    });
+    expect(unlocked.sourcePath).toBe(adopted.sourcePath);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     const expectedSha256 = sha256(readFileSync(unlocked.sourcePath));
     expect(unlocked.workingSha256).toBe(expectedSha256);
     const unlocksAtStatic = unlocked.unlockCount;

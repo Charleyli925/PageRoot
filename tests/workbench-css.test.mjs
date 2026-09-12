@@ -150,7 +150,7 @@ test("project version lists retain compact unweighted rows", async () => {
   assert.match(css, /\.sidebar-project-row > \.sidebar-project-icon\s*\{[\s\S]*?width:\s*16px[\s\S]*?height:\s*16px/u);
 
   const versionRow = lastCssRule(css, ".sidebar-version-row");
-  assert.match(versionRow, /grid-template-columns:\s*var\(--sidebar-row-icon-column\) minmax\(0, 1fr\) 68px/u);
+  assert.match(versionRow, /min-height:\s*34px/u);
   assert.match(versionRow, /padding:\s*0/u);
   assert.match(css, /\.sidebar-version-row\[data-selected="true"\]/u);
   assert.doesNotMatch(css, /sidebar-version-file > svg/u);

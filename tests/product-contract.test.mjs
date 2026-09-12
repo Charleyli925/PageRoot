@@ -161,7 +161,7 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
   assert.match(protocol, /v3 Attempt \/ finalizer CLI `--workspace` \/ `--project-id` 是历史归档/);
   assert.match(protocol, /finalize-attempt\.mjs --project-root/);
   assert.match(protocol, /record-user-supplement\.mjs --project-root/);
-  assert.match(interactionFlow, /^# PageRoot 交互流程$/m);
-  assert.match(productRequirements, /^# PageRoot MVP 产品需求$/m);
+  assert.match(interactionFlow, /^# Stemmio 交互流程$/m);
+  assert.match(productRequirements, /^# Stemmio MVP 产品需求$/m);
   assert.doesNotMatch(protocol, /output\/PROJECT\.md/);
 });

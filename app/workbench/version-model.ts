@@ -152,7 +152,7 @@ export function versionsFromWorkspace(
       || ids.has(raw.versionId) || ordinals.has(Number(raw.ordinal))
       || (raw.projectId !== undefined && raw.projectId !== payload.projectId)
       || (raw.documentId !== undefined && raw.documentId !== payload.documentId)
-      || !["initial", "internal-ai", "history-copy"].includes(String(raw.sourceType))) {
+      || !["initial", "internal-ai", "history-copy", "local-save", "recovery-copy"].includes(String(raw.sourceType))) {
       throw new TypeError("工作区版本身份或序号无效，已保留原会话。");
     }
     if (raw.sourceType === "history-copy" && (
@@ -161,6 +161,13 @@ export function versionsFromWorkspace(
       || !payload.versions.some((entry) => isRecord(entry) && entry.versionId === raw.basedOnVersionId && Number(entry.ordinal) < Number(raw.ordinal) && entry.contentSha256 === raw.contentSha256)
       || !payload.versions.some((entry) => isRecord(entry) && entry.versionId === raw.previousVersionId && Number(entry.ordinal) + 1 === Number(raw.ordinal))
     )) throw new TypeError("历史创建版本的来源记录无效，已保留原会话。");
+    if (["local-save", "recovery-copy"].includes(String(raw.sourceType)) && (
+      !/^[A-Za-z0-9_-]{8,160}$/.test(String(raw.sourceOperationId || ""))
+      || raw.sourceRequestId !== null || raw.sourceCandidateId !== null
+      || !payload.versions.some((entry) => isRecord(entry) && entry.versionId === raw.basedOnVersionId && Number(entry.ordinal) < Number(raw.ordinal))
+      || !payload.versions.some((entry) => isRecord(entry) && entry.versionId === raw.previousVersionId && Number(entry.ordinal) + 1 === Number(raw.ordinal))
+      || !/^sha256:[a-f0-9]{64}$/.test(String(raw.contentSha256 || ""))
+    )) throw new TypeError("本地版本的来源记录无效，已保留原会话。");
     ids.add(raw.versionId);
     ordinals.add(Number(raw.ordinal));
   }
@@ -181,10 +188,10 @@ export function versionsFromWorkspace(
       id,
       ordinal,
       label: displayVersionLabel(ordinal),
-      summary: String(raw.summary || (sourceType === "initial" ? "初始登记基线" : sourceType === "history-copy" ? "基于历史创建的新版本" : "已采纳的 AI Candidate")),
+      summary: String(raw.summary || (sourceType === "initial" ? "初始导入" : sourceType === "history-copy" ? "基于历史创建" : sourceType === "local-save" ? "保存当前稿" : sourceType === "recovery-copy" ? "恢复保留的稿件" : "已采纳的 AI 修改")),
       generatedAt: String(raw.generatedAt || raw.createdAt || ""),
       source: (
-        sourceType === "internal-ai" ? "内部 AI" : sourceType === "history-copy" ? "历史创建" : "初始页面"
+        sourceType === "internal-ai" ? "内部 AI" : sourceType === "history-copy" ? "历史创建" : sourceType === "local-save" ? "本地保存" : sourceType === "recovery-copy" ? "稿件恢复" : "初始页面"
       ) as Version["source"],
       requirement: raw.requirement ? String(raw.requirement) : null,
       contentSha256: String(raw.contentSha256 || ""),

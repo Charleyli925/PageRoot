@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0071 -->
+<!-- adr-history-max: 0072 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0070`.
+`0055` through `0058`; future ADRs must use the next number above `0072`.
 
 ## Active decisions
 
@@ -27,7 +27,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0012 | [Registered project mutations resolve identity before path](0012-id-first-project-context.md) | Living |
 | 0014 | [AI candidate acceptance does not classify authored script content](0014-user-authority-over-ai-script-content.md) | Living |
 | 0019 | [WorkspaceController orchestrates application workflows without owning facts](0019-workspace-controller-orchestration.md) | Living |
-| 0022 | [v4 Registry-authorized project roots and promotion paths](0022-user-owned-project-root-identity.md) | Living |
+| 0022 | [v4 Registry-authorized project roots and promotion paths](0022-user-owned-project-root-identity.md) | Living; per-Version visible files superseded by ADR 0072 |
 | 0024 | [Registry catalog and AI-task projection authority](0024-registry-catalog-and-ai-task-projections.md) | Living |
 | 0026 | [External source to project binding is a long-lived lookup](0026-external-source-project-binding.md) | Living |
 | 0027 | [Prepared open intent, Canvas-verified finalize, and out-of-root trash](0027-prepared-open-intent.md) | Living |
@@ -66,6 +66,8 @@ reused. The four collisions found in the first curation pass were assigned
 | 0070 | [Working Copy identity survives filesystem observation changes](0070-durable-working-copy-binding.md) | Living |
 
 | 0071 | [Stemmio trusted modification loop](0071-stemmio-trusted-modification-loop.md) | Accepted contract; implementation tracked separately |
+
+| 0072 | [One current draft and immutable history](0072-single-current-draft.md) | Living |
 
 ## Reading guide
 

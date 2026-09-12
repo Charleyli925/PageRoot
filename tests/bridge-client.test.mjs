@@ -41,6 +41,20 @@ test("runtime Bridge client resolves the preload-published shell connection", as
   }
 });
 
+test("Bridge client sends replacement proof as an exact structured journal query", async () => {
+  const body = { target: { projectId: "project_a" }, journal: { html: "<html>\r\n</html>", journalSha256: "sha256:journal" } };
+  const client = createBridgeClient({
+    baseUrl: "http://127.0.0.1:4317",
+    fetchImpl: async (url, init) => {
+      assert.equal(String(url), "http://127.0.0.1:4317/current-draft/replacement-proof");
+      assert.equal(init.method, "POST");
+      assert.deepEqual(JSON.parse(init.body), body);
+      return new Response(JSON.stringify({ verified: false }), { status: 200 });
+    },
+  });
+  assert.deepEqual(await client.verifyReplacedCurrentDraft(body), { verified: false });
+});
+
 test("Bridge client preserves structured conflict details", async () => {
   const client = createBridgeClient({
     baseUrl: "http://127.0.0.1:4317",

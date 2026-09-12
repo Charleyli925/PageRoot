@@ -306,3 +306,10 @@ Codex need a clean-machine install, official login, first round and review.
 - Never include real user documents in tests.
 
 See `tests/TEST_STRATEGY.md` for suite ownership and `docs/ARCHITECTURE.md` for component boundaries.
+
+
+Single-current project changes are mapped to the current-draft lifecycle,
+history and adoption Node owners plus the Electron project lifecycle canary.
+Use the existing gate selection; legacy independent Working Copies belong in
+explicit migration fixtures. New imports, history creation and adoption retain
+one editable current identity. See ADR 0072 and TEST_STRATEGY.

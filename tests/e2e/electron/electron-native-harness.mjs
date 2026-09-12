@@ -239,7 +239,7 @@ export async function openRecentProject(
     await projectRow.click();
   }
   const projectContainer = projectRow.locator("xpath=..");
-  await projectContainer.locator(".sidebar-version-file").first().click();
+  await projectContainer.locator(".sidebar-project-current-row").click();
   return loadedDiskFrame(page, sourcePath, caseId);
 }
 
@@ -262,8 +262,7 @@ export async function waitForFreshDiskFrame(page, previousDocumentToken, caseId)
 export async function managedWorkingCopyPath(page, externalSourcePath) {
   await waitForProjectReady(page);
   const externalPath = realpathSync(externalSourcePath);
-  const extension = path.extname(externalPath);
-  const expectedWorkingCopyName = `${path.basename(externalPath, extension)}-V1${extension}`;
+  const expectedWorkingCopyName = path.basename(externalPath);
   let active = null;
   await expect.poll(async () => {
     active = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
@@ -271,7 +270,7 @@ export async function managedWorkingCopyPath(page, externalSourcePath) {
     if (!sourcePath) return "";
     try {
       const canonical = realpathSync(sourcePath);
-      return path.basename(canonical) === expectedWorkingCopyName
+      return canonical !== externalPath && path.basename(canonical) === expectedWorkingCopyName
         ? canonical
         : "";
     } catch {

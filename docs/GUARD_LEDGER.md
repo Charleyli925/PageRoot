@@ -87,3 +87,18 @@ has returned a missing file or removed duplicate folders/links. It never grants
 a same-hash unregistered copy write authority. See `SECURITY_MODEL.md`.
 
 - Durable save / Request handoff: a submit drain may refresh only the captured Working Copy Hash to its verified frozen bytes; epoch, project, document, root, path, Working Copy and Version must still match. `tests/run-workflow.test.mjs` rejects unrelated authority changes; the Electron static-fallback editing test covers the real pending-save handoff.
+
+
+## Single current draft boundaries
+
+- Manual save/recovery requires current identity, persisted hash and no active
+  Request/Candidate. This protects irreversible publication; failure remains
+  scoped to the action and never discards current HTML or comments.
+- Unknown version results reconcile the same operation. Successful export
+  remains successful when its optional version step needs repair; retries must
+  name that version operation and never export another file.
+- Protected native export destinations fail closed at publication; the system
+  does not silently choose a different location.
+- Missing projects are hidden only after a successful root scan confirms
+  absence. Unavailable roots/permissions/duplicate identities remain errors.
+  Active source loss retains current/recovery content and the export escape.

@@ -140,9 +140,19 @@ export class WorkbenchNavigationWorkflow {
     });
   }
 
-  createProjectRules() {
+  async createProjectRules(requestedProject) {
+    if (requestedProject) {
+      const project = this.#controller.getSnapshot()?.projectSession;
+      if (project?.projectId !== requestedProject.projectId || project?.documentId !== requestedProject.documentId) {
+        const outcome = await this.openRegisteredProject(requestedProject);
+        if (outcome.status !== "succeeded") return outcome;
+      }
+    }
     return this.#admit({ kind: "create-project-rules" }, async (active) => {
       const project = this.#controller.getSnapshot()?.projectSession;
+      if (requestedProject && (project?.projectId !== requestedProject.projectId || project?.documentId !== requestedProject.documentId)) {
+        return { outcome: rejected("PROJECT_RULES_CONTEXT_CHANGED", "项目已切换，请重新打开对应项目的规则。") };
+      }
       if (!project?.projectId || !project.documentId || !project.sourcePath) {
         return { outcome: rejected(
           "PROJECT_RULES_CONTEXT_REQUIRED",

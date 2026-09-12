@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "$comment": "Forward compatible transaction records preserve unknown members. Structural schema checks are supplemented by Repository lineage, content and filesystem authority checks.",
+  "$id": "https://pageroot.local/schemas/preserved-draft.v1.schema.json",
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "documentId",
+    "recoveryId",
+    "reason",
+    "createdAt",
+    "originalWorkingCopyId",
+    "basedOnVersionId",
+    "originalSourceRelativePath",
+    "sourceSha256",
+    "state",
+    "draft",
+    "attachments"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[a-f0-9]{16,64}$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[a-f0-9]{16,64}$"
+    },
+    "recoveryId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{8,160}$"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "originalWorkingCopyId": {
+      "type": "string",
+      "pattern": "^work_ver_\\d{4,}$"
+    },
+    "basedOnVersionId": {
+      "type": "string",
+      "pattern": "^ver_\\d{4,}$"
+    },
+    "originalSourceRelativePath": {
+      "type": "string"
+    },
+    "sourceSha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "state": {
+      "type": "object"
+    },
+    "draft": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "relativePath",
+          "sha256",
+          "byteLength"
+        ],
+        "properties": {
+          "relativePath": {
+            "type": "string",
+            "pattern": "^draft/attachments/(?!.*(?:^|/)\\.\\.(?:/|$)).+"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "byteLength": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

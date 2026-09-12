@@ -2162,7 +2162,9 @@
         "^tests/portable-project-record\\.test\\.mjs$"
       ],
       "suites": [],
-      "nodeTests": ["tests/portable-project-record.test.mjs"]
+      "nodeTests": [
+        "tests/portable-project-record.test.mjs"
+      ]
     },
     {
       "id": "project-runtime-state-v4-candidate-seals",
@@ -2296,7 +2298,7 @@
         "^desktop/after-pack\\.mjs$",
         "^desktop/renderer/index\\.html$",
         "^desktop/resources/(?:entitlements\\.mac\\.plist|icon\\.icns)$",
-        "^PageRoot 用户声明与免责声明\\.txt$"
+        "^PageRoot \u7528\u6237\u58f0\u660e\u4e0e\u514d\u8d23\u58f0\u660e\\.txt$"
       ],
       "suites": [],
       "nodeTests": [
@@ -2556,6 +2558,36 @@
       "nodeTests": [
         "tests/workbench-presentation.test.mjs",
         "tests/version-graph.test.mjs"
+      ]
+    },
+    {
+      "id": "project-current-draft",
+      "patterns": [
+        "^bridge/project-file-repository/current-draft\\.mjs$",
+        "^schemas/(?:current-version-transaction|preserved-draft)\\.v1\\.schema\\.json$",
+        "^tests/current-draft-lifecycle\\.test\\.mjs$"
+      ],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
+      "nodeTests": [
+        "tests/current-draft-lifecycle.test.mjs",
+        "tests/history-creation.test.mjs",
+        "tests/project-candidate-promotion.test.mjs"
+      ]
+    },
+    {
+      "id": "current-draft-ui",
+      "patterns": [
+        "^app/components/PreservedDraftDialog\\.tsx$",
+        "^app/workbench/current-draft-status\\.tsx$"
+      ],
+      "suites": [
+        "typecheck",
+        "electron-project-lifecycle-smoke"
+      ],
+      "nodeTests": [
+        "tests/version-workflow.test.mjs"
       ]
     }
   ],

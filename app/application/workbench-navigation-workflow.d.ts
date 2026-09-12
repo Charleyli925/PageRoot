@@ -32,7 +32,7 @@ export class WorkbenchNavigationWorkflow {
   openRegisteredProject(input: { projectId: string; documentId: string; title: string; status?: WorkbenchTabStatus }): Promise<WorkbenchNavigationOutcome>;
   createStart(): Promise<WorkbenchNavigationOutcome>;
   createSettings(): Promise<WorkbenchNavigationOutcome>;
-  createProjectRules(): Promise<WorkbenchNavigationOutcome>;
+  createProjectRules(project?: { projectId: string; documentId: string; title: string }): Promise<WorkbenchNavigationOutcome>;
   closeTab(tabId: string): Promise<WorkbenchNavigationOutcome>;
   acceptExternalProject(input: { requestId: string; sourcePath?: string }): Promise<WorkbenchNavigationOutcome>;
   confirmOpen(input?: Record<string, unknown>): Promise<WorkbenchNavigationOutcome>;

@@ -56,7 +56,7 @@ export default function HistoryCreationDialog({
       <article className="cancel-ai-run-card">
         <h2 id="history-create-title">基于 {versionLabel} 创建新版本？</h2>
         <p id="history-create-description">
-          新版本将作为当前编辑文件，原有版本保留。
+          将以这个历史版本建立当前稿。原有版本和替换前的当前稿都会保留。
         </p>
         <footer>
           <button

@@ -1341,3 +1341,13 @@ test("changed review annotation is discovered through the AI selection runtime",
   assert.deepEqual(plan.selectedChangedSpecs["ai-changed-specs"], [file]);
   assert.equal(plan.selectedChangedSpecs["electron-changed-specs"], undefined);
 });
+
+
+test("single-current persistence selects lifecycle, immutable history and adoption oracles", () => {
+  const plan = selectGatePlan({ map, lane: "task",
+    changedFiles: ["bridge/project-file-repository/current-draft.mjs"] });
+  assert.ok(plan.selectedNodeTests.includes("tests/current-draft-lifecycle.test.mjs"));
+  assert.ok(plan.selectedNodeTests.includes("tests/history-creation.test.mjs"));
+  assert.ok(plan.selectedNodeTests.includes("tests/project-candidate-promotion.test.mjs"));
+  assert.ok(suiteIds(plan).includes("electron-project-lifecycle-smoke"));
+});
