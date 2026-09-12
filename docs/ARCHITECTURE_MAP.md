@@ -110,9 +110,10 @@ refreshed. Comment-target geometry is still measured from the current layout on
 each overlay tick. Unused insertion-point React state is not a second layout
 owner. Geometry or outline failure still must not refuse edit entry.
 
-**Transitional.** Heuristic helpers may still exist in `target-resolver.js`,
-but the official entry does not call them and does not record fallback-only
-metrics. Canvas still constructs capability-specific SourcePatch commands
+**Target resolution.** The official entry requires a valid unique Stable ID.
+Insertion resolution keeps exact boundaries and cross-hash prefix/suffix rebind
+inside that same parent; it has no ID-less parent search. Text-range context
+may similarly locate a range inside its identified host, never select a new host. Canvas still constructs capability-specific SourcePatch commands
 beside kernel operations so it can recover island metadata before the single
 apply. Opt-in `edit-pipeline-counters.js` can count
 full-document index builds, full patch applies and insertion-point full-tree

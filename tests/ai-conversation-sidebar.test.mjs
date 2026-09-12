@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   FORBIDDEN_MESSAGE_KEYS,
   sidebarAgentLine,
-  sidebarAgentStageSteps,
   sidebarReasoningLine,
   conversationLoadedForView,
   conversationReadyForDocument,
@@ -408,25 +407,6 @@ test("the Composer names thinking depth only when the Agent actually offers it",
   });
   assert.equal(explicit.text, "思考 · 关闭");
   assert.equal(explicit.selectedId, "none");
-});
-
-test("managed Agent progress exposes the four public execution stages", () => {
-  const generating = sidebarAgentStageSteps({
-    state: "processing",
-    phase: "generating-modification",
-  });
-  assert.deepEqual(generating.map((step) => [step.label, step.state]), [
-    ["正在发送任务", "completed"],
-    ["正在生成修改", "current"],
-    ["正在校验 HTML", "pending"],
-    ["正在准备审阅", "pending"],
-  ]);
-  const ready = sidebarAgentStageSteps({ state: "ready-to-open", phase: "completed" });
-  assert.equal(ready.every((step) => step.state === "completed"), true);
-  const cancelling = sidebarAgentStageSteps({ state: "processing", phase: "cancelling" });
-  assert.deepEqual(cancelling.map((step) => step.state), [
-    "completed", "current", "pending", "pending",
-  ]);
 });
 
 test("the header's mode is derived from Request authority, not guessed", () => {

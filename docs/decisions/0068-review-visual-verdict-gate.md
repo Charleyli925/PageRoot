@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-31
-- Amended: 2026-09-01
+- Amended: 2026-09-12
 - Extends: ADR 0046 and ADR 0066
 
 ## Decision
@@ -18,9 +18,12 @@ CSS/Script comments, formatting, whitespace and any whole-page source
 difference that cannot be mapped to a concrete Stable ID become private
 `ReviewDiagnostic` records. Diagnostics may be retained with task/version
 evidence, but they never create a `ReviewChange`, `<html>` marker, mask hole,
-outline entry, risk banner or user-visible `unverified` claim. A Candidate with
-diagnostics but no position-bound change is treated as having no effective page
-change and does not open the comparison surface.
+outline entry, risk banner or user-visible `unverified` claim. A validated Candidate with
+diagnostics but no position-bound change opens the same comparison surface.
+It has no markers or change navigation; both authored pages and the existing
+explicit adoption/discard decisions remain available. The in-place explanation
+says no locatable changes were found, never that the page has no visual change.
+Exact HTML equality has its own factual explanation and is not pixel equality.
 
 Current-frame observation remains bounded, non-authoritative diagnostic input
 for already position-bound Stable-ID hosts. It may help measure DOM
@@ -36,11 +39,12 @@ pair. Initial entry and explicit selection first coordinate both disposable
 iframes to the requested states, wait for both presentations, then focus and
 scroll. Presentation changes never persist to authored HTML.
 
-One first change is active on entry. It keeps the existing full purple outline,
-caption, text marks and context focus. Other text changes retain their existing
-added/removed marks. Other element changes retain the quiet page-edge revision
-bar; their full outline/caption appears only when focused or hovered. Review
-adds no list and no previous/next controls.
+Entry starts in overview with null focus. When changes exist, initial navigation
+may reveal the first locatable change without activating focus; empty facts do
+not start navigation. Text changes retain precise added/removed marks. Element
+changes retain quiet page-edge revision bars. Optional outlines follow the
+current focus-presentation contract in ARCHITECTURE_CONTRACT.md. The existing
+change directory is absent when its filtered collection is empty.
 
 Same-parent topology names a concrete moved element only when removing exactly
 one candidate restores the sibling order. If more than one element is an
@@ -51,8 +55,9 @@ Cross-parent movement remains an exact element fact.
 Review is a no-floating-notice surface. Visual status, unverified state, scope
 summary, candidate attention and background success Toasts are not rendered
 over the comparison. Blocking frame load errors stay in the existing canvas
-error area. Each new Review session hides the AI conversation once; the toolbar
-entry can reopen it and the session does not auto-hide it again.
+error area. Each new Review session opens the existing AI conversation decision panel;
+the user may close it and reopen it through the toolbar without replacing the
+Review session.
 
 Review comments remain trusted React UI outside authored HTML. The marker rail
 is fixed to the right edge of the Before pane, nearby comments aggregate to

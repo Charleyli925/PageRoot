@@ -421,6 +421,13 @@
   backdrop-filter: blur(12px) saturate(140%);
 }
 
+.reviewEmpty {
+  padding: 5px 9px;
+  color: #55525f;
+  font-size: 11px;
+  line-height: 18px;
+}
+
 .reviewDirectory {
   position: relative;
 }

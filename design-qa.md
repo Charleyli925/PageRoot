@@ -1,5 +1,22 @@
 # Design QA
 
+## 2026-09-12 — 合法空差异候选进入同一审阅页
+
+- Truth: 用户确认即使没有可定位变化也应进入审阅，保留 AI 草稿作为未来对话入口。
+- Evidence: 真实 Electron、合成 `complex-layout.html` fixture；2880×1920 像素截图：
+  `output/playwright/wave1-empty-review-final/results/ai-review-adoption-CSS-and-f42d8-ew-without-position-markers/empty-review.png`、
+  `output/playwright/wave1-empty-review-script/results/ai-review-adoption-Script--7491e-ew-without-position-markers/empty-review.png`。
+- 核对：空态说明占原变化目录行，未新增悬浮提示；前后页、原顶栏、既有会话及草稿均可见。
+  脚本用例中修改后为蓝色背景，修改前保持原色，虽然没有位置标记仍能直接比较。
+  两页 focus 为 all、focus-group 为空，零 marker、outline、mask hole 和 region bar。
+- 流程：注释变化用例通过单双页切换、收起/重开会话、明确采用与新工作文件持久化，原件字节不变；
+  Script-only 用例通过相同查看路径及明确不用本次，当前源未含脚本修改，评论保留。
+- 测试修正：空态不复用强制非空 marker 的旧助手；使用正式嵌入式工具栏名称；
+  head 中的合成脚本在 DOMContentLoaded 后访问 body。先前测试脚本失败的报告保留，未计为通过。
+- 验收边界：此证据覆盖已存在合法 Candidate 的零事实审阅，不证明上游原始同内容输出
+  已从 no-change 改为 Candidate；后者属于独立 R2。私人全目录 HTML 验收尚待明确目录。
+- final result: scoped empty-Review Electron flows and screenshot inspection passed; broader gate results are recorded separately.
+
 ## 2026-09-08 — 独立服务配置与接入恢复
 
 - Truth: 本批三条真实旅程要求；沿用既有桌面视觉语言，共享控件但分别布局设置页与侧栏。
