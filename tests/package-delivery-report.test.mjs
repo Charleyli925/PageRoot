@@ -29,6 +29,14 @@ test("delivery evidence retries only bounded GitHub transport failures", () => {
     Object.assign(new Error("spawnSync gh ETIMEDOUT"), { code: "ETIMEDOUT" }),
     new Error("gh failed: HTTP 503: temporarily unavailable"),
     new Error("Could not resolve host: api.github.com"),
+    new Error("gh returned invalid JSON for /repos/x/commits/abc/pulls"),
+    new SyntaxError("unexpected end of JSON input"),
+    new Error("gh failed: HTTP 429: rate limit exceeded"),
+    Object.assign(new Error("Command failed: gh api /repos/x/commits/abc/pulls"), {
+      code: 1,
+      stderr: "",
+      stdout: "",
+    }),
   ]) {
     assert.equal(isTransientGitHubCommandFailure(failure), true);
   }
@@ -36,6 +44,11 @@ test("delivery evidence retries only bounded GitHub transport failures", () => {
     new Error("gh failed: HTTP 401: Bad credentials"),
     new Error("gh failed: HTTP 404: Not Found"),
     new Error("GitHub commit Pull Request response must be an array"),
+    Object.assign(new Error("Command failed: gh api /repos/x/pulls: gh: Not Found (HTTP 404)"), {
+      code: 1,
+      stderr: "gh: Not Found (HTTP 404)",
+      stdout: "",
+    }),
   ]) {
     assert.equal(isTransientGitHubCommandFailure(failure), false);
   }
