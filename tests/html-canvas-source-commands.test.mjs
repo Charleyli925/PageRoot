@@ -1,8 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { inlineStyleOperation, siblingReorderOperation } from "../app/components/html-canvas-source-commands.js";
+import {
+  inlineStyleOperation,
+  siblingReorderOperation,
+  textRangeStyleCreatesWrapper,
+  textRangeStyleOperation,
+} from "../app/components/html-canvas-source-commands.js";
 import { applySemanticOperation, createSemanticDocumentState } from "../app/lib/semantic-operation-kernel.js";
 import { buildSourceIndex } from "../app/lib/source-index.js";
+import { buildSourceTextMap, textRangeToSourceSegments } from "../app/lib/source-text-map.js";
 import { createTargetRef } from "../app/lib/target-resolver.js";
 import { enableEditPipelineCounters, disableEditPipelineCounters, readEditPipelineCounters } from "../app/lib/edit-pipeline-counters.js";
 
@@ -19,6 +25,23 @@ const html = `${prefix}${a}${b}${c}${suffix}`;
 function setup(source = html) {
   const index = buildSourceIndex(source);
   return { index, state: createSemanticDocumentState(source, { sourceIndex: index }) };
+}
+
+function uuidFactory(...values) {
+  let index = 0;
+  return () => values[index++] ?? values.at(-1);
+}
+
+function rangeSetup(source) {
+  const index = buildSourceIndex(source);
+  const paragraph = index.byPagerootId.get(ids.a);
+  const textMap = buildSourceTextMap(index, paragraph.nodeId);
+  return {
+    index,
+    paragraph,
+    textMap,
+    state: createSemanticDocumentState(source, { sourceIndex: index }),
+  };
 }
 
 test("element style preserves exact surrounding bytes, priority and tracked targets through one materialization", () => {
@@ -83,6 +106,133 @@ test("direct style and reorder retain a module-level caller target through the s
       true,
     );
   }
+});
+
+test("direct range style carries the exact logical quote and uses one Kernel materialization with returned IDs", () => {
+  const source = `${prefix}<p data-pageroot-id="${ids.a}">Alpha &amp; <strong data-pageroot-id="${ids.b}">Beta</strong> tail</p><aside data-pageroot-id="${ids.c}">outside</aside>${suffix}`;
+  const { index, state, textMap } = rangeSetup(source);
+  const segments = textRangeToSourceSegments(textMap, 3, 10);
+  const operation = textRangeStyleOperation(index, {
+    elementId: ids.a,
+    baseRevision: 0,
+    operationId: "op_canvas_range_style_001",
+    segments,
+    property: "font-weight",
+    value: "700",
+    important: false,
+  });
+  assert.deepEqual(operation.range, {
+    startOffset: 3,
+    endOffset: 10,
+    quote: "ha & Be",
+  });
+  assert.equal(operation.createdPagerootIds, undefined);
+
+  const tracked = createTargetRef(index, index.byPagerootId.get(ids.a), {
+    targetId: "target_canvas_range_module",
+    level: "module",
+  });
+  const firstId = "pr1_000000000000400080000000000000a1";
+  const secondId = "pr1_000000000000400080000000000000a2";
+  enableEditPipelineCounters();
+  try {
+    const result = applySemanticOperation(state, operation, {
+      trackedTargetRefs: [tracked],
+      randomUUID: uuidFactory(
+        "00000000-0000-4000-8000-0000000000a1",
+        "00000000-0000-4000-8000-0000000000a2",
+      ),
+    });
+    assert.equal(
+      result.html,
+      `${prefix}<p data-pageroot-id="${ids.a}">Alp<span style="all: unset; display: inline !important; font-weight: 700" data-pageroot-id="${firstId}">ha &amp; </span><strong data-pageroot-id="${ids.b}"><span style="all: unset; display: inline !important; font-weight: 700" data-pageroot-id="${secondId}">Be</span>ta</strong> tail</p><aside data-pageroot-id="${ids.c}">outside</aside>${suffix}`,
+    );
+    assert.deepEqual(result.allocatedElementIds, [firstId, secondId]);
+    assert.deepEqual(result.identityDelta.addedElementIds, [firstId, secondId]);
+    assert.equal(result.materialization.planType, "set-text-range-style");
+    assert.equal(
+      textRangeStyleCreatesWrapper(result.materialization.sourcePatchResult),
+      true,
+    );
+    assert.equal(readEditPipelineCounters().fullPatchApplies, 1);
+    assert.equal(
+      result.materialization.sourcePatchResult.refreshedTrackedTargetRefs.find(
+        (candidate) => candidate.targetId === tracked.targetId,
+      )?.level,
+      "module",
+    );
+    const undo = applySemanticOperation(result.nextState, result.inverseOperation);
+    assert.equal(undo.html, source);
+    assert.equal(applySemanticOperation(undo.nextState, undo.inverseOperation).html, result.html);
+  } finally {
+    disableEditPipelineCounters();
+  }
+});
+
+test("direct range style avoids wrapper allocation for no-change and existing-wrapper projections", () => {
+  const wholeSource = `${prefix}<p data-pageroot-id="${ids.a}" style="font-weight: 700">Alpha</p>${suffix}`;
+  const whole = rangeSetup(wholeSource);
+  const unchanged = applySemanticOperation(whole.state, textRangeStyleOperation(whole.index, {
+    elementId: ids.a,
+    baseRevision: 0,
+    operationId: "op_canvas_range_same",
+    segments: textRangeToSourceSegments(whole.textMap, 0, 5),
+    property: "font-weight",
+    value: "700",
+    important: false,
+  }));
+  assert.equal(unchanged.changed, false);
+  assert.deepEqual(unchanged.allocatedElementIds, []);
+  assert.equal(textRangeStyleCreatesWrapper(unchanged.materialization.sourcePatchResult), false);
+
+  const wrappedSource = `${prefix}<p data-pageroot-id="${ids.a}"><span data-pageroot-id="${ids.b}" style="font-weight: 700">Alpha</span> tail</p>${suffix}`;
+  const wrapped = rangeSetup(wrappedSource);
+  const coalesced = applySemanticOperation(wrapped.state, textRangeStyleOperation(wrapped.index, {
+    elementId: ids.a,
+    baseRevision: 0,
+    operationId: "op_canvas_range_coalesced",
+    segments: textRangeToSourceSegments(wrapped.textMap, 0, 5),
+    property: "font-style",
+    value: "italic",
+    important: false,
+  }));
+  assert.match(coalesced.html, /style="font-weight: 700; font-style: italic"/u);
+  assert.equal((coalesced.html.match(/<span\b/gu) ?? []).length, 1);
+  assert.deepEqual(coalesced.allocatedElementIds, []);
+  assert.equal(textRangeStyleCreatesWrapper(coalesced.materialization.sourcePatchResult), false);
+});
+
+test("direct range style rejects stale revision, hash, target and quote evidence", () => {
+  const source = `${prefix}<p data-pageroot-id="${ids.a}">Alpha Beta</p><p data-pageroot-id="${ids.b}">Other</p>${suffix}`;
+  const { index, state, textMap } = rangeSetup(source);
+  const operation = textRangeStyleOperation(index, {
+    elementId: ids.a,
+    baseRevision: 0,
+    operationId: "op_canvas_range_guards",
+    segments: textRangeToSourceSegments(textMap, 0, 5),
+    property: "font-weight",
+    value: "700",
+    important: false,
+  });
+  for (const changed of [
+    { ...operation, baseRevision: 1 },
+    { ...operation, expectedSourceSha256: `sha256:${"0".repeat(64)}` },
+    { ...operation, target: { ...operation.target, tagName: "div" } },
+    { ...operation, target: { ...operation.target, expectedOuterHtmlSha256: `sha256:${"0".repeat(64)}` } },
+    { ...operation, range: { ...operation.range, quote: "Omega" } },
+  ]) assert.throws(() => applySemanticOperation(state, changed));
+
+  const other = index.byPagerootId.get(ids.b);
+  assert.throws(() => textRangeStyleOperation(index, {
+    ...operation,
+    elementId: ids.a,
+    segments: [{
+      textNodeId: other.textNodeIds[0],
+      startOffset: 0,
+      endOffset: 2,
+    }],
+  }));
+  assert.throws(() => textRangeStyleOperation(index, { ...operation, elementId: "invalid" }));
 });
 
 test("unchanged element style preserves bytes without allocating identity", () => {

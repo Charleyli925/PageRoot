@@ -1343,15 +1343,16 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
       },
     );
   }
-  // Flex/grid direct-text and visible-background cases are rejected by the
-  // canvas before this plan is applied. In supported inline flow, this wrapper
-  // preserves Chromium's real caret/beforeinput/input behavior.
+  // Canvas rejects flex/grid direct-text and visible-background cases from
+  // this materialization before source publication. In supported inline flow,
+  // this wrapper preserves Chromium's real caret/beforeinput/input behavior.
   const replayIds = replay?.token === TEXT_RANGE_ID_REPLAY_TOKEN
     ? replay.pagerootIds
     : null;
   const createdPagerootIds = index.pagerootIdentity.complete
     ? segments.map((_, segmentIndex) => {
-      const pagerootId = replayIds?.[segmentIndex] ?? generatePagerootElementId();
+      const pagerootId = replayIds?.[segmentIndex]
+        ?? generatePagerootElementId(replay?.randomUUID);
       if (!isValidPagerootElementId(pagerootId) || index.byPagerootId.has(pagerootId)) {
         fail(
           "TEXT_RANGE_IDENTITY_INVALID",

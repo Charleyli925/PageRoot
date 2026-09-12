@@ -1,5 +1,52 @@
 # Design QA
 
+## 2026-09-12 — Direct semantic text-range style commands
+
+- Mode: DESIGN CHANGE. Existing text-format controls, quiet refusal copy,
+  selection treatment and recovery surfaces are unchanged. The implementation
+  removes Canvas range pre-planning: exact logical range/quote becomes direct
+  `setStyle` intent, and flex/grid or partial-background safety is decided from
+  the same Kernel materialization before source publication.
+- Focused Node evidence: 92/92 passed across the Canvas command helper,
+  semantic Kernel, SourcePatch, source text map, edit-pipeline baseline and
+  Repository identity/save contracts. New cases cover mixed inline segments,
+  entities and exact surrounding bytes; deterministic fresh wrapper IDs
+  returned by the Kernel; no-change and existing-wrapper projections; stale
+  revision/hash/target/quote rejection; tracked caller identity; inverse/redo;
+  and one full patch apply.
+- Rebuilt-source Electron evidence: 7/7 targeted journeys passed with zero
+  retry. They cover a normal new range wrapper, forged-clone isolation, native
+  range restoration, one full patch apply, chart/script continuity, flex/grid
+  refusal, partial background-fill refusal, continued typing after rejection,
+  Undo/Redo, save and managed Working Copy reopen. The first sandboxed attempt
+  stopped before product execution because Electron launch hit macOS
+  `SIGABRT`/`EPERM`; the identical command then passed in the authorized host
+  environment.
+- Quiet-first and accessibility result: successful formatting stays in the
+  same iframe with the native range active; rejected formatting restores the
+  editable host and selection without adding a banner, modal, control, color or
+  motion. No new geometry or visual token was introduced, so a new pixel
+  comparison would not add evidence beyond the interaction assertions.
+- Independent source review found no P0/P1. It recorded a P2 test-depth debt:
+  the two refusal journeys do not yet assert the exact retained selected text
+  and pipeline count together, plus a P3 module-ref assertion gap; neither
+  changes the verified production result or expands this scoped package.
+- Final task gate `2026-09-12T15-03-37-444Z-task` passed all 10 selected
+  suites on the frozen production diff: targeted Node 796/796, contract Node
+  16/16, core Node 1874/1874, Browser 34/34, Electron 60/60 and AI 20/20,
+  with zero selected failure, skip or not-executed result. The first sandboxed
+  Node pass could not create its Unix socket (`EPERM`); the exact subtest passed
+  3/3 on the authorized host and the gate's fingerprinted resume reused only
+  typecheck/lint before completing every remaining suite.
+- The user-designated eight-file corpus then completed one real Electron run:
+  4 passed, 4 failed and 0 skipped, with all eight originals byte-identical.
+  The four passes each completed three text hosts, two duplicate/delete cycles,
+  preview/edit re-entry, source reload and save/reopen. Failures retained the
+  previously recorded baseline shapes: one reached three text hosts before the
+  copy action was unavailable; three completed only one host against the
+  three-host minimum. This is not a full-corpus pass or installed-app evidence.
+- final result: passed for the scoped direct-range behavior and continuity.
+
 ## 2026-09-12 — Direct element style and sibling reorder commands
 
 - Scope: existing element-style controls and same-parent up/down actions now

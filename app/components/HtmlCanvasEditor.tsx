@@ -33,7 +33,12 @@ import {
 } from "./runtime-continuity-probe.js";
 import { installEditPipelineTestHooks } from "../lib/edit-pipeline-counters.js";
 import { createSourceOperationId } from "../domain/source-history.js";
-import { inlineStyleOperation, siblingReorderOperation } from "./html-canvas-source-commands.js";
+import {
+  inlineStyleOperation,
+  siblingReorderOperation,
+  textRangeStyleCreatesWrapper,
+  textRangeStyleOperation,
+} from "./html-canvas-source-commands.js";
 import {
   createPagePresentationAction,
   type PagePresentationAction,
@@ -68,7 +73,6 @@ import {
   buildSourceTextMap,
   sourceSegmentsToTextRange,
   textRangeToSourceSegments,
-  type SourceTextSegment,
   type SourceTextMap,
 } from "../lib/source-text-map.js";
 import {
@@ -792,18 +796,19 @@ type FinishNativeEditingOptions = {
 };
 
 
-type SourcePatchCommand = {
+type EditableIslandSourcePatchCommand = {
+  type: "replace-editable-island";
   targetRef: SourceTargetRef;
   expectedSourceSha256: string;
-} & (
-  | { type: "replace-editable-island"; elementId?: string; beforeInnerHtml: string; nextInnerHtml: string }
-  | { type: "set-text-range-style"; segments: SourceTextSegment[]; property: string; value: string; important?: boolean }
-);
+  elementId?: string;
+  beforeInnerHtml: string;
+  nextInnerHtml: string;
+};
 type DirectSemanticCommand = {
   type: "direct-semantic-operation";
   operation: SemanticOperation;
 };
-type CanvasSourceCommand = SourcePatchCommand | DirectSemanticCommand;
+type CanvasSourceCommand = EditableIslandSourcePatchCommand | DirectSemanticCommand;
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
 type InlineStylePriority = "" | "important";
 type InlineStyleFacts = {
@@ -833,8 +838,8 @@ type PagePresentationActionCache = {
   action: PagePresentationAction | null;
 };
 
-function semanticOperationForSourceCommand(
-  command: SourcePatchCommand,
+function semanticOperationForEditableIslandCommand(
+  command: EditableIslandSourcePatchCommand,
   forwardPlan: SourcePatchPlan,
   sourceIndex: SourceIndexValue,
   mutation: HtmlCanvasMutation,
@@ -853,46 +858,22 @@ function semanticOperationForSourceCommand(
     baseRevision,
     expectedSourceSha256: sourceIndex.sourceSha256,
   };
-  if (command.type === "replace-editable-island") {
-    const after = mutation.after as { text?: unknown } | null;
-    const metadata = forwardPlan.metadata as {
-      nextInnerHtml?: unknown;
-      createdPagerootIds?: unknown;
-    };
-    const createdPagerootIds = Array.isArray(metadata.createdPagerootIds)
-      ? metadata.createdPagerootIds.map(String)
-      : [];
-    return {
-      ...envelope,
-      type: "setText",
-      target,
-      text: String(after?.text ?? ""),
-      contentHtml: String(metadata.nextInnerHtml ?? ""),
-      ...(createdPagerootIds.length > 0 ? { createdPagerootIds } : {}),
-    };
-  }
-  if (command.type === "set-text-range-style") {
-    const map = buildSourceTextMap(sourceIndex, sourceTarget.nodeId, { allowEmpty: true });
-    const range = sourceSegmentsToTextRange(map, command.segments);
-    const metadata = forwardPlan.metadata as { createdPagerootIds?: unknown };
-    const createdPagerootIds = Array.isArray(metadata.createdPagerootIds)
-      ? metadata.createdPagerootIds.map(String)
-      : [];
-    return {
-      ...envelope,
-      type: "setStyle",
-      target,
-      property: command.property,
-      value: command.value,
-      important: command.important === true,
-      range: {
-        ...range,
-        quote: map.text.slice(range.startOffset, range.endOffset),
-      },
-      ...(createdPagerootIds.length > 0 ? { createdPagerootIds } : {}),
-    };
-  }
-  throw new Error("当前画布命令尚未接入语义操作。");
+  const after = mutation.after as { text?: unknown } | null;
+  const metadata = forwardPlan.metadata as {
+    nextInnerHtml?: unknown;
+    createdPagerootIds?: unknown;
+  };
+  const createdPagerootIds = Array.isArray(metadata.createdPagerootIds)
+    ? metadata.createdPagerootIds.map(String)
+    : [];
+  return {
+    ...envelope,
+    type: "setText",
+    target,
+    text: String(after?.text ?? ""),
+    contentHtml: String(metadata.nextInnerHtml ?? ""),
+    ...(createdPagerootIds.length > 0 ? { createdPagerootIds } : {}),
+  };
 }
 
 function computedCssValue(element: HTMLElement, cssProperty: string): string {
@@ -3836,8 +3817,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? null
         : planSourcePatch(command, sourceIndex) as SourcePatchPlan;
       const semanticOperation = directSemanticOperation
-        || semanticOperationForSourceCommand(
-          command as SourcePatchCommand,
+        || semanticOperationForEditableIslandCommand(
+          command as EditableIslandSourcePatchCommand,
           plannedCommand as SourcePatchPlan,
           sourceIndex,
           mutation,
@@ -3879,8 +3860,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return null;
       }
       const forwardPlan = plannedCommand ?? {
+        version: 1,
         type: semanticResult.materialization.planType,
+        sourceSha256: result.previousSourceSha256,
+        patches: result.patches,
         targetRefs: operationTargetRefs,
+        metadata: result.inversePlan.metadata,
       } as SourcePatchPlan;
       options.validateResult?.(result);
       const currentRuntime = runtimeFrameRef.current;
@@ -3942,6 +3927,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const afterHistorySelection = historySelectionFromMutationValue(
         mutation.after,
       );
+      // Range wrappers are allocated by the same Kernel materialization. Seal
+      // those returned IDs into the accepted save evidence only after every
+      // caller validation has passed; Canvas never precomputes them.
+      const acceptedSemanticOperation = (
+        semanticOperation.type === "setStyle"
+        && semanticOperation.range
+        && !semanticOperation.createdPagerootIds
+        && semanticResult.allocatedElementIds?.length
+      )
+        ? {
+            ...semanticOperation,
+            createdPagerootIds: [...semanticResult.allocatedElementIds],
+          }
+        : semanticOperation;
       const sourceTransaction: HtmlCanvasSourceTransaction = {
         kind: appliedMutation.kind,
         ...(appliedMutation.property
@@ -3961,7 +3960,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           : {}),
         ...(semanticOperation
           ? {
-              semanticOperation,
+              semanticOperation: acceptedSemanticOperation,
               identityDelta: semanticResult?.identityDelta,
             }
           : {}),
@@ -8086,10 +8085,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           return;
         }
         nativeSelectionAfterStyle = activeNativeEdit.session.getSelection();
-        // Text-range formatting is a source operation because it may allocate
-        // persistent wrapper identities. Retire only the transient native
-        // host, apply the guarded SourcePatch in this same iframe, then resume
-        // the exact logical range without running author Script.
+        // Text-range formatting is a semantic source operation because it may
+        // allocate persistent wrapper identities. Retire only the transient
+        // native host, validate the Kernel result before publication in this
+        // same iframe, then resume the exact range without running author Script.
         const committed = finishNativeEditing(true, "style", {
           deferRuntimeRefresh: true,
         });
@@ -8161,53 +8160,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           return;
         }
         const beforeFacts = inlineStyleFacts(styleTarget, config.cssProperty);
-        const command = {
-          type: "set-text-range-style" as const,
-          targetRef: sourceTargetRefForSelection(activeRange.target),
-          segments: activeRange.segments,
-          property: config.cssProperty,
-          value,
-          ...(verifiedOverride.priority === "important" ? { important: true } : {}),
-          expectedSourceSha256: sourceIndex.sourceSha256,
-        };
+        let operation: SemanticOperation;
         try {
-          const previewPlan = planSourcePatch(command, sourceIndex);
-          if (!previewPlan) throw new Error("无法为当前文字格式生成安全 Patch。");
-          const createsRangeWrapper = previewPlan.patches.some(
-            (patch: { kind?: string }) => patch.kind === "text-range-style-open",
-          );
-          const sourceTextParents = createsRangeWrapper
-            ? sourceTextParentsForSegments(element, activeRange.segments, sourceIndex)
-            : [];
-          if (createsRangeWrapper && !sourceTextParents) {
-            reportBlockedEdit(new Error(
-              "当前文字的布局节点与源码映射不完整，本次格式修改已阻止。",
-            ));
-            resumeRejectedNativeStyle();
-            return;
-          }
-          const hasFlexOrGridTextParent = sourceTextParents?.some((parent) => (
-            ["flex", "inline-flex", "grid", "inline-grid"].includes(
-              parent.ownerDocument.defaultView?.getComputedStyle(parent).display || "",
-            )
-          ));
-          if (
-            createsRangeWrapper
-            && hasFlexOrGridTextParent
-          ) {
-            reportBlockedEdit(new Error(
-              "选区的直接文字容器使用 flex/grid，新包装会改变间距；本次格式修改已阻止。请选择已有的完整样式片段。",
-            ));
-            resumeRejectedNativeStyle();
-            return;
-          }
-          if (createsRangeWrapper && property === "backgroundColor") {
-            reportBlockedEdit(new Error(
-              "局部填充色需要新增可见盒子，可能改变原页间距；本次修改已阻止。选中已有完整样式片段时仍可修改。",
-            ));
-            resumeRejectedNativeStyle();
-            return;
-          }
+          operation = textRangeStyleOperation(sourceIndex, {
+            elementId: activeRange.target.elementId || "",
+            baseRevision: semanticRevisionRef.current,
+            segments: activeRange.segments,
+            property: config.cssProperty,
+            value,
+            important: verifiedOverride.priority === "important",
+          });
         } catch (cause) {
           reportBlockedEdit(cause);
           resumeRejectedNativeStyle();
@@ -8225,12 +8187,42 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           },
         };
         let unchanged = false;
-        const styled = applySourceCommand(command, mutation, {
+        const styled = applySourceCommand({
+          type: "direct-semantic-operation",
+          operation,
+        }, mutation, {
           onUnchanged: () => { unchanged = true; },
           validateResult: (candidate) => {
+            const createsRangeWrapper = textRangeStyleCreatesWrapper(candidate);
+            const sourceTextParents = createsRangeWrapper
+              ? sourceTextParentsForSegments(element, activeRange.segments, sourceIndex)
+              : [];
+            if (createsRangeWrapper && !sourceTextParents) {
+              throw new Error(
+                "当前文字的布局节点与源码映射不完整，本次格式修改已阻止。",
+              );
+            }
+            const hasFlexOrGridTextParent = sourceTextParents?.some((parent) => (
+              ["flex", "inline-flex", "grid", "inline-grid"].includes(
+                parent.ownerDocument.defaultView?.getComputedStyle(parent).display || "",
+              )
+            ));
+            if (createsRangeWrapper && hasFlexOrGridTextParent) {
+              throw new Error(
+                "选区的直接文字容器使用 flex/grid，新包装会改变间距；本次格式修改已阻止。请选择已有的完整样式片段。",
+              );
+            }
+            if (createsRangeWrapper && property === "backgroundColor") {
+              throw new Error(
+                "局部填充色需要新增可见盒子，可能改变原页间距；本次修改已阻止。选中已有完整样式片段时仍可修改。",
+              );
+            }
             const expectedTargetId = activeNativeEdit?.rootTargetRef.targetId
               ?? activeRange.target.id;
-            const operationTargetRef = candidate.refreshedTargetRefs.find(
+            const operationTargetRef = [
+              ...candidate.refreshedTargetRefs,
+              ...candidate.refreshedTrackedTargetRefs,
+            ].find(
               (targetRef: SourceTargetRef) => targetRef.targetId === expectedTargetId,
             );
             if (!operationTargetRef || operationTargetRef.resolution !== "exact") {
@@ -8243,6 +8235,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             );
           },
         });
+        if (!styled && !unchanged) {
+          resumeRejectedNativeStyle();
+          return;
+        }
         const resumed = Boolean(
           (styled || unchanged)
           && resumeNativeEditAfterStyle
