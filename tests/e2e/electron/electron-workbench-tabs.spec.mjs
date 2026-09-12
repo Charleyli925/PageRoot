@@ -985,12 +985,13 @@ test("Electron local current draft saves immutable versions and exports with an 
     await expect(current).toHaveAttribute("aria-current", "page");
     await expect(project.locator(".sidebar-project-history-toggle")).toHaveAttribute("aria-expanded", "false");
     await expect(project.locator(".sidebar-version-file")).toHaveCount(0);
-    const resultBounds = await launched.page.locator(".current-draft-result").boundingBox();
-    const headerBounds = await launched.page.locator(".workbench-header").boundingBox();
-    const stageBounds = await launched.page.locator(".review-scroll-stage").boundingBox();
-    expect(resultBounds.x).toBe(headerBounds.x);
-    expect(resultBounds.y).toBeGreaterThanOrEqual(headerBounds.y + headerBounds.height);
-    expect(stageBounds.y).toBeGreaterThanOrEqual(resultBounds.y + resultBounds.height);
+    await expect.poll(() => launched.page.evaluate(() => {
+      const result = document.querySelector(".current-draft-result").getBoundingClientRect();
+      const header = document.querySelector(".workbench-header").getBoundingClientRect();
+      const stage = document.querySelector(".review-scroll-stage").getBoundingClientRect();
+      return result.x >= 200 && result.x === header.x
+        && result.y >= header.bottom && stage.y >= result.bottom;
+    })).toBe(true);
     await launched.page.screenshot({ path: test.info().outputPath("current-draft-sidebar.png") });
     await project.locator(".sidebar-project-history-toggle").click();
     await expect(project.locator(".sidebar-version-index")).toHaveText(["V1", "V2"]);
