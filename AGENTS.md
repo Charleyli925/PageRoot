@@ -16,19 +16,17 @@ listed under Progressive disclosure.
 | Sol or Astra Ultra | Codex native routing | Codex native routing |
 | Any other root | Inherit root model and effort | Inherit root model and effort |
 
-- For non-Ultra Sol and Astra, the root proactively delegates concrete, bounded work when parallel execution is likely to save meaningful time or improve quality. Prefer read-heavy or noisy exploration, tests, logs, triage and summaries; keep short, tightly coupled or critical-path work on the root.
-- Before the first non-Ultra spawn in a substantial task, the root must read `docs/CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5 and follow its route-evidence, fallback, dependency-wave, task-packet, lifecycle and result-acceptance rules. Children receive only their self-contained task packet unless they need that document to perform the assigned task.
-- At most three children may be open concurrently. Only one agent may write a worktree at a time, including test artifacts; read-only work may inspect frozen source and diffs. Leaf agents do not spawn children.
-- The root remains available to the user, owns steering, stopping, integration and final decisions, and verifies cited evidence before accepting a child result.
+- For non-Ultra Sol/Astra, proactively delegate bounded independent work when it materially improves time or quality. Keep short, tightly coupled work or costly handoffs on the root; no fixed role pipeline.
+- Before non-Ultra delegation, read `docs/CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5 once for unchanged guidance. Send its compact task packet; every built-in worker request must include section 5.3's implementation inputs and execution agreement. Children receive only task-relevant constraints and reading.
+- Non-Ultra operation allows at most three open children; Ultra retains native thread selection. Only one agent may write a worktree at a time, including test artifacts; read-only work may inspect frozen source and diffs. Leaf agents do not spawn children.
+- Complete authorized implementation through agreed acceptance, including in-scope repairs and necessary retests; ask only for new authority, material requirement choices or unresolved blockers. Consultation remains read-only. The root owns steering, integration and final acceptance.
 
 ## Shared testing and independent review
 
-- Use `tester` for longer existing test batches or CI evidence collection and `reviewer` for independent review; short focused checks may stay with the implementer or root. The root owns coverage, gate level, failure classification and acceptance.
-- Follow `tests/TEST_STRATEGY.md` and the existing gate selection. `task:finish` already owns `gate:task`; never run both as separate completion gates or repeat a passed applicable gate without changed source, missing coverage, a failure or a specific unresolved risk.
-- Freeze the tested source. The tester may create existing build/test output and reports, but must not edit source, tests, assertions, snapshots, gates or dependencies, or commit, push, change PR state, merge, install or publish. Preserve full logs and first-failure evidence in the report directory.
-- Give the reviewer the acceptance goal, actual diff and relevant source. A tester or reviewer summary is evidence to inspect, not final acceptance.
-- Verified P0/P1 defects and required deterministic gate failures block delivery; P2/P3 and unclassified minor findings follow the scope-stop rule and do not expand the task without explicit user escalation.
-- Delegation is not a background scheduler or authorization expansion. Repeat applicable user constraints and routing in every fresh-context handoff.
+- Outside native Ultra delegation, use tester for long existing test batches and reviewer for independent review when useful; short self-checks stay with the implementer/root. Follow `tests/TEST_STRATEGY.md`; the root owns coverage, gate level, failure classification and acceptance.
+- `task:finish` already owns `gate:task`; never run both as separate completion gates. Reuse applicable evidence; repeat affected checks only for relevant changes, missing coverage, failure or a specific risk.
+- Pass the task-specific reviewer/tester contracts: frozen source, authorized test output only, first-failure evidence and read-only review of actual code. Follow section 5's ownership transfer and acceptance rules; child summaries are not final proof.
+- Verified P0/P1 defects and required deterministic gate failures block delivery; P2/P3 and unclassified minor findings follow the scope-stop rule without expanding the task. Delegation is neither a scheduler nor extra authority.
 
 ## Repository and authorization boundary
 
@@ -59,7 +57,7 @@ For any implementation or delivery task, the root reads `docs/CODEX_WORKFLOW.md`
 
 ## Locate, execute, and finish
 
-- Locate through `docs/ARCHITECTURE_MAP.md` and `npm run gate:plan -- --context-domain <id>` or `--context-file <path>`. Read the matched contract, owners, implementation, tests and named sections; expand only for a dependency, failure or contract change.
+- For code changes needing capability or ownership context, locate through `docs/ARCHITECTURE_MAP.md` and `npm run gate:plan -- --context-domain <id>` or `--context-file <path>`. Read the matched contract, owners, implementation, tests and named sections; expand only for a dependency, failure or contract change.
 - If guidance conflicts, name and quote the files and state the affected decision. Use `docs/decisions/README.md` for living ADR status; do not infer current behavior from historical ADR prose.
 - Enlarge or repeat verification only for changed code, missing coverage, a new failure or a specific risk. Node tests do not prove Enter, IME, caret or iframe continuity; use public-behavior evidence for those paths.
 - Deliver the actual result, verification evidence and remaining limits. Do not widen the task into packaging, merge or release.
@@ -72,9 +70,9 @@ For any change affecting what a Stemmio user sees, understands or operates, read
 
 The paths below are read gates, not optional references: before the matching action, the root reads the named sections. Every fresh-context child task packet lists `required_reading`; the child reads it before acting and reports a missing source as blocked. Read no unrelated sections.
 
-Architecture and implementation start with `ARCHITECTURE_MAP.md` plus the capability-context query above; cross-owner or persistence work then reads only the relevant sections of `ARCHITECTURE_CONTRACT.md`, `STATE_OWNERSHIP.md` and `SECURITY_MODEL.md`.
+Use `ARCHITECTURE_MAP.md` and capability context when locating code ownership; read the relevant `ARCHITECTURE_CONTRACT.md`, `STATE_OWNERSHIP.md` and `SECURITY_MODEL.md` sections for module-boundary, public-interface or persistence changes. Simple documentation fixes need only their affected sources. Reuse already-read unchanged material; expand reading when source or assumptions change.
 
-- Subagents: `CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5. Testing: `DEVELOPMENT.md` and `tests/TEST_STRATEGY.md`.
+- Non-Ultra subagents: `CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5. Testing: `DEVELOPMENT.md` and `tests/TEST_STRATEGY.md`.
 - Git/task delivery: `GIT_WORKFLOW.md` and `CODEX_WORKFLOW.md`. Packaging/release: `RELEASING.md`. Dependencies or public-source boundaries: `DEPENDENCY_SECURITY.md` or `OPEN_SOURCE_BOUNDARY.md`.
 - User-visible behavior: the named `INTERACTION_FLOW.md` section and focused policy. Design work additionally uses `PRODUCT_DESIGN_SYSTEM.md`, `DESIGN_REVIEW_PROTOCOL.md` and `DESIGN_LANGUAGE.md` as applicable.
 - AI requests, schemas or versions: `CHANGE_REQUEST_PROTOCOL.md`, relevant schemas/fixtures and the focused AI or product PRD selected by capability context.
