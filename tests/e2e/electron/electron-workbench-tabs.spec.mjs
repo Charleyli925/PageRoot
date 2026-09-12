@@ -600,6 +600,25 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(importedProject.locator('[data-selected="true"]')).toHaveCount(0);
     await loadedDiskFrame(launched.page, projectA.sourcePath, "list-item");
     const historyButton = importedProject.getByRole("button", { name: `V${historicalVersion.ordinal}，历史版本`, exact: true });
+    let rejectedCrossProjectReads = 0;
+    const rejectCrossProjectHistory = async (route) => {
+      rejectedCrossProjectReads += 1;
+      await rejectHistory(route);
+    };
+    await launched.page.route("**/version-file?*", rejectCrossProjectHistory);
+    await historyButton.click();
+    await expect(selectedB).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => rejectedCrossProjectReads).toBe(1);
+    await expect(launched.page.getByText("测试历史快照校验失败", { exact: true })).toBeVisible();
+    await launched.page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    expect(rejectedCrossProjectReads).toBe(1);
+    await expect(mode).toHaveAttribute("data-view-label", "当前");
+    await launched.page.unroute("**/version-file?*", rejectCrossProjectHistory);
+    await currentProject.locator(".sidebar-project-current-row").click();
+    await expect(tabs.filter({ hasText: "sidebar-history-a" })).toHaveAttribute("aria-selected", "true");
+    await loadedDiskFrame(launched.page, projectA.sourcePath, "list-item");
     await historyButton.focus(); await historyButton.press("Enter");
     await expect(selectedB).toHaveAttribute("aria-selected", "true");
     await expect(selectedB).toContainText(`${historicalVersion.displayFileName} · 历史`);
