@@ -224,7 +224,7 @@ async function safeAuthoredHitPoint(target) {
   });
 }
 
-async function pageSpaceAuthoredHitPoint({ page, frame, editor, target }) {
+async function pageSpaceAuthoredHitPoint({ frame, editor, target }) {
   const position = await safeAuthoredHitPoint(target);
   if (!position) return null;
   const topLevel = typeof frame.mainFrame === "function";
@@ -265,8 +265,8 @@ async function pageSpaceAuthoredHitPoint({ page, frame, editor, target }) {
   };
 }
 
-async function hostPointerSnapshot({ page, candidate, point }) {
-  return page.evaluate(({ stableId, hitPoint }) => {
+async function hostPointerSnapshot({ editor, candidate, point }) {
+  return editor.evaluate((root, { stableId, hitPoint }) => {
     const hit = document.elementFromPoint(hitPoint.pageX, hitPoint.pageY);
     if (hitPoint.topLevel) {
       return {
@@ -274,10 +274,52 @@ async function hostPointerSnapshot({ page, candidate, point }) {
         hitKind: hit?.closest("[data-pageroot-id]") ? "authored-target" : hit?.localName || null,
       };
     }
-    const activeFrame = document.querySelector('iframe[data-runtime-slot-role="active"]');
+    const activeFrame = root.querySelector('iframe[data-runtime-slot-role="active"]');
+    const hint = hit?.closest?.('[data-testid="canvas-capability-hint"]');
+    const activeGeneration = activeFrame?.getAttribute("data-frame-generation") || null;
+    const hintTargetId = hint?.getAttribute("data-capability-target-id") || null;
+    const hintTargetKey = hint?.getAttribute("data-capability-target-key") || null;
+    const hintTargetDomGeneration = hint?.getAttribute(
+      "data-capability-target-dom-generation",
+    ) || null;
+    const hintCurrentDomGeneration = hint?.getAttribute(
+      "data-capability-current-dom-generation",
+    ) || null;
+    const hintActiveFrameGeneration = hint?.getAttribute(
+      "data-capability-active-frame-generation",
+    ) || null;
+    const validGeneration = (value) => Boolean(
+      typeof value === "string"
+      && /^(?:0|[1-9]\d*)$/u.test(value)
+      && Number.isSafeInteger(Number(value)),
+    );
+    const exactCapabilityHint = Boolean(
+      activeFrame
+      && hint
+      && hintTargetId === stableId
+      && hintTargetKey === `element:${stableId}`
+      && validGeneration(activeGeneration)
+      && validGeneration(hintTargetDomGeneration)
+      && validGeneration(hintCurrentDomGeneration)
+      && validGeneration(hintActiveFrameGeneration)
+      && hintTargetDomGeneration === hintCurrentDomGeneration
+      && hintActiveFrameGeneration === activeGeneration
+    );
     return {
-      accepted: Boolean(activeFrame && hit === activeFrame),
-      hitKind: hit === activeFrame ? "active-runtime-frame" : hit?.localName || null,
+      accepted: Boolean(activeFrame && (hit === activeFrame || exactCapabilityHint)),
+      hitKind: hit === activeFrame
+        ? "active-runtime-frame"
+        : exactCapabilityHint
+          ? "exact-capability-hint"
+          : hint
+            ? "capability-hint-identity-mismatch"
+            : hit?.localName || null,
+      activeGeneration,
+      hintTargetId,
+      hintTargetKey,
+      hintTargetDomGeneration,
+      hintCurrentDomGeneration,
+      hintActiveFrameGeneration,
     };
   }, { stableId: candidate.stableId, hitPoint: point });
 }
@@ -510,7 +552,7 @@ export async function probeAuthoredCapability({ page, frame, editor, candidate }
     error.details = { expectedStableId: candidate.stableId, expectedTag: liveTag, relocated };
     throw error;
   }
-  const initialPoint = await pageSpaceAuthoredHitPoint({ page, frame, editor, target });
+  const initialPoint = await pageSpaceAuthoredHitPoint({ frame, editor, target });
   if (!initialPoint) {
     return {
       ...candidate,
@@ -525,13 +567,13 @@ export async function probeAuthoredCapability({ page, frame, editor, candidate }
   let hostPointer = null;
   let iframeHitStillExact = false;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    point = await pageSpaceAuthoredHitPoint({ page, frame, editor, target });
+    point = await pageSpaceAuthoredHitPoint({ frame, editor, target });
     if (!point) break;
     await page.mouse.move(point.pageX, point.pageY);
     await page.evaluate(() => new Promise((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     }));
-    hostPointer = await hostPointerSnapshot({ page, candidate, point });
+    hostPointer = await hostPointerSnapshot({ editor, candidate, point });
     if (!hostPointer.accepted) break;
     iframeHitStillExact = await target.evaluate((element, hitPoint) => (
       element.ownerDocument.elementFromPoint(hitPoint.clientX, hitPoint.clientY)
@@ -554,13 +596,8 @@ export async function probeAuthoredCapability({ page, frame, editor, candidate }
     error.details = { stableId: candidate.stableId };
     throw error;
   }
-  await page.keyboard.down("Alt");
-  try {
-    await page.mouse.down();
-    await page.mouse.up();
-  } finally {
-    await page.keyboard.up("Alt");
-  }
+  await page.mouse.down();
+  await page.mouse.up();
   let selectedId = null;
   try {
     await expect.poll(async () => {
