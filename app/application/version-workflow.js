@@ -720,7 +720,7 @@ export class VersionWorkflow {
     const current = this.#projectSession.context;
     return Boolean(!this.#disposed && context && current
       && context.epoch === current.epoch && context.projectId === current.projectId
-      && context.documentId === current.documentId && context.sourcePath === current.sourcePath
+      && context.documentId === current.documentId && this.#codecs.sameSourcePath(context.sourcePath, current.sourcePath)
       && context.workingCopyId === current.workingCopyId);
   }
 
@@ -740,7 +740,7 @@ export class VersionWorkflow {
       !Number.isSafeInteger(payload.versionOrdinal) || payload.versionOrdinal < 1
       || payload.versionId !== `ver_${String(payload.versionOrdinal).padStart(4, "0")}`
       || payload.workingCopyId !== context.workingCopyId
-      || payload.sourcePath !== context.sourcePath
+      || !this.#codecs.sameSourcePath(payload.sourcePath, context.sourcePath)
       || !SHA256.test(String(payload.sourceSha256 || ""))
       || (!recoveryId && payload.sourceSha256 !== expectedSourceSha256)
       || (recoveryId && payload.recoveryId !== recoveryId)

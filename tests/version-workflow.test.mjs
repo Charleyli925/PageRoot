@@ -139,6 +139,7 @@ function createHarness({
   queryCurrent = null,
   exportHtmlCopy = null,
   checkpointSource = null,
+  sameSourcePathCodec = sameSourcePath,
 } = {}) {
   const projectSession = new ProjectSession();
   const locator = projectSession.openLocator(currentPath);
@@ -435,7 +436,7 @@ function createHarness({
     codecs: {
       versionsFromWorkspace, changesFromDraftRecords, commentsFromRecords, draftAuthorityFromWorkspace,
       isRecord: (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value),
-      sameSourcePath,
+      sameSourcePath: sameSourcePathCodec,
       operationKey,
       errorMessage: (cause, fallback) => String(cause?.message || fallback),
     },
@@ -1666,4 +1667,16 @@ test("an old adoption receipt cannot open after current advances even with ident
   assert.equal(h.calls.prepare.length, 0);
   assert.equal(h.calls.commit.length, 0);
   assert.equal(h.documentSession.html, BASE_HTML);
+});
+
+
+test("a committed local version accepts the existing macOS path alias without losing draft hydration", async () => {
+  const h = createHarness({ currentDraft: true, currentPath: "/private/tmp/version-workflow-a.html",
+    sameSourcePathCodec: (a, b) => a?.replace(/^\/private(?=\/tmp\/)/u, "") === b?.replace(/^\/private(?=\/tmp\/)/u, ""),
+    createCurrent: async (input) => currentVersionReceipt(input, { sourcePath: "/tmp/version-workflow-a.html" }),
+  });
+  const result = await h.workflow.saveCurrentVersion();
+  assert.equal(result.status, "succeeded");
+  assert.equal(h.workflow.getSnapshot().draftVersion.phase, "saved");
+  assert.equal(h.calls.refresh.length, 1);
 });
