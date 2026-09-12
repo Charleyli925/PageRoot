@@ -1,3 +1,4 @@
+import { seedLegacyHistoryActivation } from "./helpers/legacy-history-activation.mjs";
 import assert from "node:assert/strict";
 import {
   access,
@@ -384,6 +385,15 @@ test("Bridge continues a historical Version through one durable Working Copy rec
     versionId: "ver_0002",
     operationId: "bridge_history_continue_v2_0001",
   };
+  const refused = await postJson(bridge, "/history-version/continue", request);
+  assert.equal(refused.response.status, 409, JSON.stringify(refused.body));
+  assert.equal(refused.body.error.code, "HISTORY_ACTIVATION_RECEIPT_MISMATCH");
+  await seedLegacyHistoryActivation({
+    target: active,
+    versionId: request.versionId,
+    operationId: request.operationId,
+    expectedActiveWorkingCopyId: "work_ver_0006",
+  });
   const continued = await postJson(bridge, "/history-version/continue", request);
   assert.equal(continued.response.status, 200, JSON.stringify(continued.body));
   assert.equal(continued.body.openTarget.workingCopyId, "work_ver_0002");
@@ -432,7 +442,7 @@ test("Bridge continues a historical Version through one durable Working Copy rec
     operationId: "bridge_history_stale_v3_0001",
   });
   assert.equal(stale.response.status, 409, JSON.stringify(stale.body));
-  assert.equal(stale.body.error.code, "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT");
+  assert.equal(stale.body.error.code, "HISTORY_ACTIVATION_RECEIPT_MISMATCH");
 });
 
 test("project-file PROJECT.md remains available through the shared project-file inspector", async (t) => {

@@ -1,3 +1,4 @@
+import { seedLegacyHistoryActivation } from "./helpers/legacy-history-activation.mjs";
 import assert from "node:assert/strict";
 import {
   cp,
@@ -748,12 +749,12 @@ test("a historical active Working Copy is returned instead of silently jumping t
     active = await promoteNextVersion(value.repository, active, label);
   }
   assert.equal(active.workingCopyId, "work_ver_0003");
-  const activated = await value.repository.activateVersionWorkingCopy({
+  const activated = await value.repository.replayHistoryVersionActivation(await seedLegacyHistoryActivation({
     target: active,
     versionId: "ver_0002",
     operationId: "history_continue_v2_reopen_0001",
     expectedActiveWorkingCopyId: "work_ver_0003",
-  });
+  }));
   assert.equal(activated.target.workingCopyId, "work_ver_0002");
   const editedHistory = html("continue from V2");
   const saved = await value.repository.saveWorkingCopy({
@@ -1054,12 +1055,12 @@ test("unknown Runtime root and historyActivation members survive a confirmation"
     "runtime-state.json",
   );
 
-  const activated = await value.repository.activateVersionWorkingCopy({
+  const activated = await value.repository.replayHistoryVersionActivation(await seedLegacyHistoryActivation({
     target: active,
     versionId: "ver_0001",
     operationId: "runtime_unknown_activation_0001",
     expectedActiveWorkingCopyId: "work_ver_0002",
-  });
+  }));
   assert.equal(activated.historyActivation.state, "desktop-pending");
 
   const runtime = await json(runtimeFile);
