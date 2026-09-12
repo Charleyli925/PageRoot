@@ -2358,35 +2358,50 @@ test("a broad but related AI return is accepted without a target-scope error", {
   }
 });
 
-test("a committed version that the desktop cannot activate stays visibly blocked", async () => {
+test("a committed version with unreadable current bytes stays blocked and retries without a duplicate", async () => {
   const fixture = createSourceFixture();
-  const launched = await launchPageRoot({
-    activeSourcePath: fixture.sourcePath,
-    injectedEnv: { PAGEROOT_E2E_GENERATED_VERSION_OPEN_FAILURE: "1" },
-  });
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
-    const request = await addCommentAndSubmit(
-      launched.page,
-      launched.electronApp,
-      fixture.sourcePath,
-    );
+    const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
+    const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
+    // The stable current path needs no Desktop file switch. Exercise the real
+    // read-back boundary when a committed receipt carries no inline HTML.
+    const withoutInlineHtml = async (route) => {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.fulfill({ response, json: { ...await response.json(), content: null } });
+    };
+    let failedReads = 0;
+    const unreadableCurrent = async (route) => {
+      failedReads += 1;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({
+        error: { code: "E2E_CURRENT_DRAFT_OPEN_FAILED", message: "新版本文件暂时无法打开。" },
+      }) });
+    };
+    await launched.page.route("**/ready-version/activate", withoutInlineHtml);
+    await launched.page.route("**/source?*", unreadableCurrent);
     await adoptReadyResult(launched.page);
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
-      .filter({ visible: true }).first())
-      .toBeVisible({ timeout: 30_000 });
-    const active = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
-    expect(active.sourcePath).toBe(realpathSync(request.sourcePath));
-    await expect.poll(
-      () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
-      { timeout: 20_000 },
-    ).toBe(2);
+      .filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    expect(failedReads).toBeGreaterThan(0);
+    await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
+    const active = await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+    expect(active.sourcePath).toBe(beforeAdoption.sourcePath);
+    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
+    const committed = await beforeAdoption.repository.workspace({ sourcePath: active.sourcePath });
+    expect(committed.target.versionId).toBe("ver_0002");
+    expect((await beforeAdoption.repository.listRegisteredProjectVersionSummaries({ projectId: committed.target.projectId })).versions).toHaveLength(2);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+
+    await launched.page.unroute("**/source?*", unreadableCurrent);
+    await launched.page.unroute("**/ready-version/activate", withoutInlineHtml);
+    await adoptReadyResult(launched.page);
+    await assertReviewAcceptPersistence({ page: launched.page, beforeAdoption, expectedText: UPDATED_TEXT });
+    expect((await beforeAdoption.repository.listRegisteredProjectVersionSummaries({ projectId: committed.target.projectId })).versions).toHaveLength(2);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
