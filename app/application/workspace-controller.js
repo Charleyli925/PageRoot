@@ -1123,7 +1123,10 @@ export class WorkspaceController {
   }
 
   reloadDocumentCanvas() {
-    return this.#documentSession.reloadCanvas();
+    return this.#documentSession.reloadCanvas({
+      context: this.#projectSession.context,
+      operationId: "workspace-reload-canvas",
+    });
   }
 
   replaceCommentWorkingCopy(input) {
@@ -1546,11 +1549,14 @@ export class WorkspaceController {
   }
 
   acknowledgeEditCanvas(input) {
-    return this.#documentSession.confirmCanvas(input);
+    return this.#documentWorkflow?.confirmCanvas?.(input) === true;
   }
 
   retryCanvasVerification(input) {
-    this.#documentSession.reloadCanvas();
+    this.#documentSession.reloadCanvas({
+      context: input?.context || this.#projectSession.context,
+      operationId: "workspace-retry-canvas",
+    });
     return this.#requireDocumentWorkflow().ensureCurrentCanvas(input);
   }
 
@@ -2692,29 +2698,23 @@ export class WorkspaceController {
       );
       this.#recoveryPort.replace(recoveryIdentity);
       this.#documentWorkflow?.replaceRecoveryIdentity(recoveryIdentity);
-      const documentAlreadyMatchesCanonical = Boolean(
-        currentDocument.html === nextDocumentHtml
-        && currentDocument.persistedSourceSha256 === nextSourceSha256,
-      );
-      if (shouldAdoptCanonicalSource && !documentAlreadyMatchesCanonical) {
-        if (currentDocument.html !== nextDocumentHtml) {
-          this.#documentSession.publishAuthority({
-            html: nextDocumentHtml,
-            persistedSourceSha256: nextSourceSha256,
-          });
-          this.#canvasPort.invalidateRenderAcks();
-        } else {
-          // The renderer already holds the exact canonical bytes. Repair only
-          // its source identity; recreating the disposable canvas would abort
-          // an otherwise valid author-runtime page for no source-level reason.
-          this.#documentSession.update({ persistedSourceSha256: nextSourceSha256 });
-        }
-      } else if (!documentAlreadyMatchesCanonical) {
-        this.#documentSession.update({
-          html: nextDocumentHtml,
-          persistedSourceSha256: nextSourceSha256,
-        });
-      }
+      // Registration always changes the complete source context. Even when
+      // the bytes are identical, publish a fresh authority receipt so the
+      // old frame and every pre-registration ACK are fenced out.
+      this.#documentSession.publishAuthority({
+        html: nextDocumentHtml,
+        persistedSourceSha256: nextSourceSha256,
+        workingHtmlSha256: shouldAdoptCanonicalSource
+          ? nextSourceSha256
+          : currentDocumentClean
+            ? currentHtmlSha256
+            : currentDocument.workingHtmlSha256,
+        editRevision: currentDocument.editRevision,
+        lastPersistedRevision: currentDocument.lastPersistedRevision,
+        context: registeredContext,
+        operationId: "workspace-register-authority",
+      });
+      this.#canvasPort.invalidateRenderAcks();
       this.#versionSession.hydrate({
         versions: decodedWorkspace.versions,
         latestVersionId: payload.latestVersionId,
