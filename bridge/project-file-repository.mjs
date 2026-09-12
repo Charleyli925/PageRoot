@@ -1,6 +1,7 @@
 import { commentsRemainingAfterAdoption } from "../shared/draft-aggregate.mjs";
 import { CURRENT_DRAFT_SCHEMA_VERSION, currentDraftEvidence, migrateCurrentDraft, retireLegacyDraftFiles,
   listPreservedDrafts, readPreservedDraft, restorePreservedAttachments,
+  verifyReplacedCurrentDraft as verifyReplacedCurrentDraftEvidence,
   prepareCurrentVersion, commitCurrentVersion, currentVersionTransactionPath, assertCurrentVersionTransaction, currentVersionNoopResult,
 } from "./project-file-repository/current-draft.mjs";
 import { readSubmissionReceipt, saveSubmissionReceipt, finishSubmissionReceipt, appendSubmissionExecutionFact, projectSubmissionReceipt } from "./project-file-repository/submission.mjs";
@@ -539,6 +540,33 @@ export class ProjectFileRepository {
 
   async readPreservedDraft({ projectId, recoveryId } = {}) {
     return this.#serial(async () => readPreservedDraft(await this.#loadRegisteredProject({ projectId, readOnly: true }), recoveryId));
+  }
+
+  async verifyReplacedCurrentDraft({ target, journal } = {}) {
+    return this.#serial(async () => {
+      if (!isObject(target) || target.targetKind !== "working-copy"
+        || !target.projectId || !target.documentId) return { verified: false };
+      const loaded = await this.#loadRegisteredProject({
+        projectId: target.projectId, documentId: target.documentId,
+        declaredProjectRootPath: normalizedPath(target.projectRootPath), readOnly: true,
+      });
+      const manifestBefore = await readJsonFileWithSha256(loaded.paths.manifestPath, "current manifest", { projectRootPath: loaded.paths.projectRootPath });
+      if (JSON.stringify(manifestBefore.value) !== JSON.stringify(loaded.manifest)) return { verified: false };
+      const member = loaded.manifest.workingCopies.find((entry) => entry.workingCopyId === target.workingCopyId);
+      if (!member || member.workingCopyId !== loaded.runtime.activeWorkingCopyId || member.versionId !== target.versionId) return { verified: false };
+      const resolved = await this.#resolveWorkingCopyPath(loaded, member, "current draft", { persistLocator: false, readOnly: true });
+      if (resolved.sourceStatus !== "ready" || !samePath(resolved.exactSourcePath, target.exactSourcePath)
+        || resolved.source.sha256 !== target.sourceSha256) return { verified: false };
+      const result = await verifyReplacedCurrentDraftEvidence(loaded, {
+        journal, currentSourcePath: resolved.exactSourcePath, currentSource: resolved.source,
+      });
+      if (!result.verified) return result;
+      const manifestAfter = await readJsonFileWithSha256(loaded.paths.manifestPath, "current manifest", { projectRootPath: loaded.paths.projectRootPath });
+      const sourceAfter = await readHtmlFile(resolved.exactSourcePath, "current draft", { projectRootPath: loaded.paths.projectRootPath });
+      if (manifestBefore.sha256 !== manifestAfter.sha256 || resolved.source.sha256 !== sourceAfter.sha256
+        || !sameFileIdentity(copyFileIdentity(resolved.source.information), copyFileIdentity(sourceAfter.information))) return { verified: false };
+      return result;
+    });
   }
 
   async #ensureCurrentDraft(loaded) {

@@ -152,6 +152,67 @@ export async function listPreservedDrafts(loaded) {
   return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+export async function verifyReplacedCurrentDraft(loaded, { journal, currentSourcePath, currentSource }) {
+  const member = loaded.manifest.workingCopies.find((entry) => entry.workingCopyId === loaded.runtime.activeWorkingCopyId);
+  const currentVersion = loaded.manifest.versions.find((version) => version.versionId === member?.versionId);
+  if (!currentVersion || loaded.manifest.currentDraftSchemaVersion !== CURRENT_DRAFT_SCHEMA_VERSION
+    || !journal || journal.projectId !== loaded.project.projectId || journal.documentId !== loaded.project.documentId
+    || journal.workingCopyId !== member.workingCopyId || typeof journal.sourcePath !== "string" || !journal.sourcePath
+    || typeof journal.html !== "string" || !Number.isSafeInteger(journal.revision) || journal.revision < 0
+    || (journal.changeEvents !== undefined && !Array.isArray(journal.changeEvents))) return { verified: false };
+  const journalBytes = Buffer.from(journal.html, "utf8");
+  const journalHash = sha256(journalBytes);
+  if (journalHash !== journal.recoveryHtmlSha256 || journalHash !== journal.expectedSourceSha256) return { verified: false };
+  assertSha256(journal.journalSha256, "journalSha256");
+  // Only official replacement operations for this current member may supply
+  // preservation evidence. A matching HTML hash elsewhere is never authority.
+  for (const version of [...loaded.manifest.versions].reverse()) {
+    if (version.ordinal > currentVersion.ordinal || !version.sourceOperationId
+      || !["history-copy", "recovery-copy", "internal-ai"].includes(version.sourceType)) continue;
+    const transactionPath = currentVersionTransactionPath(loaded, version.sourceOperationId);
+    const transaction = await readJsonFile(transactionPath, "replacement transaction", options(loaded));
+    if (!transaction || transaction.state !== "completed") continue;
+    assertCurrentVersionTransaction(loaded, transaction, version.sourceOperationId);
+    if (JSON.stringify(transaction.version) !== JSON.stringify(version)
+      || transaction.beforeMember.workingCopyId !== journal.workingCopyId
+      || transaction.expectedSourceSha256 !== journal.expectedSourceSha256) continue;
+    const recoveryId = recoveryIdentity(transaction.operationId);
+    const preserved = await readPreservedDraft(loaded, recoveryId);
+    if (preserved.originalWorkingCopyId !== transaction.beforeMember.workingCopyId
+      || preserved.originalSourceRelativePath !== transaction.beforeMember.sourceRelativePath
+      || preserved.basedOnVersionId !== transaction.beforeMember.basedOnVersionId
+      || preserved.reason !== transaction.sourceType || preserved.createdAt !== transaction.createdAt
+      || preserved.sourceSha256 !== transaction.expectedSourceSha256
+      || JSON.stringify(preserved.state) !== JSON.stringify(transaction.beforeState)
+      || JSON.stringify(preserved.draft) !== JSON.stringify(transaction.beforeDraft)
+      || !Buffer.from(preserved.html, "utf8").equals(journalBytes)) continue;
+    const draftAttachments = (transaction.beforeDraft?.comments || []).flatMap((comment) => comment.attachments || []);
+    if (draftAttachments.length !== preserved.attachments.length || draftAttachments.some((attachment, index) => {
+      const saved = preserved.attachments[index];
+      return attachment.relativePath !== saved.relativePath || (attachment.sha256 && attachment.sha256 !== saved.sha256)
+        || (attachment.byteLength !== undefined && attachment.byteLength !== saved.byteLength);
+    })) continue;
+    const before = await readHtmlFile(path.join(path.dirname(transactionPath), "before.html"), "replacement before HTML", options(loaded));
+    const snapshot = await readHtmlFile(versionSnapshotPath(loaded.paths, version), "committed replacement Version", options(loaded));
+    const originalBinding = await regularInformation(path.join(preservedRoot(loaded, recoveryId), "original-binding.ref"), "preserved source binding", options(loaded));
+    const transactionBinding = await regularInformation(path.join(path.dirname(transactionPath), "before-binding.ref"), "replacement source binding", options(loaded));
+    if (!before.buffer.equals(journalBytes) || snapshot.sha256 !== version.contentSha256
+      || !originalBinding || !transactionBinding
+      || !sameFileIdentity(copyFileIdentity(originalBinding), copyFileIdentity(transactionBinding))) continue;
+    if ((journal.changeEvents || []).some((event) => !preserved.draft?.changeEvents?.some(
+      (saved) => JSON.stringify(saved) === JSON.stringify(event),
+    ))) continue;
+    return { verified: true, proof: {
+      projectId: loaded.project.projectId, documentId: loaded.project.documentId, workingCopyId: member.workingCopyId,
+      currentVersionId: currentVersion.versionId, currentSourcePath, currentSourceSha256: currentSource.sha256,
+      replacementVersionId: version.versionId, operationId: transaction.operationId,
+      preservedRecoveryId: recoveryId, replacedSourceSha256: preserved.sourceSha256,
+      journalSha256: journal.journalSha256, journalRevision: journal.revision,
+    } };
+  }
+  return { verified: false };
+}
+
 export async function restorePreservedAttachments(loaded, record) {
   for (const attachment of record.attachments) {
     const input = path.join(preservedRoot(loaded, record.recoveryId), attachment.relativePath);

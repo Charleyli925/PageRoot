@@ -334,6 +334,21 @@ test("Bridge creates from history in the same current draft and exposes local sn
   const history = await postJson(bridge, "/history-version/create", { target, operationId: "bridge_current_history_01", versionId: "ver_0001",
     expectedSourceSha256: localSha, expectedSnapshotSha256: ensured.body.versions[0].contentSha256 });
   assert.equal(history.response.status, 200, JSON.stringify(history.body)); assert.equal(history.body.versionId, "ver_0003");
+  const afterHistory = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(target.exactSourcePath)}`);
+  const journal = { projectId: target.projectId, documentId: target.documentId, workingCopyId: target.workingCopyId,
+    sourcePath: target.exactSourcePath, expectedSourceSha256: localSha, recoveryHtmlSha256: localSha,
+    journalSha256: sha256(Buffer.from('verified Main journal')), revision: 1, html: html('local') };
+  const proof = await postJson(bridge, '/current-draft/replacement-proof', { target: afterHistory.body.openTarget, journal });
+  assert.equal(proof.response.status, 200, JSON.stringify(proof.body));
+  assert.equal(proof.body.verified, true);
+  assert.equal(proof.body.proof.currentVersionId, 'ver_0003');
+  assert.equal(proof.body.proof.operationId, 'bridge_current_history_01');
+  assert.match(proof.body.proof.preservedRecoveryId, /^replaced_/u);
+  assert.equal(proof.body.proof.journalSha256, journal.journalSha256);
+  const newHtml = await postJson(bridge, '/current-draft/replacement-proof', {
+    target: afterHistory.body.openTarget, journal: { ...journal, html: html('unsaved new content') },
+  });
+  assert.deepEqual(newHtml.body, { verified: false });
   const records = await bridge.requestJson(`/preserved-drafts?projectId=${target.projectId}`);
   assert.equal(records.response.status, 200); assert.equal(records.body.drafts.length, 1);
   const recoveryId = records.body.drafts[0].recoveryId;

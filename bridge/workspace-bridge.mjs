@@ -2688,6 +2688,19 @@ async function route(request, response) {
     } catch (cause) { throw projectFileHttpError(cause); }
     return;
   }
+  if (request.method === "POST" && url.pathname === "/current-draft/replacement-proof") {
+    const body = await readBody(request);
+    if (!body || typeof body !== "object" || Array.isArray(body)
+      || Object.keys(body).some((key) => !["target", "journal"].includes(key))) {
+      throw new HttpError(400, "INVALID_REPLACEMENT_PROOF", "The replacement proof payload is invalid.");
+    }
+    const target = projectFileTargetFromBody(body.target);
+    if (!target || target.targetKind !== "working-copy") throw new HttpError(400, "OPEN_TARGET_REQUIRED", "A current draft identity is required.");
+    try {
+      sendJson(response, 200, await projectFileRepository.verifyReplacedCurrentDraft({ target, journal: body.journal }));
+    } catch (cause) { throw projectFileHttpError(cause); }
+    return;
+  }
   if (request.method === "POST" && ["/current-version/create", "/current-version/result", "/preserved-draft/restore", "/preserved-draft/result"].includes(url.pathname)) {
     const action = url.pathname === "/current-version/create" ? "create" : url.pathname === "/preserved-draft/restore" ? "restore" : url.pathname === "/preserved-draft/result" ? "restore-result" : "result";
     sendJson(response, 200, await projectFileCurrentVersion(await readBody(request), action));
