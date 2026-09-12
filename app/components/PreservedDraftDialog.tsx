@@ -34,14 +34,14 @@ export default function PreservedDraftDialog({ open, contextKey, onClose, onLoad
     aria-labelledby="preserved-drafts-title" onCancel={(event) => { event.preventDefault(); onClose(); }} onClose={onClose}>
     <article className="cancel-ai-run-card">
       <h2 id="preserved-drafts-title">找回此前的稿件</h2>
-      <p>这里保留了旧工作稿和替换前的内容。恢复时会一并找回评论，当前稿也会保留。</p>
+      <p>恢复会保存为新版本，并找回当时的评论。当前内容也会保留。</p>
       {loading ? <p role="status">正在读取…</p> : null}
       {error ? <p role="alert">{error}</p> : null}
       {!loading && !error && !entries.length ? <p>暂无需要找回的稿件。</p> : null}
       <ul className="preserved-draft-list">
         {entries.map((entry) => <li key={entry.recoveryId}>
           <span>
-            <strong>{entry.reason === "migration" ? "旧工作稿" : "此前的当前稿"}</strong>
+            <strong>{entry.reason === "legacy-working-copy" ? "旧工作稿" : "此前的当前稿"}</strong>
             <small>{new Date(entry.createdAt).toLocaleString()} · 基于 V{Number(entry.basedOnVersionId.replace(/^ver_/, ""))}{entry.hasComments ? " · 含评论" : ""}</small>
           </span>
           <button type="button" className="cancel-ai-run-end" disabled={Boolean(restoring)} onClick={async () => {
