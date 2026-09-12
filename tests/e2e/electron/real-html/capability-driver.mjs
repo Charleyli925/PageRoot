@@ -27,6 +27,97 @@ export function majorElementType(tagName) {
   return "container";
 }
 
+export function authoredTabActivationDecision(snapshot) {
+  if (snapshot.tabCount !== 1) {
+    return { state: "failed", reason: "TAB_STABLE_ID_NOT_UNIQUE" };
+  }
+  if (snapshot.active === true) return { state: "active", reason: "TAB_ALREADY_ACTIVE" };
+  if (snapshot.activationButtonCount > 1) {
+    return { state: "failed", reason: "TAB_ACTIVATION_ACTION_AMBIGUOUS" };
+  }
+  if (
+    snapshot.activationButtonCount === 1
+    && snapshot.activationButtonVisible === true
+    && snapshot.activationButtonEnabled === true
+  ) return { state: "activate", reason: "TAB_ACTIVATION_ACTION_READY" };
+  return { state: "pending", reason: "TAB_ACTIVATION_PENDING" };
+}
+
+export async function driveAuthoredTabActivation({
+  readState,
+  prepareSelection,
+  selectTab,
+  activateTab,
+  timeoutMs = 5_000,
+  pollIntervalMs = 25,
+}) {
+  const deadline = Date.now() + timeoutMs;
+  let selected = false;
+  try {
+    await prepareSelection();
+  } catch (cause) {
+    const error = new Error("The previous selection did not settle before tab activation.");
+    error.code = "TAB_ACTIVATION_NOT_SETTLED";
+    error.details = {
+      phase: "prepare-selection",
+      causeCode: cause?.code || null,
+      cause: String(cause?.message || cause),
+    };
+    throw error;
+  }
+  let latest = await readState();
+  let lastActionError = null;
+  while (Date.now() <= deadline) {
+    const decision = authoredTabActivationDecision(latest);
+    if (decision.state === "active") return { decision, snapshot: latest };
+    if (decision.state === "failed") {
+      const error = new Error("The authored tab activation state was ambiguous.");
+      error.code = decision.reason;
+      error.details = latest;
+      throw error;
+    }
+    if (!selected) {
+      try {
+        await selectTab();
+        selected = true;
+      } catch (cause) {
+        const error = new Error("The authored tab could not be selected for activation.");
+        error.code = "TAB_ACTIVATION_NOT_SETTLED";
+        error.details = {
+          phase: "select-tab",
+          causeCode: cause?.code || null,
+          cause: String(cause?.message || cause),
+        };
+        throw error;
+      }
+    } else if (decision.state === "activate") {
+      const confirmed = await readState();
+      const confirmedDecision = authoredTabActivationDecision(confirmed);
+      if (confirmedDecision.state === "active") {
+        return { decision: confirmedDecision, snapshot: confirmed };
+      }
+      if (confirmedDecision.state === "activate") {
+        try {
+          await activateTab();
+          lastActionError = null;
+        } catch (cause) {
+          lastActionError = String(cause?.message || cause);
+        }
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    latest = await readState();
+  }
+  const error = new Error("The authored tab did not reach its active terminal state.");
+  error.code = "TAB_ACTIVATION_NOT_SETTLED";
+  error.details = {
+    decision: authoredTabActivationDecision(latest),
+    snapshot: latest,
+    lastActionError,
+  };
+  throw error;
+}
+
 export function sourceElementsForCapabilityManifest(source) {
   const index = buildSourceIndex(source);
   return index.elements.map((element, sourceOrder) => {
@@ -120,12 +211,75 @@ async function safeAuthoredHitPoint(target) {
         const y = rect.top + Math.max(1, rect.height * yFraction);
         const hit = element.ownerDocument.elementFromPoint(x, y);
         if (hit?.closest("[data-pageroot-id]") === element) {
-          return { x: x - rect.left, y: y - rect.top };
+          return {
+            targetX: x - rect.left,
+            targetY: y - rect.top,
+            clientX: x,
+            clientY: y,
+          };
         }
       }
     }
     return null;
   });
+}
+
+async function pageSpaceAuthoredHitPoint({ page, frame, editor, target }) {
+  const position = await safeAuthoredHitPoint(target);
+  if (!position) return null;
+  const topLevel = typeof frame.mainFrame === "function";
+  if (topLevel) {
+    return {
+      ...position,
+      pageX: position.clientX,
+      pageY: position.clientY,
+      topLevel,
+    };
+  }
+  const frameGeometry = await editor.evaluate((root) => {
+    const frames = root.querySelectorAll('iframe[data-runtime-slot-role="active"]');
+    if (frames.length !== 1) return { count: frames.length };
+    const iframe = frames[0];
+    const rect = iframe.getBoundingClientRect();
+    const scaleX = iframe.offsetWidth > 0 ? rect.width / iframe.offsetWidth : 1;
+    const scaleY = iframe.offsetHeight > 0 ? rect.height / iframe.offsetHeight : 1;
+    return {
+      count: 1,
+      contentLeft: rect.left + iframe.clientLeft * scaleX,
+      contentTop: rect.top + iframe.clientTop * scaleY,
+      scaleX,
+      scaleY,
+    };
+  });
+  if (frameGeometry.count !== 1) {
+    const error = new Error("The capability probe did not find one active Runtime iframe.");
+    error.code = "CAPABILITY_PROBE_ACTIVE_FRAME_NOT_UNIQUE";
+    error.details = { activeFrameCount: frameGeometry.count };
+    throw error;
+  }
+  return {
+    ...position,
+    pageX: frameGeometry.contentLeft + position.clientX * frameGeometry.scaleX,
+    pageY: frameGeometry.contentTop + position.clientY * frameGeometry.scaleY,
+    topLevel,
+  };
+}
+
+async function hostPointerSnapshot({ page, candidate, point }) {
+  return page.evaluate(({ stableId, hitPoint }) => {
+    const hit = document.elementFromPoint(hitPoint.pageX, hitPoint.pageY);
+    if (hitPoint.topLevel) {
+      return {
+        accepted: hit?.closest("[data-pageroot-id]")?.getAttribute("data-pageroot-id") === stableId,
+        hitKind: hit?.closest("[data-pageroot-id]") ? "authored-target" : hit?.localName || null,
+      };
+    }
+    const activeFrame = document.querySelector('iframe[data-runtime-slot-role="active"]');
+    return {
+      accepted: Boolean(activeFrame && hit === activeFrame),
+      hitKind: hit === activeFrame ? "active-runtime-frame" : hit?.localName || null,
+    };
+  }, { stableId: candidate.stableId, hitPoint: point });
 }
 
 function behaviorFamiliesFor(capabilities) {
@@ -291,19 +445,122 @@ export async function discoverRuntimeGeneratedTargets({ page, frame, editor, tab
   return { targets, diagnostics };
 }
 
-export async function probeAuthoredCapability({ frame, editor, candidate }) {
+async function authoredProbeSelectionSnapshot(frame, editor) {
+  return {
+    selectedMarkerCount: await frame.locator("[data-html-canvas-selected]").count(),
+    visibleToolbarCount: await editor.getByRole("toolbar").filter({ visible: true }).count(),
+  };
+}
+
+export async function resetAuthoredProbeSelection({ page, frame, editor }) {
+  await page.keyboard.press("Escape");
+  try {
+    await expect.poll(
+      () => authoredProbeSelectionSnapshot(frame, editor),
+      { timeout: 2_000 },
+    ).toEqual({ selectedMarkerCount: 0, visibleToolbarCount: 0 });
+  } catch {
+    const snapshot = await authoredProbeSelectionSnapshot(frame, editor);
+    return {
+      ok: false,
+      reason: "PREVIOUS_SELECTION_OVERLAY_DID_NOT_CLOSE",
+      ...snapshot,
+    };
+  }
+  return {
+    ok: true,
+    reason: "PREVIOUS_SELECTION_CLEARED",
+    ...(await authoredProbeSelectionSnapshot(frame, editor)),
+  };
+}
+
+export async function probeAuthoredCapability({ page, frame, editor, candidate }) {
+  const selectionReset = await resetAuthoredProbeSelection({ page, frame, editor });
+  if (!selectionReset.ok) {
+    const error = new Error("The previous capability selection overlay did not close.");
+    error.code = "CAPABILITY_PROBE_SELECTION_NOT_CLEARED";
+    error.details = { stableId: candidate.stableId, selectionReset };
+    throw error;
+  }
   const target = frame.locator(`[data-pageroot-id=${JSON.stringify(candidate.stableId)}]`);
   const count = await target.count();
   if (count !== 1) {
-    return { ...candidate, capabilityFamilies: [], behaviorFamilies: [], probeReason: count ? "LIVE_DUPLICATE_STABLE_ID" : "LIVE_DOM_MISSING" };
+    const error = new Error("The frozen Stable ID did not resolve to exactly one live element.");
+    error.code = count ? "CAPABILITY_PROBE_DUPLICATE_STABLE_ID" : "CAPABILITY_PROBE_STALE_STABLE_ID";
+    error.details = { stableId: candidate.stableId, count };
+    throw error;
   }
   const liveTag = await target.evaluate((element) => element.localName);
-  await target.scrollIntoViewIfNeeded();
-  const position = await safeAuthoredHitPoint(target);
-  if (!position) {
-    return { ...candidate, capabilityFamilies: [], behaviorFamilies: [], visible: false, probeReason: "NO_EXACT_HIT_POINT" };
+  await target.evaluate((element) => element.scrollIntoView({ block: "center", inline: "center" }));
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+  const relocated = await target.evaluate((element) => ({
+    stableId: element.getAttribute("data-pageroot-id"),
+    tag: element.localName,
+    connected: element.isConnected,
+  }));
+  if (
+    relocated.stableId !== candidate.stableId
+    || relocated.tag !== liveTag
+    || !relocated.connected
+  ) {
+    const error = new Error("The frozen capability target changed during viewport preparation.");
+    error.code = "CAPABILITY_PROBE_TARGET_CHANGED_DURING_SCROLL";
+    error.details = { expectedStableId: candidate.stableId, expectedTag: liveTag, relocated };
+    throw error;
   }
-  await target.click({ position, modifiers: ["Alt"] });
+  const initialPoint = await pageSpaceAuthoredHitPoint({ page, frame, editor, target });
+  if (!initialPoint) {
+    return {
+      ...candidate,
+      capabilityFamilies: [],
+      behaviorFamilies: [],
+      visible: false,
+      probeReason: "NO_EXACT_HIT_POINT",
+      selectionReset,
+    };
+  }
+  let point = null;
+  let hostPointer = null;
+  let iframeHitStillExact = false;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    point = await pageSpaceAuthoredHitPoint({ page, frame, editor, target });
+    if (!point) break;
+    await page.mouse.move(point.pageX, point.pageY);
+    await page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    hostPointer = await hostPointerSnapshot({ page, candidate, point });
+    if (!hostPointer.accepted) break;
+    iframeHitStillExact = await target.evaluate((element, hitPoint) => (
+      element.ownerDocument.elementFromPoint(hitPoint.clientX, hitPoint.clientY)
+        ?.closest("[data-pageroot-id]") === element
+    ), point);
+    if (iframeHitStillExact) break;
+  }
+  if (!point || !hostPointer?.accepted) {
+    const error = new Error("A host overlay intercepted the real capability probe point.");
+    error.code = "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED";
+    error.details = {
+      stableId: candidate.stableId,
+      hitKind: hostPointer?.hitKind || "no-exact-hit-point",
+    };
+    throw error;
+  }
+  if (!iframeHitStillExact) {
+    const error = new Error("The iframe target moved away from the verified capability probe point.");
+    error.code = "CAPABILITY_PROBE_TARGET_MOVED_BEFORE_POINTER_DOWN";
+    error.details = { stableId: candidate.stableId };
+    throw error;
+  }
+  await page.keyboard.down("Alt");
+  try {
+    await page.mouse.down();
+    await page.mouse.up();
+  } finally {
+    await page.keyboard.up("Alt");
+  }
   let selectedId = null;
   try {
     await expect.poll(async () => {
@@ -313,7 +570,14 @@ export async function probeAuthoredCapability({ frame, editor, candidate }) {
       return selectedId;
     }, { timeout: 2_000 }).toBe(candidate.stableId);
   } catch {
-    return { ...candidate, capabilityFamilies: [], behaviorFamilies: [], probeReason: "SELECTION_IDENTITY_MISMATCH", selectedId };
+    const error = new Error("The real pointer probe did not select the frozen Stable ID.");
+    error.code = "CAPABILITY_PROBE_SELECTION_IDENTITY_MISMATCH";
+    error.details = {
+      expectedStableId: candidate.stableId,
+      selectedId,
+      hitPoint: { x: point.pageX, y: point.pageY },
+    };
+    throw error;
   }
 
   const toolbar = editor.getByRole("toolbar").filter({ visible: true }).first();
@@ -352,5 +616,6 @@ export async function probeAuthoredCapability({ frame, editor, candidate }) {
     copyReason,
     toolbarLabel,
     probeReason: "CAPABILITY_OBSERVED",
+    selectionReset,
   };
 }

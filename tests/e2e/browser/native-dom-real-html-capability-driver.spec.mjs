@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  authoredTabActivationDecision,
   collectVisibleAuthoredCandidates,
   discoverRuntimeGeneratedTargets,
+  driveAuthoredTabActivation,
   probeAuthoredCapability,
   runtimeGeneratedDiagnosticsIssue,
 } from "../electron/real-html/capability-driver.mjs";
@@ -11,6 +13,147 @@ const CORRECT_ID = "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WRONG_ID = "pr1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 const HARNESS_TEST_OPTIONS = { tag: ["@gate-smoke", "@smoke-editing"] };
+
+test("authored tab activation waits for a delayed action and fails ambiguous state", HARNESS_TEST_OPTIONS, async () => {
+  expect(authoredTabActivationDecision({
+    tabCount: 1,
+    active: false,
+    activationButtonCount: 0,
+    activationButtonVisible: false,
+    activationButtonEnabled: false,
+  })).toEqual({ state: "pending", reason: "TAB_ACTIVATION_PENDING" });
+  expect(authoredTabActivationDecision({
+    tabCount: 1,
+    active: false,
+    activationButtonCount: 1,
+    activationButtonVisible: true,
+    activationButtonEnabled: true,
+  })).toEqual({ state: "activate", reason: "TAB_ACTIVATION_ACTION_READY" });
+  expect(authoredTabActivationDecision({
+    tabCount: 1,
+    active: true,
+    activationButtonCount: 0,
+    activationButtonVisible: false,
+    activationButtonEnabled: false,
+  })).toEqual({ state: "active", reason: "TAB_ALREADY_ACTIVE" });
+  expect(authoredTabActivationDecision({
+    tabCount: 2,
+    active: false,
+    activationButtonCount: 0,
+    activationButtonVisible: false,
+    activationButtonEnabled: false,
+  })).toEqual({ state: "failed", reason: "TAB_STABLE_ID_NOT_UNIQUE" });
+});
+
+test("authored tab driver reaches active after a delayed action and fails a disappearing action", HARNESS_TEST_OPTIONS, async () => {
+  let activePrepareCount = 0;
+  let activeSelectCount = 0;
+  const alreadyActive = await driveAuthoredTabActivation({
+    readState: async () => ({
+      tabCount: 1,
+      active: true,
+      activationButtonCount: 0,
+      activationButtonVisible: false,
+      activationButtonEnabled: false,
+    }),
+    prepareSelection: async () => { activePrepareCount += 1; },
+    selectTab: async () => { activeSelectCount += 1; },
+    activateTab: async () => {},
+  });
+  expect(alreadyActive.decision.state).toBe("active");
+  expect(activePrepareCount).toBe(1);
+  expect(activeSelectCount).toBe(0);
+
+  const pendingSnapshot = async () => ({
+    tabCount: 1,
+    active: false,
+    activationButtonCount: 0,
+    activationButtonVisible: false,
+    activationButtonEnabled: false,
+  });
+  await expect(driveAuthoredTabActivation({
+    readState: pendingSnapshot,
+    prepareSelection: async () => {
+      const error = new Error("sticky selection");
+      error.code = "SELECTION_RESET_FAILED";
+      throw error;
+    },
+    selectTab: async () => {},
+    activateTab: async () => {},
+    timeoutMs: 50,
+  })).rejects.toMatchObject({
+    code: "TAB_ACTIVATION_NOT_SETTLED",
+    details: {
+      phase: "prepare-selection",
+      causeCode: "SELECTION_RESET_FAILED",
+      cause: "sticky selection",
+    },
+  });
+  await expect(driveAuthoredTabActivation({
+    readState: pendingSnapshot,
+    prepareSelection: async () => {},
+    selectTab: async () => {
+      const error = new Error("tab intercepted");
+      error.code = "POINTER_INTERCEPTED";
+      throw error;
+    },
+    activateTab: async () => {},
+    timeoutMs: 50,
+  })).rejects.toMatchObject({
+    code: "TAB_ACTIVATION_NOT_SETTLED",
+    details: {
+      phase: "select-tab",
+      causeCode: "POINTER_INTERCEPTED",
+      cause: "tab intercepted",
+    },
+  });
+
+  let state = "pending";
+  let activationClicks = 0;
+  const delayedAction = setTimeout(() => { state = "activate"; }, 20);
+  const completed = await driveAuthoredTabActivation({
+    readState: async () => ({
+      tabCount: 1,
+      active: state === "active",
+      activationButtonCount: state === "activate" ? 1 : 0,
+      activationButtonVisible: state === "activate",
+      activationButtonEnabled: state === "activate",
+    }),
+    prepareSelection: async () => {},
+    selectTab: async () => {},
+    activateTab: async () => {
+      activationClicks += 1;
+      state = "active";
+    },
+    timeoutMs: 500,
+    pollIntervalMs: 5,
+  });
+  clearTimeout(delayedAction);
+  expect(completed.decision.state).toBe("active");
+  expect(activationClicks).toBe(1);
+
+  state = "activate";
+  await expect(driveAuthoredTabActivation({
+    readState: async () => ({
+      tabCount: 1,
+      active: false,
+      activationButtonCount: state === "activate" ? 1 : 0,
+      activationButtonVisible: state === "activate",
+      activationButtonEnabled: state === "activate",
+    }),
+    prepareSelection: async () => {},
+    selectTab: async () => {},
+    activateTab: async () => {
+      state = "pending";
+      throw new Error("activation button detached");
+    },
+    timeoutMs: 80,
+    pollIntervalMs: 5,
+  })).rejects.toMatchObject({
+    code: "TAB_ACTIVATION_NOT_SETTLED",
+    details: { decision: { state: "pending" } },
+  });
+});
 
 async function installRuntimeDiagnosticReset(page) {
   await page.evaluate(() => {
@@ -28,13 +171,21 @@ async function installRuntimeDiagnosticReset(page) {
   });
 }
 
-async function capabilityFixture(page, selectedId = CORRECT_ID, targetTag = "p") {
+async function capabilityFixture(
+  page,
+  selectedId = null,
+  targetTag = "p",
+  { resetOnEscape = true } = {},
+) {
   await page.setContent(`
-    <style>#target { display:block; width:240px; height:80px; }</style>
+    <style>
+      #target { display:block; width:240px; height:80px; }
+      [role="toolbar"] { position:fixed; inset:0 auto auto 0; width:260px; height:96px; z-index:10; }
+    </style>
     <main data-runtime-root data-element-copy-availability="available" data-element-copy-reason="available">
       <${targetTag} id="target" data-pageroot-id="${CORRECT_ID}">editable authored text</${targetTag}>
       <p data-pageroot-id="${WRONG_ID}">other text</p>
-      <div role="toolbar" aria-label="元素工具栏">
+      <div role="toolbar" aria-label="元素工具栏" hidden>
         <button aria-label="留评论"></button>
         <button aria-label="编辑"></button>
         <button aria-label="复制元素"></button>
@@ -43,15 +194,29 @@ async function capabilityFixture(page, selectedId = CORRECT_ID, targetTag = "p")
       </div>
     </main>
   `);
-  await page.locator("#target").evaluate((element, id) => {
-    element.addEventListener("click", (event) => {
-      if (!event.altKey) return;
-      document.querySelectorAll("[data-html-canvas-selected]")
-        .forEach((candidate) => candidate.removeAttribute("data-html-canvas-selected"));
-      document.querySelector(`[data-pageroot-id="${id}"]`)
-        ?.setAttribute("data-html-canvas-selected", "");
+  await page.locator("#target").evaluate((element, payload) => {
+    window.__capabilityProbeClickCount = 0;
+    document.querySelectorAll("[data-pageroot-id]").forEach((target) => {
+      target.addEventListener("click", (event) => {
+        if (!event.altKey) return;
+        window.__capabilityProbeClickCount += 1;
+        document.querySelectorAll("[data-html-canvas-selected]")
+          .forEach((candidate) => candidate.removeAttribute("data-html-canvas-selected"));
+        const nextId = payload.selectedId || target.getAttribute("data-pageroot-id");
+        document.querySelector(`[data-pageroot-id="${nextId}"]`)
+          ?.setAttribute("data-html-canvas-selected", "");
+        document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
+      });
     });
-  }, selectedId);
+    if (payload.resetOnEscape) {
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        document.querySelectorAll("[data-html-canvas-selected]")
+          .forEach((candidate) => candidate.removeAttribute("data-html-canvas-selected"));
+        document.querySelector('[role="toolbar"]')?.setAttribute("hidden", "");
+      });
+    }
+  }, { selectedId, resetOnEscape });
 }
 
 function candidate(stableId = CORRECT_ID) {
@@ -103,33 +268,176 @@ test("capability probe accepts only the exact selected Stable ID", HARNESS_TEST_
   ]));
 });
 
+test("capability probe closes A's toolbar before the next exact click on B", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await capabilityFixture(page);
+  const base = {
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+  };
+  const first = await probeAuthoredCapability({ ...base, candidate: candidate(CORRECT_ID) });
+  const second = await probeAuthoredCapability({ ...base, candidate: candidate(WRONG_ID) });
+  expect(first).toMatchObject({ probeReason: "CAPABILITY_OBSERVED", selectedId: CORRECT_ID });
+  expect(second).toMatchObject({
+    probeReason: "CAPABILITY_OBSERVED",
+    selectedId: WRONG_ID,
+    selectionReset: {
+      ok: true,
+      reason: "PREVIOUS_SELECTION_CLEARED",
+      selectedMarkerCount: 0,
+      visibleToolbarCount: 0,
+    },
+  });
+  expect(await page.evaluate(() => window.__capabilityProbeClickCount)).toBe(2);
+});
+
+test("capability probe fails closed before clicking when the prior overlay cannot clear", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await capabilityFixture(page, CORRECT_ID, "p", { resetOnEscape: false });
+  await page.evaluate((stableId) => {
+    document.querySelector(`[data-pageroot-id="${stableId}"]`)
+      ?.setAttribute("data-html-canvas-selected", "");
+    document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
+  }, CORRECT_ID);
+  const startedAt = Date.now();
+  await expect(probeAuthoredCapability({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: candidate(),
+  })).rejects.toMatchObject({
+    code: "CAPABILITY_PROBE_SELECTION_NOT_CLEARED",
+    details: {
+      stableId: CORRECT_ID,
+      selectionReset: {
+        ok: false,
+        reason: "PREVIOUS_SELECTION_OVERLAY_DID_NOT_CLOSE",
+        selectedMarkerCount: 1,
+        visibleToolbarCount: 1,
+      },
+    },
+  });
+  expect(Date.now() - startedAt).toBeLessThan(5_000);
+  expect(await page.evaluate(() => window.__capabilityProbeClickCount)).toBe(0);
+});
+
 test("capability probe rejects stale and wrongly selected Stable IDs", HARNESS_TEST_OPTIONS, async ({ page }) => {
   await capabilityFixture(page, WRONG_ID);
   const editor = page.locator("[data-runtime-root]");
-  const wrongSelection = await probeAuthoredCapability({
+  await expect(probeAuthoredCapability({
     page,
     frame: page,
     editor,
     candidate: candidate(),
-  });
-  expect(wrongSelection).toMatchObject({
-    capabilityFamilies: [],
-    behaviorFamilies: [],
-    probeReason: "SELECTION_IDENTITY_MISMATCH",
-    selectedId: WRONG_ID,
+  })).rejects.toMatchObject({
+    code: "CAPABILITY_PROBE_SELECTION_IDENTITY_MISMATCH",
+    details: { expectedStableId: CORRECT_ID, selectedId: WRONG_ID },
   });
 
-  const stale = await probeAuthoredCapability({
+  await expect(probeAuthoredCapability({
     page,
     frame: page,
     editor,
     candidate: candidate("pr1_cccccccccccccccccccccccccccccccc"),
+  })).rejects.toMatchObject({
+    code: "CAPABILITY_PROBE_STALE_STABLE_ID",
+    details: { count: 0 },
   });
-  expect(stale).toMatchObject({
+});
+
+test("capability probe uses a bounded real mouse hit for a continuously moving target", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await capabilityFixture(page);
+  await page.locator("#target").evaluate((element) => {
+    element.animate(
+      [{ transform: "translateX(0px)" }, { transform: "translateX(2px)" }],
+      { duration: 40, iterations: Infinity, direction: "alternate" },
+    );
+  });
+  const startedAt = Date.now();
+  const observed = await probeAuthoredCapability({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: candidate(),
+  });
+  expect(observed).toMatchObject({ probeReason: "CAPABILITY_OBSERVED", selectedId: CORRECT_ID });
+  expect(Date.now() - startedAt).toBeLessThan(5_000);
+});
+
+test("capability probe rejects a foreign hit interceptor without force-clicking", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await capabilityFixture(page);
+  await page.locator("#target").evaluate((element) => {
+    const interceptor = document.createElement("div");
+    interceptor.id = "foreign-interceptor";
+    Object.assign(interceptor.style, {
+      position: "absolute",
+      left: `${element.offsetLeft}px`,
+      top: `${element.offsetTop}px`,
+      width: `${element.offsetWidth}px`,
+      height: `${element.offsetHeight}px`,
+      zIndex: "9",
+    });
+    document.body.append(interceptor);
+  });
+  const startedAt = Date.now();
+  const observed = await probeAuthoredCapability({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: candidate(),
+  });
+  expect(observed).toMatchObject({
     capabilityFamilies: [],
     behaviorFamilies: [],
-    probeReason: "LIVE_DOM_MISSING",
+    probeReason: "NO_EXACT_HIT_POINT",
   });
+  expect(Date.now() - startedAt).toBeLessThan(5_000);
+  expect(await page.evaluate(() => window.__capabilityProbeClickCount)).toBe(0);
+});
+
+test("capability probe rejects an iframe host overlay that appears on pointer move", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await page.setContent(`
+    <style>
+      iframe { width: 320px; height: 180px; border: 0; }
+      #host-overlay { position: fixed; left: 8px; top: 8px; width: 320px; height: 180px; z-index: 20; }
+    </style>
+    <main data-runtime-root data-element-copy-availability="available" data-element-copy-reason="available">
+      <iframe data-runtime-slot-role="active"></iframe>
+      <div id="host-overlay" hidden></div>
+      <div role="toolbar" aria-label="元素工具栏" hidden></div>
+    </main>
+  `);
+  const iframeElement = await page.locator("iframe").elementHandle();
+  const child = await iframeElement.contentFrame();
+  await child.setContent(`
+    <p id="target" data-pageroot-id="${CORRECT_ID}" style="display:block;width:240px;height:80px">
+      iframe authored target
+    </p>
+  `);
+  await child.locator("#target").evaluate((element) => {
+    window.__capabilityProbeClickCount = 0;
+    element.addEventListener("click", (event) => {
+      if (!event.altKey) return;
+      window.__capabilityProbeClickCount += 1;
+      element.setAttribute("data-html-canvas-selected", "");
+    });
+  });
+  await page.locator("iframe").evaluate((iframe) => {
+    iframe.addEventListener("mouseenter", () => {
+      document.querySelector("#host-overlay")?.removeAttribute("hidden");
+    });
+  });
+  const startedAt = Date.now();
+  await expect(probeAuthoredCapability({
+    page,
+    frame: child,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: candidate(),
+  })).rejects.toMatchObject({
+    code: "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED",
+    details: { stableId: CORRECT_ID, hitKind: "div" },
+  });
+  expect(Date.now() - startedAt).toBeLessThan(5_000);
+  expect(await child.evaluate(() => window.__capabilityProbeClickCount)).toBe(0);
 });
 
 test("capability probe reports a same-ID wrong DOM tag instead of echoing the frozen tag", HARNESS_TEST_OPTIONS, async ({ page }) => {
