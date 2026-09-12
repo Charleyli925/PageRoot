@@ -52,6 +52,12 @@ with `ProjectSession` + `ProjectWorkflow`. Open/switch/close now have
 `ProjectWorkflow`. Do not split that workflow for line budget, and do not
 add a second Controller.
 
+Native HTTP Agent input/attachment policy is shared in
+`shared/agent-input-policy.mjs`. RunWorkflow supplies candidate byte estimates;
+HTTP Runtime supplies verified frozen serialized bytes. Provider launch consumes
+the selected preflight ticket capability. No policy object owns source, Request,
+credentials or durable runtime state; see ADR 0069 for the estimation boundary.
+
 ## Workspace response ingress
 
 `decodeWorkspaceResponse` in the existing Controller codecs module is the
