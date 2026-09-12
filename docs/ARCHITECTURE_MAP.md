@@ -87,7 +87,7 @@ bypass hash, identity, scope or persistence checks, and do not serialize
 Runtime DOM as the save source.
 
 **Current fact.** `HtmlCanvasEditor.applySourceCommand()` materializes once
-for an accepted edit: it lowers the canvas command to a semantic operation,
+for an accepted edit: it receives a semantic operation or lowers an island/range command,
 applies the kernel, and publishes that complete HTML/Hash plus the kernel's
 SourcePatch target mappings. SourcePatch remains the internal materializer
 inside the kernel; Canvas does not apply a second independent plan or compare
@@ -113,9 +113,14 @@ owner. Geometry or outline failure still must not refuse edit entry.
 **Target resolution.** The official entry requires a valid unique Stable ID.
 Insertion resolution keeps exact boundaries and cross-hash prefix/suffix rebind
 inside that same parent; it has no ID-less parent search. Text-range context
-may similarly locate a range inside its identified host, never select a new host. Canvas still constructs capability-specific SourcePatch commands
-beside kernel operations so it can recover island metadata before the single
-apply. Opt-in `edit-pipeline-counters.js` can count
+may similarly locate a range inside its identified host, never select a new host.
+Element styles and same-parent up/down commands directly construct `setStyle`
+and `moveElement` through the pure `html-canvas-source-commands` helpers. Canvas
+uses the kernel's `materialization.planType` for direct-command projection;
+it does not pre-plan these commands or infer their type from inverse metadata.
+Only editable-island and text-range style commands still pre-plan to recover
+their structure/allocated-ID metadata before the single apply.
+Opt-in `edit-pipeline-counters.js` can count
 full-document index builds, full patch applies and insertion-point full-tree
 scans in tests; it is not a Session and has no production stream. Undo/redo
 restores the open-document history tuple and is not a new `fullPatchApply`. Live

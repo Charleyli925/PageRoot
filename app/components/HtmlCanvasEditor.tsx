@@ -33,6 +33,7 @@ import {
 } from "./runtime-continuity-probe.js";
 import { installEditPipelineTestHooks } from "../lib/edit-pipeline-counters.js";
 import { createSourceOperationId } from "../domain/source-history.js";
+import { inlineStyleOperation, siblingReorderOperation } from "./html-canvas-source-commands.js";
 import {
   createPagePresentationAction,
   type PagePresentationAction,
@@ -67,6 +68,7 @@ import {
   buildSourceTextMap,
   sourceSegmentsToTextRange,
   textRangeToSourceSegments,
+  type SourceTextSegment,
   type SourceTextMap,
 } from "../lib/source-text-map.js";
 import {
@@ -790,7 +792,13 @@ type FinishNativeEditingOptions = {
 };
 
 
-type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
+type SourcePatchCommand = {
+  targetRef: SourceTargetRef;
+  expectedSourceSha256: string;
+} & (
+  | { type: "replace-editable-island"; elementId?: string; beforeInnerHtml: string; nextInnerHtml: string }
+  | { type: "set-text-range-style"; segments: SourceTextSegment[]; property: string; value: string; important?: boolean }
+);
 type DirectSemanticCommand = {
   type: "direct-semantic-operation";
   operation: SemanticOperation;
@@ -863,16 +871,6 @@ function semanticOperationForSourceCommand(
       ...(createdPagerootIds.length > 0 ? { createdPagerootIds } : {}),
     };
   }
-  if (command.type === "set-inline-style") {
-    return {
-      ...envelope,
-      type: "setStyle",
-      target,
-      property: command.property,
-      value: command.value,
-      important: command.important === true,
-    };
-  }
   if (command.type === "set-text-range-style") {
     const map = buildSourceTextMap(sourceIndex, sourceTarget.nodeId, { allowEmpty: true });
     const range = sourceSegmentsToTextRange(map, command.segments);
@@ -894,34 +892,7 @@ function semanticOperationForSourceCommand(
       ...(createdPagerootIds.length > 0 ? { createdPagerootIds } : {}),
     };
   }
-  if (command.type === "reorder-sibling") {
-    const parent = sourceTarget.parentId
-      ? sourceIndex.byNodeId.get(sourceTarget.parentId)
-      : null;
-    if (parent?.type !== "element" || !parent.pagerootId) {
-      throw new Error("语义排序需要稳定源码父元素。");
-    }
-    const withoutTarget = parent.childElementIds.filter(
-      (nodeId: string) => nodeId !== sourceTarget.nodeId,
-    );
-    const toIndex = Number(command.toIndex);
-    if (!Number.isSafeInteger(toIndex) || toIndex < 0 || toIndex > withoutTarget.length) {
-      throw new Error("语义排序目标位置无效。");
-    }
-    const beforeNode = withoutTarget[toIndex]
-      ? sourceIndex.byNodeId.get(withoutTarget[toIndex])
-      : null;
-    return {
-      ...envelope,
-      type: "moveElement",
-      target,
-      parent: createSemanticElementPrecondition(sourceIndex, parent.pagerootId),
-      before: beforeNode?.type === "element" && beforeNode.pagerootId
-        ? createSemanticElementPrecondition(sourceIndex, beforeNode.pagerootId)
-        : null,
-    };
-  }
-  throw new Error(`当前 SourcePatch 类型尚未接入语义操作：${command.type}`);
+  throw new Error("当前画布命令尚未接入语义操作。");
 }
 
 function computedCssValue(element: HTMLElement, cssProperty: string): string {
@@ -3887,7 +3858,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ]);
       const trackedTargetRefs = trackedSourceTargetRefs(
         originalTargets,
-        operationTargetRefs,
+        // A direct semantic operation materializes its own canonical
+        // subregion TargetRef. Keep the caller's presentation-level identity
+        // (for example a module selection) in the same apply as a tracked
+        // mapping so the Canvas can restore its original targetId and level.
+        directSemanticOperation ? [] : operationTargetRefs,
       );
       const semanticResult = applySemanticOperation(
         documentState,
@@ -3904,7 +3879,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return null;
       }
       const forwardPlan = plannedCommand ?? {
-        type: String(result.inversePlan?.metadata?.originalType ?? ""),
+        type: semanticResult.materialization.planType,
         targetRefs: operationTargetRefs,
       } as SourcePatchPlan;
       options.validateResult?.(result);
@@ -5598,13 +5573,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           elementTargetId: targetBeforeMove.id,
         },
       };
-      return Boolean(applySourceCommand({
-        type: "reorder-sibling",
-        targetRef: sourceTargetRefForSelection(targetBeforeMove),
-        toIndex: nextIndex,
-        beforeOrder: [...sourceParent.childElementIds],
-        expectedSourceSha256: sourceIndex?.sourceSha256 || "",
-      }, mutation));
+      try {
+        return Boolean(applySourceCommand({
+          type: "direct-semantic-operation",
+          operation: siblingReorderOperation(sourceIndex, {
+            elementId: sourceElement.pagerootId,
+            toIndex: nextIndex,
+            baseRevision: semanticRevisionRef.current,
+          }),
+        }, mutation));
+      } catch (cause) {
+        reportBlockedEdit(cause);
+        return false;
+      }
     },
     [
       applySourceCommand,
@@ -8307,13 +8288,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         },
       };
       let unchanged = false;
+      let operation: SemanticOperation;
+      try {
+        operation = inlineStyleOperation(sourceIndexRef.current, {
+          elementId: target.elementId || "",
+          baseRevision: semanticRevisionRef.current,
+          property: config.cssProperty,
+          value,
+          important: verifiedOverride.priority === "important",
+        });
+      } catch (cause) {
+        reportBlockedEdit(cause);
+        resumeRejectedNativeStyle();
+        return;
+      }
       const styled = applySourceCommand({
-        type: "set-inline-style",
-        targetRef: sourceTargetRefForSelection(target),
-        property: config.cssProperty,
-        value,
-        ...(verifiedOverride.priority === "important" ? { important: true } : {}),
-        expectedSourceSha256: sourceIndexRef.current?.sourceSha256 || "",
+        type: "direct-semantic-operation",
+        operation,
       }, mutation, { onUnchanged: () => { unchanged = true; } });
       const resumed = Boolean(
         (styled || unchanged)

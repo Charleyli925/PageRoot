@@ -1,5 +1,55 @@
 # Design QA
 
+## 2026-09-12 — Direct element style and sibling reorder commands
+
+- Scope: existing element-style controls and same-parent up/down actions now
+  construct semantic intent directly. The layout, copy, native checkpoints,
+  Runtime source proof and persistence boundaries are unchanged. Range styles,
+  editable islands, Enter/IME and controlled HTML echoes remain separate work.
+- Source evidence: the two former Canvas command/translation branches are
+  removed; direct projection uses the kernel's materialization type. Kernel
+  re-planning, exact source materialization, target mapping and inverse remain.
+- Local validation: 30 focused Node tests passed, including direct commands,
+  exact style bytes/priority, sibling positions through the end, comment-owned
+  whitespace, unchanged style, inverse/redo and identity/stale-source rejection.
+  Typecheck and architecture passed. Initial synthetic fixtures used invalid
+  UUID version bits, then assumed the wrong trailing-comment newline ownership;
+  both failures were retained and the fixtures were corrected against the
+  existing identity contract and shared reorder planner, without relaxing it.
+- Independent review reproduced a blocking target-continuity defect before
+  delivery: direct Kernel materialization returned its canonical subregion
+  TargetRef but omitted the caller's module-level target, so the first move
+  left the selection orphaned and disabled a second move. Direct operations
+  now carry that caller identity as a tracked mapping in the same Kernel
+  apply. Focused Node coverage checks both style and reorder mappings; the
+  Electron reorder flow requires two consecutive module moves without a new
+  selection, retains the module marker and checks one full patch apply for
+  each move. Independent re-review confirmed the P1 closed with no new P0/P1
+  or P2; the remaining P3 is that the automated counter proves one apply but
+  does not independently count old pre-planning calls.
+- Runtime evidence before that repair: the exact pre-fix completion gate
+  `2026-09-12T10-54-27-167Z-task` passed 10/10 selected suites (Browser 34,
+  Electron 52 and AI 20; no selected failure, skip or flaky result). The
+  user-designated eight-file HTML corpus then completed one real Electron run:
+  5 passed, 3 failed and 0 skipped, with all eight originals byte-identical.
+  The five passes completed preview/edit re-entry, source reload, save/reopen
+  and two duplicate/delete cycles. One failure followed three text hosts when
+  the copy action was unavailable; two found only one independent text host
+  rather than the required three. Failure screenshots were inspected. This is
+  not a full-corpus pass or a same-HEAD attribution experiment.
+- Repaired-source runtime evidence: the focused real Electron module reorder
+  flow passed 1/1. It retained the same module selection through two moves,
+  kept the second move available, preserved one document and one script
+  execution, and recorded one full patch apply for each command. The same
+  eight-file corpus was then rerun once: 4 passed, 4 failed and 0 skipped,
+  again with all eight originals byte-identical. The extra failure versus the
+  preceding run was another one-text-host minimum failure; the file had passed
+  in the immediately preceding run, so the variation is treated as discovery
+  noise rather than a repair regression. The other failure shapes were the
+  same missing copy action and one-text-host minimum. This matches the earlier
+  recorded 4/8 baseline shape and still is not a full-corpus pass. The exact
+  repaired-source completion gate remains pending.
+
 ## 2026-09-12 — 合法空差异候选进入同一审阅页
 
 - Truth: 用户确认即使没有可定位变化也应进入审阅，保留 AI 草稿作为未来对话入口。
