@@ -23,14 +23,15 @@ import {
   json,
 } from "./project-file-repository-harness.mjs";
 
-test("a Candidate is not a Version until adoption, rejection consumes no ordinal, and promotion is idempotent", async (t) => {
+for (const sameContent of [false, true]) {
+test(`Candidate rejection consumes no ordinal and promotion is idempotent (same content: ${sameContent})`, async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
   const firstCandidate = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_rejected",
     candidateId: "candidate_rejected_0001",
-    html: html("rejected candidate"),
+    html: sameContent ? await readFile(imported.target.exactSourcePath, "utf8") : html("rejected candidate"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
 
@@ -52,7 +53,7 @@ test("a Candidate is not a Version until adoption, rejection consumes no ordinal
     target: imported.target,
     requestId: "req_adopted",
     candidateId: "candidate_adopted_0001",
-    html: html("adopted candidate"),
+    html: sameContent ? await readFile(imported.target.exactSourcePath, "utf8") : html("adopted candidate"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
   assert.equal(secondCandidate.candidate.proposedVersionId, "ver_0002");
@@ -74,6 +75,7 @@ test("a Candidate is not a Version until adoption, rejection consumes no ordinal
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
   assert.equal(manifest.latestOfficialVersionId, "ver_0002");
 });
+}
 
 test("promotion preserves the identity-normalized Candidate in its Version and Working Copy", async (t) => {
   const value = await fixture(t);
@@ -512,7 +514,8 @@ test("runtime authority seals Candidate record and output after review begins", 
   );
 });
 
-test("request recovery promotes a prepared Candidate only when its runtime seal survives", async (t) => {
+for (const sameContent of [false, true]) {
+test(`prepared Candidate recovery retains runtime authority (same content: ${sameContent})`, async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
   const request = await value.repository.prepareRequest({
@@ -540,7 +543,7 @@ test("request recovery promotes a prepared Candidate only when its runtime seal 
       target: imported.target,
       requestId: request.requestId,
       attemptId: request.attemptId,
-      html: html("candidate after interrupted completion"),
+      html: sameContent ? await readFile(imported.target.exactSourcePath, "utf8") : html("candidate after interrupted completion"),
     }),
     (error) => error instanceof ProjectFileRepositoryError
       && error.code === "INJECTED_FAILPOINT",
@@ -552,6 +555,7 @@ test("request recovery promotes a prepared Candidate only when its runtime seal 
   assert.equal(recovered.activeRequest.status, "candidate-ready");
   assert.equal(recovered.activeCandidate.candidateId, request.candidateId);
 });
+}
 
 test("Promotion recovery does not bypass the runtime-sealed Candidate record", async (t) => {
   const value = await fixture(t);
@@ -1175,7 +1179,8 @@ test("a replaced published promotion file fails recovery without deleting user b
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
-test("promotion fault recovery leaves exactly one formal Version and regular files at every commit point", async (t) => {
+for (const sameContent of [false, true]) {
+test(`promotion fault recovery leaves one formal Version at every commit point (same content: ${sameContent})`, async (t) => {
   for (const failpoint of [
     "promotion-prepared",
     "promotion-snapshot-created",
@@ -1191,7 +1196,7 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
       target: imported.target,
       requestId: "req_fault",
       candidateId: "candidate_fault_0001",
-      html: html("fault recovery candidate"),
+      html: sameContent ? await readFile(imported.target.exactSourcePath, "utf8") : html("fault recovery candidate"),
       expectedSourceSha256: imported.target.sourceSha256,
     });
     const failing = new ProjectFileRepository({
@@ -1229,3 +1234,4 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
     );
   }
 });
+}

@@ -464,6 +464,8 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 
 > 候选版本 7 · 基于版本 2 · 待审阅
 
+新的成功 finalizer completion 统一为 `completed`。合法完整 HTML 即使与冻结输入逐字节相同，也建立普通 Candidate，进入同一审阅流程，由用户明确选择采纳或不用；Hash 相同不再自动结束本轮。既有 `completion.json` 重放保持原字节，仍在 processing 的历史 v4 `no-change` completion 经当前校验后也进入 Candidate。
+
 第一期的候选 HTML 与记录保存在 Request / Attempt 的隐藏路径中。PR 2B 的 `AI任务/<轮次>/` 只展示经校验后的派生副本，不能替代 Attempt 输出、Candidate 记录或 Promotion 输入：
 
 1. Repository 先重新验证 Registry 绑定、Project/Document、Request/Attempt、Candidate 身份与 Hash、`proposedVersionId`、`basedOnVersionId`、`previousVersionId` 和项目根真实路径，才把已验证字节交给派生写入器。
@@ -472,7 +474,7 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 4. 删除、篡改或用用户文件/目录/软链接占用派生位置时绝不覆盖；同一连续收据的完整投影可重建，冲突或篡改则分配新的安全展示目录。隐藏 Candidate、审阅和 Promotion 不读取此副本。
 5. 产品 UI 的 Finder 命令只提交当前 `sourcePath`；Bridge 重新解析并验证后才返回位于已登记根的 `AI任务/<单一子目录>`。它不接受 Renderer 提供的 Request 路径，也不打开 `.pageroot/requests/...`。
 6. `<主干>-Vn-待审阅.html` 是当前已验证 Working Copy 命名的展示结果，不是 Candidate 身份。若 Finder 在 `PROMPT.md` 发布后把同根 Working Copy 重命名，下一次投影会更新这一展示名，并仅在安全目录可复用时复用；已有不同展示文件时分配新的安全目录，绝不因此拒绝隐藏 Candidate、审阅或 Promotion。
-7. `no-change` 或不可用输出的 `error` 只保留运行时封存的 `lastAiTask` 展示锚点，不恢复活动 Request。应用重启后必须先用该锚点校验精确 Request 记录，再把它投影为“上轮处理”，从而仍可定位该轮 `AI任务/`；锚点缺失或校验失败时不得扫描 Request 目录猜测终态。
+7. 已终态的历史 v4 `no-change` 或不可用输出的 `error` 只保留运行时封存的 `lastAiTask` 展示锚点，不恢复活动 Request。应用重启后必须先用该锚点校验精确 Request 记录，再把它投影为“上轮处理”，从而仍可定位该轮 `AI任务/`；锚点缺失或校验失败时不得扫描 Request 目录猜测终态。
 
 ### 10.3 用户审阅
 
@@ -484,6 +486,8 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 - 在不改变正式历史的前提下重新发送新 Attempt。
 
 候选不能在 AI 返回时自动切换为正式当前文件，也不能覆盖 V2 工作文件。
+
+同内容候选使用同一 Review 和原采用确认框，明确说明：“HTML 内容相同，采纳后仍会创建正式版本，并归档本轮已提交且未再修改的要求。”明确采用才执行普通 Promotion；不用本次不新增 Version，保留要求。采纳只归档本轮冻结后未再修改的已提交要求，新增和再次编辑的要求继续保留。已终态历史 `no-change` 保持原终态、`lastAiTask`、submission receipt 与 outbox，不复活为 Candidate，也不批量迁移。
 
 ### 10.4 采纳候选
 
@@ -717,7 +721,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 ### 14.3 候选和采纳失败
 
-- AI 失败、取消、超时、返回无效 HTML、no-change 或用户拒绝，都不增加正式版本序号。
+- AI 失败、取消、超时、返回无效 HTML、用户拒绝或已终态的历史 `no-change`，都不增加正式版本序号。新的合法同内容 Candidate 只有在用户明确采纳后才增加正式版本序号。
 - 采纳时发现候选 Hash 改变，停止提交并要求重新审阅。
 - 采纳事务崩溃后，要么恢复为完整正式版本，要么回滚为仍待审阅候选，不能出现界面有 V7、快照却不存在。
 - 删除或篡改 `AI任务/` 中的派生 Prompt/Candidate，或用用户文件、目录、软链接占用其路径，不改变隐藏 Candidate、审阅或 Promotion；Finder 入口只会由收据安全重建原投影或分配新的展示目录。

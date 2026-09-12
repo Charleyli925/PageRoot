@@ -3815,19 +3815,6 @@ export class ProjectFileRepository {
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
       };
     }
-    if (outputSha256 === record.expectedSourceSha256) {
-      record.status = "no-change";
-      record.completedAt = nowIso(this.#clock);
-      await this.#writeRequestWithHistory(loaded, requestPath, record);
-      loaded.runtime.activeRequest = null;
-      loaded.runtime.activeCandidateId = null;
-      loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
-      await this.#writeRuntime(loaded);
-      return {
-        status: "no-change",
-        request: this.#publicRequest(record, loaded.paths.projectRootPath),
-      };
-    }
     const frozenInput = await readHtmlFile(
       resolveRelative(
         loaded.paths.controlRoot,

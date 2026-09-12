@@ -1,3 +1,4 @@
+import { writeLegacyNoChangeOutcome } from "./helpers/legacy-v4-no-change.mjs";
 import assert from "node:assert/strict";
 import {
   access,
@@ -693,7 +694,8 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.deepEqual(afterAdoption.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
 });
 
-test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
+for (const legacyTerminal of [false, true]) {
+test(`Bridge reopens identical output with its original lifecycle (legacy terminal: ${legacyTerminal})`, async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-no-change-ai-task-",
   });
@@ -742,11 +744,18 @@ test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
     attemptId: request.body.attemptId,
   });
 
+  const legacy = legacyTerminal ? await writeLegacyNoChangeOutcome({
+    projectRoot: ensured.body.projectRoot, requestId: request.body.requestId,
+  }) : null;
   const status = await bridge.requestJson(
     `/status?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&requestId=${encodeURIComponent(request.body.requestId)}&attemptId=${encodeURIComponent(request.body.attemptId)}`,
   );
   assert.equal(status.response.status, 200, JSON.stringify(status.body));
-  assert.equal(status.body.status, "no-change");
+  assert.equal(status.body.status, legacyTerminal ? "no-change" : "ready-to-open");
+  const replay = await bridge.requestJson(
+    `/status?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&requestId=${encodeURIComponent(request.body.requestId)}&attemptId=${encodeURIComponent(request.body.attemptId)}`,
+  );
+  assert.equal(replay.body.status, status.body.status);
   await bridge.stop();
   bridge = await environment.start({
     HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
@@ -755,6 +764,27 @@ test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
     `/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
   );
   assert.equal(reopened.response.status, 200, JSON.stringify(reopened.body));
+  if (!legacyTerminal) {
+    assert.equal(reopened.body.activeRun.requestId, request.body.requestId);
+    assert.equal(reopened.body.activeRun.status, "ready-to-open");
+    const ready = await bridge.requestJson(
+      `/status?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&requestId=${encodeURIComponent(request.body.requestId)}&attemptId=${encodeURIComponent(request.body.attemptId)}`,
+    );
+    assert.equal(ready.body.status, "ready-to-open");
+    assert.equal(ready.body.versionId, "ver_0002");
+    const review = await bridge.requestJson(
+      `/version-file?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&versionId=ver_0002`,
+    );
+    assert.equal(review.body.content, original);
+    assert.equal(review.body.candidate.status, "pending-review");
+    const candidate = JSON.parse(await readFile(join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "candidate.json"), "utf8"));
+    assert.equal(review.body.candidate.candidateId, candidate.candidateId);
+    const manifest = JSON.parse(await readFile(join(ensured.body.projectRoot, ".pageroot", "manifest.json"), "utf8"));
+    assert.equal(manifest.versions.length, 1);
+    assert.equal(await readFile(ensured.body.sourcePath, "utf8"), original);
+    return;
+  }
+  assert.deepEqual(await Promise.all(legacy.files.map((file) => readFile(file, "utf8"))), legacy.bytes);
   assert.equal(reopened.body.activeRun, null);
   assert.equal(reopened.body.runtimeState.activeRun, null);
   assert.equal(reopened.body.recentRunOutcome?.status, "no-change");
@@ -791,6 +821,7 @@ test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
   assert.equal(tamperRejected.response.status, 409, JSON.stringify(tamperRejected.body));
   assert.equal(tamperRejected.body.error.code, "REQUEST_RUNTIME_ANCHOR_MISMATCH");
 });
+}
 
 test("a finalized but unusable Candidate remains an error and never creates a Version", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {

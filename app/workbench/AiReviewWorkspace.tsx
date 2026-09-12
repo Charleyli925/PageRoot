@@ -2606,7 +2606,9 @@ export default function AiReviewWorkspace({
                     <button type="button" onClick={onRevealAiTask}>AI 返回的 HTML 已自动保留，点击在文件夹中打开。</button>
                   </>
                 : <>
-                    <span>确认后将采纳 AI 修改后的{afterLabel}为正式版本。</span>
+                    <span>{sourceContentEqual
+                      ? "HTML 内容相同，采纳后仍会创建正式版本，并归档本轮已提交且未再修改的要求。"
+                      : `确认后将采纳 AI 修改后的${afterLabel}为正式版本。`}</span>
                     <span>修改前的 {beforeLabel} 与本轮记录仍会保留，可在历史记录中查看。</span>
                   </>}
             </div>

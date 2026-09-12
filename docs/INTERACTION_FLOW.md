@@ -93,10 +93,12 @@ stateDiagram-v2
     submitting --> processing: 冻结输入发布成功
     submitting --> editing: 准备失败或取消
     processing --> validating: 发现有效 completion
-    processing --> editing: 取消、失败或 no-change 终止
-    validating --> committing: 身份、Hash、变化校验通过
+    processing --> editing: 取消或失败
+    validating --> reviewing: 合法完整候选，包括同内容结果
+    reviewing --> committing: 用户明确采用
+    reviewing --> editing: 不用本次
     validating --> processing: output 尚未封存或 completion 暂不可用
-    validating --> editing: 校验失败、取消或 no-change
+    validating --> editing: 校验失败或取消
     committing --> ready: commit marker、源文件与画布一致
     ready --> editing: 成功提示结束
     committing --> awaiting_conflict_resolution: 源文件外部变化
@@ -893,7 +895,7 @@ finalizer 通过后，Repository 封存 AI 原始输出 Hash，再以冻结 HTML
 
 ### 8.2 唯一完成信号
 
-finalizer 最后原子写入 `completion.json`。工作台发现它后进入 `validating`。
+finalizer 最后原子写入 `completion.json`，新的成功完成统一为 `status=completed`，包括与冻结输入逐字节相同的完整 HTML。工作台发现它后进入 `validating`；旧 completion 重放不改写原字节。
 “AI 已返回”只由这个完成信号或其后的生命周期状态点亮；完成信号出现前发生的错误显示“未检测到 AI 返回结果”，不能因为通用 `error` 状态而打勾。
 
 若用户已经结束本轮，官方 finalizer 在校验受控取消标记后返回 `status=cancelled`、`accepted=false`、`retryable=false`，不修改 output、不写 `completion.json`、不创建 Version。Prompt 必须要求 AI Agent 收到该结果后立即停止，不重试，也不改写到其他路径；这是一种正常取消终态，不是保存或路径故障。
@@ -1013,25 +1015,17 @@ AI 候选通过检查后，用户通过“查看修改”进入同一审阅页�
 第 25 个不同 canonical fact，整个分析明确失败；解析端的事实和字节预算仍
 fail-closed，绝不把未访问或未投影部分当作未变化。
 
-### 8.4 no-change
+### 8.4 同内容结果与历史 no-change
 
-如果规范化比较 Hash 相同：
+新的合法完整 HTML 即使与冻结输入逐字节相同，也建立普通 Candidate，进入同一 Review，由用户明确选择采用或不用本次，不按相同 Hash 自动结束。采用确认沿用原确认框，说明：
 
-```text
-未识别到明确的页面变化
-本轮要求和诊断已保留
-[返回编辑]
-```
+> HTML 内容相同，采纳后仍会创建正式版本，并归档本轮已提交且未再修改的要求。
 
-系统：
+采用执行原 Promotion，创建一个正式 Version 与新 Working Copy；只归档本轮已提交且未再修改的要求，新增和再编辑要求保留。不用本次不增加版本，保留要求与本轮记录。
 
-- 不创建 V9。
-- 不创建下一正式 Version 或新的可见 Version Working Copy。
-- 释放候选号。
-- 保留 Request、Attempt、评论和诊断。
-- 解锁并回到 editing。
+历史 v4 中仍在 processing 的 Request，即使 completion 的原状态是 `no-change`，也在全部校验通过后进入普通 Candidate；completion 原字节不重写。已终态的历史 `no-change` 保持原语义：不建版、不复活活动 Request、保留评论和诊断，沿已封存的 `lastAiTask` 展示“上轮处理”。其 submission receipt 与 outbox 继续按原稳定事件 ID 重放，不重新执行，也不迁移历史记录。
 
-失败和 no-change 终态都只提供一个“返回编辑”动作，不自动打开第一条评论，也不把
+失败和历史 no-change 终态都只提供一个“返回编辑”动作，不自动打开第一条评论，也不把
 “修改要求”和“返回编辑”做成两个实际相同的按钮。返回编辑只退出处理视图；本轮 outcome
 继续保存在项目记录中，标题栏显示“上轮处理”，用户可在当前应用会话或重启后重新打开。
 新一轮 Request 正式冻结时才替换这个入口指向的上轮终态。
@@ -1081,9 +1075,9 @@ V1.8 已生成并打开
 
 - 冻结评论与 edit event 写入 Version 归档并与 Request/Attempt 关联。
 - 校验归档数量与 Hash。
-- 成功后才从“本轮要求”清空。
+- 成功后才从“本轮要求”移除本轮已提交且未再修改的要求；新增和再次编辑的要求保留。
 
-任何失败、取消、冲突、no-change 或重启都不能提前清空。
+任何失败、取消、冲突、历史 no-change 或重启都不能提前清空。
 
 ## 10. 外部冲突流程
 
@@ -1288,7 +1282,8 @@ A 项目 processing 时切换 B 项目：
 | output Hash 不符 | 协议错误 | 重新生成并 finalizer |
 | completion 后 output 变化 | 协议违规 | 新 Attempt |
 | completion 已验证后 Agent 进程收尾未确认 | 保留有效 Candidate 并继续审阅；不得改写成执行失败 | 保持进程围栏，后续执行按 Bridge 恢复规则处理 |
-| no-change | 不建版 | 修改要求后再提交 |
+| 新的合法同内容输出 | 进入同一 Review；明确采用才建版 | 采用或不用本次 |
+| 已终态历史 no-change | 保持原终态，不建版 | 修改要求后再提交 |
 | AI 失败或取消 | 不建版、不创建工作文件 | 修改要求后再提交 |
 
 Agent 设置与执行状态均原位收口：设置页只执行无副作用的
@@ -1335,14 +1330,14 @@ Request 仍为 `processing` 但同一 request/attempt 的受管 handoff 失败�
 4. A 项目处理中可以编辑 B 项目。
 5. 只写 output 并等待 30 秒，不建版。
 6. finalizer completion 有任一 ID 或 Hash 错误，不建版。
-7. no-change 不消耗候选号，评论保留。
+7. 新的合法同内容输出进入普通 Candidate，明确采用才消耗正式版本号；已终态历史 no-change 不复活，评论保留。
 8. 成功 V9 只在新可见 Version Working Copy、快照、画布三 Hash 相同且项目路径已切换后提示。
 9. 查看 V6 永远只读且打开精确路径。
 10. 用 V5 替换当前内容不建版；下一次有效 AI 返回仍按时间线成为 V9。
 11. 外部冲突重启后仍停留在同一候选和同一 Hash 对比。
 12. 每个事务边界崩溃后，不出现半提交状态。
 13. 连续两次 AI 成功后，原始 HTML 和第一份工作文件逐字节不变，项目当前路径指向第二份工作文件。
-14. no-change、失败和取消均不创建下一个可见 Version Working Copy。
+14. 已终态历史 no-change、失败、取消和不用本次均不创建下一个可见 Version Working Copy；新的同内容 Candidate 经明确采用后沿普通 Promotion 创建。
 15. 左侧版本列表无横向滚动，点击具体版本文件仍定位对应的可见 Version Working Copy；隐藏快照继续只读用于历史画布。
 16. 处理中查看 Request/Attempt/output 并产生普通 `.DS_Store`，仍保持 processing 且 finalizer 可正常完成；同名软链接和其他额外文件继续失败关闭。
 17. completion 出现前的失败不点亮“AI 已返回”；completion 出现后的校验失败保留已返回事实。

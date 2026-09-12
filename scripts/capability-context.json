@@ -341,7 +341,8 @@
         "^app/workbench/AiConversationSidebar",
         "^tests/run-",
         "^tests/version-",
-        "^app/workbench/review-(?:analysis|document)"
+        "^app/workbench/review-(?:analysis|document)",
+        "^bridge/project-file-(?:finalizer|repository)\\.mjs$"
       ],
       "entryInterfaces": [
         "app/application/run-workflow.d.ts",
@@ -359,7 +360,8 @@
         "VersionSession",
         "VersionWorkflow",
         "WorkspaceController runs capability",
-        "RunConversationOutlet"
+        "RunConversationOutlet",
+        "ProjectFileRepository"
       ],
       "implementationFiles": [
         "app/application/run-workflow.js",
@@ -369,7 +371,9 @@
         "app/workbench/run-conversation-outlet.tsx",
         "app/workbench/AiConversationSidebar.tsx",
         "app/workbench/review-analysis.ts",
-        "app/workbench/review-document.ts"
+        "app/workbench/review-document.ts",
+        "bridge/project-file-finalizer.mjs",
+        "bridge/project-file-repository.mjs"
       ],
       "focusedTests": [
         "tests/run-workflow.test.mjs",
@@ -378,12 +382,20 @@
         "tests/version-review-plan.test.mjs",
         "tests/ai-conversation-sidebar.test.mjs",
         "tests/workbench-render-snapshot.test.mjs",
-        "tests/workspace-controller.test.mjs"
+        "tests/workspace-controller.test.mjs",
+        "tests/project-file-finalizer.test.mjs",
+        "tests/project-file-bridge.test.mjs",
+        "tests/project-candidate-promotion.test.mjs",
+        "tests/submission-receipt.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
         "docs/CHANGE_REQUEST_PROTOCOL.md",
-        "docs/INTERACTION_FLOW.md"
+        "docs/INTERACTION_FLOW.md",
+        "docs/VERSION_AND_PROJECT_FILES_PRD.md",
+        "docs/ARCHITECTURE_CONTRACT.md",
+        "docs/STATE_OWNERSHIP.md",
+        "docs/SECURITY_MODEL.md"
       ],
       "requiredDocSections": [
         {
@@ -392,6 +404,15 @@
             "## 7. 发给 AI 与交接",
             "## 8. 内部 AI 处理与完成",
             "## 9. 新 Version 提交与打开"
+          ]
+        },
+        {
+          "path": "docs/VERSION_AND_PROJECT_FILES_PRD.md",
+          "headings": [
+            "### 10.2 候选身份",
+            "### 10.3 用户审阅",
+            "### 10.4 采纳候选",
+            "### 14.3 候选和采纳失败"
           ]
         }
       ]
