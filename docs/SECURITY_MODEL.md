@@ -584,17 +584,31 @@ a one-use ticket; start compares that ticket to the durable Request selection.
 Malformed policies, cross-provider model ids, unknown providers and selection
 drift fail closed.
 
-### Manual historical Version creation
+### Current draft, manual Versions and protected export
 
-The existing Registry-authorized Repository serializes manual creation and its
-recovery. A renderer-supplied path is not write authority: project/document and
-Working Copy identity, expected current Hash, selected immutable snapshot Hash,
-next ordinal and transaction provenance must agree. Snapshot and visible HTML
-publication never overwrite an existing file. The final boundary rechecks the
-old source plus prepared/published file identity and bytes before the manifest
-commit. Replays validate operation inputs and return committed facts; a render
-failure cannot allocate another Version. AI task/Candidate decisions are never
-automatically cancelled by manual creation.
+The Registry-authorized Repository serializes local save, history creation,
+preserved-draft recovery, migration and AI publication with its shared lock.
+Renderer paths alone grant no authority: project/document/current Working Copy,
+expected hash, immutable source hash, ordinal and operation provenance must agree.
+Manual operations cannot displace an active Request or unresolved Candidate.
+
+Versions are immutable. Current-source replacement preserves displaced HTML,
+comments and attachment bytes before publication; recoverable transactions
+validate old/new file bindings and hashes. Replays return the same committed
+facts and never allocate another Version after a lost receipt or render failure.
+Migration selects the real active legacy draft, retains its ID/path, preserves
+inactive draft data and retires their write membership. Unknown markers and
+invalid single-current membership fail closed. Downgrade writers are unsupported.
+
+Export rejects destinations in configured project roots, hidden managed data and
+their symlink/hard-link aliases, including other projects. Main rechecks protection
+at publication, verifies output bytes and alone updates its last-successful
+external directory preference. Unsafe chosen destinations are never redirected.
+Recent export receipts grant bounded Finder reveal access only, not file writes.
+Cancellation/failure cannot create a Version. Optional version creation requires
+the exact verified exported hash; subsequent uncertainty is reconciled separately.
+Missing active paths never authorize recreating a project directory; memory and
+recovery bytes remain available for export. A failed root scan is not deletion.
 
 Codex managed execution uses an ephemeral read-only native thread and no native
 approval grants. Native environments, inherited MCP servers, apps/plugins and
