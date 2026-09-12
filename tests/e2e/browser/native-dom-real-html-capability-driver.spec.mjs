@@ -331,7 +331,16 @@ test("capability probe rejects stale and wrongly selected Stable IDs", HARNESS_T
     candidate: candidate(),
   })).rejects.toMatchObject({
     code: "CAPABILITY_PROBE_SELECTION_IDENTITY_MISMATCH",
-    details: { expectedStableId: CORRECT_ID, selectedId: WRONG_ID },
+    details: {
+      expectedStableId: CORRECT_ID,
+      selectedId: WRONG_ID,
+      selectedSnapshot: {
+        selectedCount: 1,
+        selectedId: WRONG_ID,
+        selectedContainsExpected: false,
+        expectedContainsSelected: false,
+      },
+    },
   });
 
   await expect(probeAuthoredCapability({
@@ -342,6 +351,32 @@ test("capability probe rejects stale and wrongly selected Stable IDs", HARNESS_T
   })).rejects.toMatchObject({
     code: "CAPABILITY_PROBE_STALE_STABLE_ID",
     details: { count: 0 },
+  });
+});
+
+test("selection snapshot failure preserves the original identity mismatch and pointer facts", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await capabilityFixture(page, WRONG_ID);
+  await expect(probeAuthoredCapability({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: candidate(),
+    selectedSnapshotReader: async () => {
+      throw new Error("detached diagnostic frame");
+    },
+  })).rejects.toMatchObject({
+    code: "CAPABILITY_PROBE_SELECTION_IDENTITY_MISMATCH",
+    details: {
+      expectedStableId: CORRECT_ID,
+      hostPointer: {
+        accepted: true,
+        hitKind: "authored-target",
+      },
+      selectedSnapshot: {
+        available: false,
+        reasonCode: "SELECTION_SNAPSHOT_UNAVAILABLE",
+      },
+    },
   });
 });
 
@@ -434,7 +469,11 @@ test("capability probe rejects an iframe host overlay that appears on pointer mo
     candidate: candidate(),
   })).rejects.toMatchObject({
     code: "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED",
-    details: { stableId: CORRECT_ID, hitKind: "div" },
+    details: {
+      stableId: CORRECT_ID,
+      hitKind: "div",
+      hostPointer: { accepted: false, hitKind: "div" },
+    },
   });
   expect(Date.now() - startedAt).toBeLessThan(5_000);
   expect(await child.evaluate(() => window.__capabilityProbeClickCount)).toBe(0);
@@ -524,7 +563,15 @@ test("capability probe rejects wrong-target, stale-frame, and stale-DOM product 
   };
   await expect(probeAuthoredCapability(input)).rejects.toMatchObject({
     code: "CAPABILITY_PROBE_HOST_POINTER_INTERCEPTED",
-    details: { hitKind: "capability-hint-identity-mismatch" },
+    details: {
+      hitKind: "capability-hint-identity-mismatch",
+      hostPointer: {
+        hintTargetId: WRONG_ID,
+        hintTargetDomGeneration: "11",
+        hintCurrentDomGeneration: "11",
+        hintActiveFrameGeneration: "7",
+      },
+    },
   });
   expect(await page.evaluate(() => window.__capabilityHintClickCount)).toBe(0);
 

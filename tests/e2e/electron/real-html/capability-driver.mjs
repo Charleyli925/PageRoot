@@ -516,7 +516,13 @@ export async function resetAuthoredProbeSelection({ page, frame, editor }) {
   };
 }
 
-export async function probeAuthoredCapability({ page, frame, editor, candidate }) {
+export async function probeAuthoredCapability({
+  page,
+  frame,
+  editor,
+  candidate,
+  selectedSnapshotReader = null,
+}) {
   const selectionReset = await resetAuthoredProbeSelection({ page, frame, editor });
   if (!selectionReset.ok) {
     const error = new Error("The previous capability selection overlay did not close.");
@@ -587,6 +593,7 @@ export async function probeAuthoredCapability({ page, frame, editor, candidate }
     error.details = {
       stableId: candidate.stableId,
       hitKind: hostPointer?.hitKind || "no-exact-hit-point",
+      hostPointer,
     };
     throw error;
   }
@@ -607,11 +614,42 @@ export async function probeAuthoredCapability({ page, frame, editor, candidate }
       return selectedId;
     }, { timeout: 2_000 }).toBe(candidate.stableId);
   } catch {
+    const readSelectedSnapshot = selectedSnapshotReader || (async () => (
+      frame.locator("[data-html-canvas-selected]").evaluateAll((selectedElements, expectedStableId) => {
+        const expectedElement = Array.from(document.querySelectorAll("[data-pageroot-id]"))
+          .find((element) => element.getAttribute("data-pageroot-id") === expectedStableId) || null;
+        const selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
+        return {
+          available: true,
+          reasonCode: "SELECTION_SNAPSHOT_OBSERVED",
+          selectedCount: selectedElements.length,
+          selectedId: selectedElement?.getAttribute("data-pageroot-id") || null,
+          selectedTag: selectedElement?.localName || null,
+          selectedContainsExpected: Boolean(
+            selectedElement && expectedElement && selectedElement.contains(expectedElement),
+          ),
+          expectedContainsSelected: Boolean(
+            selectedElement && expectedElement && expectedElement.contains(selectedElement),
+          ),
+        };
+      }, candidate.stableId)
+    ));
+    const selectedSnapshot = await readSelectedSnapshot().catch(() => ({
+      available: false,
+      reasonCode: "SELECTION_SNAPSHOT_UNAVAILABLE",
+      selectedCount: null,
+      selectedId: null,
+      selectedTag: null,
+      selectedContainsExpected: false,
+      expectedContainsSelected: false,
+    }));
     const error = new Error("The real pointer probe did not select the frozen Stable ID.");
     error.code = "CAPABILITY_PROBE_SELECTION_IDENTITY_MISMATCH";
     error.details = {
       expectedStableId: candidate.stableId,
       selectedId,
+      selectedSnapshot,
+      hostPointer,
       hitPoint: { x: point.pageX, y: point.pageY },
     };
     throw error;
