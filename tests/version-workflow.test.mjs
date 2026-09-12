@@ -134,6 +134,11 @@ function createHarness({
   onDrain = null,
   observeExternalSourceChange = async () => ({ status: "succeeded" }),
   onCatalogAfterSettlement = null,
+  currentDraft = false,
+  createCurrent = null,
+  queryCurrent = null,
+  exportHtmlCopy = null,
+  checkpointSource = null,
 } = {}) {
   const projectSession = new ProjectSession();
   const locator = projectSession.openLocator(currentPath);
@@ -143,6 +148,9 @@ function createHarness({
     ...locator,
     projectId,
     documentId,
+    ...(currentDraft ? { openTarget: { projectId, documentId, projectRootPath: "/tmp/project-a",
+      targetKind: "working-copy", workingCopyId: "work_ver_0001", versionId: "ver_0001",
+      exactSourcePath: currentPath, sourceSha256: sha256(BASE_HTML) } } : {}),
   });
   const initialHtml = currentPath === SOURCE_B ? B_HTML : BASE_HTML;
   const documentSession = new DocumentSession({
@@ -183,6 +191,8 @@ function createHarness({
     order: [],
   };
   const bridgeClient = {
+    createVersionFromCurrent: (input) => createCurrent(input),
+    queryCurrentVersionCreation: (input) => queryCurrent(input),
     workspace: (path) => workspaceRead(path),
     confirmHistoryCreationOpened: confirmCreation,
     async createVersionFromHistory(input) {
@@ -387,6 +397,7 @@ function createHarness({
     },
   };
   const documentWorkflow = {
+    recordVerifiedExport: async () => ({ status: "succeeded" }),
     observeExternalSourceChange,
     clearRecovery() {
       calls.clearRecovery += 1;
@@ -429,8 +440,10 @@ function createHarness({
       errorMessage: (cause, fallback) => String(cause?.message || fallback),
     },
     ports: {
+      files: exportHtmlCopy ? { exportHtmlCopy } : null,
       hash: { sha256: async (html) => sha256(html) },
       canvas: {
+        checkpointSource,
         freezeWorkingSource: () => ({ ok: true }),
         freeze: () => ({ ok: true, html: documentSession.html }),
         async verifyRendered(html, hash, nextContext) {
@@ -458,8 +471,167 @@ function createHarness({
     draftSession,
     calls,
     context,
+    bridgeClient,
   };
 }
+
+function currentVersionReceipt(input, overrides = {}) {
+  return { status: "created", operationId: input.operationId,
+    projectId: input.target.projectId, documentId: input.target.documentId,
+    sourcePath: input.target.sourcePath, workingCopyId: input.target.workingCopyId,
+    versionId: "ver_0002", versionOrdinal: 2,
+    sourceSha256: input.expectedSourceSha256, ...overrides };
+}
+
+test("local checkpoint preserves current HTML, comments, attachments and editing Canvas", async () => {
+  const writes = [];
+  const h = createHarness({ currentDraft: true, createCurrent: async (input) => {
+    writes.push(input); return currentVersionReceipt(input);
+  } });
+  const comments = [{ id: "comment_1", text: "Keep this comment", attachments: [{ id: "attachment_1" }] }];
+  h.commentSession.update({ comments });
+  const outcome = await h.workflow.saveCurrentVersion();
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].expectedSourceSha256, sha256(BASE_HTML));
+  assert.equal(h.documentSession.html, BASE_HTML);
+  assert.deepEqual(h.commentSession.comments, comments);
+  assert.equal(h.calls.invalidate, 0);
+  assert.equal(h.calls.render.length, 0);
+  assert.equal(h.calls.resetComments, 0);
+  assert.equal(h.workflow.getSnapshot().draftVersion.phase, "saved");
+  assert.equal(h.workflow.getSnapshot().navigation.phase, "idle");
+});
+
+test("unchanged local checkpoint reports existing version without rebuilding Canvas", async () => {
+  const h = createHarness({ currentDraft: true, createCurrent: async (input) => currentVersionReceipt(input,
+    { status: "unchanged", versionId: "ver_0001", versionOrdinal: 1 }) });
+  assert.equal((await h.workflow.saveCurrentVersion()).status, "succeeded");
+  assert.equal(h.workflow.getSnapshot().draftVersion.phase, "unchanged");
+  assert.equal(h.calls.invalidate, 0);
+});
+
+test("lost local checkpoint response queries same operation and does not create twice", async () => {
+  let input; let writes = 0; const queries = [];
+  const h = createHarness({ currentDraft: true,
+    createCurrent: async (value) => { input = value; writes++; throw new Error("lost response"); },
+    queryCurrent: async (value) => { queries.push(value); return currentVersionReceipt(input); },
+  });
+  assert.equal((await h.workflow.saveCurrentVersion()).status, "succeeded");
+  assert.equal(writes, 1);
+  assert.equal(queries[0].operationId, input.operationId);
+  assert.equal(h.workflow.getSnapshot().draftVersion.phase, "saved");
+});
+
+test("unknown checkpoint blocks a second operation and retry only queries authority", async () => {
+  let input; let queryWorks = false; let writes = 0;
+  const h = createHarness({ currentDraft: true,
+    createCurrent: async (value) => { input = value; writes++; throw new Error("lost response"); },
+    queryCurrent: async () => { if (!queryWorks) throw new Error("offline"); return currentVersionReceipt(input); },
+  });
+  assert.equal((await h.workflow.saveCurrentVersion()).status, "unknown");
+  assert.equal((await h.workflow.saveCurrentVersion()).status, "blocked");
+  queryWorks = true;
+  assert.equal((await h.workflow.retryCurrentVersion()).status, "succeeded");
+  assert.equal(writes, 1);
+});
+
+test("mismatched local checkpoint receipt never publishes a saved result", async () => {
+  const h = createHarness({ currentDraft: true,
+    createCurrent: async (input) => currentVersionReceipt(input, { projectId: "project_other" }),
+    queryCurrent: async (input) => ({ ...currentVersionReceipt(input), projectId: "project_other" }),
+  });
+  assert.equal((await h.workflow.saveCurrentVersion()).status, "unknown");
+  assert.equal(h.calls.refresh.length, 0);
+});
+
+test("local checkpoint refuses unpersisted content and releases navigation", async () => {
+  let writes = 0;
+  const h = createHarness({ currentDraft: true,
+    createCurrent: async (input) => { writes++; return currentVersionReceipt(input); },
+    onDrain: async ({ documentSession }) => { documentSession.update({ html: DRAINED_HTML }); return { ok: true }; },
+  });
+  assert.equal((await h.workflow.saveCurrentVersion()).status, "rejected");
+  assert.equal(writes, 0);
+  assert.equal(h.documentSession.html, DRAINED_HTML);
+  assert.equal(h.workflow.getSnapshot().navigation.phase, "idle");
+});
+
+test("project switch during local checkpoint discards old UI response", async () => {
+  const response = deferred();
+  let input;
+  const h = createHarness({ currentDraft: true, createCurrent: async (value) => { input = value; return response.promise; } });
+  const pending = h.workflow.saveCurrentVersion();
+  while (!input) await new Promise((resolve) => setImmediate(resolve));
+  const locator = h.projectSession.openLocator(SOURCE_B);
+  h.projectSession.register({ ...locator, projectId: "project_b", documentId: "document_b" });
+  response.resolve(currentVersionReceipt(input));
+  assert.equal((await pending).status, "stale");
+  assert.equal(h.calls.refresh.length, 0);
+  assert.equal(h.workflow.getSnapshot().navigation.phase, "idle");
+});
+
+test("plain export includes latest native edits and does not create a version", async () => {
+  const exports = []; let writes = 0; let h;
+  h = createHarness({ currentDraft: true,
+    checkpointSource: () => { h.documentSession.update({ html: DRAINED_HTML }); return { ok: true }; },
+    exportHtmlCopy: async (input) => { exports.push(input); return { path: "/tmp/shared.html", sha256: sha256(input.html) }; },
+    createCurrent: async () => { writes++; },
+  });
+  assert.equal((await h.workflow.exportHtml({ suggestedName: "report.html" })).status, "succeeded");
+  assert.equal(exports[0].html, DRAINED_HTML);
+  assert.equal(writes, 0);
+  assert.equal(h.workflow.getSnapshot().export.phase, "exported");
+});
+
+test("cancelled or failed export never creates a version", async () => {
+  for (const fail of [false, true]) {
+    let writes = 0;
+    const h = createHarness({ currentDraft: true,
+      exportHtmlCopy: async () => { if (fail) throw new Error("write failed"); return null; },
+      createCurrent: async () => { writes++; },
+    });
+    await h.workflow.exportHtml({ saveVersion: true });
+    assert.equal(writes, 0);
+    assert.equal(h.workflow.getSnapshot().export.phase, fail ? "failed" : "cancelled");
+  }
+});
+
+test("export and optional checkpoint use the same confirmed source bytes", async () => {
+  const exports = []; const writes = [];
+  const h = createHarness({ currentDraft: true,
+    exportHtmlCopy: async (input) => { exports.push(input); return { path: "/tmp/shared.html", sha256: sha256(input.html) }; },
+    createCurrent: async (input) => { writes.push(input); return currentVersionReceipt(input); },
+  });
+  assert.equal((await h.workflow.exportHtml({ saveVersion: true })).status, "succeeded");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].expectedSourceSha256, sha256(exports[0].html));
+});
+
+test("export succeeds independently when optional version is unknown; retry does not export again", async () => {
+  let exports = 0; let input; let queryWorks = false;
+  const h = createHarness({ currentDraft: true,
+    exportHtmlCopy: async (value) => { exports++; return { path: "/tmp/shared.html", sha256: sha256(value.html) }; },
+    createCurrent: async (value) => { input = value; throw new Error("lost reply"); },
+    queryCurrent: async () => { if (!queryWorks) throw new Error("offline"); return currentVersionReceipt(input); },
+  });
+  assert.equal((await h.workflow.exportHtml({ saveVersion: true })).status, "succeeded");
+  assert.equal(h.workflow.getSnapshot().export.phase, "version-pending");
+  queryWorks = true;
+  assert.equal((await h.workflow.retryCurrentVersion()).status, "succeeded");
+  assert.equal(exports, 1);
+});
+
+test("history export uses immutable viewed bytes and a readable Vn filename", async () => {
+  const exports = [];
+  const h = createHarness({ currentDraft: true,
+    exportHtmlCopy: async (input) => { exports.push(input); return { path: "/tmp/history.html", sha256: sha256(input.html) }; },
+  });
+  await h.workflow.viewHistory({ version: { id: "ver_0001" } });
+  assert.equal((await h.workflow.exportHtml({ suggestedName: "report", saveVersion: true })).status, "succeeded");
+  assert.equal(exports[0].html, HISTORY_HTML);
+  assert.equal(exports[0].suggestedName, "report-V1.html");
+});
 
 test("review preparation returns an immutable candidate without activating or publishing source", async () => {
   const harness = createHarness();

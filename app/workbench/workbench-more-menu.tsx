@@ -8,6 +8,10 @@ import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOu
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
+import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
+import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
+import { CheckSquareIcon } from "@phosphor-icons/react/dist/csr/CheckSquare";
+import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
 
 type MoreMenuItem = Readonly<{
   id: string;
@@ -17,6 +21,8 @@ type MoreMenuItem = Readonly<{
   dividerBefore?: boolean;
   disabled?: boolean;
   reason?: string;
+  checked?: boolean;
+  keepOpen?: boolean;
 }>;
 
 export type WorkbenchMoreMenuProps = Readonly<{
@@ -26,7 +32,10 @@ export type WorkbenchMoreMenuProps = Readonly<{
   canOpenInBrowser: boolean;
   onOpenInBrowser: () => void;
   canExportCurrentHtml: boolean;
-  onExportCurrentHtml: () => void;
+  onExportCurrentHtml: (saveVersion?: boolean) => void;
+  canSaveCurrentVersion?: boolean;
+  onSaveCurrentVersion?: () => void;
+  onOpenPreservedDrafts?: () => void;
   canReloadCurrentSource: boolean;
   reloadCurrentSourceUnavailableReason?: string;
   onReloadCurrentSource: () => void;
@@ -53,6 +62,9 @@ export function WorkbenchMoreMenu({
   onOpenInBrowser,
   canExportCurrentHtml,
   onExportCurrentHtml,
+  canSaveCurrentVersion = false,
+  onSaveCurrentVersion,
+  onOpenPreservedDrafts,
   canReloadCurrentSource,
   reloadCurrentSourceUnavailableReason,
   onReloadCurrentSource,
@@ -60,11 +72,17 @@ export function WorkbenchMoreMenu({
 }: WorkbenchMoreMenuProps) {
   const menuId = useId();
   const [open, setOpen] = useState(false);
+  const [saveVersionOnExport, setSaveVersionOnExport] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const items = useMemo<readonly MoreMenuItem[]>(() => [
+    ...(!isHistory && onSaveCurrentVersion ? [{
+      id: "save-version", label: "保存为新版本",
+      icon: <FloppyDiskIcon aria-hidden="true" size={16} weight="duotone" />,
+      onSelect: onSaveCurrentVersion, disabled: !canSaveCurrentVersion,
+    }] : []),
     {
       id: "show-in-folder",
       label: isHistory ? "在 Finder 中显示当前工作文件" : "在 Finder 中显示",
@@ -81,9 +99,20 @@ export function WorkbenchMoreMenu({
       id: "export-html",
       label: isHistory ? "导出此版本…" : "导出当前 HTML…",
       icon: <DownloadSimpleIcon aria-hidden="true" size={16} weight="duotone" />,
-      onSelect: onExportCurrentHtml,
+      onSelect: () => onExportCurrentHtml(!isHistory && saveVersionOnExport),
       dividerBefore: true,
     },
+    ...(!isHistory && onSaveCurrentVersion && canExportCurrentHtml ? [{
+      id: "export-save-version", label: "同时保存为新版本",
+      icon: saveVersionOnExport ? <CheckSquareIcon aria-hidden="true" size={16} /> : <SquareIcon aria-hidden="true" size={16} />,
+      onSelect: () => setSaveVersionOnExport((value) => !value),
+      checked: saveVersionOnExport, keepOpen: true, disabled: !canSaveCurrentVersion,
+    }] : []),
+    ...(onOpenPreservedDrafts ? [{
+      id: "preserved-drafts", label: "找回此前的稿件…",
+      icon: <ClockCounterClockwiseIcon aria-hidden="true" size={16} />,
+      onSelect: onOpenPreservedDrafts,
+    }] : []),
     ...(onRetryDynamicContent ? [{
       id: "retry-dynamic",
       label: "重新加载动态内容",
@@ -108,12 +137,17 @@ export function WorkbenchMoreMenu({
     reloadCurrentSourceUnavailableReason,
     onRetryDynamicContent,
     onShowInFolder,
+    canSaveCurrentVersion,
+    canExportCurrentHtml,
+    onSaveCurrentVersion,
+    onOpenPreservedDrafts,
+    saveVersionOnExport,
   ]);
   const visibleItems = useMemo(() => items.filter((item) => (
     item.id === "show-in-folder" ? canShowInFolder
       : item.id === "open-in-browser" ? canOpenInBrowser
         : item.id === "export-html" ? canExportCurrentHtml
-          : canReloadCurrentSource || Boolean(reloadCurrentSourceUnavailableReason)
+          : item.id === "reload-source" ? canReloadCurrentSource || Boolean(reloadCurrentSourceUnavailableReason) : true
   )), [
     canExportCurrentHtml,
     canOpenInBrowser,
@@ -136,7 +170,7 @@ export function WorkbenchMoreMenu({
     if (!trigger) return undefined;
     const updatePosition = () => setPosition(menuPosition(trigger));
     const focusFirst = () => {
-      itemRefs.current.get(interactiveItems[0]?.id || "")?.focus();
+      if (!menuRef.current?.contains(document.activeElement)) itemRefs.current.get(interactiveItems[0]?.id || "")?.focus();
     };
     updatePosition();
     window.requestAnimationFrame(focusFirst);
@@ -201,7 +235,7 @@ export function WorkbenchMoreMenu({
         data-tooltip="更多"
         onClick={() => {
           if (open) close(false);
-          else setOpen(true);
+          else { setSaveVersionOnExport(false); setOpen(true); }
         }}
       >
         <DotsThreeIcon aria-hidden="true" size={18} weight="bold" />
@@ -224,12 +258,13 @@ export function WorkbenchMoreMenu({
                   else itemRefs.current.delete(item.id);
                 }}
                 type="button"
-              role="menuitem"
+              role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+              aria-checked={item.checked}
               data-menu-item={item.id}
               disabled={item.disabled}
               aria-describedby={item.reason ? `${menuId}-${item.id}-reason` : undefined}
                 onClick={() => {
-                  close();
+                  if (!item.keepOpen) close();
                   item.onSelect();
                 }}
               >

@@ -517,7 +517,7 @@ export type Version = {
   label: string;
   summary: string;
   generatedAt: string;
-  source: "初始页面" | "内部 AI" | "历史创建";
+  source: "初始页面" | "内部 AI" | "历史创建" | "本地保存" | "稿件恢复";
   // What the user asked for in the round that produced this version, read from
   // that round's frozen request. Null for the initial import and for rounds
   // whose records are no longer readable.

@@ -68,6 +68,12 @@ export type BridgeClient = {
   resolveConflict(body: BridgeJson): Promise<BridgeJson>;
   activateReadyVersion(body: BridgeJson): Promise<BridgeJson>;
   createVersionFromHistory(body: BridgeJson): Promise<BridgeJson>;
+  createVersionFromCurrent(body: BridgeJson): Promise<BridgeJson>;
+  queryCurrentVersionCreation(body: BridgeJson): Promise<BridgeJson>;
+  listPreservedDrafts(body: BridgeJson): Promise<BridgeJson>;
+  readPreservedDraft(body: BridgeJson): Promise<BridgeJson>;
+  restorePreservedDraft(body: BridgeJson): Promise<BridgeJson>;
+  queryPreservedDraftRestore(body: BridgeJson): Promise<BridgeJson>;
   queryHistoryCreation(body: BridgeJson): Promise<BridgeJson>;
   confirmHistoryCreationOpened(body: BridgeJson): Promise<BridgeJson>;
   continueEditingHistoryVersion(body: BridgeJson): Promise<BridgeJson>;

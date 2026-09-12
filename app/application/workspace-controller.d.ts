@@ -317,6 +317,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     runSession: import("./run-session.js").RunSession;
     codecs: VersionWorkflowCodecs;
     canvas: VersionWorkflowCanvasPort;
+    files?: import("./version-workflow.js").VersionFilePort;
   }>;
   clock: ClockPort;
 }>;
@@ -400,7 +401,7 @@ export class WorkspaceController {
   activateWorkbenchTab(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchNavigationOutcome>;
   createWorkbenchStartTab(): Promise<WorkbenchNavigationOutcome>;
   createWorkbenchSettingsTab(): Promise<WorkbenchNavigationOutcome>;
-  createWorkbenchProjectRulesTab(): Promise<WorkbenchNavigationOutcome>;
+  createWorkbenchProjectRulesTab(project?: { projectId: string; documentId: string; title: string }): Promise<WorkbenchNavigationOutcome>;
   closeWorkbenchTab(tabId: string): Promise<WorkbenchNavigationOutcome>;
   openRegisteredWorkbenchProject(input: {
     projectId: string;
@@ -704,6 +705,11 @@ export class WorkspaceController {
   viewHistory(input: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   returnToCurrent(input?: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   createVersionFromHistory(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome>;
+  saveCurrentVersion(input?: { operationId?: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome<import("./version-workflow.js").CurrentVersionResult>>;
+  retryCurrentVersion(input?: Record<string, unknown>): Promise<VersionWorkflowOutcome<import("./version-workflow.js").CurrentVersionResult>>;
+  loadPreservedDrafts(): Promise<VersionWorkflowOutcome<{ context: ProjectContext; entries: import("./version-workflow.js").PreservedDraftSummary[] }>>;
+  restorePreservedDraft(input: { recoveryId: string }): Promise<VersionWorkflowOutcome<import("./version-workflow.js").CurrentVersionResult>>;
+  exportHtml(input?: { suggestedName?: string; saveVersion?: boolean }): Promise<VersionWorkflowOutcome>;
   openCreatedHistoryVersion(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome>;
   queryHistoryCreation(input: { operationId: string; context?: ProjectContext | null }): Promise<VersionWorkflowOutcome>;
   /** @deprecated Legacy activation protocol only; no product UI callers. */

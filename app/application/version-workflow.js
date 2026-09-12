@@ -145,6 +145,10 @@ export class VersionWorkflow {
   #reviewGeneration = 0;
   #disposed = false;
   #pendingActivations = new Map();
+  #filePort;
+  #preservedDraftGeneration = 0;
+  #exportSequence = 0;
+  #resultSequence = 0;
 
   constructor({
     bridgeClient,
@@ -263,6 +267,7 @@ export class VersionWorkflow {
     this.#hashPort = ports.hash;
     this.#canvasPort = {
       deferCommand: ports.canvas.deferCommand || null,
+      checkpointSource: ports.canvas.checkpointSource || null,
       freezeWorkingSource: ports.canvas.freezeWorkingSource || (() => ({ ok: true })),
       freeze: ports.canvas.freeze,
       verifyRendered: ports.canvas.verifyRendered,
@@ -272,6 +277,7 @@ export class VersionWorkflow {
       onNavigationChange: ports.canvas.onNavigationChange || (() => {}),
     };
     this.#clock = clock;
+    this.#filePort = ports.files || null;
   }
 
   getSnapshot() {
@@ -707,6 +713,230 @@ export class VersionWorkflow {
     this.#publishSnapshot();
   }
 
+  #sameCurrentDocument(context) {
+    const current = this.#projectSession.context;
+    return Boolean(!this.#disposed && context && current
+      && context.epoch === current.epoch && context.projectId === current.projectId
+      && context.documentId === current.documentId && context.sourcePath === current.sourcePath
+      && context.workingCopyId === current.workingCopyId);
+  }
+
+  #setDraftVersion(value) {
+    if (!this.#sameCurrentDocument(value.context)) return;
+    this.#snapshot = Object.freeze({ ...this.#snapshot, draftVersion: Object.freeze({ ...value, sequence: ++this.#resultSequence }) });
+    this.#publishSnapshot();
+  }
+
+  #validateCurrentVersion(payload, context, operationId, expectedSourceSha256, recoveryId) {
+    if (!isRecord(payload) || payload.projectId !== context.projectId
+      || payload.documentId !== context.documentId || payload.operationId !== operationId
+      || !["created", "unchanged", "not-created"].includes(payload.status)) {
+      throw new Error("版本保存回执身份不一致。");
+    }
+    if (payload.status !== "not-created" && (
+      !Number.isSafeInteger(payload.versionOrdinal) || payload.versionOrdinal < 1
+      || payload.versionId !== `ver_${String(payload.versionOrdinal).padStart(4, "0")}`
+      || payload.workingCopyId !== context.workingCopyId
+      || payload.sourcePath !== context.sourcePath
+      || !SHA256.test(String(payload.sourceSha256 || ""))
+      || (!recoveryId && payload.sourceSha256 !== expectedSourceSha256)
+      || (recoveryId && payload.recoveryId !== recoveryId)
+    )) throw new Error("版本保存回执内容不一致。");
+    return Object.freeze({ ...payload });
+  }
+
+  saveCurrentVersion(input = {}) {
+    return this.#runCurrentVersionCommand(input);
+  }
+
+  retryCurrentVersion(input = {}) {
+    const pending = this.#snapshot.draftVersion;
+    if (!pending || !this.#sameCurrentDocument(pending.context)) {
+      return Promise.resolve(blocked("VERSION_OPERATION_MISSING", "没有待确认的版本操作。"));
+    }
+    return this.#runCurrentVersionCommand({ ...input, ...pending,
+      queryOnly: pending.phase === "unknown" || pending.phase === "refresh-pending" });
+  }
+
+  restorePreservedDraft({ recoveryId, ...input } = {}) {
+    return this.#runCurrentVersionCommand({ ...input, recoveryId });
+  }
+
+  async #runCurrentVersionCommand({ operationId, context, recoveryId = null,
+    expectedSourceSha256 = null, queryOnly = false } = {}) {
+    let current = copyContext(context || this.#projectSession.context);
+    if (!this.#sameCurrentDocument(current)) return stale(current || {});
+    if (this.#versionSession.snapshot.historyPreview && !recoveryId && !queryOnly) {
+      return blocked("CURRENT_DRAFT_REQUIRED", "请返回当前稿后保存版本。");
+    }
+    if (this.#runSession.activeLocked) return blocked("VERSION_RUN_LOCKED", "请先完成当前 AI 任务或候选的处理。");
+    const pending = this.#snapshot.draftVersion;
+    if (pending?.phase === "unknown" && this.#sameCurrentDocument(pending.context)
+      && operationId !== pending.operationId) {
+      return blocked("VERSION_RESULT_UNKNOWN", "正在确认上一次版本保存结果。");
+    }
+    operationId ||= this.#nextOperationId(recoveryId ? "restore-draft" : "save-version");
+    const operation = this.#beginNavigation("creating", current);
+    if (!operation) return blocked("VERSION_NAVIGATION_BUSY", "版本操作正在进行。");
+    const setState = (phase, extra = {}) => this.#setDraftVersion({
+      phase, operationId, context: current, recoveryId, expectedSourceSha256, ...extra,
+    });
+    const query = () => (recoveryId
+      ? this.#bridgeClient.queryPreservedDraftRestore({ target: current, operationId })
+      : this.#bridgeClient.queryCurrentVersionCreation({ target: current, operationId }));
+    let attempted = queryOnly;
+    let result = null;
+    setState("saving");
+    try {
+      if (!queryOnly) {
+        const drained = await this.#projectWorkflow.drain("history", { deadlineAt: this.#clock.now() + 15_000 });
+        if (!this.#isNavigationActive(operation) || !this.#sameCurrentDocument(current)) {
+          this.#finishNavigation(operation);
+          return stale(current);
+        }
+        if (!drained.ok) throw new Error(drained.reason || "当前修改尚未保存。");
+        current = copyContext(this.#projectSession.context);
+        const persistedHash = this.#documentSession.persistedSourceSha256;
+        const actualHash = await this.#hashPort.sha256(this.#documentSession.html);
+        if (!this.#sameCurrentDocument(current)) {
+          this.#finishNavigation(operation);
+          return stale(current);
+        }
+        if (persistedHash !== actualHash || (expectedSourceSha256 && expectedSourceSha256 !== actualHash)) {
+          throw new Error("当前稿已发生变化，请保存当前稿的新版本。已导出的文件保持原样。");
+        }
+        expectedSourceSha256 ||= actualHash;
+        attempted = true;
+        const input = { target: current, operationId, expectedSourceSha256 };
+        result = this.#validateCurrentVersion(await (recoveryId
+          ? this.#bridgeClient.restorePreservedDraft({ ...input, recoveryId })
+          : this.#bridgeClient.createVersionFromCurrent(input)), current, operationId, expectedSourceSha256, recoveryId);
+      } else {
+        result = this.#validateCurrentVersion(await query(), current, operationId, expectedSourceSha256, recoveryId);
+      }
+    } catch (cause) {
+      if (attempted) {
+        try {
+          result = this.#validateCurrentVersion(await query(), current, operationId, expectedSourceSha256, recoveryId);
+        } catch {
+          setState("unknown", { reason: "暂时无法确认版本保存结果，请查询同一操作。" });
+          this.#finishNavigation(operation);
+          return unknown(operationId, "暂时无法确认版本保存结果。");
+        }
+      }
+      if (!result || result.status === "not-created") {
+        const reason = this.#codecs.errorMessage(cause, "版本尚未保存，当前稿保留。");
+        setState("failed", { reason });
+        this.#finishNavigation(operation);
+        return rejected(errorCode(cause, "CURRENT_VERSION_NOT_CREATED"), reason);
+      }
+    }
+    try {
+      if (!this.#isNavigationActive(operation) || !this.#sameCurrentDocument(current)) return stale(current);
+      if (result.status === "not-created") {
+        setState("failed", { reason: "版本尚未保存，可以重试。" });
+        return rejected("CURRENT_VERSION_NOT_CREATED", "版本尚未保存，可以重试。");
+      }
+      // Refresh the existing owners. A local checkpoint preserves source bytes,
+      // so the ordinary metadata refresh does not replace the editing Canvas.
+      const refreshed = await this.#projectWorkflow.refreshWorkspace({ sourcePath: current.sourcePath,
+        epoch: current.epoch, fromDeferred: true });
+      if (!this.#sameCurrentDocument(current)) return stale(current);
+      current = copyContext(this.#projectSession.context);
+      if (refreshed.status !== "succeeded") {
+        setState("refresh-pending", { result, reason: "版本已保存，正在等待项目状态更新。" });
+        return succeeded(result);
+      }
+      if (recoveryId) {
+        this.#versionSession.returnCurrent();
+        await this.#canvasPort.verifyRendered(this.#documentSession.html,
+          this.#documentSession.persistedSourceSha256, current);
+      }
+      setState(result.status === "unchanged" ? "unchanged" : "saved", { result });
+      this.#projectWorkflow.scheduleProjectListRefreshAfterSettlement(current);
+      return succeeded(result);
+    } catch (cause) {
+      setState("refresh-pending", { result, reason: this.#codecs.errorMessage(cause, "版本已保存，项目状态尚未更新。") });
+      return succeeded(result);
+    } finally {
+      this.#finishNavigation(operation);
+    }
+  }
+
+  async loadPreservedDrafts() {
+    const current = copyContext(this.#projectSession.context);
+    if (!current) return blocked("PROJECT_CONTEXT_REQUIRED", "请先打开项目。");
+    const generation = ++this.#preservedDraftGeneration;
+    try {
+      const payload = await this.#bridgeClient.listPreservedDrafts({ projectId: current.projectId });
+      if (!this.#sameCurrentDocument(current) || generation !== this.#preservedDraftGeneration) return stale(current);
+      const entries = payload.drafts;
+      if (!Array.isArray(entries) || entries.some((entry) => !isRecord(entry)
+        || !/^[A-Za-z0-9_-]{8,160}$/.test(String(entry.recoveryId || ""))
+        || !SHA256.test(String(entry.sourceSha256 || "")) || !validTimestamp(entry.createdAt))) {
+        throw new Error("保留稿件的记录不完整。");
+      }
+      return succeeded({ context: current, entries });
+    } catch (cause) {
+      return rejected("PRESERVED_DRAFTS_UNAVAILABLE", this.#codecs.errorMessage(cause, "暂时无法读取保留的稿件。"));
+    }
+  }
+
+  async exportHtml({ suggestedName, saveVersion = false } = {}) {
+    if (!this.#filePort?.exportHtmlCopy) return blocked("EXPORT_UNAVAILABLE", "导出功能暂不可用。");
+    if (["exporting", "saving-version"].includes(this.#snapshot.export?.phase)) {
+      return blocked("EXPORT_BUSY", "导出正在进行。");
+    }
+    let context = copyContext(this.#projectSession.context);
+    if (!context) return blocked("PROJECT_CONTEXT_REQUIRED", "请先打开项目。");
+    const history = this.#versionSession.snapshot.historyPreview;
+    if (history && (history.projectId !== context.projectId || history.documentId !== context.documentId
+      || history.sourcePath !== context.sourcePath)) return stale(context);
+    if (!history) {
+      const checkpoint = this.#canvasPort.checkpointSource?.();
+      if (checkpoint && !checkpoint.ok) return blocked("EXPORT_EDIT_PENDING", checkpoint.reason || "请先完成当前文字输入。");
+      context = copyContext(this.#projectSession.context);
+    }
+    const html = history ? history.content : this.#documentSession.html;
+    const revision = this.#documentSession.editRevision;
+    const sequence = ++this.#exportSequence;
+    const setState = (value) => {
+      if (!this.#sameCurrentDocument(context) || sequence !== this.#exportSequence) return;
+      this.#snapshot = Object.freeze({ ...this.#snapshot, export: Object.freeze({ context, ...value, sequence: ++this.#resultSequence }) });
+      this.#publishSnapshot();
+    };
+    setState({ phase: "exporting" });
+    let exported;
+    try {
+      const hash = await this.#hashPort.sha256(html);
+      const ordinal = history ? this.#versionSession.snapshot.versions.find((version) => version.id === history.versionId)?.ordinal : null;
+      const name = history ? `${String(suggestedName || "项目").replace(/\.html?$/iu, "")}-V${ordinal}.html` : suggestedName;
+      exported = await this.#filePort.exportHtmlCopy({ html, sourcePath: context.sourcePath, suggestedName: name });
+      if (!exported) {
+        setState({ phase: "cancelled" });
+        return succeeded({ cancelled: true });
+      }
+      if (exported.sha256 !== hash || !String(exported.path || "")) throw new Error("导出文件未通过内容校验。");
+      if (!this.#sameCurrentDocument(context)) return stale(context);
+      if (!history) await this.#documentWorkflow.recordVerifiedExport({ context, html, revision, exported });
+      if (saveVersion && !history) {
+        setState({ phase: "saving-version", path: exported.path });
+        const saved = await this.saveCurrentVersion({ context, expectedSourceSha256: hash });
+        if (saved.status !== "succeeded") {
+          setState({ phase: "version-pending", path: exported.path,
+            reason: saved.status === "unknown" ? "HTML 已导出，版本保存结果待确认。" : "HTML 已导出，版本尚未保存。" });
+          return succeeded({ exported, version: saved });
+        }
+      }
+      setState({ phase: "exported", path: exported.path });
+      return succeeded({ exported });
+    } catch (cause) {
+      const reason = this.#codecs.errorMessage(cause, "HTML 导出失败，请选择其他位置重试。");
+      setState({ phase: "failed", reason, ...(exported?.path ? { path: exported.path } : {}) });
+      return rejected("EXPORT_FAILED", reason);
+    }
+  }
+
   #validateHistoryCreation(payload, context, operationId, versionId = null, snapshotSha256 = null) {
     if (!isRecord(payload) || payload.operationId !== operationId
       || payload.projectId !== context.projectId || payload.documentId !== context.documentId
@@ -717,7 +947,7 @@ export class VersionWorkflow {
       !Number.isSafeInteger(payload.versionOrdinal) || payload.versionOrdinal < 2
       || payload.versionId !== `ver_${String(payload.versionOrdinal).padStart(4, "0")}`
       || !String(payload.sourcePath || "") || !SHA256.test(String(payload.contentSha256 || ""))
-      || payload.workingCopyId !== `work_${payload.versionId}`
+      || !/^work_[A-Za-z0-9_-]+$/.test(String(payload.workingCopyId || ""))
       || payload.previousVersionId !== `ver_${String(payload.versionOrdinal - 1).padStart(4, "0")}`
       || !/^ver_\d{4,}$/.test(String(payload.basedOnVersionId || ""))
       || !["pending", "opened", "superseded"].includes(payload.recoveryState)

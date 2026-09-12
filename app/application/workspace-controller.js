@@ -576,7 +576,7 @@ export class WorkspaceController {
         activateTab: (tabId, input) => this.activateWorkbenchTab(tabId, input),
         createStartTab: () => this.createWorkbenchStartTab(),
         createSettingsTab: () => this.createWorkbenchSettingsTab(),
-        createProjectRulesTab: () => this.createWorkbenchProjectRulesTab(),
+        createProjectRulesTab: (project) => this.createWorkbenchProjectRulesTab(project),
         closeTab: (tabId) => this.closeWorkbenchTab(tabId),
         openRegisteredProject: (input) => this.openRegisteredWorkbenchProject(input),
       }),
@@ -922,6 +922,7 @@ export class WorkspaceController {
         ports: {
           hash: this.#hashPort,
           canvas: versionWorkflow.canvas,
+          files: versionWorkflow.files,
         },
         clock,
       });
@@ -1171,8 +1172,8 @@ export class WorkspaceController {
       || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
   }
 
-  createWorkbenchProjectRulesTab() {
-    return this.#workbenchNavigationWorkflow?.createProjectRules()
+  createWorkbenchProjectRulesTab(project) {
+    return this.#workbenchNavigationWorkflow?.createProjectRules(project)
       || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
   }
 
@@ -1911,6 +1912,26 @@ export class WorkspaceController {
 
   createVersionFromHistory(input) {
     return this.#requireVersionWorkflow().createVersionFromHistory(input);
+  }
+
+  saveCurrentVersion(input) {
+    return this.#requireVersionWorkflow().saveCurrentVersion(input);
+  }
+
+  retryCurrentVersion(input) {
+    return this.#requireVersionWorkflow().retryCurrentVersion(input);
+  }
+
+  loadPreservedDrafts() {
+    return this.#requireVersionWorkflow().loadPreservedDrafts();
+  }
+
+  restorePreservedDraft(input) {
+    return this.#requireVersionWorkflow().restorePreservedDraft(input);
+  }
+
+  exportHtml(input) {
+    return this.#requireVersionWorkflow().exportHtml(input);
   }
 
   openCreatedHistoryVersion(input) {

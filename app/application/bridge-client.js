@@ -384,6 +384,12 @@ export function createBridgeClient({
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
     createVersionFromHistory: (body) => command("/history-version/create", body, "新版本的创建结果暂时无法确认。", DEFAULT_REQUEST_TIMEOUT_MS),
+    createVersionFromCurrent: (body) => command("/current-version/create", body, "版本保存结果暂时无法确认。", DEFAULT_REQUEST_TIMEOUT_MS),
+    queryCurrentVersionCreation: (body) => command("/current-version/result", body, "暂时无法确认版本保存结果。"),
+    listPreservedDrafts: (body) => query("/preserved-drafts", body, "暂时无法读取保留的稿件。"),
+    readPreservedDraft: (body) => query("/preserved-draft", body, "暂时无法读取这份稿件。"),
+    restorePreservedDraft: (body) => command("/preserved-draft/restore", body, "稿件恢复结果暂时无法确认。", DEFAULT_REQUEST_TIMEOUT_MS),
+    queryPreservedDraftRestore: (body) => command("/preserved-draft/result", body, "暂时无法确认稿件恢复结果。"),
     queryHistoryCreation: (body) => command("/history-version/result", body, "暂时无法确认新版本的创建结果。"),
     confirmHistoryCreationOpened: (body) => command("/history-version/opened", body, "新版本打开确认暂时没有响应。"),
     continueEditingHistoryVersion: (body) => command(

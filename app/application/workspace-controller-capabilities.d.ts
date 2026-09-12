@@ -254,7 +254,7 @@ export interface NavigationControllerCommands {
   ): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
   createStartTab(): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
   createSettingsTab(): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
-  createProjectRulesTab(): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
+  createProjectRulesTab(project?: { projectId: string; documentId: string; title: string }): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
   closeTab(tabId: string): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
   openRegisteredProject(input: {
     projectId: string;
