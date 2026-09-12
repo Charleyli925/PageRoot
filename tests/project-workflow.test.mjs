@@ -3628,3 +3628,27 @@ test("catalog stops after one reread when authority keeps changing", async (t) =
   assert.equal(revision, 2);
   assert.equal(h.events.some((event) => event.type === "project-catalog-loaded"), false);
 });
+
+
+test("same-path managed publication advances the entire OpenTarget without replacing current identity", () => {
+  const target = { projectId: "project_old", documentId: "document_old", projectRootPath: "/tmp/project",
+    targetKind: "working-copy", workingCopyId: "work_current", versionId: "ver_0001",
+    exactSourcePath: OLD_PATH, sourceSha256: sha256(OLD_HTML) };
+  const h = createHarness({ openTarget: target });
+  const epoch = h.projectSession.epoch;
+  const nextTarget = { ...target, versionId: "ver_0002", sourceSha256: sha256(A_HTML) };
+  let publishedContext;
+  const result = h.workflow.commitManagedSourceTransition({
+    prepared: { updatesCurrentProject: true, previousSourcePath: OLD_PATH, nextSourcePath: OLD_PATH,
+      projectId: target.projectId, documentId: target.documentId, openTarget: nextTarget },
+    html: A_HTML, sourceSha256: sha256(A_HTML),
+    publishSessions: (context) => { publishedContext = context; },
+  });
+  assert.equal(h.projectSession.epoch, epoch);
+  assert.equal(result.workingCopyId, target.workingCopyId);
+  assert.equal(result.versionId, "ver_0002");
+  assert.equal(result.sourceSha256, sha256(A_HTML));
+  assert.deepEqual(publishedContext, result);
+  assert.equal(h.documentSession.html, A_HTML);
+  assert.equal(h.documentSession.persistedSourceSha256, result.sourceSha256);
+});

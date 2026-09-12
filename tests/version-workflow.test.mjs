@@ -1604,3 +1604,53 @@ test("two lost adoption replies retain one decision and automatically reconcile 
   assert.equal(harness.calls.commit.length, 1);
   assert.equal(harness.runSession.isOperationBusy("activate", operationKey(run)), false);
 });
+
+
+for (const completion of ["success", "cancel", "failure"]) {
+  test(`an export finishing after project switch releases the operation on ${completion}`, async () => {
+    const pending = deferred();
+    let count = 0;
+    const h = createHarness({ currentDraft: true, exportHtmlCopy: async (input) => {
+      if (++count === 1) {
+        await pending.promise;
+        if (completion === "cancel") return null;
+        if (completion === "failure") throw new Error("export failed");
+      }
+      return { path: "/tmp/export-current.html", sha256: sha256(input.html) };
+    } });
+    const first = h.workflow.exportHtml();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const locator = h.projectSession.openLocator(SOURCE_B);
+    h.projectSession.register({ ...locator, projectId: "project_b", documentId: "document_b" });
+    h.documentSession.publishAuthority({ html: B_HTML, persistedSourceSha256: sha256(B_HTML) });
+    pending.resolve();
+    await first;
+    assert.equal(h.workflow.getSnapshot().export, undefined);
+    assert.equal((await h.workflow.exportHtml()).status, "succeeded");
+    assert.equal(count, 2);
+  });
+}
+
+test("browser download initiation never claims a verified export or creates a Version", async () => {
+  let versions = 0;
+  const h = createHarness({ currentDraft: true,
+    createCurrent: async () => { versions++; },
+    exportHtmlCopy: async () => ({ kind: "download-started" }) });
+  assert.deepEqual((await h.workflow.exportHtml({ saveVersion: true })).value, { downloadStarted: true });
+  assert.equal(h.workflow.getSnapshot().export.phase, "download-started");
+  assert.equal(h.workflow.getSnapshot().export.path, undefined);
+  assert.equal(versions, 0);
+});
+
+test("export blocked before local version creation never offers an unrelated operation retry", async () => {
+  const h = createHarness({ currentDraft: true,
+    createCurrent: async (input) => currentVersionReceipt(input),
+    exportHtmlCopy: async (input) => ({ path: "/tmp/export-current.html", sha256: sha256(input.html) }) });
+  await h.workflow.saveCurrentVersion();
+  const previous = h.workflow.getSnapshot().draftVersion.operationId;
+  h.runSession.trackRun(readyRun(), { activate: "always" });
+  assert.equal((await h.workflow.exportHtml({ saveVersion: true })).status, "succeeded");
+  assert.equal(h.workflow.getSnapshot().export.phase, "version-pending");
+  assert.equal(h.workflow.getSnapshot().export.versionOperationId, undefined);
+  assert.equal(h.workflow.getSnapshot().draftVersion.operationId, previous);
+});

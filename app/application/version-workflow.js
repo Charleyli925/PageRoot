@@ -148,6 +148,8 @@ export class VersionWorkflow {
   #filePort;
   #preservedDraftGeneration = 0;
   #exportSequence = 0;
+
+  #activeExportOperation = null;
   #resultSequence = 0;
 
   constructor({
@@ -870,6 +872,7 @@ export class VersionWorkflow {
     try {
       const payload = await this.#bridgeClient.listPreservedDrafts({ projectId: current.projectId });
       if (!this.#sameCurrentDocument(current) || generation !== this.#preservedDraftGeneration) return stale(current);
+      if (payload.projectId !== current.projectId) throw new Error("保留稿件的项目身份不一致。");
       const entries = payload.drafts;
       if (!Array.isArray(entries) || entries.some((entry) => !isRecord(entry)
         || !/^[A-Za-z0-9_-]{8,160}$/.test(String(entry.recoveryId || ""))
@@ -884,7 +887,7 @@ export class VersionWorkflow {
 
   async exportHtml({ suggestedName, saveVersion = false } = {}) {
     if (!this.#filePort?.exportHtmlCopy) return blocked("EXPORT_UNAVAILABLE", "导出功能暂不可用。");
-    if (["exporting", "saving-version"].includes(this.#snapshot.export?.phase)) {
+    if (this.#activeExportOperation !== null) {
       return blocked("EXPORT_BUSY", "导出正在进行。");
     }
     let context = copyContext(this.#projectSession.context);
@@ -900,6 +903,7 @@ export class VersionWorkflow {
     const html = history ? history.content : this.#documentSession.html;
     const revision = this.#documentSession.editRevision;
     const sequence = ++this.#exportSequence;
+    this.#activeExportOperation = sequence;
     const setState = (value) => {
       if (!this.#sameCurrentDocument(context) || sequence !== this.#exportSequence) return;
       this.#snapshot = Object.freeze({ ...this.#snapshot, export: Object.freeze({ context, ...value, sequence: ++this.#resultSequence }) });
@@ -916,15 +920,23 @@ export class VersionWorkflow {
         setState({ phase: "cancelled" });
         return succeeded({ cancelled: true });
       }
+      if (exported.kind === "download-started") {
+        setState({ phase: "download-started" });
+        return succeeded({ downloadStarted: true });
+      }
       if (exported.sha256 !== hash || !String(exported.path || "")) throw new Error("导出文件未通过内容校验。");
       if (!this.#sameCurrentDocument(context)) return stale(context);
       if (!history) await this.#documentWorkflow.recordVerifiedExport({ context, html, revision, exported });
       if (saveVersion && !history) {
         setState({ phase: "saving-version", path: exported.path });
-        const saved = await this.saveCurrentVersion({ context, expectedSourceSha256: hash });
+        const operationId = this.#nextOperationId("export-version");
+        const saved = await this.saveCurrentVersion({ context, operationId, expectedSourceSha256: hash });
         if (saved.status !== "succeeded") {
+          const hasOperation = this.#snapshot.draftVersion?.operationId === operationId;
           setState({ phase: "version-pending", path: exported.path,
-            reason: saved.status === "unknown" ? "HTML 已导出，版本保存结果待确认。" : "HTML 已导出，版本尚未保存。" });
+            ...(hasOperation ? { versionOperationId: operationId } : {}),
+            reason: saved.status === "unknown" ? "HTML 已导出，版本保存结果待确认。"
+              : `HTML 已导出，版本尚未保存。${saved.reason || ""}` });
           return succeeded({ exported, version: saved });
         }
       }
@@ -934,6 +946,13 @@ export class VersionWorkflow {
       const reason = this.#codecs.errorMessage(cause, "HTML 导出失败，请选择其他位置重试。");
       setState({ phase: "failed", reason, ...(exported?.path ? { path: exported.path } : {}) });
       return rejected("EXPORT_FAILED", reason);
+    } finally {
+      if (this.#activeExportOperation === sequence) this.#activeExportOperation = null;
+      if (sequence === this.#exportSequence && !this.#sameCurrentDocument(context)) {
+        const { export: _completedExport, ...snapshot } = this.#snapshot;
+        this.#snapshot = Object.freeze(snapshot);
+        this.#publishSnapshot();
+      }
     }
   }
 

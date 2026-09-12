@@ -4082,7 +4082,7 @@ export class ProjectWorkflow {
           documentId: prepared.documentId,
           openTarget: prepared.openTarget,
         })
-      : this.#projectSession.context || this.#projectSession.register({
+      : this.#projectSession.register({
           epoch: this.#projectSession.epoch,
           projectId: prepared.projectId,
           documentId: prepared.documentId,
