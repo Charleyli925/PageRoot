@@ -17,6 +17,12 @@
   未变化不重复生成版本；取消、受管路径拒绝均不创建版本且原文件不变。
   AI 采纳受影响的两个 Electron 用例在 `c3f6ac5a` 通过，核对当前稿路径/WC 身份稳定、
   新旧快照精确内容及后续 Runtime/预览断言。
+- 完整历史恢复链路已通过，日志 `output/current-draft/history-recovery-final3.log`：
+  V9 已提交但加载失败后可切换项目，再回来打开同一 V9、继续编辑并重启；旧 V3/V8 快照不变。
+  `history-created-v9.png` 与 `version-history-projection.png` 已检查并保存在同一截图目录。
+  跨项目历史读取被明确拒绝后，两帧内仍只有一次读取；新键盘点击可重新打开历史。
+  Repository 保留证明、DocumentWorkflow 和 Main 日志 CAS 的独立验证覆盖了新编辑、
+  并发日志更新、未保留事件和源文件不可读，不会以旧恢复日志回灌已正式替换的当前稿。
 - 真实用户 HTML：单份指定复杂页面的私有副本完成导入、编辑保存、预览/编辑切换、重载、重开及两次结构操作，
   用户原件与副本前后 Hash 一致。旧 runner 的文件级结果为 1 通过，但 7 个尝试编辑目标中
   有 4 个被 runner 捕获拒绝（斜体状态、撤销文本、编辑标记及 contenteditable 等断言）；

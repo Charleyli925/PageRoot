@@ -17,6 +17,7 @@ import {
   openRecentProject,
   path,
   readFileSync,
+  realpathSync,
   renameSync,
   removeIsolatedUserData,
   removeSourceFixture,
@@ -677,7 +678,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(importedProject.locator('.sidebar-version-row[data-selected="true"]')).toHaveCount(0);
     expect(creates).toBe(1);
     const createdPath = await launched.page.evaluate(async () => (await window.htmlAIProjects.getActiveProject()).sourcePath);
-    expect(createdPath).toBe(target.exactSourcePath);
+    expect(realpathSync(createdPath)).toBe(realpathSync(target.exactSourcePath));
     const { frame: createdFrame } = await loadedStaticDiskFrame(launched.page, createdPath, { expectedCase: "list-item", includeEditor: true });
     await activateNativeEdit(createdFrame, "list-item");
     await setTextSelection(createdFrame, "list-item", 0, 3);
