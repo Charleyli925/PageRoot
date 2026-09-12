@@ -39,18 +39,13 @@ export function projectVersionSummariesFromVersions(
 ): ProjectVersionSummary[] {
   const activeVersionId = options.activeVersionId || null;
   const latestVersionId = options.latestVersionId || null;
-  const activeFileName = normalizedFileName(currentFileName);
   return versions.map((version) => {
     const isActiveWorkingCopy = activeVersionId === null ? null : version.id === activeVersionId;
-    const displayFileName = isActiveWorkingCopy
-      ? activeFileName
-        || normalizedFileName(version.displayFileName)
-        || fallbackVersionFileName(currentFileName, version.ordinal)
-      : normalizedFileName(version.displayFileName)
-        || fallbackVersionFileName(currentFileName, version.ordinal);
-    const modifiedAt = isActiveWorkingCopy
-      ? String(options.activeModifiedAt || version.modifiedAt || version.generatedAt || "")
-      : String(version.modifiedAt || version.generatedAt || "");
+    // These rows describe immutable snapshots. Current-draft renames and saves
+    // must not rewrite the historical filename or timestamp projection.
+    const displayFileName = normalizedFileName(version.displayFileName)
+      || fallbackVersionFileName(currentFileName, version.ordinal);
+    const modifiedAt = String(version.generatedAt || version.modifiedAt || "");
     return {
       projectId,
       documentId,
@@ -133,16 +128,8 @@ export function versionInheritanceDescription(
   version: ProjectVersionSummary,
   parent: ProjectVersionSummary | null,
 ): string {
-  const latest = version.isLatestOfficial ? " · 最新版本" : "";
-  if (!parent) {
-    return version.isActiveWorkingCopy
-      ? `项目初始导入版本 · 当前编辑文件${latest}`
-      : `项目初始导入版本${latest}`;
-  }
-  const isIndependentBranch = Boolean(
-    version.basedOnVersionId
-    && version.previousVersionId
-    && version.basedOnVersionId !== version.previousVersionId,
-  );
-  return `基于 ${parent.displayFileName} 修改生成${isIndependentBranch ? " · 独立分支" : ""}${version.isActiveWorkingCopy ? " · 当前编辑文件" : ""}${latest}`;
+  const origin = parent
+    ? `基于 V${parent.ordinal}`
+    : version.ordinal === 1 ? "初始导入" : "历史版本";
+  return `${origin} · 只读`;
 }
