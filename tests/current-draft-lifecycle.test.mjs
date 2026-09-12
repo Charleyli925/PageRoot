@@ -9,6 +9,116 @@ const manifestPath = (t) => path.join(t.projectRootPath, '.pageroot/manifest.jso
 const statePath = (t) => path.join(t.projectRootPath, '.pageroot/working-copies', t.workingCopyId + '.json');
 const current = async (v, t) => (await v.repository.resolveRegisteredProjectOpenTarget({ projectId: t.projectId })).target;
 
+async function replacementProofFixture(t, { attachment = false } = {}) {
+  const value = await fixture(t);
+  const { target: before } = await importSource(value);
+  const original = await readFile(before.exactSourcePath, 'utf8');
+  if (attachment) {
+    const relativePath = 'draft/attachments/comment_proof/attachment_proof-file.txt';
+    const bytes = Buffer.from('preserved proof attachment');
+    await mkdir(path.dirname(path.join(before.projectRootPath, relativePath)), { recursive: true });
+    await writeFile(path.join(before.projectRootPath, relativePath), bytes);
+    await value.repository.saveDraft({ target: before, operationId: 'draftop_replacement_proof_01', expectedDraftRevision: 0,
+      comments: [{ id: 'comment_proof', body: 'preserve', attachments: [{ attachmentId: 'attachment_proof',
+        commentId: 'comment_proof', fileName: 'file.txt', relativePath, sha256: sha256(bytes), byteLength: bytes.length }] }],
+      changeEvents: [], deletedCommentIds: [] });
+  }
+  const target = await promoteNextVersion(value.repository, before, 'replacement_proof_next');
+  const version = (await json(manifestPath(target))).versions.at(-1);
+  const transactionPath = path.join(target.projectRootPath, '.pageroot/transactions', `current_${version.sourceOperationId}`, 'transaction.json');
+  const preserved = (await value.repository.listPreservedDrafts({ projectId: target.projectId }))[0];
+  const preservedRoot = path.join(target.projectRootPath, '.pageroot/recovery/preserved-drafts', preserved.recoveryId);
+  const journal = { projectId: before.projectId, documentId: before.documentId, workingCopyId: before.workingCopyId,
+    sourcePath: before.exactSourcePath, expectedSourceSha256: before.sourceSha256, recoveryHtmlSha256: sha256(Buffer.from(original)),
+    journalSha256: sha256(Buffer.from('verified Main journal')), revision: 0, html: original, changeEvents: [] };
+  return { value, before, target, journal, transactionPath, preservedRoot, preserved, version };
+}
+
+test('replacement proof verifies completed preservation across later snapshots and rename without writes', async (t) => {
+  const f = await replacementProofFixture(t, { attachment: true });
+  const files = [manifestPath(f.target), f.target.exactSourcePath, f.transactionPath,
+    path.join(f.preservedRoot, 'record.json'), path.join(f.value.projects, '.pageroot-registry.json')];
+  const beforeBytes = await Promise.all(files.map((file) => readFile(file)));
+  const result = await f.value.repository.verifyReplacedCurrentDraft({ target: f.target, journal: f.journal });
+  assert.deepEqual(result, { verified: true, proof: { projectId: f.target.projectId, documentId: f.target.documentId,
+    workingCopyId: f.target.workingCopyId, currentVersionId: 'ver_0002', currentSourcePath: f.target.exactSourcePath,
+    currentSourceSha256: f.target.sourceSha256, replacementVersionId: 'ver_0002', operationId: f.version.sourceOperationId,
+    preservedRecoveryId: f.preserved.recoveryId, replacedSourceSha256: f.journal.recoveryHtmlSha256,
+    journalSha256: f.journal.journalSha256, journalRevision: f.journal.revision } });
+  assert.deepEqual(await Promise.all(files.map((file) => readFile(file))), beforeBytes);
+  await f.value.repository.saveWorkingCopy({ target: f.target, expectedSourceSha256: f.target.sourceSha256, html: html('later local edit'), editRevision: 1 });
+  const edited = await current(f.value, f.target);
+  await f.value.repository.createVersionFromCurrent({ target: edited, operationId: 'proof_later_snapshot_01', expectedSourceSha256: edited.sourceSha256 });
+  const renamed = path.join(f.target.projectRootPath, 'renamed proof.html');
+  await rename(f.target.exactSourcePath, renamed);
+  const target = (await f.value.repository.workspace({ sourcePath: renamed })).target;
+  const later = await f.value.repository.verifyReplacedCurrentDraft({ target, journal: f.journal });
+  assert.equal(later.verified, true);
+  assert.equal(later.proof.currentVersionId, 'ver_0003');
+  assert.equal(later.proof.replacementVersionId, 'ver_0002');
+  assert.equal(later.proof.currentSourcePath, renamed);
+  assert.equal(await readFile(renamed, 'utf8'), html('later local edit'));
+});
+
+test('replacement proof rejects other owners, stale current, new HTML and unpreserved events', async (t) => {
+  const f = await replacementProofFixture(t);
+  const mutations = [
+    { journal: { ...f.journal, projectId: 'project_1111111111111111' } },
+    { journal: { ...f.journal, documentId: 'doc_1111111111111111' } },
+    { journal: { ...f.journal, workingCopyId: 'work_ver_0099' } },
+    { journal: { ...f.journal, html: html('unsaved new'), recoveryHtmlSha256: sha256(Buffer.from(html('unsaved new'))) } },
+    { journal: { ...f.journal, expectedSourceSha256: f.target.sourceSha256 } },
+    { journal: { ...f.journal, changeEvents: [{ eventId: 'new_unsaved_event' }] } },
+    { target: { ...f.target, workingCopyId: 'work_ver_0099' } },
+    { target: { ...f.target, sourceSha256: f.before.sourceSha256 } },
+    { target: { ...f.target, versionId: f.before.versionId } },
+  ];
+  for (const mutation of mutations) {
+    assert.deepEqual(await f.value.repository.verifyReplacedCurrentDraft({ target: f.target, journal: f.journal, ...mutation }), { verified: false });
+  }
+});
+
+for (const damage of ['missing-record', 'tampered-record', 'omitted-attachment-record', 'missing-attachment', 'tampered-attachment', 'tampered-html', 'uncompleted-transaction']) {
+  test(`replacement proof never authorizes recovery retirement with ${damage}`, async (t) => {
+    const f = await replacementProofFixture(t, { attachment: true });
+    if (damage === 'missing-record') await rm(path.join(f.preservedRoot, 'record.json'));
+    if (damage === 'tampered-record') {
+      const file = path.join(f.preservedRoot, 'record.json'); const record = await json(file);
+      record.originalWorkingCopyId = 'work_ver_0099'; await writeFile(file, JSON.stringify(record));
+    }
+    if (damage === 'omitted-attachment-record') {
+      const file = path.join(f.preservedRoot, 'record.json'); const record = await json(file);
+      record.attachments = []; await writeFile(file, JSON.stringify(record));
+    }
+    const attachmentPath = path.join(f.preservedRoot, 'draft/attachments/comment_proof/attachment_proof-file.txt');
+    if (damage === 'missing-attachment') await rm(attachmentPath);
+    if (damage === 'tampered-attachment') await writeFile(attachmentPath, 'changed');
+    if (damage === 'tampered-html') await writeFile(path.join(f.preservedRoot, 'index.html'), html('changed'));
+    if (damage === 'uncompleted-transaction') {
+      const transaction = await json(f.transactionPath); transaction.state = 'prepared'; await writeFile(f.transactionPath, JSON.stringify(transaction));
+    }
+    const source = await readFile(f.target.exactSourcePath);
+    const transaction = await readFile(f.transactionPath);
+    const result = await f.value.repository.verifyReplacedCurrentDraft({ target: f.target, journal: f.journal }).catch(() => ({ verified: false }));
+    assert.equal(result.verified, false);
+    assert.deepEqual(await readFile(f.target.exactSourcePath), source);
+    assert.deepEqual(await readFile(f.transactionPath), transaction);
+  });
+}
+
+test('replacement proof does not commit or trust an unfinished preserved transaction', async (t) => {
+  const value = await fixture(t); const { target } = await importSource(value);
+  const writer = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: (name) => name === 'current-version-prepared' });
+  await assert.rejects(writer.createVersionFromHistory({ target, versionId: 'ver_0001', operationId: 'proof_uncommitted_history_01',
+    expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 }));
+  const journal = { projectId: target.projectId, documentId: target.documentId, workingCopyId: target.workingCopyId,
+    sourcePath: target.exactSourcePath, expectedSourceSha256: target.sourceSha256, recoveryHtmlSha256: target.sourceSha256,
+    journalSha256: sha256(Buffer.from('verified Main journal')), revision: 0, html: await readFile(target.exactSourcePath, 'utf8') };
+  assert.deepEqual(await value.repository.verifyReplacedCurrentDraft({ target, journal }), { verified: false });
+  assert.equal((await json(manifestPath(target))).versions.length, 1);
+  assert.equal((await json(path.join(target.projectRootPath, '.pageroot/transactions/current_proof_uncommitted_history_01/transaction.json'))).state, 'prepared');
+});
+
 test('import has stable current filename; identity materialization alone creates no Version', async (t) => {
   const v = await fixture(t); const {target, buffer} = await importSource(v, 'page.htm', html('V1').replace(/ data-pageroot-id="[^"]*"/g, ''));
   assert.equal(path.basename(target.exactSourcePath), 'page.htm');
