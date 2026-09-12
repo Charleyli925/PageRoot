@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -118,4 +118,44 @@ test("watching the same path twice keeps the live watcher", async () => {
     watcher.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("a missing project directory stays absent and its returning source is watched again", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-return-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const project = path.join(root, "project");
+  const moved = path.join(root, "moved");
+  const sourcePath = path.join(project, "page.html");
+  await mkdir(project);
+  await writeFile(sourcePath, "original");
+  const events = [];
+  const watcher = createSourceFileWatcher({ debounceMs: 20, onChange: (info) => events.push(info) });
+  t.after(() => watcher.close());
+  watcher.watch(sourcePath);
+  await rename(project, moved);
+  await waitFor(() => events.some((event) => event.sourceMissing), "missing source must be reported");
+  await assert.rejects(lstat(project), { code: "ENOENT" });
+  events.length = 0;
+  await rename(moved, project);
+  await waitFor(() => events.some((event) => event.sourceMissing === false), "returned source must be reported");
+  events.length = 0;
+  await writeFile(sourcePath, "after return");
+  await waitFor(() => events.length > 0, "returned project must observe subsequent edits");
+  assert.ok(events.every((event) => event.sourcePath === sourcePath && event.sourceMissing === false));
+});
+
+test("starting a watcher on an absent project retains a recovery signal without creating it", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-absent-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const project = path.join(root, "missing");
+  const sourcePath = path.join(project, "page.html");
+  const events = [];
+  const watcher = createSourceFileWatcher({ debounceMs: 20, onChange: (info) => events.push(info) });
+  t.after(() => watcher.close());
+  watcher.watch(sourcePath);
+  await waitFor(() => events.some((event) => event.sourceMissing), "absent project must emit unavailable hint");
+  await assert.rejects(lstat(project), { code: "ENOENT" });
+  await mkdir(project);
+  await writeFile(sourcePath, "restored");
+  await waitFor(() => events.some((event) => event.sourceMissing === false), "restored project must emit available hint");
 });

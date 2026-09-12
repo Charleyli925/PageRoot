@@ -240,7 +240,35 @@ async function readUiPreferencesFile({ userDataPath }) {
   return {
     preferences: decodeUiPreferences(parsed),
     legacy: isRecord(parsed) && parsed.schemaVersion === 1,
+    desktop: normalizedDesktopPreferences(parsed),
   };
+}
+
+function normalizedDesktopPreferences(value) {
+  const directory = value?.desktop?.lastExportDirectory;
+  return typeof directory === "string" && directory.length <= 4096
+    && !directory.includes("\0") && path.isAbsolute(directory)
+    ? { lastExportDirectory: path.resolve(directory) }
+    : {};
+}
+
+function durablePreferences(preferences, desktop) {
+  return desktop?.lastExportDirectory ? { ...preferences, desktop } : preferences;
+}
+
+// Native export convenience stays private to Main and shares the existing
+// preference write queue. It is not a renderer-editable workspace preference.
+export async function readLastExportDirectory({ userDataPath } = {}) {
+  return (await readUiPreferencesFile({ userDataPath })).desktop?.lastExportDirectory || null;
+}
+
+export async function recordLastExportDirectory({ userDataPath, directoryPath } = {}) {
+  const desktop = normalizedDesktopPreferences({ desktop: { lastExportDirectory: directoryPath } });
+  if (!desktop.lastExportDirectory) throw new TypeError("Export directory must be an absolute path.");
+  return enqueueWrite(async () => {
+    const current = await readUiPreferencesFile({ userDataPath });
+    await atomicWrite(preferencesPath(userDataPath), durablePreferences(current.preferences, desktop));
+  });
 }
 
 export async function readUiPreferences({
@@ -253,7 +281,7 @@ export async function readUiPreferences({
       await enqueueWrite(async () => {
         const latest = await readUiPreferencesFile({ userDataPath });
         if (!latest.legacy) return latest.preferences;
-        await atomicWrite(preferencesPath(userDataPath), latest.preferences);
+        await atomicWrite(preferencesPath(userDataPath), durablePreferences(latest.preferences, latest.desktop));
         return latest.preferences;
       });
     } catch {
@@ -264,9 +292,9 @@ export async function readUiPreferences({
   return loaded.preferences;
 }
 
-async function writeUiPreferences(userDataPath, next) {
+async function writeUiPreferences(userDataPath, next, desktop) {
   const frozen = freezePreferences(next);
-  await atomicWrite(preferencesPath(userDataPath), frozen);
+  await atomicWrite(preferencesPath(userDataPath), durablePreferences(frozen, desktop));
   return frozen;
 }
 
@@ -278,12 +306,10 @@ function enqueueWrite(task) {
 
 async function updateUiPreferences(userDataPath, update) {
   return enqueueWrite(async () => {
-    const current = await readUiPreferences({
-      userDataPath,
-      persistMigration: false,
-    });
+    const loaded = await readUiPreferencesFile({ userDataPath });
+    const current = loaded.preferences;
     const next = update(current);
-    return next === current ? current : writeUiPreferences(userDataPath, next);
+    return next === current ? current : writeUiPreferences(userDataPath, next, loaded.desktop);
   });
 }
 
