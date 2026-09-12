@@ -23,6 +23,7 @@ test("workspace provenance changes for untracked source bytes", () => {
   git(root, ["add", "tracked.txt"]);
   git(root, ["commit", "-qm", "fixture"]);
   const clean = workspaceSourceFingerprint(root);
+  assert.match(clean.tree, /^[0-9a-f]{40}$/u);
   writeFileSync(path.join(root, "tracked.txt"), "unstaged\n");
   const unstaged = workspaceSourceFingerprint(root);
   git(root, ["add", "tracked.txt"]);

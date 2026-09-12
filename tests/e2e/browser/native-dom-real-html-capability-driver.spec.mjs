@@ -1,18 +1,79 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { executeFrozenSelection, frozenFrameAccess, selectionExecutionIssues }
+  from "../electron/real-html/frozen-selection.mjs";
+import { readFrozenActiveGeneration, requireCurrentTextDocument, requireFrozenTextFocus }
+  from "../electron/real-html/frozen-text.mjs";
+import { probeFrozenEndedContinuation } from "../electron/real-html/frozen-structure.mjs";
+import { revealFrozenCommentDelete } from "../electron/real-html/frozen-mixed.mjs";
+
+test("frozen generation reads the active iframe and rejects absent or ambiguous identities", async ({ page }) => {
+  await page.setContent('<main data-runtime-root data-canvas-generation="999"><iframe data-runtime-slot-role="active" data-frame-generation="2"></iframe></main>');
+  const root = page.locator("[data-runtime-root]");
+  expect(await readFrozenActiveGeneration(root)).toBe("2");
+  await root.locator("iframe").evaluate((frame) => frame.removeAttribute("data-frame-generation"));
+  await expect(readFrozenActiveGeneration(root)).rejects.toMatchObject({ code: "FROZEN_ACTIVE_GENERATION_MISSING" });
+  await root.evaluate((element) => element.append(element.querySelector("iframe").cloneNode()));
+  await expect(readFrozenActiveGeneration(root)).rejects.toMatchObject({ code: "FROZEN_ACTIVE_FRAME_NOT_UNIQUE" });
+});
 
 import {
   authoredTabActivationDecision,
+  canonicalSourceRelationship,
   collectVisibleAuthoredCandidates,
   discoverRuntimeGeneratedTargets,
   driveAuthoredTabActivation,
+  normalizeCapabilityProbeObservations,
   probeAuthoredCapability,
   runtimeGeneratedDiagnosticsIssue,
 } from "../electron/real-html/capability-driver.mjs";
 
 const CORRECT_ID = "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WRONG_ID = "pr1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const PARENT_ID = "pr1_cccccccccccccccccccccccccccccccc";
 
 const HARNESS_TEST_OPTIONS = { tag: ["@gate-smoke", "@smoke-editing"] };
+
+for (const reveal of [true, false]) test(`frozen comment hover proves reveal=${reveal}`, HARNESS_TEST_OPTIONS, async ({ page }) => {
+  const css = ["review-v5.css", "comment-hierarchy.css"].map(name =>
+    readFileSync(new URL(`../../../app/styles/${name}`, import.meta.url), "utf8")).join("\n");
+  await page.setContent(`<style>${css}</style><article class="comment-card" style="position:relative;width:400px;height:120px">
+    <p>Fixed comment</p><footer class="comment-card-footer"><button aria-label="删除评论">Delete</button></footer></article>`);
+  const card = page.locator(".comment-card"), button = card.getByRole("button", { name: "删除评论" });
+  expect(await button.evaluate(element => getComputedStyle(element).pointerEvents)).toBe("none");
+  if (!reveal) await page.addStyleTag({ content: ".comment-card:hover .comment-card-footer{pointer-events:none!important}" });
+  if (reveal) {
+    await page.evaluate(() => document.querySelector("button").addEventListener("click", () => document.body.dataset.clicked = "true"));
+    await (await revealFrozenCommentDelete(card)).click({ timeout: 2_000 });
+    await expect(page.locator("body")).toHaveAttribute("data-clicked", "true");
+  } else await expect(revealFrozenCommentDelete(card)).rejects.toThrow();
+});
+
+for (const mode of ["ended", "wrong-focus", "wrong-input", "observer-missing", "observer-invalid"]) {
+  test(`frozen direct continuation proves ${mode}`, HARNESS_TEST_OPTIONS, async ({ page }) => {
+    await page.setContent('<main data-editor data-e2e-copy-native-edit-ended="true"><iframe data-runtime-slot-role="active" data-frame-generation="2"></iframe></main><input id="wrong">');
+    const editor = page.locator("[data-editor]");
+    const frame = await (await editor.locator("iframe").elementHandle()).contentFrame();
+    await frame.setContent(`<p data-pageroot-id="${CORRECT_ID}">Fixed target</p>`);
+    if (mode === "wrong-focus") await page.locator("#wrong").focus();
+    if (mode === "wrong-input") await page.evaluate(() => document.addEventListener("keydown", () => {
+      document.getElementById("wrong").focus();
+    }, { once: true }));
+    if (mode === "observer-missing") await page.evaluate(() => document.addEventListener("keydown", () => {
+      delete globalThis.__STEMMIO_FROZEN_INPUT_DELIVERY__;
+    }, { once: true }));
+    if (mode === "observer-invalid") await page.evaluate(() => document.addEventListener("keydown", () => {
+      globalThis.__STEMMIO_FROZEN_INPUT_DELIVERY__.stop = () => "";
+    }, { once: true }));
+    const result = probeFrozenEndedContinuation({ page, frame, editor,
+      target: { clickId: CORRECT_ID, selectedId: CORRECT_ID }, readSource: async () => Buffer.from("unchanged"),
+      calls: [], marker: "PROBE" });
+    if (mode === "ended") expect((await result).mode).toBe("session-ended-no-refocus");
+    else await expect(result).rejects.toThrow(mode === "wrong-focus" ? "FROZEN_CONTINUATION_UNSAFE_FOCUS"
+      : mode === "wrong-input" ? "FROZEN_DIRECT_CONTINUATION_MISMATCH"
+        : mode === "observer-missing" ? "FROZEN_INPUT_OBSERVER_MISSING" : "FROZEN_INPUT_OBSERVER_INVALID");
+  });
+}
 
 test("authored tab activation waits for a delayed action and fails ambiguous state", HARNESS_TEST_OPTIONS, async () => {
   expect(authoredTabActivationDecision({
@@ -233,6 +294,394 @@ function candidate(stableId = CORRECT_ID) {
     scrollContainer: "document",
   };
 }
+
+async function canonicalCapabilityFixture(page, selectedId = PARENT_ID, toolbarLabel = "元素工具栏") {
+  await page.setContent(`
+    <main data-runtime-root data-element-copy-availability="available" data-element-copy-reason="available">
+      <h1 data-pageroot-id="${PARENT_ID}" style="display:block;width:260px;height:90px">
+        <span id="target" data-pageroot-id="${CORRECT_ID}" style="display:block;width:220px;height:70px">
+          canonical child
+        </span>
+      </h1>
+      <p data-pageroot-id="${WRONG_ID}">unrelated sibling</p>
+      <div role="toolbar" aria-label="${toolbarLabel}" hidden>
+        <button aria-label="留评论"></button>
+        <button aria-label="编辑"></button>
+        <button aria-label="复制元素"></button>
+      </div>
+    </main>
+  `);
+  await page.locator("#target").evaluate((target, operationId) => {
+    target.addEventListener("click", () => {
+      document.querySelector(`[data-pageroot-id="${operationId}"]`)
+        ?.setAttribute("data-html-canvas-selected", "subregion");
+      document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      document.querySelectorAll("[data-html-canvas-selected]")
+        .forEach((element) => element.removeAttribute("data-html-canvas-selected"));
+      document.querySelector('[role="toolbar"]')?.setAttribute("hidden", "");
+    });
+  }, selectedId);
+}
+
+function canonicalSourceElements({ childParentId = PARENT_ID, duplicateParent = false } = {}) {
+  const rows = [
+    {
+      pagerootId: PARENT_ID,
+      pagerootIdentityStatus: "valid",
+      parentId: null,
+      tagName: "h1",
+      sourceOrder: 0,
+      sourceEditable: true,
+    },
+    {
+      pagerootId: CORRECT_ID,
+      pagerootIdentityStatus: "valid",
+      parentId: childParentId,
+      tagName: "span",
+      sourceOrder: 1,
+      sourceEditable: false,
+    },
+    {
+      pagerootId: WRONG_ID,
+      pagerootIdentityStatus: "valid",
+      parentId: null,
+      tagName: "p",
+      sourceOrder: 2,
+      sourceEditable: true,
+    },
+  ];
+  if (duplicateParent) rows.push({ ...rows[0], sourceOrder: 3 });
+  return rows;
+}
+
+for (const mode of ["padding", "canvas-through-parent", "wrong-hit", "wrong-landing", "outside-point"]) {
+  test(`frozen fixed point preserves identity: ${mode}`, HARNESS_TEST_OPTIONS, async ({ page }) => {
+    const canvas = mode !== "padding";
+    await page.setContent(`<div data-pageroot-id="${PARENT_ID}" style="padding:10px"><${canvas ? "canvas" : "div"}
+      data-pageroot-id="${CORRECT_ID}" style="width:200px;height:80px;display:block;${canvas ? "pointer-events:none" : ""}"></${canvas ? "canvas" : "div"}></div>
+      <p data-pageroot-id="${WRONG_ID}">Other</p>`);
+    await page.evaluate(({ correct, wrong, mode }) => document.addEventListener("click", () => {
+      document.querySelector(`[data-pageroot-id="${mode === "wrong-landing" ? wrong : correct}"]`).setAttribute("data-html-canvas-selected", "part");
+    }), { correct: CORRECT_ID, wrong: WRONG_ID, mode });
+    const target = { clickId: CORRECT_ID, selectedId: CORRECT_ID, clickTag: canvas ? "canvas" : "div", selectedTag: canvas ? "canvas" : "div",
+      selectionPoint: { x: mode === "outside-point" ? 300 : 10, y: 10,
+        expectedHitId: mode === "wrong-hit" ? WRONG_ID : canvas ? PARENT_ID : CORRECT_ID,
+        basis: canvas ? "dedicated-canvas-through-parent" : "direct-authored-hit" } };
+    const calls = [], execution = executeFrozenSelection({ access: frozenFrameAccess(page, target, calls),
+      keyboard: page.keyboard, mouse: page.mouse, target, calls });
+    if (mode === "padding" || mode === "canvas-through-parent") {
+      expect((await execution).state).toBe("PASS"); expect(selectionExecutionIssues(calls, target)).toEqual([]);
+      expect(calls.filter(c => c.kind === "pointer-click")).toHaveLength(1);
+    } else {
+      await expect(execution).rejects.toMatchObject({ code: mode === "wrong-landing" ? "FROZEN_SELECTION_FAILED" : "FROZEN_POINTER_HIT_MISMATCH" });
+      expect(calls.filter(c => c.kind === "pointer-click")).toHaveLength(mode === "wrong-landing" ? 1 : 0);
+    }
+  });
+}
+
+test("frozen executor selects one exact target and supports only the pre-reviewed mapping", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  for (const selectedId of [CORRECT_ID, PARENT_ID]) {
+    await canonicalCapabilityFixture(page, selectedId);
+    const target = { clickId: CORRECT_ID, selectedId, clickTag: "span",
+      selectedTag: selectedId === CORRECT_ID ? "span" : "h1" };
+    const calls = [];
+    const selectors = [];
+    const result = await executeFrozenSelection({
+      access: frozenFrameAccess({ locator(selector) {
+        selectors.push(selector);
+        return page.locator(selector);
+      } }, target, calls), keyboard: page.keyboard, target, calls,
+    });
+    expect(result.state).toBe("PASS");
+    expect(new Set(selectors)).toEqual(new Set([
+      `[data-pageroot-id="${CORRECT_ID}"]`, `[data-pageroot-id="${selectedId}"]`,
+      "[data-html-canvas-selected]",
+    ]));
+    expect(calls.filter((call) => call.kind === "pointer-click")).toHaveLength(1);
+    expect(selectionExecutionIssues(calls, target)).toEqual([]);
+    for (const kind of ["scan", "replace-target", "infer-mapping"]) {
+      expect(selectionExecutionIssues([...calls, { kind }], target))
+        .toContain("FORBIDDEN_EXECUTION_ACTIVITY");
+    }
+  }
+});
+
+test("frozen executor rejects mapping drift, duplicate or absent identity without replacement", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  const target = { clickId: CORRECT_ID, selectedId: PARENT_ID, clickTag: "span", selectedTag: "h1" };
+  await canonicalCapabilityFixture(page, CORRECT_ID);
+  let calls = [];
+  await expect(executeFrozenSelection({ access: frozenFrameAccess(page, target, calls),
+    keyboard: page.keyboard, target, calls })).rejects.toMatchObject({ code: "FROZEN_SELECTION_FAILED" });
+  expect(calls.filter((call) => call.kind === "pointer-click")).toHaveLength(1);
+  for (const mode of ["duplicate", "absent"]) {
+    await canonicalCapabilityFixture(page);
+    await page.locator("#target").evaluate((element, mutation) => {
+      if (mutation === "duplicate") element.after(element.cloneNode(true));
+      else element.remove();
+    }, mode);
+    calls = [];
+    await expect(executeFrozenSelection({ access: frozenFrameAccess(page, target, calls),
+      keyboard: page.keyboard, target, calls })).rejects.toMatchObject({ code: "FROZEN_IDENTITY_COUNT_MISMATCH" });
+    expect(calls.filter((call) => call.kind === "pointer-click")).toHaveLength(0);
+  }
+  expect(() => frozenFrameAccess(page, target, []).target(WRONG_ID))
+    .toThrow(expect.objectContaining({ code: "UNPLANNED_TARGET_LOOKUP" }));
+});
+
+test("frozen target switch verifies its known prior identity instead of relying on Escape reset", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await page.setContent(`<button id="toolbar">Copy</button><span data-pageroot-id="${WRONG_ID}" data-html-canvas-selected="part">Original</span>
+    <span data-pageroot-id="${CORRECT_ID}">Copy</span>`);
+  await page.evaluate(() => document.addEventListener("click", event => {
+    if (!event.target.matches("span")) return;
+    document.querySelector("[data-html-canvas-selected]")?.removeAttribute("data-html-canvas-selected");
+    event.target.setAttribute("data-html-canvas-selected", "part");
+  }));
+  await page.locator("#toolbar").click();
+  const target = { clickId: CORRECT_ID, selectedId: CORRECT_ID, clickTag: "span", selectedTag: "span" };
+  for (const priorSelectionId of [null, PARENT_ID]) {
+    const calls = [];
+    await expect(executeFrozenSelection({ access: frozenFrameAccess(page, target, calls),
+      keyboard: page.keyboard, target, calls, priorSelectionId })).rejects.toMatchObject({ code: "FROZEN_SELECTION_INITIAL_STATE_MISMATCH" });
+    expect(calls.some(call => call.kind === "pointer-click")).toBe(false);
+  }
+  const calls = [];
+  const result = await executeFrozenSelection({ access: frozenFrameAccess(page, target, calls),
+    keyboard: page.keyboard, target, calls, priorSelectionId: WRONG_ID });
+  expect(result).toMatchObject({ state: "PASS", initialSelectionId: WRONG_ID, actual: CORRECT_ID });
+  expect(selectionExecutionIssues(calls, target)).toEqual([]);
+});
+
+test("frozen text accepts the current document and native caret but rejects stale document and wrong landing", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await page.setContent(`<p contenteditable="true" data-pageroot-id="${CORRECT_ID}">Synthetic</p>
+    <p contenteditable="true" data-pageroot-id="${WRONG_ID}">Other</p>`);
+  const locator = page.locator(`[data-pageroot-id="${CORRECT_ID}"]`);
+  const handle = await locator.elementHandle();
+  const documentHandle = await page.evaluateHandle(() => document);
+  const oldDocument = await page.evaluateHandle(() => document.implementation.createHTMLDocument("old"));
+  await expect(requireCurrentTextDocument(page, documentHandle, handle)).resolves.toEqual({
+    currentDocument: true, targetInCurrentDocument: true, connected: true,
+  });
+  await expect(requireCurrentTextDocument(page, oldDocument, handle))
+    .rejects.toMatchObject({ code: "FROZEN_TEXT_DOCUMENT_REPLACED" });
+  await locator.click();
+  await locator.press("End");
+  await expect(requireFrozenTextFocus(handle, CORRECT_ID, { atEnd: true }))
+    .resolves.toMatchObject({ conditions: { identityMatches: true, focusMatches: true, caretAtEnd: true } });
+  await handle.evaluate((element) => element.blur());
+  await expect(requireFrozenTextFocus(handle, CORRECT_ID))
+    .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+  await locator.click();
+  await locator.press("End");
+  await locator.press("ArrowLeft");
+  await expect(requireFrozenTextFocus(handle, CORRECT_ID, { atEnd: true }))
+    .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+  await page.locator(`[data-pageroot-id="${WRONG_ID}"]`).click();
+  await expect(requireFrozenTextFocus(handle, CORRECT_ID))
+    .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+  await handle.evaluate((element) => element.remove());
+  await expect(requireCurrentTextDocument(page, documentHandle, handle))
+    .rejects.toMatchObject({ code: "FROZEN_TEXT_DOCUMENT_REPLACED" });
+  await Promise.all([handle.dispose(), documentHandle.dispose(), oldDocument.dispose()]);
+});
+
+test("capability preflight waits for delayed toolbar commit but never turns a missing toolbar into denied capability", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  for (const delay of [150, null]) {
+    await canonicalCapabilityFixture(page);
+    await page.locator("#target").evaluate((target, delayMs) => {
+      target.addEventListener("click", () => {
+        const toolbar = document.querySelector('[role="toolbar"]');
+        toolbar.setAttribute("hidden", "");
+        if (delayMs !== null) setTimeout(() => toolbar.removeAttribute("hidden"), delayMs);
+      });
+    }, delay);
+    const probe = probeAuthoredCapability({ page, frame: page,
+      editor: page.locator("[data-runtime-root]"),
+      candidate: { ...candidate(), tag: "span" }, mode: "discover",
+      sourceElements: canonicalSourceElements() });
+    if (delay === null) await expect(probe).rejects.toMatchObject({
+      code: "CAPABILITY_PROBE_TOOLBAR_NOT_SETTLED", details: { visibleToolbarCount: 0 },
+    });
+    else await expect(probe).resolves.toMatchObject({
+      operationStableId: PARENT_ID, probeReason: "CAPABILITY_OBSERVED",
+      capabilityFamilies: expect.arrayContaining(["text", "format", "copy"]),
+    });
+  }
+});
+
+test("capability discovery freezes a child hit to its proven authored operation ancestor", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await canonicalCapabilityFixture(page);
+  const sourceElements = canonicalSourceElements();
+  const discovered = await probeAuthoredCapability({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: { ...candidate(), sourceEditable: false, sourceOrder: 1 },
+    mode: "discover",
+    sourceElements,
+  });
+  expect(discovered).toMatchObject({
+    probeStableId: CORRECT_ID,
+    operationStableId: PARENT_ID,
+    stableId: PARENT_ID,
+    selectedId: PARENT_ID,
+    tag: "h1",
+    sourceEditable: true,
+  });
+  expect(discovered.capabilityFamilies).toEqual(expect.arrayContaining(["text", "format"]));
+
+  const verified = await probeAuthoredCapability({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: {
+      ...candidate(),
+      stableId: CORRECT_ID,
+      expectedOperationStableId: PARENT_ID,
+      sourceEditable: true,
+      sourceOrder: 1,
+    },
+    mode: "verify",
+    sourceElements,
+  });
+  expect(verified.selectedId).toBe(PARENT_ID);
+});
+
+test("capability discovery rejects DOM-only ancestry, duplicate source identity, and Runtime targets", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  const input = (sourceElements) => ({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: { ...candidate(), sourceEditable: false, sourceOrder: 1 },
+    mode: "discover",
+    sourceElements,
+  });
+  await canonicalCapabilityFixture(page);
+  await expect(probeAuthoredCapability(input(canonicalSourceElements({ childParentId: null }))))
+    .rejects.toMatchObject({ code: "CAPABILITY_PROBE_CANONICAL_MAPPING_INVALID" });
+
+  await canonicalCapabilityFixture(page);
+  await expect(probeAuthoredCapability(input(canonicalSourceElements({ duplicateParent: true }))))
+    .rejects.toMatchObject({ code: "CAPABILITY_PROBE_CANONICAL_MAPPING_INVALID" });
+
+  await canonicalCapabilityFixture(page, PARENT_ID, "评论工具栏");
+  await expect(probeAuthoredCapability(input(canonicalSourceElements())))
+    .rejects.toMatchObject({ code: "CAPABILITY_PROBE_RUNTIME_GENERATED_OPERATION_TARGET" });
+});
+
+test("capability discovery rejects source-only ancestry and verification mapping drift", HARNESS_TEST_OPTIONS, async ({ page }) => {
+  await page.setContent(`
+    <main data-runtime-root data-element-copy-availability="available" data-element-copy-reason="available">
+      <h1 data-pageroot-id="${PARENT_ID}">detached operation target</h1>
+      <span id="target" data-pageroot-id="${CORRECT_ID}">probe child in source only</span>
+      <div role="toolbar" aria-label="元素工具栏" hidden><button aria-label="编辑"></button></div>
+    </main>
+  `);
+  await page.locator("#target").evaluate((target, operationId) => {
+    target.addEventListener("click", () => {
+      document.querySelector(`[data-pageroot-id="${operationId}"]`)
+        ?.setAttribute("data-html-canvas-selected", "subregion");
+      document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
+    });
+  }, PARENT_ID);
+  await expect(probeAuthoredCapability({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: { ...candidate(), sourceEditable: false, sourceOrder: 1 },
+    mode: "discover",
+    sourceElements: canonicalSourceElements(),
+  })).rejects.toMatchObject({ code: "CAPABILITY_PROBE_CANONICAL_MAPPING_INVALID" });
+
+  await canonicalCapabilityFixture(page, CORRECT_ID);
+  await expect(probeAuthoredCapability({
+    page,
+    frame: page,
+    editor: page.locator("[data-runtime-root]"),
+    candidate: {
+      ...candidate(),
+      expectedOperationStableId: PARENT_ID,
+      sourceEditable: true,
+      sourceOrder: 1,
+    },
+    mode: "verify",
+    sourceElements: canonicalSourceElements(),
+  })).rejects.toMatchObject({ code: "CAPABILITY_PROBE_SELECTION_IDENTITY_MISMATCH" });
+});
+
+test("canonical source and alias normalization fail closed and keep one deterministic operation row", HARNESS_TEST_OPTIONS, async () => {
+  expect(canonicalSourceRelationship(canonicalSourceElements(), CORRECT_ID, PARENT_ID))
+    .toMatchObject({ validProbe: true, validOperation: true, sourceAncestor: true });
+  expect(canonicalSourceRelationship(canonicalSourceElements({ childParentId: null }), CORRECT_ID, PARENT_ID))
+    .toMatchObject({ sourceAncestor: false });
+
+  const snapshot = {
+    stableId: PARENT_ID,
+    operationStableId: PARENT_ID,
+    capabilityFamilies: ["selection", "text"],
+    behaviorFamilies: ["activation", "input"],
+    copyAvailability: "unsupported",
+    copyReason: "unsupported",
+    runtimeGenerated: false,
+    tag: "h1",
+    sourceEditable: true,
+    region: "top",
+    scrollContainer: "document",
+  };
+  const normalized = normalizeCapabilityProbeObservations([
+    { ...snapshot, probeStableId: WRONG_ID, probeSourceOrder: 2 },
+    { ...snapshot, probeStableId: CORRECT_ID, probeSourceOrder: 1 },
+  ]);
+  expect(normalized.liveDom).toHaveLength(1);
+  expect(normalized.liveDom[0].probeStableId).toBe(CORRECT_ID);
+  expect(normalized.aliases).toHaveLength(2);
+  const direct = normalizeCapabilityProbeObservations([
+    { ...snapshot, probeStableId: CORRECT_ID, probeSourceOrder: 1 },
+    { ...snapshot, probeStableId: PARENT_ID, probeSourceOrder: 0 },
+  ]);
+  expect(direct.liveDom[0].probeStableId).toBe(PARENT_ID);
+  expect(direct.aliases).toEqual([{ probeStableId: CORRECT_ID, operationStableId: PARENT_ID }]);
+  expect(() => normalizeCapabilityProbeObservations([
+    { ...snapshot, probeStableId: CORRECT_ID, probeSourceOrder: 1 },
+    { ...snapshot, probeStableId: WRONG_ID, probeSourceOrder: 2, capabilityFamilies: ["selection"] },
+  ])).toThrow(expect.objectContaining({ code: "CAPABILITY_PROBE_ALIAS_CAPABILITY_CONFLICT" }));
+  expect(() => normalizeCapabilityProbeObservations([
+    { ...snapshot, probeStableId: CORRECT_ID, probeSourceOrder: 1 },
+    {
+      ...snapshot,
+      probeStableId: WRONG_ID,
+      probeSourceOrder: 2,
+      capabilityFamilies: [],
+      behaviorFamilies: [],
+    },
+  ])).toThrow(expect.objectContaining({ code: "CAPABILITY_PROBE_ALIAS_CAPABILITY_CONFLICT" }));
+  expect(() => normalizeCapabilityProbeObservations([
+    { ...snapshot, probeStableId: CORRECT_ID, probeSourceOrder: 1 },
+    { ...snapshot, probeStableId: WRONG_ID, probeSourceOrder: 2, region: "middle" },
+  ])).toThrow(expect.objectContaining({ code: "CAPABILITY_PROBE_ALIAS_CAPABILITY_CONFLICT" }));
+  const tolerated = normalizeCapabilityProbeObservations([
+    { ...snapshot, probeStableId: CORRECT_ID, probeSourceOrder: 1 },
+    { ...snapshot, probeStableId: WRONG_ID, probeSourceOrder: 2, region: "middle" },
+  ], { allowConflicts: true });
+  expect(tolerated.liveDom).toHaveLength(1);
+  expect(tolerated.aliases).toHaveLength(2);
+  expect(tolerated.conflicts).toEqual([expect.objectContaining({
+    operationStableId: PARENT_ID,
+    probeStableIds: [CORRECT_ID, WRONG_ID],
+    observations: [
+      expect.objectContaining({
+        probeStableId: CORRECT_ID,
+        snapshot: expect.objectContaining({ region: "top" }),
+      }),
+      expect.objectContaining({
+        probeStableId: WRONG_ID,
+        snapshot: expect.objectContaining({ region: "middle" }),
+      }),
+    ],
+  })]);
+});
 
 test("capability probe accepts only the exact selected Stable ID", HARNESS_TEST_OPTIONS, async ({ page }) => {
   await capabilityFixture(page);

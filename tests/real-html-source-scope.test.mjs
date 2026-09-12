@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { boldMarkerPattern } from "./e2e/electron/real-html/frozen-text.mjs";
+import { bindFrozenCopy } from "./e2e/electron/real-html/frozen-structure.mjs";
+import { frozenDigest } from "./e2e/electron/real-html/frozen-selection.mjs";
 
 import {
   compareElementScopedMutation,
@@ -10,6 +13,69 @@ import {
 } from "./e2e/electron/real-html/source-scope.mjs";
 
 const SOURCE_ID = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+
+test("each repeated bold operation compares with its verified unbold preparation, not the cycle baseline", () => {
+  const bold = `<p data-pageroot-id="${SOURCE_ID}" style="font-weight: 700">Fixed</p><!-- outside -->`;
+  const plain = bold.replace("700", "normal");
+  const check = (before, after, expectedValue) => compareElementStyleMutation({ before, after,
+    sourceId: SOURCE_ID, expectedProperty: "font-weight", expectedValue });
+  assert.equal(check(bold, plain, "normal").ok, true);
+  assert.equal(check(plain, bold, "700").ok, true);
+  assert.equal(check(bold, bold, "700").expectedPropertyChanged, false);
+  assert.equal(check(bold, bold, "700").ok, false);
+  assert.equal(check(plain, plain, "700").ok, false);
+  assert.equal(check(plain, bold.replace("outside", "wrong"), "700").outsideElementUnchanged, false);
+});
+
+for (const tag of ["span", "p"]) test(`copy binding for ${tag} accepts only the frozen insertion with a fresh identity and unchanged outside bytes`, () => {
+  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const copyId = "pr1_cccccccccccc4ccc8ccccccccccccccc";
+  const siblingId = "pr1_dddddddddddd4ddd8ddddddddddddddd";
+  const original = `<${tag} data-pageroot-id="${SOURCE_ID}">中文 text</${tag}>`;
+  const sibling = `<aside data-pageroot-id="${siblingId}">Outside</aside>`;
+  const before = Buffer.from(`<div data-pageroot-id="${parentId}">${original}\n${sibling}</div>`);
+  const byteOffset = before.indexOf(sibling);
+  const target = { selectedId: SOURCE_ID, selectedTag: tag, copyBinding: {
+    parentId, beforeSiblingId: siblingId, byteOffset, originalElementSha256: frozenDigest(original) } };
+  const inserted = `<${tag}  data-pageroot-id="${copyId}">中文 text</${tag}>`;
+  const after = Buffer.concat([before.subarray(0, byteOffset), Buffer.from(inserted), before.subarray(byteOffset)]);
+  assert.equal(bindFrozenCopy(before, after, target).copyId, copyId);
+  for (const broken of [
+    after.toString().replace(copyId, SOURCE_ID), after.toString().replace(copyId, "stale"),
+    after.toString().replace("Outside", "Changed"), after.toString().replace(inserted, inserted.replace("text", "wrong")),
+    after.toString().replace(inserted, `${inserted}${inserted}`),
+    `${inserted}${before}`, before.toString(),
+  ]) {
+    assert.throws(() => bindFrozenCopy(before, Buffer.from(broken), target), error => {
+      assert.equal(error.code, "FROZEN_COPY_SOURCE_INVALID");
+      assert.ok(Object.values(error.details.conditions).includes(false));
+      assert.ok(error.details.actualChangedRanges);
+      return true;
+    });
+  }
+  for (const change of [{ byteOffset: byteOffset + 1 }, { parentId: copyId }, { beforeSiblingId: null },
+    { originalElementSha256: "0".repeat(64) }]) {
+    assert.throws(() => bindFrozenCopy(before, after, { ...target, copyBinding: { ...target.copyBinding, ...change } }),
+      { code: "FROZEN_COPY_SOURCE_INVALID" });
+  }
+});
+
+test("fixed bold oracle accepts the declared wrapper but rejects extra formatting and outside writes", () => {
+  const before = `<p data-pageroot-id="${SOURCE_ID}">Original</p><!-- outside -->`;
+  const formatted = ' <span style="all: unset; display: inline !important; font-weight: 700" data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">PRCORE_H03</span>';
+  const after = before.replace("Original", `Original${formatted}`);
+  const check = (html) => compareElementScopedMutation({ before, after: html, sourceId: SOURCE_ID,
+    normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_FORMAT, expectedAfterContains: ["PRCORE_H03"],
+    expectedAppendedPattern: boldMarkerPattern("PRCORE_H03", true) });
+  assert.equal(check(after).ok, true);
+  const outside = check(after.replace("outside", "changed"));
+  assert.equal(outside.ok, false);
+  assert.equal(outside.outsideUnchanged, false);
+  for (const broken of [after.replace("700", "400"), after.replace("700", "700; color: red")]) {
+    assert.equal(check(broken).ok, false);
+    assert.equal(check(broken).appendedShapeValid, false);
+  }
+});
 
 function sourcePair() {
   const before = Buffer.from(`<p data-pageroot-id="${SOURCE_ID}">SAFE</p>`);

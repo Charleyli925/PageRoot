@@ -17,6 +17,7 @@ function splitNullSeparated(value) {
 export function workspaceSourceFingerprint(root = process.cwd()) {
   const repositoryRoot = git(root, ["rev-parse", "--show-toplevel"]).trim();
   const head = git(repositoryRoot, ["rev-parse", "HEAD"]).trim();
+  const tree = git(repositoryRoot, ["rev-parse", "HEAD^{tree}"]).trim();
   const unstaged = git(repositoryRoot, ["diff", "--binary", "--no-ext-diff", "--"]);
   const staged = git(repositoryRoot, [
     "diff", "--cached", "--binary", "--no-ext-diff", "HEAD", "--",
@@ -51,6 +52,7 @@ export function workspaceSourceFingerprint(root = process.cwd()) {
   }
   return {
     head,
+    tree,
     workspaceSourceSha256: hash.digest("hex"),
     untrackedFileCount: untracked.length,
   };

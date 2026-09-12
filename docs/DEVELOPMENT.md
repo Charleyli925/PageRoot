@@ -162,6 +162,56 @@ Qoder process, so it must not be repurposed for real user Requests. See
 
 ## Test lanes
 
+Private real-HTML execution is currently migrating to reviewed local manifests.
+The old `local-html-corpus.mjs` entry allows read-only `capability-preflight-only`
+and rejects automatic-discovery qualification. The frozen micro entry
+is `node tests/e2e/electron/frozen-html-operation.mjs`, with the local manifest
+path and independent SHA-256 supplied through `PAGEROOT_FROZEN_MANIFEST` and
+`PAGEROOT_FROZEN_MANIFEST_SHA256`. Reviewed plans choose either one selection or
+the fixed native text chain (activate, type, Backspace, save, undo, redo).
+The `core-text-format` scope adds explicit unbold preparation, bold and restart
+verification on the same frozen target. Its manifest fixes the expected history
+adoption path and source/contract basis before execution. History waits for
+source-matched handoff completion; only a pre-reviewed Candidate path may bind
+the same target ID in a new Document. Direct text/style edits retain their
+no-rebuild check. Runtime history plans declare session end plus explicit
+same-ID reentry as separate operations; observing lost focus alone is not a
+product failure or permission for an unplanned recovery click. Generation comes from the unique Active iframe; promotion
+identity comes from that iframe's Candidate binding, not delayed root metadata.
+Format scope is also frozen: source-safe range wrapping and element-level style
+overrides are distinct capabilities. A forbidden flex/grid range wrapper does
+not authorize an execution-time switch to element formatting or another target.
+These partial scopes do not attest eight-file core acceptance or full qualification.
+`core-three-cycle` composes the same text/structure operations over two reviewed
+targets in one Electron session. It runs exactly three cycles, retaining text,
+comments and history; copy insertion offsets never change or get rediscovered.
+The fixed structure prefix must still match before each copy. Each rebuild has
+a no-refocus input probe followed by explicit same-ID text reentry. Comments use
+persisted comment ID/source anchor, survive the final reopen, then are deleted.
+This representative diagnostic is neither an eight-file result nor a pressure run.
+Initial load and reopen also wait for the manifest's declared Runtime terminal
+before the handoff barrier: an idle temporary static iframe during resource
+preparation is not a completed dynamic startup. Fallback remains explicit failure.
+The bounded `core-structure-leaf` scope freezes one reviewed plain-text span or paragraph and
+its source insertion offset. Copy output identity is bound only after an independent
+byte oracle proves a single fresh leaf at that offset; edit/delete never discover
+or substitute another target. Static rebuild and Runtime Candidate adoption are
+separate declared paths. The separate `core-copy-denied` scope binds one reviewed
+Runtime-added attribute absent from source and verifies exact UI/live refusal,
+fresh probe acknowledgement, hidden copy action and unchanged source/Document.
+Reviewed boundary witnesses may also prove a nonempty extra style/SVG/chart
+attribute, an authored empty container populated by Runtime, or an opaque Canvas.
+The witness ID, source-relative diagnostic path and single padding point are frozen.
+Canvas records its pointer-transparent parent's raw hit separately from the
+Canvas selected ID; neither that mapping nor the click point is inferred at run time.
+It does not force-dispatch a hidden command or count as a successful copy.
+An explicitly frozen `session-ended-no-refocus` structure probe adds direct
+keyboard delivery checks immediately after copy/delete, before any target click.
+Wrong focus, observed input delivery, source changes or a missing observer fail;
+the later fixed copy selection/edit remains a separate operation. This micro
+probe is not a three-cycle mixed-session or stress acceptance result.
+See `tests/TEST_STRATEGY.md` for the separate eight-file core acceptance scope.
+
 | Command | Purpose |
 | --- | --- |
 | `npm run gate:edit` | Fast, impact-selected feedback for uncommitted work |

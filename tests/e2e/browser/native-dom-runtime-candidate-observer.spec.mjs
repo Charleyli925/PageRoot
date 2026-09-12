@@ -105,6 +105,7 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
     candidate.setAttribute("data-runtime-slot-role", "candidate");
     candidate.setAttribute("data-frame-role", "runtime-candidate");
     candidate.setAttribute("data-frame-generation", "2");
+    candidate.setAttribute("data-runtime-candidate-id", "candidate-2");
     element.setAttribute("data-runtime-candidate-id", "candidate-2");
     element.setAttribute("data-runtime-candidate-generation", "2");
     element.setAttribute("data-runtime-candidate-source-revision", "source-2");
@@ -116,6 +117,7 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
     oldActive.setAttribute("data-frame-role", "runtime-previous");
     candidate.setAttribute("data-runtime-slot-role", "active");
     candidate.removeAttribute("data-frame-role");
+    candidate.removeAttribute("data-runtime-candidate-id");
     element.removeAttribute("data-runtime-candidate-id");
     element.removeAttribute("data-runtime-refresh-pending");
     element.removeAttribute("data-runtime-refresh-pending-source-revision");
@@ -159,6 +161,56 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
     candidateId: "candidate-2",
     generation: "2",
   });
+});
+
+test("promotion is bound to its iframe, not delayed last-known-good metadata", async ({ page }) => {
+  await page.setContent(`<main data-runtime-root data-runtime-last-known-good-id="candidate-old">
+    <iframe data-runtime-slot-role="active" data-frame-generation="1"></iframe>
+    <iframe data-runtime-slot-role="inactive" data-frame-generation="0"></iframe>
+  </main>`);
+  const root = page.locator("[data-runtime-root]");
+  await root.evaluate(startRuntimeLifecycleObservation);
+  // Candidate identity exists on the real product iframe before promotion.
+  await root.evaluate((element) => {
+    const frame = element.querySelector('iframe[data-runtime-slot-role="inactive"]');
+    frame.setAttribute("data-runtime-candidate-id", "candidate-new");
+    frame.setAttribute("data-frame-generation", "2");
+    frame.setAttribute("data-frame-role", "runtime-candidate");
+    element.setAttribute("data-runtime-candidate-id", "candidate-new");
+  });
+  await root.evaluate((element) => {
+    const frame = element.querySelector('iframe[data-frame-role="runtime-candidate"]');
+    element.querySelector('iframe[data-runtime-slot-role="active"]').setAttribute("data-runtime-slot-role", "previous");
+    frame.setAttribute("data-runtime-slot-role", "active");
+    frame.removeAttribute("data-runtime-candidate-id");
+    frame.removeAttribute("data-frame-role");
+    element.removeAttribute("data-runtime-candidate-id");
+    // Deliberately leave root metadata stale, as in the real H06 first failure.
+  });
+  const stopped = await root.evaluate(stopRuntimeLifecycleObservation);
+  expect(stopped.lifecycleRecords.find((record) => record.kind === "active-identity"))
+    .toMatchObject({ candidateId: "candidate-new", generation: "2" });
+  expect(stopped.lifecycleRecords.find((record) => record.kind === "candidate-terminal"))
+    .toMatchObject({ candidateId: "candidate-new", terminal: "ready" });
+  expect(stopped.lifecycleRecords.some((record) => record.candidateId === "candidate-old")).toBe(false);
+});
+
+test("an unbound promoted iframe cannot borrow a global Candidate identity", async ({ page }) => {
+  await page.setContent(`<main data-runtime-root data-runtime-last-known-good-id="candidate-wrong">
+    <iframe data-runtime-slot-role="active" data-frame-generation="1"></iframe>
+    <iframe data-runtime-slot-role="inactive" data-frame-generation="2"></iframe>
+  </main>`);
+  const root = page.locator("[data-runtime-root]");
+  await root.evaluate(startRuntimeLifecycleObservation);
+  await root.evaluate((element) => {
+    element.querySelector('iframe[data-runtime-slot-role="active"]').setAttribute("data-runtime-slot-role", "previous");
+    element.querySelector('iframe[data-runtime-slot-role="inactive"]').setAttribute("data-runtime-slot-role", "active");
+  });
+  const stopped = await root.evaluate(stopRuntimeLifecycleObservation);
+  const summary = summarizeRuntimeObserverRecords(stopped.records);
+  expect(summary.hasCandidate).toBe(false);
+  expect(summary.hasActiveIdentity).toBe(false);
+  expect(stopped.lifecycleRecords.find((record) => record.kind === "active-identity").candidateId).toBeNull();
 });
 
 test("lifecycle observer does not invent a Candidate from generation alone", {

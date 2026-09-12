@@ -5,6 +5,7 @@ import {
   createTargetRef,
 } from "../../../../app/lib/source-patch-core.js";
 import { isEditableIslandTarget } from "../../../../app/lib/editable-island.js";
+import { CAPABILITY_STABLE_ID_PATTERN } from "./capability-manifest.mjs";
 
 const TEXT_TAGS = new Set([
   "address", "blockquote", "caption", "dd", "dt", "figcaption", "h1", "h2",
@@ -188,6 +189,7 @@ export async function collectVisibleAuthoredCandidates(frame, sourceElements, ta
       return {
         stableId,
         tag: element.localName,
+        sourceOrder: source.sourceOrder,
         sourceEditable: source.sourceEditable === true,
         visible: !hidden,
         isConnected: element.isConnected,
@@ -265,8 +267,20 @@ async function pageSpaceAuthoredHitPoint({ frame, editor, target }) {
   };
 }
 
-async function hostPointerSnapshot({ editor, candidate, point }) {
-  return editor.evaluate((root, { stableId, hitPoint }) => {
+async function hostPointerSnapshot({
+  editor,
+  candidate,
+  point,
+  mode,
+  expectedOperationStableId,
+}) {
+  return editor.evaluate((root, payload) => {
+    const {
+      stableId,
+      hitPoint,
+      probeMode,
+      expectedOperationId,
+    } = payload;
     const hit = document.elementFromPoint(hitPoint.pageX, hitPoint.pageY);
     if (hitPoint.topLevel) {
       return {
@@ -288,6 +302,22 @@ async function hostPointerSnapshot({ editor, candidate, point }) {
     const hintActiveFrameGeneration = hint?.getAttribute(
       "data-capability-active-frame-generation",
     ) || null;
+    const frameDocument = activeFrame?.contentDocument || null;
+    const probeElement = frameDocument
+      ? Array.from(frameDocument.querySelectorAll("[data-pageroot-id]"))
+        .find((element) => element.getAttribute("data-pageroot-id") === stableId) || null
+      : null;
+    const hintedOperationElement = frameDocument && hintTargetId
+      ? Array.from(frameDocument.querySelectorAll("[data-pageroot-id]"))
+        .find((element) => element.getAttribute("data-pageroot-id") === hintTargetId) || null
+      : null;
+    const hintMapsProbeToOperation = Boolean(
+      probeElement
+      && hintedOperationElement
+      && hintedOperationElement.contains(probeElement)
+      && (probeMode === "discover"
+        || hintTargetId === expectedOperationId),
+    );
     const validGeneration = (value) => Boolean(
       typeof value === "string"
       && /^(?:0|[1-9]\d*)$/u.test(value)
@@ -296,8 +326,8 @@ async function hostPointerSnapshot({ editor, candidate, point }) {
     const exactCapabilityHint = Boolean(
       activeFrame
       && hint
-      && hintTargetId === stableId
-      && hintTargetKey === `element:${stableId}`
+      && hintMapsProbeToOperation
+      && hintTargetKey === `element:${hintTargetId}`
       && validGeneration(activeGeneration)
       && validGeneration(hintTargetDomGeneration)
       && validGeneration(hintCurrentDomGeneration)
@@ -320,8 +350,161 @@ async function hostPointerSnapshot({ editor, candidate, point }) {
       hintTargetDomGeneration,
       hintCurrentDomGeneration,
       hintActiveFrameGeneration,
+      hintedOperationContainsProbe: hintMapsProbeToOperation,
     };
-  }, { stableId: candidate.stableId, hitPoint: point });
+  }, {
+    stableId: candidate.stableId,
+    hitPoint: point,
+    probeMode: mode,
+    expectedOperationId: expectedOperationStableId,
+  });
+}
+
+export function canonicalSourceRelationship(sourceElements, probeStableId, operationStableId) {
+  const elements = Array.isArray(sourceElements) ? sourceElements : [];
+  const matches = (stableId) => elements.filter((element) => element?.pagerootId === stableId);
+  const probeMatches = matches(probeStableId);
+  const operationMatches = matches(operationStableId);
+  const validProbe = CAPABILITY_STABLE_ID_PATTERN.test(probeStableId || "")
+    && probeMatches.length === 1
+    && probeMatches[0].pagerootIdentityStatus === "valid";
+  const validOperation = CAPABILITY_STABLE_ID_PATTERN.test(operationStableId || "")
+    && operationMatches.length === 1
+    && operationMatches[0].pagerootIdentityStatus === "valid";
+  let sourceAncestor = validProbe && validOperation;
+  if (sourceAncestor && probeStableId !== operationStableId) {
+    const byId = new Map();
+    for (const element of elements) {
+      if (!element?.pagerootId) continue;
+      const group = byId.get(element.pagerootId) || [];
+      group.push(element);
+      byId.set(element.pagerootId, group);
+    }
+    let parentId = probeMatches[0].parentId || null;
+    sourceAncestor = false;
+    const visited = new Set();
+    while (parentId && !visited.has(parentId)) {
+      const parentMatches = byId.get(parentId) || [];
+      if (
+        parentMatches.length !== 1
+        || parentMatches[0].pagerootIdentityStatus !== "valid"
+      ) break;
+      if (parentId === operationStableId) {
+        sourceAncestor = true;
+        break;
+      }
+      visited.add(parentId);
+      parentId = parentMatches[0].parentId || null;
+    }
+  }
+  return {
+    validProbe,
+    validOperation,
+    sourceAncestor,
+    probe: probeMatches[0] || null,
+    operation: operationMatches[0] || null,
+  };
+}
+
+export function capabilityObservationSnapshot(entry) {
+  return {
+    capabilityFamilies: [...(entry.capabilityFamilies || [])].sort(),
+    behaviorFamilies: [...(entry.behaviorFamilies || [])].sort(),
+    copyAvailability: entry.copyAvailability || null,
+    copyReason: entry.copyReason || null,
+    runtimeGenerated: entry.runtimeGenerated === true,
+    tag: entry.tag || null,
+    sourceEditable: entry.sourceEditable === true,
+    region: entry.region || null,
+    scrollContainer: entry.scrollContainer || null,
+  };
+}
+
+export function normalizeCapabilityProbeObservations(
+  observations,
+  { allowConflicts = false } = {},
+) {
+  const preProbeRejectionReasons = new Set([
+    "HIDDEN_ELEMENT",
+    "LIVE_DUPLICATE_STABLE_ID",
+    "NO_EXACT_HIT_POINT",
+  ]);
+  const passthrough = [];
+  const groups = new Map();
+  for (const observation of observations || []) {
+    const canonicalObservation = (
+      CAPABILITY_STABLE_ID_PATTERN.test(observation?.probeStableId || "")
+      && CAPABILITY_STABLE_ID_PATTERN.test(observation?.operationStableId || "")
+      && observation.stableId === observation.operationStableId
+    );
+    if (!canonicalObservation) {
+      const explicitPreProbeRejection = (
+        preProbeRejectionReasons.has(observation?.probeReason)
+        && !observation?.probeStableId
+        && !observation?.operationStableId
+        && (observation?.capabilityFamilies?.length || 0) === 0
+        && (observation?.behaviorFamilies?.length || 0) === 0
+      );
+      if (explicitPreProbeRejection) {
+        passthrough.push(observation);
+        continue;
+      }
+      const error = new Error("Capability observation is missing a valid canonical identity.");
+      error.code = "CAPABILITY_PROBE_CANONICAL_IDENTITY_INVALID";
+      error.details = {
+        stableId: observation?.stableId || null,
+        probeStableId: observation?.probeStableId || null,
+        operationStableId: observation?.operationStableId || null,
+        probeReason: observation?.probeReason || null,
+      };
+      throw error;
+    }
+    const group = groups.get(observation.stableId) || [];
+    group.push(observation);
+    groups.set(observation.stableId, group);
+  }
+  const liveDom = [];
+  const aliases = [];
+  const conflicts = [];
+  for (const [operationStableId, group] of groups) {
+    const observationsByProbe = group.map((entry) => ({
+      probeStableId: entry.probeStableId,
+      snapshot: capabilityObservationSnapshot(entry),
+    }));
+    const signatures = new Set(observationsByProbe.map(({ snapshot }) => JSON.stringify(snapshot)));
+    if (signatures.size > 1) {
+      const conflict = {
+        operationStableId,
+        probeStableIds: group.map((entry) => entry.probeStableId),
+        observations: observationsByProbe,
+      };
+      if (allowConflicts) {
+        conflicts.push(conflict);
+      } else {
+      const error = new Error("Canonical probe aliases observed conflicting operation capabilities.");
+      error.code = "CAPABILITY_PROBE_ALIAS_CAPABILITY_CONFLICT";
+      error.details = conflict;
+      throw error;
+      }
+    }
+    group.sort((left, right) => (
+      Number(right.probeStableId === operationStableId)
+      - Number(left.probeStableId === operationStableId)
+      || Number(left.probeSourceOrder ?? Number.MAX_SAFE_INTEGER)
+      - Number(right.probeSourceOrder ?? Number.MAX_SAFE_INTEGER)
+      || String(left.probeStableId || "").localeCompare(String(right.probeStableId || ""))
+    ));
+    liveDom.push(group[0]);
+    for (const entry of group) {
+      if (entry.probeStableId !== operationStableId) {
+        aliases.push({
+          probeStableId: entry.probeStableId,
+          operationStableId,
+        });
+      }
+    }
+  }
+  return { liveDom: [...passthrough, ...liveDom], aliases, conflicts };
 }
 
 function behaviorFamiliesFor(capabilities) {
@@ -521,8 +704,15 @@ export async function probeAuthoredCapability({
   frame,
   editor,
   candidate,
+  mode = "verify",
+  sourceElements = [],
   selectedSnapshotReader = null,
 }) {
+  if (mode !== "discover" && mode !== "verify") {
+    throw new Error(`Unknown capability probe mode: ${mode}`);
+  }
+  const expectedOperationStableId = candidate.expectedOperationStableId
+    || candidate.stableId;
   const selectionReset = await resetAuthoredProbeSelection({ page, frame, editor });
   if (!selectionReset.ok) {
     const error = new Error("The previous capability selection overlay did not close.");
@@ -579,7 +769,13 @@ export async function probeAuthoredCapability({
     await page.evaluate(() => new Promise((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     }));
-    hostPointer = await hostPointerSnapshot({ editor, candidate, point });
+    hostPointer = await hostPointerSnapshot({
+      editor,
+      candidate,
+      point,
+      mode,
+      expectedOperationStableId,
+    });
     if (!hostPointer.accepted) break;
     iframeHitStillExact = await target.evaluate((element, hitPoint) => (
       element.ownerDocument.elementFromPoint(hitPoint.clientX, hitPoint.clientY)
@@ -606,43 +802,93 @@ export async function probeAuthoredCapability({
   await page.mouse.down();
   await page.mouse.up();
   let selectedId = null;
+  let selectedSnapshot = null;
+  const readSelectedSnapshot = selectedSnapshotReader || (async () => (
+    frame.locator("[data-html-canvas-selected]").evaluateAll((selectedElements, expectedStableId) => {
+      const expectedElement = Array.from(document.querySelectorAll("[data-pageroot-id]"))
+        .find((element) => element.getAttribute("data-pageroot-id") === expectedStableId) || null;
+      const selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
+      const rect = selectedElement?.getBoundingClientRect() || null;
+      const style = selectedElement ? getComputedStyle(selectedElement) : null;
+      const documentHeight = Math.max(
+        document.documentElement?.scrollHeight || 0,
+        document.body?.scrollHeight || 0,
+        innerHeight,
+      );
+      const center = rect ? scrollY + rect.top + rect.height / 2 : null;
+      let scrollContainer = "document";
+      let ancestor = selectedElement?.parentElement || null;
+      while (ancestor && ancestor !== document.body) {
+        const ancestorStyle = getComputedStyle(ancestor);
+        if (/(?:auto|scroll)/u.test(`${ancestorStyle.overflowY} ${ancestorStyle.overflow}`)
+          && ancestor.scrollHeight > ancestor.clientHeight + 1) {
+          scrollContainer = ancestor.getAttribute("data-pageroot-id") || "nested-authored-scroller";
+          break;
+        }
+        ancestor = ancestor.parentElement;
+      }
+      return {
+        available: true,
+        reasonCode: "SELECTION_SNAPSHOT_OBSERVED",
+        selectedCount: selectedElements.length,
+        selectedId: selectedElement?.getAttribute("data-pageroot-id") || null,
+        selectedTag: selectedElement?.localName || null,
+        selectedConnected: selectedElement?.isConnected === true,
+        selectedVisible: Boolean(
+          selectedElement
+          && rect
+          && style
+          && rect.width > 1
+          && rect.height > 1
+          && style.display !== "none"
+          && style.visibility !== "hidden",
+        ),
+        selectedInert: selectedElement?.closest("[inert]") != null,
+        selectedRegion: center == null
+          ? null
+          : center < documentHeight / 3
+            ? "top"
+            : center < documentHeight * 2 / 3
+              ? "middle"
+              : "bottom",
+        selectedScrollContainer: scrollContainer,
+        selectedContainsExpected: Boolean(
+          selectedElement && expectedElement && selectedElement.contains(expectedElement),
+        ),
+        expectedContainsSelected: Boolean(
+          selectedElement && expectedElement && expectedElement.contains(selectedElement),
+        ),
+      };
+    }, candidate.stableId)
+  ));
+  const unavailableSnapshot = () => ({
+    available: false,
+    reasonCode: "SELECTION_SNAPSHOT_UNAVAILABLE",
+    selectedCount: null,
+    selectedId: null,
+    selectedTag: null,
+    selectedConnected: false,
+    selectedVisible: false,
+    selectedInert: false,
+    selectedRegion: null,
+    selectedScrollContainer: null,
+    selectedContainsExpected: false,
+    expectedContainsSelected: false,
+  });
   try {
     await expect.poll(async () => {
-      const selected = frame.locator("[data-html-canvas-selected]");
-      if (await selected.count() !== 1) return null;
-      selectedId = await selected.getAttribute("data-pageroot-id");
-      return selectedId;
-    }, { timeout: 2_000 }).toBe(candidate.stableId);
+      selectedSnapshot = await readSelectedSnapshot().catch(unavailableSnapshot);
+      selectedId = selectedSnapshot.selectedId;
+      return mode === "discover"
+        ? selectedSnapshot.available
+          && selectedSnapshot.selectedCount === 1
+          && CAPABILITY_STABLE_ID_PATTERN.test(selectedId || "")
+        : selectedId;
+    }, { timeout: 2_000 }).toBe(
+      mode === "discover" ? true : expectedOperationStableId,
+    );
   } catch {
-    const readSelectedSnapshot = selectedSnapshotReader || (async () => (
-      frame.locator("[data-html-canvas-selected]").evaluateAll((selectedElements, expectedStableId) => {
-        const expectedElement = Array.from(document.querySelectorAll("[data-pageroot-id]"))
-          .find((element) => element.getAttribute("data-pageroot-id") === expectedStableId) || null;
-        const selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
-        return {
-          available: true,
-          reasonCode: "SELECTION_SNAPSHOT_OBSERVED",
-          selectedCount: selectedElements.length,
-          selectedId: selectedElement?.getAttribute("data-pageroot-id") || null,
-          selectedTag: selectedElement?.localName || null,
-          selectedContainsExpected: Boolean(
-            selectedElement && expectedElement && selectedElement.contains(expectedElement),
-          ),
-          expectedContainsSelected: Boolean(
-            selectedElement && expectedElement && expectedElement.contains(selectedElement),
-          ),
-        };
-      }, candidate.stableId)
-    ));
-    const selectedSnapshot = await readSelectedSnapshot().catch(() => ({
-      available: false,
-      reasonCode: "SELECTION_SNAPSHOT_UNAVAILABLE",
-      selectedCount: null,
-      selectedId: null,
-      selectedTag: null,
-      selectedContainsExpected: false,
-      expectedContainsSelected: false,
-    }));
+    selectedSnapshot ||= await readSelectedSnapshot().catch(unavailableSnapshot);
     const error = new Error("The real pointer probe did not select the frozen Stable ID.");
     error.code = "CAPABILITY_PROBE_SELECTION_IDENTITY_MISMATCH";
     error.details = {
@@ -654,20 +900,97 @@ export async function probeAuthoredCapability({
     };
     throw error;
   }
+  const sourceRelationship = canonicalSourceRelationship(
+    sourceElements,
+    candidate.stableId,
+    selectedId,
+  );
+  const sourceProofRequired = sourceElements.length > 0
+    || mode === "discover"
+    || selectedId !== candidate.stableId;
+  const domAncestor = selectedId === candidate.stableId
+    || selectedSnapshot?.selectedContainsExpected === true;
+  const canonicalMappingValid = Boolean(
+    selectedSnapshot?.available
+    && selectedSnapshot.selectedCount === 1
+    && selectedSnapshot.selectedConnected
+    && !selectedSnapshot.selectedInert
+    && domAncestor
+    && (!sourceProofRequired || (
+      sourceRelationship.validProbe
+      && sourceRelationship.validOperation
+      && sourceRelationship.sourceAncestor
+    ))
+  );
+  const selectedStableIdCount = await frame.locator(
+    `[data-pageroot-id=${JSON.stringify(selectedId)}]`,
+  ).count();
+  if (!canonicalMappingValid || selectedStableIdCount !== 1) {
+    const error = new Error("The selected operation target was not the frozen authored target or its proven ancestor.");
+    error.code = "CAPABILITY_PROBE_CANONICAL_MAPPING_INVALID";
+    error.details = {
+      probeStableId: candidate.stableId,
+      expectedOperationStableId,
+      selectedId,
+      selectedStableIdCount,
+      selectedSnapshot,
+      sourceRelationship: {
+        validProbe: sourceRelationship.validProbe,
+        validOperation: sourceRelationship.validOperation,
+        sourceAncestor: sourceRelationship.sourceAncestor,
+      },
+    };
+    throw error;
+  }
+  const operationSourceEditable = sourceRelationship.operation?.sourceEditable
+    ?? candidate.sourceEditable;
+  const operationObservation = {
+    ...candidate,
+    stableId: selectedId,
+    operationStableId: selectedId,
+    probeStableId: candidate.stableId,
+    probeTag: liveTag,
+    probeSourceOrder: candidate.sourceOrder,
+    tag: selectedSnapshot.selectedTag,
+    sourceEditable: operationSourceEditable,
+    parentId: sourceRelationship.operation?.parentId ?? candidate.parentId ?? null,
+    sourceOrder: sourceRelationship.operation?.sourceOrder ?? candidate.sourceOrder,
+    visible: selectedSnapshot.selectedVisible,
+    isConnected: selectedSnapshot.selectedConnected,
+    inert: selectedSnapshot.selectedInert,
+    region: selectedSnapshot.selectedRegion,
+    scrollContainer: selectedSnapshot.selectedScrollContainer,
+  };
 
-  const toolbar = editor.getByRole("toolbar").filter({ visible: true }).first();
-  if (await toolbar.count() !== 1) {
-    return { ...candidate, capabilityFamilies: [], behaviorFamilies: [], probeReason: "SELECTION_TOOLBAR_MISSING", selectedId };
+  const toolbar = editor.getByRole("toolbar").filter({ visible: true });
+  try {
+    // Selection's DOM marker can precede the React toolbar commit. This is an
+    // observation boundary, not evidence that the selected element has no capabilities.
+    await expect.poll(() => toolbar.count(), { timeout: 2_000 }).toBe(1);
+  } catch (cause) {
+    throw Object.assign(new Error("The selected target toolbar did not settle.", { cause }), {
+      code: "CAPABILITY_PROBE_TOOLBAR_NOT_SETTLED",
+      details: { selectedId, visibleToolbarCount: await toolbar.count() },
+    });
   }
   const toolbarLabel = await toolbar.getAttribute("aria-label");
   const runtimeGenerated = Boolean(toolbarLabel?.startsWith("评论"));
+  if (runtimeGenerated) {
+    const error = new Error("An authored capability probe resolved to Runtime-generated content.");
+    error.code = "CAPABILITY_PROBE_RUNTIME_GENERATED_OPERATION_TARGET";
+    error.details = {
+      probeStableId: candidate.stableId,
+      operationStableId: selectedId,
+    };
+    throw error;
+  }
   const enabled = async (name) => {
     const button = toolbar.getByRole("button", { name, exact: true });
     return await button.count() === 1 && await button.isEnabled().catch(() => false);
   };
   const capabilityFamilies = ["selection"];
   if (await toolbar.getByRole("button", { name: /留评论/u }).count()) capabilityFamilies.push("comment");
-  if (!runtimeGenerated && candidate.sourceEditable && await enabled("编辑")) {
+  if (!runtimeGenerated && operationSourceEditable && await enabled("编辑")) {
     capabilityFamilies.push("text", "format");
   }
   const copyAvailability = await editor.getAttribute("data-element-copy-availability");
@@ -681,8 +1004,7 @@ export async function probeAuthoredCapability({
     capabilityFamilies.push("delete");
   }
   return {
-    ...candidate,
-    tag: liveTag,
+    ...operationObservation,
     runtimeGenerated,
     selectedId,
     capabilityFamilies,

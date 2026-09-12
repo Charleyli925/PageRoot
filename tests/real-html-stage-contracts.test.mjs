@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { readPublishedWorkingCopy } from "./e2e/electron/helpers/working-copy-publication.mjs";
 
 import {
   createRealHtmlPlan,
@@ -36,6 +40,22 @@ import {
   STALE_CANDIDATE_REASONS,
 } from "./e2e/electron/real-html/continuity-chain.mjs";
 import { summarizeRuntimeObserverRecords } from "./e2e/electron/real-html/runtime-observer.mjs";
+import { normalizeCapabilityProbeObservations } from "./e2e/electron/real-html/capability-driver.mjs";
+import { assertReadOnlyCorpusMode, frozenInitialRuntimeDecision, FROZEN_COPY_DENIED_OPERATIONS, FROZEN_STRUCTURE_PROBE_OPERATIONS, FROZEN_STRUCTURE_OPERATIONS, FROZEN_FORMAT_OPERATIONS, FROZEN_REENTRY_FORMAT_OPERATIONS, FROZEN_TEXT_OPERATIONS, frozenDigest, readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay }
+  from "./e2e/electron/real-html/frozen-selection.mjs";
+import { requireTextOperationLedger, verifyEndedHistorySession, verifyFrozenHistory } from "./e2e/electron/real-html/frozen-text.mjs";
+import { verifyFrozenCopyCapability, verifyFrozenDenialWitness, verifyFrozenEndedContinuation, verifyFrozenStructureLifecycle } from "./e2e/electron/real-html/frozen-structure.mjs";
+import { publicDiagnosticValue } from "./e2e/electron/real-html/diagnostic-sanitizer.mjs";
+import { verifyFrozenComment, mixedCycleRows, verifyFreshCommentStorage } from "./e2e/electron/real-html/frozen-mixed.mjs";
+import {
+  CAPABILITY_EXPECTATION_RULES,
+  attachOperationGroupsToAuthoredDenominator,
+  capabilityExpectationRows,
+  capabilityManifestDraftIssues,
+  capabilityPreflightExitCode,
+  capabilityPreflightFileStatus,
+  createCapabilityManifestDraft,
+} from "./e2e/electron/real-html/capability-manifest-draft.mjs";
 
 const VALID_CANDIDATE_EVIDENCE = Object.freeze({
   kind: "candidate-created",
@@ -609,6 +629,576 @@ test("capability manifest excludes duplicate, hidden, inert, generated and no-ca
   assert.ok(reasonFor(capabilityId(103)).includes(CAPABILITY_MANIFEST_REASONS.INERT_ELEMENT));
   assert.ok(reasonFor(capabilityId(104)).includes(CAPABILITY_MANIFEST_REASONS.LIVE_RUNTIME_GENERATED));
   assert.ok(reasonFor(capabilityId(105)).includes(CAPABILITY_MANIFEST_REASONS.NO_CAPABILITY));
+});
+
+test("canonical normalization preserves raw live duplicate evidence for the manifest", () => {
+  const evidence = capabilityEvidence();
+  const duplicate = {
+    ...evidence.liveDom[0],
+    stableId: evidence.sourceIndex.elements[0].pagerootId,
+    capabilityFamilies: [],
+    behaviorFamilies: [],
+    probeReason: "LIVE_DUPLICATE_STABLE_ID",
+  };
+  const normalized = normalizeCapabilityProbeObservations([duplicate, { ...duplicate }]);
+  assert.equal(normalized.liveDom.length, 2);
+  const manifest = createCapabilityManifest({
+    sourceIndex: evidence.sourceIndex,
+    liveDom: normalized.liveDom,
+  });
+  const excluded = manifest.excluded.find((entry) => entry.elementId === duplicate.stableId);
+  assert.ok(excluded?.reasons.includes(CAPABILITY_MANIFEST_REASONS.LIVE_DUPLICATE_STABLE_ID));
+});
+
+test("canonical normalization rejects missing, mismatched, or positive raw identities", () => {
+  const stableId = capabilityId(210);
+  const otherId = capabilityId(211);
+  const valid = {
+    stableId,
+    probeStableId: stableId,
+    operationStableId: stableId,
+    capabilityFamilies: ["selection"],
+    behaviorFamilies: ["activation"],
+  };
+  assert.throws(
+    () => normalizeCapabilityProbeObservations([{ ...valid, probeStableId: null }]),
+    { code: "CAPABILITY_PROBE_CANONICAL_IDENTITY_INVALID" },
+  );
+  assert.throws(
+    () => normalizeCapabilityProbeObservations([{ ...valid, operationStableId: null }]),
+    { code: "CAPABILITY_PROBE_CANONICAL_IDENTITY_INVALID" },
+  );
+  assert.throws(
+    () => normalizeCapabilityProbeObservations([{ ...valid, operationStableId: otherId }]),
+    { code: "CAPABILITY_PROBE_CANONICAL_IDENTITY_INVALID" },
+  );
+  assert.throws(
+    () => normalizeCapabilityProbeObservations([{
+      stableId,
+      capabilityFamilies: ["selection"],
+      behaviorFamilies: ["activation"],
+    }]),
+    { code: "CAPABILITY_PROBE_CANONICAL_IDENTITY_INVALID" },
+  );
+});
+
+test("canonical diagnostics retain only valid planned and observed Stable IDs", () => {
+  const probeStableId = capabilityId(201);
+  const operationStableId = capabilityId(202);
+  assert.deepEqual(publicDiagnosticValue({
+    probeStableId,
+    expectedOperationStableId: operationStableId,
+    operationStableId,
+    probeStableIds: [probeStableId, operationStableId, "private-file-name.html"],
+    selectedId: "private-file-name.html",
+    stableId: probeStableId,
+    expectedStableId: operationStableId,
+    hintTargetId: "private-file-name.html",
+    path: "/private/local/path",
+  }), {
+    probeStableId,
+    expectedOperationStableId: operationStableId,
+    operationStableId,
+    probeStableIds: [probeStableId, operationStableId],
+    stableId: probeStableId,
+    expectedStableId: operationStableId,
+  });
+});
+
+test("capability draft keeps contract, source, and live conflicts pending review", () => {
+  const operation = {
+    pagerootId: capabilityId(220),
+    pagerootIdentityStatus: "valid",
+    parentId: null,
+    sourceOrder: 0,
+    sourceEditable: true,
+    boundarySafe: true,
+  };
+  const expectations = capabilityExpectationRows({
+    sourceElements: [operation],
+    operation,
+    observation: {
+      capabilityFamilies: ["selection", "comment"],
+      copyAvailability: "unsupported",
+      copyReason: "runtime-subtree-diverged",
+      probeReason: "CAPABILITY_OBSERVED",
+    },
+  });
+  assert.equal(expectations.find((entry) => entry.family === "text")?.source.state, "ELIGIBLE");
+  assert.equal(expectations.find((entry) => entry.family === "text")?.live.state, "DENIED");
+  assert.equal(
+    expectations.find((entry) => entry.family === "text")?.live.reason,
+    "CAPABILITY_NOT_OBSERVED",
+  );
+  assert.equal(expectations.find((entry) => entry.family === "text")?.reviewStatus, "PENDING_REVIEW");
+  assert.equal(expectations.find((entry) => entry.family === "copy")?.contract.state, "CONDITIONAL");
+  assert.equal(expectations.find((entry) => entry.family === "copy")?.live.reason, "runtime-subtree-diverged");
+  assert.deepEqual(capabilityManifestDraftIssues({
+    authoredDenominator: [{
+      probeStableId: operation.pagerootId,
+      operationStableId: operation.pagerootId,
+      expectations,
+    }],
+    operationGroups: [{ expectations }],
+    unresolvedProbes: [{ probeStableId: operation.pagerootId }],
+  }), ["UNRESOLVED_PROBES_PRESENT", "CAPABILITY_EXPECTATIONS_PENDING_REVIEW"]);
+  assert.deepEqual(capabilityManifestDraftIssues({
+    authoredDenominator: [{
+      probeStableId: operation.pagerootId,
+      operationStableId: operation.pagerootId,
+      expectations,
+    }],
+    operationGroups: [{ expectations }],
+    unresolvedProbes: [],
+    observationConflicts: [{ operationStableId: operation.pagerootId }],
+  }), [
+    "CAPABILITY_EXPECTATIONS_PENDING_REVIEW",
+    "CAPABILITY_OBSERVATION_CONFLICTS_PENDING_REVIEW",
+  ]);
+  assert.deepEqual(capabilityManifestDraftIssues({
+    authoredDenominator: [{ probeStableId: operation.pagerootId, operationStableId: null }],
+    operationGroups: [],
+    unresolvedProbes: [],
+  }), ["UNRESOLVED_DENOMINATOR_IDENTITIES", "INCOMPLETE_CAPABILITY_EXPECTATIONS"]);
+  const normalizedConflict = normalizeCapabilityProbeObservations([
+    {
+      stableId: operation.pagerootId,
+      operationStableId: operation.pagerootId,
+      probeStableId: capabilityId(221),
+      capabilityFamilies: ["selection"],
+      region: "top",
+    },
+    {
+      stableId: operation.pagerootId,
+      operationStableId: operation.pagerootId,
+      probeStableId: capabilityId(222),
+      capabilityFamilies: ["selection"],
+      region: "middle",
+    },
+  ], { allowConflicts: true });
+  const constructed = createCapabilityManifestDraft({
+    authoredDenominator: [{
+      probeStableId: capabilityId(221),
+      operationStableId: operation.pagerootId,
+      expectations,
+    }],
+    operationGroups: [{ operationStableId: operation.pagerootId, expectations }],
+    observationConflicts: normalizedConflict.conflicts,
+  });
+  assert.equal(constructed.observationConflicts.length, 1);
+  assert.ok(constructed.issues.includes("CAPABILITY_OBSERVATION_CONFLICTS_PENDING_REVIEW"));
+});
+
+test("capability draft keeps every authored alias in the denominator", () => {
+  const probeA = capabilityId(230);
+  const probeC = capabilityId(231);
+  const operationB = capabilityId(232);
+  const expectations = Object.keys(CAPABILITY_EXPECTATION_RULES).map((family) => ({
+    family,
+    reviewStatus: "CONSISTENT",
+  }));
+  const alternateExpectations = expectations.map((entry) => ({
+    ...entry,
+    evidenceVariant: "alias",
+  }));
+  const probeALiveSnapshot = { region: "top", sourceEditable: true };
+  const probeCLiveSnapshot = { region: "middle", sourceEditable: false };
+  const denominator = attachOperationGroupsToAuthoredDenominator({
+    authoredDenominator: [
+      { probeStableId: probeA },
+      { probeStableId: probeC },
+    ],
+    operationGroups: [{
+      operationStableId: operationB,
+      expectations,
+      probes: [
+        { probeStableId: probeA, liveSnapshot: probeALiveSnapshot, expectations },
+        { probeStableId: probeC, liveSnapshot: probeCLiveSnapshot, expectations: alternateExpectations },
+      ],
+    }],
+    liveDom: [{
+      stableId: operationB,
+      probeStableId: probeA,
+      operationStableId: operationB,
+    }],
+    aliases: [
+      { probeStableId: probeA, operationStableId: operationB },
+      { probeStableId: probeC, operationStableId: operationB },
+    ],
+  });
+  assert.equal(denominator.length, 2);
+  assert.deepEqual(denominator.map((entry) => entry.operationStableId), [operationB, operationB]);
+  assert.equal(denominator[0].expectations, expectations);
+  assert.equal(denominator[1].expectations, alternateExpectations);
+  assert.equal(denominator[0].liveSnapshot, probeALiveSnapshot);
+  assert.equal(denominator[1].liveSnapshot, probeCLiveSnapshot);
+  assert.equal(new Set(denominator.map((entry) => entry.probeStableId)).size, 2);
+  assert.deepEqual(capabilityManifestDraftIssues({
+    authoredDenominator: denominator,
+    operationGroups: [{ operationStableId: operationB, expectations }],
+    unresolvedProbes: [],
+  }), []);
+  const invalidExpectations = expectations.map((entry) => ({ ...entry }));
+  invalidExpectations[7].family = invalidExpectations[0].family;
+  assert.deepEqual(capabilityManifestDraftIssues({
+    authoredDenominator: [{ ...denominator[0], expectations: invalidExpectations }],
+    operationGroups: [{ operationStableId: operationB, expectations: invalidExpectations }],
+    unresolvedProbes: [],
+  }), ["INCOMPLETE_CAPABILITY_EXPECTATIONS"]);
+});
+
+test("capability preflight cannot pass file, cleanup, or source failures", () => {
+  assert.equal(capabilityPreflightFileStatus({}), "PENDING_REVIEW");
+  assert.equal(capabilityPreflightFileStatus({ environmentBlocked: true }), "ENVIRONMENT_BLOCKED");
+  assert.equal(capabilityPreflightFileStatus({ discoveryFailed: true }), "DISCOVERY_ERROR");
+  assert.equal(capabilityPreflightFileStatus({ cleanupFailed: true }), "DISCOVERY_ERROR");
+  assert.equal(capabilityPreflightFileStatus({ workingCopyUnchanged: false }), "DISCOVERY_ERROR");
+  assert.equal(capabilityPreflightFileStatus({ originalUnchanged: false }), "DISCOVERY_ERROR");
+  assert.equal(capabilityPreflightFileStatus({
+    draftIssues: ["UNRESOLVED_PROBES_PRESENT"],
+  }), "DISCOVERY_ERROR");
+  assert.equal(capabilityPreflightFileStatus({
+    draftIssues: ["AUTHORED_DENOMINATOR_EMPTY"],
+  }), "DISCOVERY_ERROR");
+  const passingRow = {
+    status: "PENDING_REVIEW",
+    originalUnchanged: true,
+    preflightWorkingCopy: { unchanged: true },
+  };
+  assert.equal(capabilityPreflightExitCode([passingRow]), 0);
+  for (const broken of [
+    { ...passingRow, status: "DISCOVERY_ERROR" },
+    { ...passingRow, originalUnchanged: false },
+    { ...passingRow, preflightWorkingCopy: { unchanged: false } },
+    { ...passingRow, cleanupError: "cleanup failed" },
+  ]) assert.equal(capabilityPreflightExitCode([broken]), 1);
+});
+
+test("frozen copy boundary proves exact source witness and fails every missing condition", () => {
+  for (const [kind, tag, attribute] of [["attribute-extra", "div", "style"], ["attribute-extra", "svg", "viewBox"],
+    ["attribute-extra", "div", "_echarts_instance_"], ["opaque-canvas", "canvas"], ["empty-container-populated", "div"]]) {
+    const rootId = capabilityId(601), witnessId = capabilityId(602);
+    const raw = `<div data-pageroot-id="${rootId}">\n<${tag} data-pageroot-id="${witnessId}"></${tag}></div>`;
+    const source = Buffer.from(raw), identity = { path: "synthetic.html", sha256: frozenDigest(source), size: source.length };
+    const proof = { kind, witnessId, witnessTag: tag, diagnosticPath: "root/div[1]", sourceElementSha256: frozenDigest(raw), ...(attribute ? { attribute } : {}) };
+    const target = { clickId: rootId, selectedId: rootId, clickTag: "div", selectedTag: "div", mapping: "self",
+      expectedCapability: "AVAILABLE", contractReason: "UNIQUE_REACHABLE_AUTHORED_TARGET", sourceProof: "REVIEWED_EXACT_SEED",
+      tabId: null, scrollContainer: "document", operations: FROZEN_COPY_DENIED_OPERATIONS,
+      selectionPoint: { x: 5, y: 5, expectedHitId: rootId, basis: "direct-authored-hit" }, denialEvidence: proof,
+      copyCapability: { expected: "UNSUPPORTED", basis: "REVIEWED_AUTHORED_COPY_BOUNDARY", reason: "runtime-subtree-diverged",
+        diagnostic: `root/div[1]:${attribute ? `attribute-extra:${attribute.toLowerCase()}` : kind === "opaque-canvas" ? "opaque-or-program" : "child-count"}` } };
+    const plan = { schemaVersion: 1, scope: "core-copy-denied", operation: "copy-denied", reviewStatus: "FROZEN", reviewedBy: "root",
+      fileId: "H94", initialRuntime: "runtime", reopen: false, workspaceSourceSha256: "a".repeat(64), original: identity, seed: identity, targets: [target] };
+    const bytes = Buffer.from(JSON.stringify(plan)); assert.equal(readFrozenSelection(bytes, frozenDigest(bytes)).operation, "copy-denied");
+    for (const mutate of [t => t.selectionPoint.x = -1, t => t.selectionPoint.expectedHitId = witnessId,
+      t => t.denialEvidence.witnessId = "stale", t => t.denialEvidence.kind = "AUTO",
+      t => t.copyCapability.diagnostic = "", t => t.denialEvidence.diagnosticPath = "AUTO"] ) {
+      const broken = structuredClone(plan); mutate(broken.targets[0]); const b = Buffer.from(JSON.stringify(broken));
+      assert.throws(() => readFrozenSelection(b, frozenDigest(b)));
+    }
+    const live = { id: witnessId, tag, connected: true, count: 1, attributeValue: "nonempty", childCount: 1 };
+    assert.ok(Object.values(verifyFrozenDenialWitness(source, target, live).conditions).every(Boolean));
+    for (const invalid of [{ count: 0 }, { count: 2 }, { id: rootId }, { connected: false }, { tag: "span" },
+      ...(attribute ? [{ attributeValue: "" }, { attributeValue: null }] : kind === "empty-container-populated" ? [{ childCount: 0 }, { childCount: null }] : [])]) {
+      assert.throws(() => verifyFrozenDenialWitness(source, target, { ...live, ...invalid }), error =>
+        error.code === "FROZEN_DENIAL_WITNESS_MISMATCH" && Object.values(error.details.conditions).includes(false) && Boolean(error.details.sourceRange));
+    }
+    for (const change of [{ sourceElementSha256: "b".repeat(64) }, { diagnosticPath: "root/div[0]" }, { witnessId: rootId }]) {
+      assert.throws(() => verifyFrozenDenialWitness(source, { ...target, denialEvidence: { ...proof, ...change } }, live));
+    }
+    const changed = raw.replace(`data-pageroot-id="${witnessId}"`, `data-pageroot-id="${witnessId}"${attribute ? ` ${attribute}="already-authored"` : ""}`)
+      .replace(`></${tag}>`, `>authored</${tag}>`);
+    assert.throws(() => verifyFrozenDenialWitness(Buffer.from(changed), target, live));
+  }
+});
+
+test("frozen executor ingress binds reviewed single target, seed bytes and manifest digest", () => {
+  assert.doesNotThrow(() => assertReadOnlyCorpusMode("capability-preflight-only"));
+  assert.throws(() => assertReadOnlyCorpusMode("qualification"), { code: "AUTOMATIC_DISCOVERY_EXECUTION_RETIRED" });
+  const seed = Buffer.from("synthetic seed");
+  const identity = { path: "synthetic.html", sha256: frozenDigest(seed), size: seed.length };
+  const plan = { schemaVersion: 1, scope: "single-selection-micro", reviewStatus: "FROZEN",
+    reviewedBy: "root", fileId: "H03", initialRuntime: "static", operation: "select", original: identity, seed: identity,
+    workspaceSourceSha256: "a".repeat(64), targets: [{
+      clickId: capabilityId(301), selectedId: capabilityId(301), clickTag: "p", selectedTag: "p",
+      mapping: "self", expectedCapability: "AVAILABLE", contractReason: "UNIQUE_REACHABLE_AUTHORED_TARGET",
+      sourceProof: "REVIEWED_EXACT_SEED", tabId: null, scrollContainer: "document",
+    }] };
+  const bytes = Buffer.from(JSON.stringify(plan));
+  assert.equal(readFrozenSelection(bytes, frozenDigest(bytes)).targets[0].clickId, capabilityId(301));
+  assert.throws(() => readFrozenSelection(bytes, "b".repeat(64)), { code: "FROZEN_MANIFEST_DIGEST_MISMATCH" });
+  for (const changed of [
+    { ...plan, reviewStatus: "DRAFT" }, { ...plan, targets: [...plan.targets, ...plan.targets] },
+    { ...plan, initialRuntime: "AUTO" }, { ...plan, initialRuntime: undefined },
+    { ...plan, targets: [{ ...plan.targets[0], clickId: "stale-id" }] },
+    { ...plan, targets: [{ ...plan.targets[0], selectedId: capabilityId(302) }] },
+  ]) {
+    const changedBytes = Buffer.from(JSON.stringify(changed));
+    assert.throws(() => readFrozenSelection(changedBytes, frozenDigest(changedBytes)));
+  }
+  assert.deepEqual(verifyFrozenBytes(seed, identity, "SOURCE_CHANGED"), { hashMatches: true, sizeMatches: true });
+  assert.throws(() => verifyFrozenBytes(Buffer.from("Synthetic seed"), identity, "SOURCE_CHANGED"), { code: "SOURCE_CHANGED" });
+  assert.throws(() => verifyFrozenBytes(seed, { ...identity, size: seed.length + 1 }, "SOURCE_CHANGED"), { code: "SOURCE_CHANGED" });
+  const display = { working: `sha256:${identity.sha256}`, displayed: `sha256:${identity.sha256}` };
+  assert.deepEqual(verifyFrozenDisplay(display, identity), { workingMatches: true, displayedMatches: true });
+  for (const incorrect of [{ ...display, working: identity.sha256 },
+    { ...display, displayed: `sha256:${"b".repeat(64)}` }, { ...display, working: null }]) {
+    assert.throws(() => verifyFrozenDisplay(incorrect, identity), { code: "FROZEN_DISPLAY_SOURCE_MISMATCH" });
+  }
+  const textPlan = { ...plan, scope: "native-text-core-micro", operation: "native-text",
+    targets: [{ ...plan.targets[0], operations: FROZEN_TEXT_OPERATIONS,
+      textCapability: { expected: "AVAILABLE", basis: "SOURCE_EDITABLE_ISLAND_PLAIN_LEAF",
+        clickPoint: "first-direct-text-character" } }] };
+  const textBytes = Buffer.from(JSON.stringify(textPlan));
+  assert.equal(readFrozenSelection(textBytes, frozenDigest(textBytes)).operation, "native-text");
+  const structurePlan = { ...plan, scope: "core-structure-leaf", operation: "structure", reopen: true,
+    targets: [{ ...plan.targets[0], clickTag: "span", selectedTag: "span", operations: FROZEN_STRUCTURE_OPERATIONS,
+      copyCapability: { expected: "AVAILABLE", basis: "REVIEWED_SOURCE_EQUIVALENT_LEAF", reason: "available" },
+      textCapability: { expected: "AVAILABLE", basis: "SOURCE_EDITABLE_ISLAND_PLAIN_LEAF" },
+      rebuildPath: "static-rebuild", copyBinding: { kind: "inserted-leaf-at-frozen-source-offset",
+        parentId: capabilityId(300), beforeSiblingId: null, byteOffset: 100, originalElementSha256: "a".repeat(64) } }] };
+  const structureBytes = Buffer.from(JSON.stringify(structurePlan));
+  assert.equal(readFrozenSelection(structureBytes, frozenDigest(structureBytes)).operation, "structure");
+  const deniedPlan = { ...plan, scope: "core-copy-denied", operation: "copy-denied", initialRuntime: "runtime", reopen: false,
+    targets: [{ ...plan.targets[0], operations: FROZEN_COPY_DENIED_OPERATIONS,
+      denialEvidence: { attribute: "data-author-proof", value: "added", sourceElementSha256: "a".repeat(64) },
+      copyCapability: { expected: "UNSUPPORTED", basis: "REVIEWED_RUNTIME_ATTRIBUTE_DIVERGENCE",
+        reason: "runtime-subtree-diverged", diagnostic: "root:attribute-extra:data-author-proof" } }] };
+  const deniedBytes = Buffer.from(JSON.stringify(deniedPlan));
+  assert.equal(readFrozenSelection(deniedBytes, frozenDigest(deniedBytes)).operation, "copy-denied");
+  for (const change of [{ operations: [] }, { denialEvidence: {} }, { clickTag: "span" },
+    { copyCapability: { ...deniedPlan.targets[0].copyCapability, reason: "" } },
+    { copyCapability: { ...deniedPlan.targets[0].copyCapability, diagnostic: "root:attribute-extra:other" } },
+    { copyCapability: { ...deniedPlan.targets[0].copyCapability, basis: "OBSERVED_UI" } }]) {
+    const bytes = Buffer.from(JSON.stringify({ ...deniedPlan, targets: [{ ...deniedPlan.targets[0], ...change }] }));
+    assert.throws(() => readFrozenSelection(bytes, frozenDigest(bytes)), { code: "FROZEN_COPY_DENIED_CONTRACT_INVALID" });
+  }
+  for (const attribute of ["data-runtime-proof", "data-pageroot-edit-runtime-source", "data-html-canvas-selected", "data-pageroot-v2-editing"]) {
+    const bytes = Buffer.from(JSON.stringify({ ...deniedPlan, targets: [{ ...deniedPlan.targets[0],
+      denialEvidence: { ...deniedPlan.targets[0].denialEvidence, attribute },
+      copyCapability: { ...deniedPlan.targets[0].copyCapability, diagnostic: `root:attribute-extra:${attribute}` } }] }));
+    assert.throws(() => readFrozenSelection(bytes, frozenDigest(bytes)), { code: "FROZEN_COPY_DENIED_CONTRACT_INVALID" });
+  }
+  const paragraphBytes = Buffer.from(JSON.stringify({ ...structurePlan,
+    targets: [{ ...structurePlan.targets[0], clickTag: "p", selectedTag: "p" }] }));
+  assert.equal(readFrozenSelection(paragraphBytes, frozenDigest(paragraphBytes)).targets[0].selectedTag, "p");
+  const probeBytes = Buffer.from(JSON.stringify({ ...structurePlan, targets: [{ ...structurePlan.targets[0],
+    continuationProbe: "session-ended-no-refocus", operations: FROZEN_STRUCTURE_PROBE_OPERATIONS }] }));
+  assert.doesNotThrow(() => readFrozenSelection(probeBytes, frozenDigest(probeBytes)));
+  for (const change of [{ operations: ["copy"] }, { rebuildPath: "AUTO" }, { copyBinding: { kind: "find-new-id" } },
+    { continuationProbe: "AUTO" }, { continuationProbe: "session-ended-no-refocus" },
+    { clickTag: "p" }, { clickTag: "div", selectedTag: "div" },
+    { copyCapability: { expected: "AVAILABLE", basis: "OBSERVED_UI", reason: "available" } }]) {
+    const bytes = Buffer.from(JSON.stringify({ ...structurePlan, targets: [{ ...structurePlan.targets[0], ...change }] }));
+    assert.throws(() => readFrozenSelection(bytes, frozenDigest(bytes)), { code: "FROZEN_STRUCTURE_CONTRACT_INVALID" });
+  }
+  for (const change of [{ operations: ["activate", "input"] },
+    { historyAdoption: "runtime-candidate" },
+    { textCapability: { expected: "AVAILABLE", basis: "OBSERVED_UI" } },
+    { mapping: "authored-ancestor", selectedId: capabilityId(302) }]) {
+    const changedBytes = Buffer.from(JSON.stringify({ ...textPlan,
+      targets: [{ ...textPlan.targets[0], ...change }] }));
+    assert.throws(() => readFrozenSelection(changedBytes, frozenDigest(changedBytes)),
+      { code: "FROZEN_TEXT_CONTRACT_INVALID" });
+  }
+  const formatPlan = { ...textPlan, scope: "core-text-format", reopen: true, targets: [{ ...textPlan.targets[0],
+    operations: FROZEN_FORMAT_OPERATIONS, initialBold: false, textNodePath: [0],
+    historyAdoption: "editable-island-in-place", historyBasis: "REVIEWED_CANONICAL_ISLAND",
+    historyResume: "in-place",
+    formatCapability: { expected: "AVAILABLE", scope: "text-range", basis: "SOURCE_SAFE_TEXT_RANGE_WRAPPER" },
+    textCapability: { ...textPlan.targets[0].textCapability, basis: "SOURCE_EDITABLE_ISLAND" } }] };
+  for (const initialBold of [false, true]) {
+    const bytes = Buffer.from(JSON.stringify({ ...formatPlan,
+      targets: [{ ...formatPlan.targets[0], initialBold }] }));
+    assert.doesNotThrow(() => readFrozenSelection(bytes, frozenDigest(bytes)));
+  }
+  const fallback = Buffer.from(JSON.stringify({ ...formatPlan, targets: [{ ...formatPlan.targets[0],
+    historyAdoption: "runtime-candidate", historyBasis: "REVIEWED_CANONICAL_MAPPING_FALLBACK",
+    historyResume: "explicit-reentry", operations: FROZEN_REENTRY_FORMAT_OPERATIONS }] }));
+  assert.doesNotThrow(() => readFrozenSelection(fallback, frozenDigest(fallback)));
+  const mixed = { ...formatPlan, scope: "core-three-cycle", operation: "mixed", initialRuntime: "runtime", cycles: 3,
+    commentBasis: "EXACT_AUTHORED_SOURCE_ANCHOR", structurePrefixSha256: "b".repeat(64), targets: [
+      { ...formatPlan.targets[0], formatCapability: { expected: "AVAILABLE", scope: "element", basis: "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER" } },
+      { ...structurePlan.targets[0], selectedId: capabilityId(303), clickId: capabilityId(303),
+        rebuildPath: "runtime-candidate", continuationProbe: "session-ended-no-refocus", operations: FROZEN_STRUCTURE_PROBE_OPERATIONS },
+    ] };
+  const readMixed = plan => { const bytes = Buffer.from(JSON.stringify(plan)); return readFrozenSelection(bytes, frozenDigest(bytes)); };
+  assert.doesNotThrow(() => readMixed(mixed));
+  const pending = mixedCycleRows(readMixed(mixed));
+  assert.equal(pending.length, 3);
+  assert.equal(pending.flatMap(cycle => [...cycle.control, ...cycle.text, ...cycle.structure, ...cycle.continuation])
+    .every(row => row.state === "NOT_EXECUTED" && row.reason === "DEPENDENCY_NOT_COMPLETED"), true);
+  for (const change of [{ cycles: 20 }, { initialRuntime: "static" }, { commentBasis: "LIVE_UI" },
+    { reviewStatus: "DRAFT" }, { structurePrefixSha256: "" }, { targets: [mixed.targets[0], mixed.targets[0]] }])
+    assert.throws(() => readMixed({ ...mixed, ...change }));
+  for (const change of [{ initialBold: null }, { textNodePath: [1] }, { operations: FROZEN_TEXT_OPERATIONS },
+    { historyAdoption: "AUTO" }, { historyBasis: "OBSERVED_RUNTIME" }, { historyResume: "AUTO" },
+    { formatCapability: { expected: "AVAILABLE", scope: "AUTO" } }]) {
+    const bytes = Buffer.from(JSON.stringify({ ...formatPlan, targets: [{ ...formatPlan.targets[0], ...change }] }));
+    assert.throws(() => readFrozenSelection(bytes, frozenDigest(bytes)), { code: "FROZEN_TEXT_CONTRACT_INVALID" });
+  }
+});
+
+test("mixed comments require exact persistent ID and authored anchor, never display-only identity", () => {
+  const initial = { workingCopyId: "work_ver_0001", draftRelativePath: "drafts/work_ver_0001.json",
+    draftRevision: 0, draftSha256: null };
+  assert.doesNotThrow(() => verifyFreshCommentStorage(initial, false));
+  assert.throws(() => verifyFreshCommentStorage(initial, true), { code: "FROZEN_INITIAL_COMMENT_STORAGE_INVALID" });
+  for (const change of [{ draftRevision: 1 }, { draftSha256: "sha256:published" }, { draftRelativePath: "elsewhere" }])
+    assert.throws(() => verifyFreshCommentStorage({ ...initial, ...change }, false), { code: "FROZEN_INITIAL_COMMENT_STORAGE_INVALID" });
+  const expected = { commentId: "comment_fixed_1", text: "Synthetic comment", targetId: capabilityId(301) };
+  const comment = { commentId: expected.commentId, text: expected.text,
+    sourceAnchor: { elementId: expected.targetId, resolution: "exact" } };
+  assert.doesNotThrow(() => verifyFrozenComment(comment, expected));
+  for (const change of [{ commentId: "old" }, { text: "wrong" }, { sourceAnchor: undefined },
+    { sourceAnchor: { elementId: capabilityId(302), resolution: "exact" } },
+    { sourceAnchor: { elementId: expected.targetId, resolution: "orphaned" } }])
+    assert.throws(() => verifyFrozenComment({ ...comment, ...change }, expected), { code: "FROZEN_COMMENT_IDENTITY_MISMATCH" });
+});
+
+test("frozen copy assessment accepts exact available or denied facts and rejects stale UI, live probes and empty reasons", () => {
+  const source = Buffer.from("synthetic unchanged source"), sourceHash = `sha256:${frozenDigest(source)}`;
+  for (const available of [true, false]) {
+    const diagnostic = available ? null : "root:attribute-extra:data-author-proof";
+    const target = { selectedId: capabilityId(301), copyCapability: { expected: available ? "AVAILABLE" : "UNSUPPORTED",
+      reason: available ? "available" : "runtime-subtree-diverged", ...(diagnostic ? { diagnostic } : {}) } };
+    const actual = { probeBefore: 0, probeAfter: 1, ui: available ? "available" : "unsupported", live: available ? "available" : "unsupported",
+      uiReason: target.copyCapability.reason, liveReason: target.copyCapability.reason, uiDiagnostic: diagnostic, liveDiagnostic: diagnostic,
+      liveId: target.selectedId, sessionEnded: "true", candidateId: null, candidateCount: 0,
+      working: sourceHash, displayed: sourceHash, buttonCount: available ? 1 : 0, buttonEnabled: available };
+    assert.doesNotThrow(() => verifyFrozenCopyCapability(actual, target, source));
+    for (const change of [{ probeAfter: 0 }, { probeBefore: null }, { ui: "UNKNOWN" }, { live: available ? "unsupported" : "available" },
+      { uiReason: "" }, { liveReason: "" }, { liveDiagnostic: diagnostic ? null : "unexpected" },
+      { uiDiagnostic: "wrong-diagnostic" }, { liveId: capabilityId(302) }, { sessionEnded: "false" },
+      { candidateId: "pending" }, { candidateCount: 1 }, { working: "stale" }, { displayed: "stale" },
+      { buttonCount: 2 }, { buttonEnabled: !available }]) {
+      assert.throws(() => verifyFrozenCopyCapability({ ...actual, ...change }, target, source), error => {
+        assert.equal(error.code, "FROZEN_COPY_CAPABILITY_MISMATCH");
+        assert.ok(Object.values(error.details.conditions).includes(false));
+        assert.equal(Object.keys(error.details.conditions).length, 10);
+        return true;
+      });
+    }
+  }
+});
+
+test("initial Runtime preparation is not mistaken for an idle handoff or a terminal success", () => {
+  const check = (phase, outcome, expected = "runtime") => frozenInitialRuntimeDecision({ phase, outcome }, expected).state;
+  assert.equal(check("settled", "ready"), "READY");
+  assert.equal(check("static", "not-candidate", "static"), "READY");
+  for (const phase of ["preparing", "ready", "running"]) assert.equal(check(phase, null), "WAIT");
+  assert.equal(check("static", "source-not-authoritative"), "WAIT");
+  for (const [phase, outcome] of [["static", "not-candidate"], ["static-fallback", "prepare-failed"],
+    ["settled", "timeout"], [null, null], ["UNKNOWN", "ready"]]) assert.equal(check(phase, outcome), "REJECTED");
+  assert.equal(check("settled", "ready", "static"), "REJECTED");
+});
+
+test("direct continuation cannot call wrong focus, missed input or source changes an ended session", () => {
+  const actual = { sessionEnded: true, frameFocusIsBody: true, targetNotEditable: true, outerFocusSafe: true,
+    sourceUnchanged: true, targetTextUnchanged: true, generationUnchanged: true, currentDocument: true, inputEvents: [] };
+  assert.doesNotThrow(() => verifyFrozenEndedContinuation(actual));
+  for (const key of Object.keys(actual).filter(key => key !== "inputEvents")) {
+    for (const value of [false, null, undefined]) {
+      assert.throws(() => verifyFrozenEndedContinuation({ ...actual, [key]: value }), error => {
+        assert.equal(error.code, "FROZEN_DIRECT_CONTINUATION_MISMATCH");
+        assert.equal(error.details.conditions[key], false);
+        assert.equal(Object.keys(error.details.conditions).length, 9);
+        return true;
+      });
+    }
+  }
+  for (const inputEvents of [null, undefined, "", {}, [{ type: "input", id: "wrong-target" }]]) {
+    assert.throws(() => verifyFrozenEndedContinuation({ ...actual, inputEvents }), { code: "FROZEN_DIRECT_CONTINUATION_MISMATCH" });
+  }
+});
+
+test("history reentry requires proven ended session and never excuses input into another target", () => {
+  const actual = { sessionEnded: true, editable: false, focusIsBody: true, selectionInside: false };
+  assert.doesNotThrow(() => verifyEndedHistorySession(actual));
+  for (const key of Object.keys(actual)) {
+    for (const value of [!actual[key], null, undefined]) {
+      assert.throws(() => verifyEndedHistorySession({ ...actual, [key]: value }),
+        { code: "FROZEN_HISTORY_SESSION_END_INVALID" });
+    }
+  }
+});
+
+test("frozen history accepts a reviewed fallback but rejects missing and mismatched lifecycle facts", () => {
+  const records = [
+    { kind: "rebuild-request", sourceRevision: "sha256:next", reason: "history" },
+    { kind: "candidate-created", candidateId: "candidate-new", sourceRevision: "sha256:next" },
+    { kind: "candidate-terminal", candidateId: "candidate-new", terminal: "ready" },
+    { kind: "generation", beforeGeneration: "1", afterGeneration: "2" },
+    { kind: "active-identity", candidateId: "candidate-new", generation: "2" },
+    { kind: "runtime-terminal", candidateId: "candidate-new", phase: "settled", terminal: "ready" },
+  ];
+  const proof = { expectedPath: "runtime-candidate", sourceHash: "sha256:next", records,
+    before: { generation: "1", documentId: "old" }, after: { generation: "2", documentId: "new",
+      path: "runtime-candidate", working: "sha256:next", displayed: "sha256:next" } };
+  assert.doesNotThrow(() => verifyFrozenHistory(proof));
+  const structureProof = { ...proof, path: "runtime-candidate", after: { ...proof.after, phase: "settled", outcome: "ready" } };
+  assert.doesNotThrow(() => verifyFrozenStructureLifecycle(structureProof));
+  for (const change of [{ phase: "static-fallback" }, { outcome: "prepare-failed" }, { phase: null }, { outcome: null }]) {
+    assert.throws(() => verifyFrozenStructureLifecycle({ ...structureProof, after: { ...structureProof.after, ...change } }),
+      { code: "FROZEN_STRUCTURE_RUNTIME_TERMINAL_INVALID" });
+  }
+  for (const broken of [
+    ...records.map((_, index) => ({ ...proof, records: records.filter((_, i) => i !== index) })),
+    ...[{ documentId: "old" }, { generation: "1" }, { path: "UNKNOWN" }, { displayed: "sha256:wrong" }]
+      .map((change) => ({ ...proof, after: { ...proof.after, ...change } })),
+    { ...proof, records: records.map((row) => row.kind === "active-identity" ? { ...row, candidateId: "wrong" } : row) },
+    { ...proof, records: records.map((row) => row.kind === "runtime-terminal" ? { ...row, terminal: "static-fallback" } : row) },
+    { ...proof, records: [...records, { kind: "candidate-created", candidateId: "extra" }] },
+    { ...proof, before: { ...proof.before, generation: null } },
+  ]) {
+    assert.throws(() => verifyFrozenHistory(broken), { code: "FROZEN_HISTORY_ADOPTION_INVALID" });
+    if (broken.after.path !== "UNKNOWN") assert.throws(() => verifyFrozenStructureLifecycle({ ...broken, path: "runtime-candidate" }),
+      { code: "FROZEN_HISTORY_ADOPTION_INVALID" });
+  }
+  const inPlace = { ...proof, expectedPath: "editable-island-in-place", records: [],
+    after: { ...proof.after, path: "editable-island-in-place", documentId: "old", generation: "1" } };
+  assert.doesNotThrow(() => verifyFrozenHistory(inPlace));
+  assert.throws(() => verifyFrozenHistory({ ...inPlace, records }), { code: "FROZEN_HISTORY_ADOPTION_INVALID" });
+});
+
+test("static structure rebuild requires a new current document and explicit non-Runtime terminal", () => {
+  const proof = { path: "static-rebuild", records: [], sourceHash: "sha256:next",
+    before: { documentId: "old", generation: "1" }, after: { documentId: "new", generation: "2",
+      working: "sha256:next", displayed: "sha256:next", phase: "static", outcome: "not-candidate" } };
+  assert.equal(verifyFrozenStructureLifecycle(proof).candidate.state, "NOT_APPLICABLE");
+  for (const change of [{ documentId: "old" }, { generation: "1" }, { displayed: "sha256:old" },
+    { phase: "static-fallback" }, { outcome: "prepare-failed" }]) {
+    assert.throws(() => verifyFrozenStructureLifecycle({ ...proof, after: { ...proof.after, ...change } }),
+      { code: "FROZEN_STATIC_REBUILD_INVALID" });
+  }
+  assert.throws(() => verifyFrozenStructureLifecycle({ ...proof, records: [{ kind: "candidate-created" }] }),
+    { code: "FROZEN_STATIC_REBUILD_INVALID" });
+});
+
+test("frozen text operation ledger fails omissions, unknowns, empty reasons and timeouts", () => {
+  const rows = FROZEN_TEXT_OPERATIONS.map((operation) => ({ operation,
+    state: "PASS", reason: "EXPECTED_CHANGE_OBSERVED", durationMs: 1 }));
+  assert.doesNotThrow(() => requireTextOperationLedger(rows, FROZEN_TEXT_OPERATIONS));
+  for (const incorrect of [rows.slice(1), [...rows, rows[0]],
+    ...[{ state: "UNKNOWN" }, { state: "NOT_EXECUTED" }, { state: "FAIL", reason: "TimeoutError" },
+      { reason: "" }, { durationMs: null }, { operation: "scan" }]
+      .map((change) => [{ ...rows[0], ...change }, ...rows.slice(1)])]) {
+    assert.throws(() => requireTextOperationLedger(incorrect, FROZEN_TEXT_OPERATIONS),
+      { code: "FROZEN_TEXT_LEDGER_INVALID" });
+  }
+});
+
+test("frozen source reader accepts a bounded atomic publication gap but fails persistent absence", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "frozen-reader-self-proof-"));
+  const source = path.join(directory, "source.html");
+  const staged = path.join(directory, "staged.html");
+  try {
+    await writeFile(staged, "synthetic source");
+    const reading = readPublishedWorkingCopy(source, null);
+    await rename(staged, source);
+    assert.deepEqual(await reading, Buffer.from("synthetic source"));
+    await assert.rejects(readPublishedWorkingCopy(staged, null), { code: "ENOENT" });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("capability target selection covers dimensions before the deterministic ceil(60%) fill", () => {
