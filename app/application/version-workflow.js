@@ -538,6 +538,7 @@ export class VersionWorkflow {
       const activatedOpenTarget = this.#activatedOpenTarget(ready, activatedPayload);
       perfMark("pageroot:accept:promote-end");
       if (!this.#isNavigationCurrent(operation) || !this.#isCurrentReadyRun(ready)) {
+        this.#clearPendingActivation(operationKey);
         return stale(this.#runIdentity(ready));
       }
       const opened = await this.#openCommittedVersion({
@@ -555,7 +556,28 @@ export class VersionWorkflow {
         operation,
         activationOperationId: durableActivationOperationId,
       });
-      if (opened.status !== "succeeded") return opened;
+      if (opened.status !== "succeeded") {
+        if (opened.code === "VERSION_ACTIVATION_SUPERSEDED") {
+          this.#clearPendingActivation(operationKey);
+          if (this.#isCurrentReadyRun(ready)) {
+            this.#runSession.setActiveRun({
+              ...this.#runSession.activeRun,
+              status: "complete",
+              completionObserved: true,
+              adoptionPhase: undefined,
+              error: undefined,
+            });
+            this.#runSession.removeRun(ready, { clearActive: false });
+            const handoff = this.#runSession.activeHandoff;
+            if (handoff?.requestId === ready.requestId
+              && handoff.attemptId === ready.attemptId
+              && this.#codecs.sameSourcePath(handoff.sourcePath, ready.sourcePath)) {
+              this.#runSession.clearActiveHandoff();
+            }
+          }
+        }
+        return opened;
+      }
 
       this.#clearPendingActivation(operationKey);
       const completed = this.#settleActivatedRun(ready, opened.value);
