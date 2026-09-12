@@ -2577,6 +2577,24 @@ test("a stuck immutable hydration can close without waiting for the remote read"
   assert.equal(harness.unlockCount, unlocksBeforeClose);
 });
 
+test("a recovery journal retirement conflict prevents project readiness without loading old recovery HTML", async (t) => {
+  const harness = createHarness({
+    documentWorkflow: {
+      async recoverAutosave() {
+        return { status: "blocked", code: "DOCUMENT_REPLACED_RECOVERY_RETIRE_FAILED", reason: "newer journal retained" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  const result = harness.workflow.acceptProject({ name: "B", sourcePath: B_PATH, html: B_HTML, sha256: sha256(B_HTML) });
+  assert.equal(result.status, "succeeded");
+  await waitFor(() => Boolean(harness.workflow.projectLoadError));
+  assert.equal(harness.workflow.projectLoadError, "newer journal retained");
+  assert.equal(harness.documentSession.html, B_HTML);
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(B_HTML));
+  assert.equal(harness.events.some((event) => event.type === "project-core-ready"), false);
+});
+
 test("a Canvas acknowledgement failure rolls the hydration publication back", async (t) => {
   const canonicalHtml = "<!doctype html><html><body><p>canonical</p></body></html>";
   const harness = createHarness({

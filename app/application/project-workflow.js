@@ -3636,6 +3636,12 @@ export class ProjectWorkflow {
           serverRevision,
         });
         if (!this.#projectSession.matches(context)) return stale(context);
+        if (recoveredLocally.status === "stale") return recoveredLocally;
+        if (recoveredLocally.status !== "succeeded") {
+          throw Object.assign(new Error(recoveredLocally.reason || "恢复副本尚未完成安全核对。"), {
+            code: recoveredLocally.code || "DOCUMENT_RECOVERY_REJECTED",
+          });
+        }
         if (
           recoveredLocally.status === "succeeded"
           && !recoveredLocally.value.recovered

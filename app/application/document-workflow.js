@@ -1447,6 +1447,12 @@ export class DocumentWorkflow {
         return succeeded({ recovered: false, reconciled: true });
       }
 
+      const replacement = await this.#retireReplacedRecovery({
+        context: activeContext, journal: raw, targetSha256, currentSourceSha256,
+      });
+      if (replacement) return replacement;
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+
       const nextRevision = Math.max(serverRevision, revision(raw.revision)) + 1;
       const recoveredEvents = this.#codecs.changesFromRecords(raw.changeEvents);
       const existingIds = new Set(
@@ -1521,6 +1527,60 @@ export class DocumentWorkflow {
         this.#codecs.errorMessage(cause, "恢复记录无法安全加载。"),
       );
     }
+  }
+
+  async #retireReplacedRecovery({ context, journal, targetSha256, currentSourceSha256 }) {
+    if (typeof this.#bridgeClient.verifyReplacedCurrentDraft !== "function"
+      || context.targetKind !== "working-copy" || !context.workingCopyId || !context.versionId
+      || !sameRecoveryDocument(journal, context)
+      || !this.#codecs.sameSourcePath(journal.sourcePath, context.sourcePath)
+      || journal.recoveryHtmlSha256 !== targetSha256
+      || journal.expectedSourceSha256 !== targetSha256
+      || !SHA256.test(String(journal.journalSha256 || ""))) return null;
+    const before = this.#documentSession.snapshot;
+    const generation = this.#recoveryJournalGeneration;
+    const stillCurrent = () => this.#isCurrent(context)
+      && this.#documentSession.editRevision === before.editRevision
+      && this.#documentSession.html === before.html
+      && this.#documentSession.persistedSourceSha256 === before.persistedSourceSha256
+      && this.#recoveryJournalGeneration === generation;
+    let result;
+    try {
+      result = await this.#bridgeClient.verifyReplacedCurrentDraft({ target: context, journal });
+    } catch {
+      return stillCurrent() ? null : stale(context);
+    }
+    if (!stillCurrent()) return stale(context);
+    const proof = result?.proof;
+    if (result?.verified !== true || !proof
+      || proof.projectId !== context.projectId || proof.documentId !== context.documentId
+      || proof.workingCopyId !== context.workingCopyId || proof.currentVersionId !== context.versionId
+      || !this.#codecs.sameSourcePath(proof.currentSourcePath, context.sourcePath)
+      || proof.currentSourceSha256 !== currentSourceSha256
+      || proof.replacedSourceSha256 !== targetSha256
+      || proof.journalSha256 !== journal.journalSha256 || proof.journalRevision !== journal.revision
+      || !proof.replacementVersionId || !proof.operationId || !proof.preservedRecoveryId) return null;
+    try {
+      // Retire only the exact Main journal proven to be preserved by the
+      // completed replacement. A newer journal must never inherit this proof.
+      await this.#recoveryJournal.remove({
+        projectId: context.projectId, documentId: context.documentId,
+        sourcePath: journal.sourcePath, workingCopyId: journal.workingCopyId,
+        revision: journal.revision, recoveryHtmlSha256: targetSha256,
+        expectedJournalSha256: journal.journalSha256,
+      });
+    } catch (cause) {
+      if (!stillCurrent()) return stale(context);
+      return blocked("DOCUMENT_REPLACED_RECOVERY_RETIRE_FAILED", this.#codecs.errorMessage(
+        cause, "已保留的恢复副本尚未完成核对，当前稿未被覆盖。",
+      ));
+    }
+    if (!stillCurrent()) return stale(context);
+    if (this.#recoveryJournalReceipt?.journalSha256 === journal.journalSha256) {
+      this.#recoveryJournalReceipt = null;
+      this.#recoveryCheckpoint = null;
+    }
+    return succeeded({ recovered: false, replaced: true, preservedRecoveryId: proof.preservedRecoveryId });
   }
 
   adoptConflictCandidate({
