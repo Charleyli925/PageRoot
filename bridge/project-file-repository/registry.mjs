@@ -561,19 +561,22 @@ export function assertManifest(manifest, project) {
   }
   const historyOperations = new Set();
   for (const version of manifest.versions) {
-    if (version.sourceType !== undefined && !["initial", "internal-ai", "history-copy"].includes(version.sourceType)) {
+    if (version.sourceType !== undefined && !["initial", "internal-ai", "history-copy", "local-save", "recovery-copy"].includes(version.sourceType)) {
       throw new ProjectFileRepositoryError("INVALID_MANIFEST", "Unknown Version source type.");
     }
-    if (version.sourceType !== "history-copy") continue;
+    if (!["history-copy", "local-save", "recovery-copy"].includes(version.sourceType)) continue;
     const basedOn = manifest.versions.find((v) => v.versionId === version.basedOnVersionId);
     const previous = manifest.versions.find((v) => v.versionId === version.previousVersionId);
     if (!SAFE_OPERATION_ID.test(String(version.sourceOperationId || "")) || historyOperations.has(version.sourceOperationId)
-      || !basedOn || basedOn.ordinal >= version.ordinal || basedOn.contentSha256 !== version.contentSha256
+      || !basedOn || basedOn.ordinal >= version.ordinal || (version.sourceType === "history-copy" && basedOn.contentSha256 !== version.contentSha256)
       || !previous || previous.ordinal + 1 !== version.ordinal
       || version.sourceRequestId !== null || version.sourceCandidateId !== null) {
       throw new ProjectFileRepositoryError("INVALID_MANIFEST", "Historical creation provenance is inconsistent.");
     }
     historyOperations.add(version.sourceOperationId);
+  }
+  if (manifest.currentDraftSchemaVersion !== undefined && (manifest.currentDraftSchemaVersion !== "1.0.0" || manifest.workingCopies.length !== 1)) {
+    throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A current-draft project has exactly one editable member.");
   }
   const workingCopyIds = new Set();
   const workingCopyPaths = new Set();

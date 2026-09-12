@@ -1,4 +1,8 @@
 import { commentsRemainingAfterAdoption } from "../shared/draft-aggregate.mjs";
+import { CURRENT_DRAFT_SCHEMA_VERSION, currentDraftEvidence, migrateCurrentDraft, retireLegacyDraftFiles,
+  listPreservedDrafts, readPreservedDraft, restorePreservedAttachments,
+  prepareCurrentVersion, commitCurrentVersion, currentVersionTransactionPath, assertCurrentVersionTransaction, currentVersionNoopResult,
+} from "./project-file-repository/current-draft.mjs";
 import { readSubmissionReceipt, saveSubmissionReceipt, finishSubmissionReceipt, appendSubmissionExecutionFact, projectSubmissionReceipt } from "./project-file-repository/submission.mjs";
 // Persistence façade. Internals live in ./project-file-repository/.
 // Callers keep importing this module; the public surface is unchanged.
@@ -327,22 +331,24 @@ export class ProjectFileRepository {
       const registry = await this.#readRegistry();
       for (const projectId of Object.keys(registry.projects)) {
         try {
-          const initial = await this.#loadRegisteredProject({ projectId });
-          await this.#recoverProject(initial.paths.projectRootPath);
-          const loaded = await this.#loadRegisteredProject({ projectId });
-          await this.#recoverSubmissionHistory(loaded, { restart: true });
-          const bindingIndex = await createSourceBindingIndex(loaded.paths.projectRootPath, loaded.manifest.workingCopies);
-          let locatorChanged = false;
-          for (const workingCopy of loaded.manifest.workingCopies) {
-            try {
-              const resolved = await this.#resolveWorkingCopyPath(loaded, workingCopy, "Working Copy", { persistLocator: false, bindingIndex });
-              locatorChanged = resolved.locatorChanged || locatorChanged;
-            } catch { /* File status is exposed per project by the catalog. */ }
-          }
-          if (locatorChanged) await atomicWriteProjectJson(
-            loaded.paths.projectRootPath, loaded.paths.manifestPath,
-            loaded.manifest, "manifest.json",
-          );
+          await this.#withRegistryWriteLock(async () => {
+            const initial = await this.#loadRegisteredProject({ projectId });
+            await this.#recoverProject(initial.paths.projectRootPath);
+            const loaded = await this.#ensureCurrentDraft(await this.#loadRegisteredProject({ projectId }));
+            await this.#recoverSubmissionHistory(loaded, { restart: true });
+            const bindingIndex = await createSourceBindingIndex(loaded.paths.projectRootPath, loaded.manifest.workingCopies);
+            let locatorChanged = false;
+            for (const workingCopy of loaded.manifest.workingCopies) {
+              try {
+                const resolved = await this.#resolveWorkingCopyPath(loaded, workingCopy, "Working Copy", { persistLocator: false, bindingIndex });
+                locatorChanged = resolved.locatorChanged || locatorChanged;
+              } catch { /* File status is exposed per project by the catalog. */ }
+            }
+            if (locatorChanged) await atomicWriteProjectJson(
+              loaded.paths.projectRootPath, loaded.paths.manifestPath,
+              loaded.manifest, "manifest.json",
+            );
+          });
         } catch { /* Recovery failures stay local to this registered project. */ }
       }
     });
@@ -353,7 +359,7 @@ export class ProjectFileRepository {
   }
 
   async restoreRegisteredWorkingCopy({ projectId } = {}) {
-    return this.#serial(async () => {
+    return this.#writeSerial(async () => {
       const initial = await this.#loadRegisteredProject({ projectId });
       await this.#recoverProject(initial.paths.projectRootPath);
       const loaded = await this.#loadRegisteredProject({ projectId });
@@ -389,7 +395,7 @@ export class ProjectFileRepository {
   }
 
   async resolveRegisteredProjectOpenTarget({ projectId, workingCopyId = null } = {}) {
-    return this.#serial(() => this.#resolveRegisteredProjectOpenTarget({ projectId, workingCopyId }));
+    return this.#writeSerial(() => this.#resolveRegisteredProjectOpenTarget({ projectId, workingCopyId }));
   }
 
   async importExternal({
@@ -403,7 +409,7 @@ export class ProjectFileRepository {
   }
 
   async resolveOpenTarget({ sourcePath } = {}) {
-    return this.#serial(() => this.#resolveOpenTarget({ sourcePath }));
+    return this.#writeSerial(() => this.#resolveOpenTarget({ sourcePath }));
   }
 
   async classifyOpenPath({ sourcePath } = {}) {
@@ -420,7 +426,7 @@ export class ProjectFileRepository {
     expectedSourceSha256,
     reason,
   } = {}) {
-    return this.#serial(() => this.#reconcileWorkingCopyLocator({
+    return this.#writeSerial(() => this.#reconcileWorkingCopyLocator({
       operationId,
       previousSourcePath,
       projectId,
@@ -439,7 +445,7 @@ export class ProjectFileRepository {
     editRevision = 0,
     sourceHistoryOperations = [],
   } = {}) {
-    return this.#serial(() => this.#saveWorkingCopy({
+    return this.#writeSerial(() => this.#saveWorkingCopy({
       target,
       html,
       expectedSourceSha256,
@@ -459,7 +465,7 @@ export class ProjectFileRepository {
     requestedTargetCount = null,
     requestedTargetIsPage = false,
   } = {}) {
-    return this.#serial(() => this.#createCandidate({
+    return this.#writeSerial(() => this.#createCandidate({
       target,
       requestId,
       attemptId,
@@ -475,7 +481,7 @@ export class ProjectFileRepository {
 
   async rejectCandidate({ target, candidateId } = {}) {
     const requestedCandidateId = assertCandidateId(candidateId);
-    return this.#serial(() => this.#rejectCandidate({
+    return this.#writeSerial(() => this.#rejectCandidate({
       target,
       candidateId: requestedCandidateId,
     }));
@@ -490,21 +496,21 @@ export class ProjectFileRepository {
         "Adoption identity does not match this Candidate.",
       );
     }
-    return this.#serial(() => this.#promoteCandidate({
+    return this.#serial(() => this.#withRegistryWriteLock(() => this.#promoteCandidate({
       target,
       candidateId: requestedCandidateId,
       expectedSourceSha256,
       decisionOperationId,
-    }));
+    })));
   }
 
   async recoverProject({ projectRootPath } = {}) {
-    return this.#serial(() => this.#recoverProject(projectRootPath));
+    return this.#writeSerial(() => this.#recoverProject(projectRootPath));
   }
 
   async workspace({ sourcePath } = {}) {
     const performanceTiming = new WorkspacePerformanceTiming();
-    return this.#serial(async () => {
+    return this.#writeSerial(async () => {
       performanceTiming.markDequeued();
       const workspace = await this.#workspace({ sourcePath, performanceTiming });
       if (!workspace) return null;
@@ -513,15 +519,194 @@ export class ProjectFileRepository {
   }
 
   async forceUnlockWorkingCopy({ sourcePath } = {}) {
-    return this.#serial(() => this.#forceUnlockWorkingCopy({ sourcePath }));
+    return this.#writeSerial(() => this.#forceUnlockWorkingCopy({ sourcePath }));
   }
 
   async createVersionFromHistory(input = {}) {
-    return this.#serial(() => this.#withRegistryWriteLock(() => this.#createVersionFromHistory(input)));
+    return this.#serial(() => this.#withRegistryWriteLock(() => this.#createCurrentVersion({ ...input, sourceType: "history-copy" })));
   }
 
   async queryHistoryCreation(input = {}) {
-    return this.#serial(() => this.#withRegistryWriteLock(() => this.#queryHistoryCreation(input)));
+    return this.#serial(() => this.#withRegistryWriteLock(() => this.#queryCurrentVersion(input, "history-copy")));
+  }
+
+  async createVersionFromCurrent(input = {}) {
+    return this.#serial(() => this.#withRegistryWriteLock(() => this.#createCurrentVersion({ ...input, sourceType: "local-save" })));
+  }
+
+  async queryCurrentVersionCreation(input = {}) {
+    return this.#serial(() => this.#withRegistryWriteLock(() => this.#queryCurrentVersion(input, "local-save")));
+  }
+
+  async restorePreservedDraft(input = {}) {
+    return this.#serial(() => this.#withRegistryWriteLock(() => this.#createCurrentVersion({ ...input, sourceType: "recovery-copy" })));
+  }
+
+  async queryPreservedDraftRestore(input = {}) {
+    return this.#serial(() => this.#withRegistryWriteLock(() => this.#queryCurrentVersion(input, "recovery-copy")));
+  }
+
+  async listPreservedDrafts({ projectId } = {}) {
+    return this.#serial(async () => listPreservedDrafts(await this.#loadRegisteredProject({ projectId, readOnly: true })));
+  }
+
+  async readPreservedDraft({ projectId, recoveryId } = {}) {
+    return this.#serial(async () => readPreservedDraft(await this.#loadRegisteredProject({ projectId, readOnly: true }), recoveryId));
+  }
+
+  async #ensureCurrentDraft(loaded) {
+    return this.#withRegistryWriteLock(async () => {
+      const current = await this.#loadRegisteredProject({ projectId: loaded.project.projectId, documentId: loaded.project.documentId });
+      if (current.manifest.currentDraftSchemaVersion === CURRENT_DRAFT_SCHEMA_VERSION) {
+        await retireLegacyDraftFiles(current);
+        return current;
+      }
+      return migrateCurrentDraft(current, { resolveSource: (project, member) => this.#resolveWorkingCopySource(project, member),
+        clock: () => nowIso(this.#clock), hit: (name) => this.#hit(name) });
+    });
+  }
+
+  async #createCurrentVersion({ target, operationId, expectedSourceSha256, sourceType, versionId: selectedVersionId, expectedSnapshotSha256, recoveryId = null }) {
+    let loaded = await this.#historyCreationLoaded(target);
+    const transactionPath = currentVersionTransactionPath(loaded, operationId);
+    const expected = assertSha256(expectedSourceSha256, "expectedSourceSha256");
+    const existing = await readJsonFile(transactionPath, "current Version transaction", { projectRootPath: loaded.paths.projectRootPath });
+    if (existing) {
+      if (existing.sourceType !== sourceType || existing.expectedSourceSha256 !== expected
+        || (sourceType === "history-copy" && (existing.version?.basedOnVersionId !== selectedVersionId || existing.version?.contentSha256 !== expectedSnapshotSha256))
+        || existing.recoveryId !== recoveryId) throw new ProjectFileRepositoryError(sourceType === "history-copy" ? "HISTORY_CREATION_OPERATION_MISMATCH" : "CURRENT_VERSION_OPERATION_MISMATCH", "This operation identity belongs to another Version request.");
+      if (existing.state === "unchanged") return currentVersionNoopResult(loaded, existing, operationId);
+      return commitCurrentVersion(loaded, existing, { hit: (name) => this.#hit(name) });
+    }
+    if (loaded.runtime.activeRequest || loaded.runtime.activeCandidateId) throw new ProjectFileRepositoryError("HISTORY_CREATION_RUN_LOCKED", "Finish the active AI task or Candidate decision before creating a Version.");
+    await this.#recoverProject(loaded.paths.projectRootPath);
+    loaded = await this.#ensureCurrentDraft(loaded);
+    const member = await this.#activeRegisteredWorkingCopy(loaded);
+    if (target.workingCopyId !== member.workingCopyId) throw new ProjectFileRepositoryError("WORKING_COPY_NOT_CURRENT", "Only the current draft is editable.");
+    const evidence = await currentDraftEvidence(loaded, member);
+    if (evidence.source.sha256 !== expected) throw new ProjectFileRepositoryError(sourceType === "history-copy" ? "HISTORY_CREATION_SOURCE_CHANGED" : "WORKING_COPY_CONFLICT", "The current draft changed before creating a Version.");
+    let sourceHtml = evidence.source.html;
+    let basedOnVersionId = member.basedOnVersionId;
+    let draft;
+    if (sourceType === "local-save" && (evidence.state.snapshotBaselineSha256 || evidence.state.baseSha256) === evidence.source.sha256) {
+      const latest = loaded.manifest.versions.find((v) => v.versionId === loaded.manifest.latestOfficialVersionId);
+      const result = { status: "unchanged", operationId, projectId: loaded.project.projectId, documentId: loaded.project.documentId,
+        workingCopyId: member.workingCopyId, sourcePath: evidence.source.filePath || workingCopySourcePath(loaded.paths, member),
+        sourceSha256: evidence.source.sha256, versionId: latest.versionId, versionOrdinal: latest.ordinal };
+      await ensureProjectDirectory(loaded.paths.projectRootPath, path.dirname(transactionPath), "current Version receipt");
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, { schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION, kind: "current-version-noop", operationId, projectId: loaded.project.projectId, documentId: loaded.project.documentId, state: "unchanged", sourceType, recoveryId, expectedSourceSha256: expected, result }, "unchanged Version receipt");
+      return result;
+    }
+    if (sourceType === "history-copy") {
+      const version = loaded.manifest.versions.find((v) => v.versionId === selectedVersionId);
+      if (!version || version.contentSha256 !== assertSha256(expectedSnapshotSha256, "expectedSnapshotSha256")) throw new ProjectFileRepositoryError("VERSION_SNAPSHOT_HASH_MISMATCH", "The selected snapshot no longer matches the request.");
+      const snapshot = await readHtmlFile(versionSnapshotPath(loaded.paths, version), "historical snapshot", { projectRootPath: loaded.paths.projectRootPath });
+      if (snapshot.sha256 !== version.contentSha256) throw new ProjectFileRepositoryError("VERSION_SNAPSHOT_HASH_MISMATCH", "The historical snapshot changed.");
+      sourceHtml = snapshot.html; basedOnVersionId = version.versionId; draft = null;
+    } else if (sourceType === "recovery-copy") {
+      const preserved = await readPreservedDraft(loaded, recoveryId);
+      await restorePreservedAttachments(loaded, preserved);
+      sourceHtml = preserved.html; basedOnVersionId = preserved.basedOnVersionId; draft = preserved.draft;
+    }
+    const transaction = await prepareCurrentVersion(loaded, { operationId, expectedSourceSha256: expected, sourceType,
+      sourceHtml, basedOnVersionId, draft, recoveryId, clock: () => nowIso(this.#clock) });
+    await this.#hit("current-version-prepared");
+    const result = await commitCurrentVersion(loaded, transaction, { hit: (name) => this.#hit(name) });
+    if (sourceType === "history-copy" && result.status === "created") {
+      loaded.runtime.historyCreation = { operationId, versionId: result.versionId };
+      loaded.runtime.historyActivation = null;
+      await this.#writeRuntime(loaded);
+    }
+    return result;
+  }
+
+  async #queryCurrentVersion({ target, operationId, markOpened = false }, sourceType) {
+    const loaded = await this.#historyCreationLoaded(target);
+    const transactionPath = currentVersionTransactionPath(loaded, operationId);
+    const transaction = await readJsonFile(transactionPath, "current Version transaction", { projectRootPath: loaded.paths.projectRootPath });
+    if (!transaction) return sourceType === "history-copy" ? this.#queryHistoryCreation({ target, operationId, markOpened }) : { status: "not-created", operationId, projectId: loaded.project.projectId, documentId: loaded.project.documentId };
+    if (transaction.sourceType !== sourceType) throw new ProjectFileRepositoryError("CURRENT_VERSION_OPERATION_MISMATCH", "The Version request has a different source.");
+    if (transaction.state === "unchanged") return currentVersionNoopResult(loaded, transaction, operationId);
+    const result = await commitCurrentVersion(loaded, transaction, { hit: (name) => this.#hit(name) });
+    if (markOpened && !transaction.openedAt) {
+      transaction.openedAt = nowIso(this.#clock);
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, transaction, "current Version transaction");
+      result.openedAt = transaction.openedAt;
+      if (result.recoveryState === "pending") result.recoveryState = "opened";
+    }
+    return result;
+  }
+
+  async #promoteCurrentCandidate(loaded, { target, candidateId, expectedSourceSha256, decisionOperationId }) {
+    candidateId ||= loaded.runtime.activeCandidateId;
+    if (!candidateId) throw new ProjectFileRepositoryError("CANDIDATE_NOT_FOUND", "No Candidate is awaiting review.");
+    assertCandidateId(candidateId);
+    const decisionId = `promote_${candidateId}`;
+    const operationId = decisionId.length <= 160 ? decisionId : `promote_${sha256(Buffer.from(candidateId)).slice(7, 39)}`;
+    if (decisionOperationId !== undefined && decisionOperationId !== decisionId) throw new ProjectFileRepositoryError("DECISION_IDENTITY_MISMATCH", "Adoption identity does not match the Candidate.");
+    const transactionPath = currentVersionTransactionPath(loaded, operationId);
+    let transaction = await readJsonFile(transactionPath, "current adoption", { projectRootPath: loaded.paths.projectRootPath });
+    if (!transaction) {
+      const resolved = await this.#resolveMutationTarget(target);
+      const candidateState = await this.#readCandidateForLoaded(resolved, candidateId);
+      const candidate = candidateState.candidate;
+      if (expectedSourceSha256 !== undefined && expectedSourceSha256 !== candidate.expectedSourceSha256) throw new ProjectFileRepositoryError("SOURCE_HASH_CONFLICT", "Adoption does not match the reviewed source.");
+      await this.#assertCandidateSourceCurrent(resolved, candidate);
+      const evidence = await currentDraftEvidence(resolved, resolved.workingCopy, resolved.source);
+      const request = await readJsonFile(path.join(requestRootPath(loaded.paths, candidate.requestId), "request.json"), "request.json", { projectRootPath: loaded.paths.projectRootPath });
+      const submission = request?.request?.submissionOperationId ? await readSubmissionReceipt(resolved, request.request.submissionOperationId) : null;
+      const comments = commentsRemainingAfterAdoption(evidence.draft?.comments || [], submission?.snapshot.comments || request?.request?.comments || []);
+      const draft = { ...(evidence.draft || {}), schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+        draftRevision: Number(evidence.draft?.draftRevision || 0) + 1, comments,
+        changeEvents: [], deletedCommentIds: [], appliedOperationIds: [], updatedAt: nowIso(this.#clock) };
+      transaction = await prepareCurrentVersion(resolved, { operationId, expectedSourceSha256: candidate.expectedSourceSha256,
+        sourceType: "internal-ai", sourceHtml: candidateState.output.html, basedOnVersionId: candidate.basedOnVersionId,
+        draft, requestId: candidate.requestId, candidateId, clock: () => nowIso(this.#clock) });
+      await this.#hit("current-version-prepared");
+    } else if (expectedSourceSha256 !== undefined && transaction.expectedSourceSha256 !== expectedSourceSha256) {
+      throw new ProjectFileRepositoryError("SOURCE_HASH_CONFLICT", "Adoption does not match the original request.");
+    }
+    return this.#resumeCurrentPromotion(loaded, transaction);
+  }
+
+  async #resumeCurrentPromotion(loaded, transaction) {
+    const state = await this.#readCandidateForLoaded(loaded, transaction.version.sourceCandidateId);
+    const candidate = state.candidate;
+    if (transaction.sourceType !== "internal-ai" || candidate.candidateId !== transaction.version.sourceCandidateId || candidate.requestId !== transaction.version.sourceRequestId
+      || candidate.outputSha256 !== transaction.version.contentSha256 || candidate.expectedSourceSha256 !== transaction.expectedSourceSha256
+      || candidate.proposedVersionId !== transaction.version.versionId || candidate.previousVersionId !== transaction.version.previousVersionId
+      || candidate.basedOnVersionId !== transaction.version.basedOnVersionId
+      || candidate.sourceWorkingCopyId !== transaction.beforeMember.workingCopyId) {
+      throw new ProjectFileRepositoryError("PROMOTION_TRANSACTION_MISMATCH", "The adoption no longer matches its sealed Candidate.");
+    }
+    const committed = await commitCurrentVersion(loaded, transaction, { hit: (name) => this.#hit(name) });
+    if (committed.status !== "created") throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "The adoption was interrupted by a changed current draft.");
+    candidate.status = "promoted";
+    candidate.promotedAt ||= nowIso(this.#clock);
+    candidate.promotedVersionId = transaction.version.versionId;
+    await atomicWriteProjectJson(loaded.paths.projectRootPath, state.candidatePath, candidate, "candidate.json");
+    await this.#hit("promotion-candidate-promoted");
+    const requestPath = path.join(requestRootPath(loaded.paths, candidate.requestId), "request.json");
+    const request = await readJsonFile(requestPath, "request.json", { projectRootPath: loaded.paths.projectRootPath });
+    if (request?.candidateId === candidate.candidateId) {
+      request.status = "promoted"; request.promotedVersionId = transaction.version.versionId; request.promotedAt = candidate.promotedAt;
+      await this.#writeRequestWithHistory(loaded, requestPath, request);
+    }
+    loaded.runtime.activeRequest = null; loaded.runtime.activeCandidateId = null; loaded.runtime.historyActivation = null;
+    await this.#writeRuntime(loaded);
+    const current = loaded.manifest.workingCopies[0];
+    if (request?.request?.submissionOperationId) {
+      await appendSubmissionExecutionFact({ ...loaded, workingCopy: current }, request.request.submissionOperationId, {
+        eventId: `event_${transaction.operationId}_completed`, kind: "promoted",
+        timestamp: candidate.promotedAt, candidateId: candidate.candidateId,
+      }).catch(() => {}); // The committed transaction is durable replay authority.
+    }
+    const sourcePath = workingCopySourcePath(loaded.paths, current);
+    const source = await readHtmlFile(sourcePath, "current draft", { projectRootPath: loaded.paths.projectRootPath });
+    return { promoted: true, version: transaction.version,
+      target: publicOpenTarget({ project: loaded.project, projectRootPath: loaded.paths.projectRootPath,
+        targetKind: "working-copy", workingCopy: current, version: transaction.version,
+        exactSourcePath: sourcePath, sourceSha256: source.sha256 }) };
   }
 
   async replayHistoryVersionActivation({
@@ -530,7 +715,7 @@ export class ProjectFileRepository {
     operationId,
     expectedActiveWorkingCopyId,
   } = {}) {
-    return this.#serial(() => this.#replayHistoryVersionActivation({
+    return this.#writeSerial(() => this.#replayHistoryVersionActivation({
       target,
       requestedVersionId,
       operationId,
@@ -545,7 +730,7 @@ export class ProjectFileRepository {
     activatedWorkingCopyId,
     versionId,
   } = {}) {
-    return this.#serial(() => this.#confirmVersionWorkingCopyActivation({
+    return this.#writeSerial(() => this.#confirmVersionWorkingCopyActivation({
       target,
       operationId,
       previousWorkingCopyId,
@@ -555,7 +740,7 @@ export class ProjectFileRepository {
   }
 
   async recordSubmission({ target, operationId, input }) {
-    return this.#serial(async () => {
+    return this.#writeSerial(async () => {
       const loaded = await this.#resolveMutationTarget(target);
       const { filePath: projectRulesPath } = await ensureProjectRulesFile(loaded.paths.projectRootPath);
       return saveSubmissionReceipt(loaded, { operationId, input, projectRulesPath }, nowIso(this.#clock));
@@ -563,16 +748,16 @@ export class ProjectFileRepository {
   }
 
   async submissionReceipt({ target, operationId }) {
-    return this.#serial(async () => readSubmissionReceipt(await this.#resolveMutationTarget(target), operationId));
+    return this.#writeSerial(async () => readSubmissionReceipt(await this.#resolveMutationTarget(target), operationId));
   }
 
   async finishSubmission({ target, operationId, status, errorCode }) {
-    return this.#serial(async () => finishSubmissionReceipt(await this.#resolveMutationTarget(target),
+    return this.#writeSerial(async () => finishSubmissionReceipt(await this.#resolveMutationTarget(target),
       { operationId, status, errorCode }, nowIso(this.#clock)));
   }
 
   async recordExecutionFact({ target, requestId, attemptId, event }) {
-    return this.#serial(async () => {
+    return this.#writeSerial(async () => {
       const loaded = await this.#resolveMutationTarget(target);
       const record = await readJsonFile(path.join(requestRootPath(loaded.paths, requestId), "request.json"), "request.json", { projectRootPath: loaded.paths.projectRootPath });
       this.#assertRequestRecord(record, loaded, { requestId, attemptId });
@@ -622,6 +807,14 @@ export class ProjectFileRepository {
         await finishSubmissionReceipt(bound, { operationId, status: "request-created" }, record.createdAt);
         for (const event of record.conversationEvents || []) await appendSubmissionExecutionFact(bound, operationId, event);
         if (record.status === "promoted") {
+          const decisionId = `promote_${record.candidateId}`;
+          const currentOperation = decisionId.length <= 160 ? decisionId : `promote_${sha256(Buffer.from(record.candidateId)).slice(7, 39)}`;
+          const currentTransaction = await readJsonFile(currentVersionTransactionPath(loaded, currentOperation), "current adoption transaction", { projectRootPath: loaded.paths.projectRootPath });
+          if (currentTransaction?.state === "completed") {
+            assertCurrentVersionTransaction(loaded, currentTransaction, currentOperation);
+            if (currentTransaction.version.sourceRequestId !== record.requestId || currentTransaction.version.sourceCandidateId !== record.candidateId) throw new ProjectFileRepositoryError("SUBMISSION_IDENTITY_MISMATCH", "The adoption belongs to a different Request.");
+            await appendSubmissionExecutionFact(bound, operationId, { eventId: `event_${currentOperation}_completed`, kind: "promoted", timestamp: record.promotedAt, candidateId: record.candidateId });
+          }
           const transaction = await readJsonFile(path.join(loaded.paths.transactionsRoot, `promote_${record.candidateId}`, "transaction.json"), "promotion transaction", { projectRootPath: loaded.paths.projectRootPath });
           if (transaction?.state === "completed" && transaction.requestId === record.requestId
             && transaction.candidateId === record.candidateId && transaction.projectId === receipt.projectId
@@ -652,7 +845,7 @@ export class ProjectFileRepository {
     request = {},
     prompt = "",
   } = {}) {
-    return this.#serial(() => this.#prepareRequest({
+    return this.#writeSerial(() => this.#prepareRequest({
       target,
       requestId,
       attemptId,
@@ -668,7 +861,7 @@ export class ProjectFileRepository {
     attemptId = "attempt_001",
     html,
   } = {}) {
-    return this.#serial(() => this.#completeRequest({
+    return this.#writeSerial(() => this.#completeRequest({
       target,
       requestId,
       attemptId,
@@ -677,11 +870,11 @@ export class ProjectFileRepository {
   }
 
   async requestStatus({ target, requestId, attemptId = "attempt_001" } = {}) {
-    return this.#serial(() => this.#requestStatus({ target, requestId, attemptId }));
+    return this.#writeSerial(() => this.#requestStatus({ target, requestId, attemptId }));
   }
 
   async cancelRequest({ target, requestId, attemptId = "attempt_001", discardCandidate = false } = {}) {
-    return this.#serial(() => this.#cancelRequest({ target, requestId, attemptId, discardCandidate }));
+    return this.#writeSerial(() => this.#cancelRequest({ target, requestId, attemptId, discardCandidate }));
   }
 
   async saveDraft({
@@ -693,7 +886,7 @@ export class ProjectFileRepository {
     changeEvents,
     deletedCommentIds,
   } = {}) {
-    return this.#serial(() => this.#saveDraft({
+    return this.#writeSerial(() => this.#saveDraft({
       target,
       operationId,
       expectedDraftRevision,
@@ -705,11 +898,11 @@ export class ProjectFileRepository {
   }
 
   async readVersionFile({ target, versionId: requestedVersionId } = {}) {
-    return this.#serial(() => this.#readVersionFile({ target, requestedVersionId }));
+    return this.#writeSerial(() => this.#readVersionFile({ target, requestedVersionId }));
   }
 
   async resolveVersionWorkingCopy({ target, versionId: requestedVersionId } = {}) {
-    return this.#serial(() => this.#resolveVersionWorkingCopy({
+    return this.#writeSerial(() => this.#resolveVersionWorkingCopy({
       target,
       requestedVersionId,
     }));
@@ -721,7 +914,7 @@ export class ProjectFileRepository {
     attemptId = "attempt_001",
     candidateId = null,
   } = {}) {
-    return this.#serial(() => this.#materializeAiTaskProjection({
+    return this.#writeSerial(() => this.#materializeAiTaskProjection({
       target,
       requestId,
       attemptId,
@@ -730,7 +923,7 @@ export class ProjectFileRepository {
   }
 
   async materializeCurrentAiTaskProjection({ target } = {}) {
-    return this.#serial(() => this.#materializeCurrentAiTaskProjection({ target }));
+    return this.#writeSerial(() => this.#materializeCurrentAiTaskProjection({ target }));
   }
 
   async readCandidate({ target, candidateId: requestedCandidateId } = {}) {
@@ -802,6 +995,10 @@ export class ProjectFileRepository {
         updated,
       };
     });
+  }
+
+  async #writeSerial(operation) {
+    return this.#serial(() => this.#withRegistryWriteLock(operation));
   }
 
   async #serial(operation) {
@@ -887,6 +1084,7 @@ export class ProjectFileRepository {
     performanceTiming.checkpoint("registryResolveMs");
     if (registered) {
       await this.#recoverProject(registered.paths.projectRootPath);
+      await this.#ensureCurrentDraft(registered);
     }
     performanceTiming.checkpoint("recoveryMs");
     let target = await this.#resolveOpenTarget({ sourcePath });
@@ -4209,9 +4407,11 @@ export class ProjectFileRepository {
     return { committed, pending };
   }
 
-  async #externalSourceProjectFacts({ projectId, record, currentSourceSha256 }) {
-    const opened = await this.#resolveRegisteredProjectOpenTarget({ projectId });
-    const loaded = await this.#loadRegisteredProject({ projectId });
+  async #externalSourceProjectFacts({ projectId, record, currentSourceSha256, readOnly = false }) {
+    const loaded = await this.#loadRegisteredProject({ projectId, readOnly });
+    const active = await this.#activeRegisteredWorkingCopy(loaded);
+    const resolved = await this.#resolveWorkingCopyPath(loaded, active, "current draft", { readOnly, persistLocator: !readOnly });
+    const opened = { target: publicOpenTarget({ project: loaded.project, projectRootPath: loaded.paths.projectRootPath, targetKind: "working-copy", workingCopy: active, exactSourcePath: resolved.exactSourcePath, sourceSha256: resolved.source.sha256 }) };
     const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
     const state = assertWorkingCopyState(
       await readJsonFile(
@@ -4272,7 +4472,7 @@ export class ProjectFileRepository {
     };
   }
 
-  async #resolveExternalSourceBinding({ sourceKey, currentSourceSha256 }) {
+  async #resolveExternalSourceBinding({ sourceKey, currentSourceSha256, readOnly = false }) {
     const registry = await this.#readRegistry();
     const claims = this.#externalSourceClaims(registry, sourceKey);
     if (claims.committed.length > 1) {
@@ -4294,7 +4494,7 @@ export class ProjectFileRepository {
       return this.#externalSourceProjectFacts({
         projectId: claims.committed[0].projectId,
         record: claims.committed[0].record,
-        currentSourceSha256,
+        currentSourceSha256, readOnly,
       });
     }
     if (claims.pending.length > 1) {
@@ -4341,7 +4541,7 @@ export class ProjectFileRepository {
   async #classifyOpenPath({ sourcePath }) {
     const requestedPath = normalizedPath(sourcePath);
     htmlExtension(requestedPath);
-    const managedTarget = await this.#resolveOpenTarget({ sourcePath: requestedPath });
+    const managedTarget = await this.#resolveOpenTarget({ sourcePath: requestedPath, readOnly: true });
     if (managedTarget) {
       return {
         kind: "managed-project",
@@ -4351,7 +4551,7 @@ export class ProjectFileRepository {
     }
     const descriptor = await this.#readExternalSourceDescriptor(requestedPath);
     const binding = await this.#resolveExternalSourceBinding({
-      sourceKey: descriptor.sourceKey,
+      readOnly: true, sourceKey: descriptor.sourceKey,
       currentSourceSha256: descriptor.sourceSha256,
     });
     if (binding) {
@@ -4368,7 +4568,7 @@ export class ProjectFileRepository {
       kind: "new-external",
       sourceSha256: descriptor.sourceSha256,
       sourceFileName: path.basename(descriptor.canonicalSourcePath),
-      visibleV1FileName: visibleFileName(stem, 1, extension),
+      visibleV1FileName: `${stem}${extension}`,
     };
   }
 
@@ -4464,7 +4664,7 @@ export class ProjectFileRepository {
 
       const firstVersionId = versionId(1);
       const firstWorkingCopyId = workingCopyId(1);
-      const visibleName = visibleFileName(stem, 1, extension);
+      const visibleName = `${stem}${extension}`;
       const visiblePath = path.join(stagingRoot, visibleName);
       const snapshotRelativePath = `versions/${firstVersionId}/index.html`;
       const snapshotPath = resolveRelative(
@@ -4522,6 +4722,7 @@ export class ProjectFileRepository {
         projectId,
         documentId,
         latestOfficialVersionId: firstVersionId,
+        currentDraftSchemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
         versions: [firstVersion],
         workingCopies: [firstWorkingCopy],
       };
@@ -4533,6 +4734,7 @@ export class ProjectFileRepository {
         basedOnVersionId: firstVersionId,
         baseSha256: descriptor.sourceSha256,
         currentSha256: identifiedWorkingCopySha256,
+        snapshotBaselineSha256: identifiedWorkingCopySha256,
         differsFromBase: identifiedWorkingCopySha256 !== descriptor.sourceSha256,
         draftId: `draft_${firstWorkingCopyId}`,
         draftRelativePath: draftRelativePathFor(firstWorkingCopy),
@@ -4766,7 +4968,10 @@ export class ProjectFileRepository {
       throw new ProjectFileRepositoryError("REGISTERED_PROJECT_AMBIGUOUS", "存在相同项目身份的多个文件夹，请移走多余副本后重新检查。", { projectId });
     }
     const chosen = candidates[0];
-    if (!chosen) return null;
+    if (!chosen) {
+      if (matchingIncomplete) throw matchingIncomplete;
+      return null;
+    }
     if (documentId && chosen.project.documentId !== documentId) {
       throw new ProjectFileRepositoryError("PROJECT_IDENTITY_CHANGED", "项目文档身份不匹配。", { projectId });
     }
@@ -4778,21 +4983,26 @@ export class ProjectFileRepository {
   }
 
   async #recoverRegisteredRootRename(projectId, record, options = {}) {
-    const found = await this.#discoverRegisteredRoot(projectId, record, options);
-    if (!found) return null;
-    if (!samePath(record.registeredProjectRootPath, found.projectRootPath)
-      || JSON.stringify(record.rootFileIdentity) !== JSON.stringify(found.observedIdentity)) {
-      const latest = await this.#readRegistry();
-      const latestRecord = latest.projects[projectId];
-      if (!latestRecord || JSON.stringify(latestRecord) !== JSON.stringify(record)) {
-        throw new ProjectFileRepositoryError("REGISTERED_PROJECT_RACE", "项目登记在恢复过程中发生变化。", { projectId });
+    return this.#withRegistryWriteLock(async () => {
+      const latestRecord = (await this.#readRegistry()).projects[projectId];
+      if (!latestRecord) return null;
+      record = latestRecord;
+      const found = await this.#discoverRegisteredRoot(projectId, record, options);
+      if (!found) return null;
+      if (!samePath(record.registeredProjectRootPath, found.projectRootPath)
+        || JSON.stringify(record.rootFileIdentity) !== JSON.stringify(found.observedIdentity)) {
+        const latest = await this.#readRegistry();
+        const latestRecord = latest.projects[projectId];
+        if (!latestRecord || JSON.stringify(latestRecord) !== JSON.stringify(record)) {
+          throw new ProjectFileRepositoryError("REGISTERED_PROJECT_RACE", "项目登记在恢复过程中发生变化。", { projectId });
+        }
+        latestRecord.registeredProjectRootPath = found.projectRootPath;
+        latestRecord.rootFileIdentity = found.observedIdentity;
+        latestRecord.updatedAt = nowIso(this.#clock);
+        await this.#writeRegistry(latest);
       }
-      latestRecord.registeredProjectRootPath = found.projectRootPath;
-      latestRecord.rootFileIdentity = found.observedIdentity;
-      latestRecord.updatedAt = nowIso(this.#clock);
-      await this.#writeRegistry(latest);
-    }
-    return found.projectRootPath;
+      return found.projectRootPath;
+    });
   }
 
   async #loadRegisteredProject({
@@ -4838,6 +5048,7 @@ export class ProjectFileRepository {
         {
           projectId: id,
           registeredProjectRootPath: record.registeredProjectRootPath,
+          confirmedAbsent: true,
         },
       );
     }
@@ -4855,14 +5066,16 @@ export class ProjectFileRepository {
     return loaded;
   }
 
-  async #registeredProjectForSource(sourcePath) {
+  async #registeredProjectForSource(sourcePath, { readOnly = false } = {}) {
     const exactSourcePath = normalizedPath(sourcePath);
     const registry = await this.#readRegistry();
     const candidates = [];
     for (const [projectId, record] of Object.entries(registry.projects)) {
       let resolvedRoot;
       try {
-        resolvedRoot = await this.#recoverRegisteredRootRename(projectId, record);
+        resolvedRoot = readOnly
+          ? (await this.#discoverRegisteredRoot(projectId, record))?.projectRootPath
+          : await this.#recoverRegisteredRootRename(projectId, record);
       } catch (cause) {
         // A v4 project only owns an HTML after its root, stable identity and
         // on-disk contract all validate. A damaged record is therefore not an
@@ -4891,7 +5104,7 @@ export class ProjectFileRepository {
     try {
       return await this.#loadRegisteredProject({
         projectId: candidates[0].projectId,
-        declaredProjectRootPath: candidates[0].projectRootPath,
+        ...(readOnly ? { readOnly: true } : { declaredProjectRootPath: candidates[0].projectRootPath }),
       });
     } catch (cause) {
       if (invalidRegisteredProjectError(cause)) return null;
@@ -4999,6 +5212,7 @@ export class ProjectFileRepository {
           lastUpdatedAt: this.#registeredProjectLastUpdatedAt({ loaded, workingCopyState: state, rulesInformation }),
         });
       } catch (cause) {
+        if (cause?.code === "REGISTERED_PROJECT_UNAVAILABLE" && cause.details?.confirmedAbsent === true) continue;
         row.availability = registeredProjectCatalogAvailability(cause);
         row.availabilityReason = cause?.message || row.availabilityReason;
         row.sourceStatus = ["MANAGED_PATH_AMBIGUOUS", "REGISTERED_PROJECT_AMBIGUOUS"].includes(cause?.code)
@@ -5022,12 +5236,6 @@ export class ProjectFileRepository {
         activeDisplayPath = await findBoundSource(loaded.paths.projectRootPath, binding) || activeDisplayPath;
       }
     } catch { /* Locator display failure never gates immutable Version metadata. */ }
-    const activeState = await readJsonFile(
-      workingCopyStatePath(loaded.paths, activeWorkingCopy),
-      "active Working Copy state",
-      { projectRootPath: loaded.paths.projectRootPath },
-    ).catch(() => null);
-
     const versions = loaded.manifest.versions.map((version) => {
       const workingCopy = loaded.manifest.workingCopies.find(
         (entry) => entry.versionId === version.versionId,
@@ -5042,11 +5250,7 @@ export class ProjectFileRepository {
         basedOnVersionId: version.basedOnVersionId || null,
         previousVersionId: version.previousVersionId || null,
         displayFileName,
-        // Only the live Working Copy has a mutable timestamp. Historical
-        // Version timestamps come from the immutable manifest record.
-        modifiedAt: isActiveWorkingCopy
-          ? String(activeState?.lastSavedAt || version.createdAt)
-          : String(version.createdAt),
+        modifiedAt: String(version.createdAt),
         isActiveWorkingCopy,
         isLatestOfficial: version.versionId === loaded.manifest.latestOfficialVersionId,
       };
@@ -5064,7 +5268,7 @@ export class ProjectFileRepository {
     const id = assertId(projectId, PROJECT_ID, "projectId");
     const initial = await this.#loadRegisteredProject({ projectId: id });
     await this.#recoverProject(initial.paths.projectRootPath);
-    const loaded = await this.#loadRegisteredProject({ projectId: id });
+    const loaded = await this.#ensureCurrentDraft(await this.#loadRegisteredProject({ projectId: id }));
     const requestedId = requestedWorkingCopyId === null ? null : assertId(requestedWorkingCopyId, WORKING_COPY_ID, "workingCopyId");
     const workingCopy = requestedId
       ? loaded.manifest.workingCopies.find((member) => member.workingCopyId === requestedId)
@@ -5189,15 +5393,15 @@ export class ProjectFileRepository {
     };
   }
 
-  async #resolveOpenTarget({ sourcePath }) {
+  async #resolveOpenTarget({ sourcePath, readOnly = false }) {
     const exactSourcePath = normalizedPath(sourcePath);
     htmlExtension(exactSourcePath);
-    const loaded = await this.#registeredProjectForSource(exactSourcePath);
+    const loaded = await this.#registeredProjectForSource(exactSourcePath, { readOnly });
     if (!loaded) return null;
     const source = await readHtmlFile(exactSourcePath, "HTML", {
       projectRootPath: loaded.paths.projectRootPath,
     });
-    const target = await this.#targetForExactPath(loaded, exactSourcePath, source);
+    const target = await this.#targetForExactPath(loaded, exactSourcePath, source, { readOnly });
     // An unlisted user HTML inside a project root is still an external file:
     // PageRoot must never infer a Working Copy merely from its location.
     return target;
@@ -5236,7 +5440,7 @@ export class ProjectFileRepository {
     return true;
   }
 
-  async #resolveWorkingCopyPath(loaded, workingCopy, label = "Working Copy", { persistLocator = true, bindingIndex = null, expectedInformation = null } = {}) {
+  async #resolveWorkingCopyPath(loaded, workingCopy, label = "Working Copy", { persistLocator = true, bindingIndex = null, expectedInformation = null, readOnly = false } = {}) {
     const projectRootPath = loaded.paths.projectRootPath;
     const state = await readJsonFile(workingCopyStatePath(loaded.paths, workingCopy), "Working Copy state", { projectRootPath });
     if (!state) throw new ProjectFileRepositoryError("WORKING_COPY_STATE_NOT_FOUND", "Working Copy state is missing.");
@@ -5266,7 +5470,7 @@ export class ProjectFileRepository {
     const sourceStatus = source.sha256 === state.currentSha256 ? "ready" : "external-change";
     // A registered path or a unique live binding selects the member. A hash
     // validates that selection; it never searches for/claims an unlisted file.
-    if (sourceStatus === "ready") {
+    if (sourceStatus === "ready" && !readOnly) {
       await refreshSourceBinding(projectRootPath, workingCopy.workingCopyId, exactSourcePath, state.currentSha256, { bindingIndex, expectedInformation: selectedBindingInformation });
     }
     const locatorChanged = await this.#rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, source.information, { persistLocator });
@@ -5277,7 +5481,7 @@ export class ProjectFileRepository {
     return this.#resolveWorkingCopyPath(loaded, workingCopy, label);
   }
 
-  async #targetForExactPath(loaded, exactSourcePath, source) {
+  async #targetForExactPath(loaded, exactSourcePath, source, { readOnly = false } = {}) {
     const { paths, project, manifest } = loaded;
     for (const version of manifest.versions) {
       const snapshotPath = versionSnapshotPath(paths, version);
@@ -5302,7 +5506,7 @@ export class ProjectFileRepository {
       samePath(workingCopySourcePath(paths, workingCopy), exactSourcePath)
     ));
     if (direct) {
-      await this.#resolveWorkingCopyPath(loaded, direct);
+      await this.#resolveWorkingCopyPath(loaded, direct, "Working Copy", { readOnly, persistLocator: !readOnly });
       return publicOpenTarget({
         project,
         projectRootPath: paths.projectRootPath,
@@ -5343,7 +5547,7 @@ export class ProjectFileRepository {
     }
     const workingCopy = matching[0] || null;
     if (!workingCopy) return null;
-    await this.#resolveWorkingCopyPath(loaded, workingCopy);
+    await this.#resolveWorkingCopyPath(loaded, workingCopy, "Working Copy", { readOnly, persistLocator: !readOnly });
     return publicOpenTarget({
       project,
       projectRootPath: paths.projectRootPath,
@@ -5373,6 +5577,9 @@ export class ProjectFileRepository {
     );
     if (!workingCopy) {
       throw new ProjectFileRepositoryError("WORKING_COPY_NOT_FOUND", "The active Working Copy no longer exists.");
+    }
+    if (workingCopy.workingCopyId !== loaded.runtime.activeWorkingCopyId) {
+      throw new ProjectFileRepositoryError("WORKING_COPY_NOT_CURRENT", "Only the current draft is editable; historical versions are immutable.");
     }
     const source = await this.#resolveWorkingCopySource(loaded, workingCopy);
     return { ...loaded, workingCopy, ...source };
@@ -6522,6 +6729,15 @@ export class ProjectFileRepository {
         "DECISION_IDENTITY_MISMATCH",
         "Adoption identity does not match this Candidate.",
       );
+    }
+    const currentProject = await this.#historyCreationLoaded(target);
+    if (currentProject.manifest.currentDraftSchemaVersion === CURRENT_DRAFT_SCHEMA_VERSION) {
+      return this.#promoteCurrentCandidate(currentProject, {
+        target,
+        candidateId: requestedCandidateId,
+        expectedSourceSha256,
+        decisionOperationId,
+      });
     }
     const loaded = await this.#resolveMutationTarget(target);
     const candidateState = await this.#readCandidateForLoaded(loaded, requestedCandidateId, {
@@ -7691,6 +7907,16 @@ export class ProjectFileRepository {
     const saveRetirementCandidates = [];
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory() && entry.name.startsWith("current_")) {
+        const transaction = await readJsonFile(path.join(loaded.paths.transactionsRoot, entry.name, "transaction.json"), "current Version transaction", { projectRootPath: loaded.paths.projectRootPath });
+        if (transaction && transaction.state !== "unchanged" && transaction.state !== "aborted" && (transaction.state !== "completed" || (transaction.sourceType === "internal-ai" && loaded.runtime.activeCandidateId && loaded.runtime.activeCandidateId === transaction.version?.sourceCandidateId))) {
+          assertCurrentVersionTransaction(loaded, transaction, entry.name.slice("current_".length));
+          recovered.push(transaction.sourceType === "internal-ai"
+            ? await this.#resumeCurrentPromotion(loaded, transaction)
+            : await commitCurrentVersion(loaded, transaction, { hit: (name) => this.#hit(name) }));
+        }
+        continue;
+      }
       if (
         entry.isFile()
         && entry.name.startsWith("identity_")

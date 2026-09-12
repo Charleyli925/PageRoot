@@ -218,7 +218,7 @@ test("only a Registry pending-import intent can recover a published import", asy
   const recoveredPublish = new ProjectFileRepository({ projectsRoot: published.projects });
   await recoveredPublish.initialize();
   const reopenedPublished = await recoveredPublish.resolveOpenTarget({
-    sourcePath: path.join(published.projects, publishedRoots[0].name, "published-V1.html"),
+    sourcePath: path.join(published.projects, publishedRoots[0].name, "published.html"),
   });
   assert.equal(reopenedPublished.targetKind, "working-copy");
   const recoveredRegistry = await json(path.join(
@@ -250,7 +250,7 @@ test("only a Registry pending-import intent can recover a published import", asy
   const reopened = await new ProjectFileRepository({
     projectsRoot: committed.projects,
   }).resolveOpenTarget({
-    sourcePath: path.join(committed.projects, committedRoots[0].name, "committed-V1.html"),
+    sourcePath: path.join(committed.projects, committedRoots[0].name, "committed.html"),
   });
   assert.equal(reopened.targetKind, "working-copy");
   const retriedImport = await new ProjectFileRepository({
