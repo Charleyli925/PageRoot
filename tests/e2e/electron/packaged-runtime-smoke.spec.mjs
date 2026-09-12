@@ -175,7 +175,7 @@ test("packaged PageRoot imports pre-v4 shell state as V1 and reconciles draft re
         () => window.htmlAIProjects?.getActiveProject(),
       ))?.sourcePath,
       { timeout: 30_000 },
-    ).toMatch(/\/packaged-source-V1\.html$/u);
+    ).toMatch(/\/packaged-source\.html$/u);
     sourcePath = await page.evaluate(async () => (
       await window.htmlAIProjects?.getActiveProject()
     )?.sourcePath || "");
