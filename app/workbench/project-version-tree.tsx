@@ -37,11 +37,13 @@ export function ProjectVersionTree({
   versions,
   onOpenVersion,
   activeVersionId = null,
+  disabled = false,
 }: {
   versions: readonly ProjectVersionSummary[];
   onOpenVersion: (version: ProjectVersionSummary) => void;
   /** Only the viewed immutable snapshot, never the current draft's base. */
   activeVersionId?: string | null;
+  disabled?: boolean;
 }) {
   const now = useSidebarClock();
   const rows = useMemo(() => orderedProjectVersions(versions), [versions]);
@@ -67,6 +69,7 @@ export function ProjectVersionTree({
             <button
               className="sidebar-version-file"
               type="button"
+              disabled={disabled}
               aria-label={`V${version.ordinal}，历史版本`}
               aria-current={selected ? "page" : undefined}
               title={`${version.displayFileName}\n${versionInheritanceDescription(version, parent)}\n${formatSidebarVersionDateTime(version.modifiedAt)}`}

@@ -406,6 +406,7 @@ export function WorkbenchGlobalSidebar({
   currentProjectVersions,
   activeVersionId,
   currentDraftActive,
+  currentProjectBusy = false,
   projectRulesActive,
   onToggle,
   onOpenLocal,
@@ -439,6 +440,7 @@ export function WorkbenchGlobalSidebar({
   currentProjectVersions: readonly ProjectVersionSummary[];
   activeVersionId: string | null;
   currentDraftActive: boolean;
+  currentProjectBusy?: boolean;
   projectRulesActive: boolean;
   onToggle: () => void;
   onOpenLocal: () => void;
@@ -683,6 +685,7 @@ export function WorkbenchGlobalSidebar({
                               </div> : null
                             ) : (
                               <ProjectVersionTree
+                                disabled={isCurrentProject && currentProjectBusy}
                                 versions={isCurrentProject ? currentProjectVersions : state?.versions || []}
                                 activeVersionId={isCurrentProject && !currentDraftActive && !projectRulesActive ? activeVersionId : null}
                                 onOpenVersion={(version) => onOpenHistoryVersion(project, version)}
