@@ -600,6 +600,15 @@ Migration selects the real active legacy draft, retains its ID/path, preserves
 inactive draft data and retires their write membership. Unknown markers and
 invalid single-current membership fail closed. Downgrade writers are unsupported.
 
+Retiring a superseded renderer recovery journal requires a Repository proof that
+joins registered current identity, an officially committed replacement Version,
+its completed transaction and the derived preserved draft. Exact HTML and journal
+baseline, preserved comments/events and attachment integrity must agree; a hash
+match alone grants no authority. The renderer fences its live context and uses
+the captured journal revision/hash for Main's compare-and-swap removal. Missing
+or invalid proof preserves ordinary recovery; a changed journal is never removed
+or replaced using a stale read. No source file is written by this proof operation.
+
 Export rejects destinations in configured project roots, hidden managed data and
 their symlink/hard-link aliases, including other projects. Main rechecks protection
 at publication, verifies output bytes and alone updates its last-successful
