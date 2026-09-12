@@ -41,8 +41,10 @@ import {
 import {
   collectVisibleAuthoredCandidates,
   discoverRuntimeGeneratedTargets,
+  driveAuthoredTabActivation,
   majorElementType,
   probeAuthoredCapability,
+  resetAuthoredProbeSelection,
   runtimeGeneratedDiagnosticsIssue,
   sourceElementsForCapabilityManifest,
 } from "./real-html/capability-driver.mjs";
@@ -144,7 +146,9 @@ const saveReport = () => writeFileSync(
 
 const PUBLIC_ERROR_STRING_KEYS = new Set([
   "code",
+  "causeCode",
   "exactReason",
+  "phase",
   "reasonCode",
   "expectedId",
   "observedId",
@@ -406,26 +410,68 @@ async function currentFrameIdentity(page) {
 
 async function clickAuthoredTab(page, tabId) {
   if (!tabId) return;
-  const frame = await currentEditorFrame(page);
-  const tab = frame.locator(`[data-pageroot-id="${tabId}"]`);
-  await tab.scrollIntoViewIfNeeded();
-  await tab.click();
-  const activate = editorFor(page).getByRole("button", {
-    name: "切换到此页签",
-    exact: true,
-  });
-  if (await activate.count()) await activate.click();
-  await expect.poll(async () => {
+  const readState = async () => {
     const currentFrame = await currentEditorFrame(page);
     const currentTab = currentFrame.locator(`[data-pageroot-id="${tabId}"]`);
-    if (await currentTab.count() !== 1) return false;
-    const ariaSelected = await currentTab.getAttribute("aria-selected");
-    const controls = await currentTab.getAttribute("aria-controls");
+    const tabCount = await currentTab.count();
+    const ariaSelected = tabCount === 1 ? await currentTab.getAttribute("aria-selected") : null;
+    const controls = tabCount === 1 ? await currentTab.getAttribute("aria-controls") : null;
     const controlledVisible = controls
       ? await currentFrame.locator(`[id=${JSON.stringify(controls)}]`).isVisible().catch(() => false)
       : false;
-    return ariaSelected === "true" || controlledVisible;
-  }, { timeout: 5_000 }).toBe(true);
+    const activate = editorFor(page).getByRole("button", {
+      name: "切换到此页签",
+      exact: true,
+    });
+    const activationButtonCount = await activate.count();
+    return {
+      tabCount,
+      active: ariaSelected === "true" || controlledVisible,
+      ariaSelected,
+      controls,
+      controlledVisible,
+      activationButtonCount,
+      activationButtonVisible: activationButtonCount === 1
+        ? await activate.isVisible().catch(() => false)
+        : false,
+      activationButtonEnabled: activationButtonCount === 1
+        ? await activate.isEnabled().catch(() => false)
+        : false,
+    };
+  };
+  await driveAuthoredTabActivation({
+    readState,
+    prepareSelection: async () => {
+      const selectionFrame = await currentEditorFrame(page);
+      const selectionReset = await resetAuthoredProbeSelection({
+        page,
+        frame: selectionFrame,
+        editor: editorFor(page),
+      });
+      if (!selectionReset.ok) {
+        const error = new Error("The prior selection did not clear before tab activation.");
+        error.code = "TAB_SELECTION_OVERLAY_NOT_CLEARED";
+        error.details = { tabId, selectionReset };
+        throw error;
+      }
+    },
+    selectTab: async () => {
+      const frame = await currentEditorFrame(page);
+      const tab = frame.locator(`[data-pageroot-id="${tabId}"]`);
+      await tab.evaluate((element) => element.scrollIntoView({
+        block: "center",
+        inline: "center",
+      }));
+      await tab.click({ timeout: 2_000 });
+    },
+    activateTab: async () => {
+      const activate = editorFor(page).getByRole("button", {
+        name: "切换到此页签",
+        exact: true,
+      });
+      await activate.click({ timeout: 2_000 });
+    },
+  });
 }
 
 async function authoredTabIds(page) {
