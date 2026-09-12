@@ -662,19 +662,30 @@ export class ProjectFileRepository {
     }
     const committed = await commitCurrentVersion(loaded, transaction, { hit: (name) => this.#hit(name) });
     if (committed.status !== "created") throw new ProjectFileRepositoryError("WORKING_COPY_CONFLICT", "The adoption was interrupted by a changed current draft.");
-    candidate.status = "promoted";
-    candidate.promotedAt ||= nowIso(this.#clock);
-    candidate.promotedVersionId = transaction.version.versionId;
-    await atomicWriteProjectJson(loaded.paths.projectRootPath, state.candidatePath, candidate, "candidate.json");
-    await this.#hit("promotion-candidate-promoted");
+    const ownsActiveDecision = loaded.runtime.activeCandidateId === candidate.candidateId
+      && loaded.runtime.activeRequest?.requestId === candidate.requestId
+      && loaded.runtime.activeRequest?.candidateId === candidate.candidateId
+      && loaded.runtime.activeRequest?.attemptId === candidate.attemptId;
+    if (!ownsActiveDecision && candidate.status !== "promoted") {
+      throw new ProjectFileRepositoryError("PROMOTION_TRANSACTION_MISMATCH", "The unfinished adoption no longer owns the active decision.");
+    }
     const requestPath = path.join(requestRootPath(loaded.paths, candidate.requestId), "request.json");
     const request = await readJsonFile(requestPath, "request.json", { projectRootPath: loaded.paths.projectRootPath });
-    if (request?.candidateId === candidate.candidateId) {
-      request.status = "promoted"; request.promotedVersionId = transaction.version.versionId; request.promotedAt = candidate.promotedAt;
-      await this.#writeRequestWithHistory(loaded, requestPath, request);
+    if (ownsActiveDecision) {
+      candidate.status = "promoted";
+      candidate.promotedAt ||= nowIso(this.#clock);
+      candidate.promotedVersionId = transaction.version.versionId;
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, state.candidatePath, candidate, "candidate.json");
+      await this.#hit("promotion-candidate-promoted");
+      if (request?.candidateId === candidate.candidateId) {
+        request.status = "promoted"; request.promotedVersionId = transaction.version.versionId; request.promotedAt = candidate.promotedAt;
+        await this.#writeRequestWithHistory(loaded, requestPath, request);
+      }
+      // A completed decision may be replayed after a newer Request starts.
+      // Only the exact owning Request/Candidate can release this write fence.
+      loaded.runtime.activeRequest = null; loaded.runtime.activeCandidateId = null; loaded.runtime.historyActivation = null;
+      await this.#writeRuntime(loaded);
     }
-    loaded.runtime.activeRequest = null; loaded.runtime.activeCandidateId = null; loaded.runtime.historyActivation = null;
-    await this.#writeRuntime(loaded);
     const current = loaded.manifest.workingCopies[0];
     if (request?.request?.submissionOperationId) {
       await appendSubmissionExecutionFact({ ...loaded, workingCopy: current }, request.request.submissionOperationId, {
@@ -686,7 +697,7 @@ export class ProjectFileRepository {
     const source = await readHtmlFile(sourcePath, "current draft", { projectRootPath: loaded.paths.projectRootPath });
     return { promoted: true, version: transaction.version,
       target: publicOpenTarget({ project: loaded.project, projectRootPath: loaded.paths.projectRootPath,
-        targetKind: "working-copy", workingCopy: current, version: transaction.version,
+        targetKind: "working-copy", workingCopy: current, version: loaded.manifest.versions.find((version) => version.versionId === current.versionId),
         exactSourcePath: sourcePath, sourceSha256: source.sha256 }) };
   }
 

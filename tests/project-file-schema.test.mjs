@@ -326,3 +326,43 @@ test("current draft disk schemas validate one member, local snapshots and recove
   await validateRejects("project-manifest.v4.schema.json", unknown);
   assert.equal(saved.workingCopyId, target.workingCopyId);
 });
+
+test("retired members retain the complete former Working Copy schema and a unique recovery identity", async (t) => {
+  const { fixture, importLegacySource, promoteNextVersion } = await import("./project-file-repository-harness.mjs");
+  const { assertManifest } = await import("../bridge/project-file-repository/registry.mjs");
+  const value = await fixture(t); const { target } = await importLegacySource(value);
+  const active = await promoteNextVersion(value.repository, target, "retired_schema_next");
+  await value.repository.initialize();
+  const manifest = await json(path.join(target.projectRootPath, ".pageroot/manifest.json"));
+  const project = await json(path.join(target.projectRootPath, ".pageroot/project.json"));
+  assert.equal(manifest.retiredWorkingCopies.length, 1);
+  await validate("project-manifest.v4.schema.json", manifest);
+  assert.doesNotThrow(() => assertManifest(manifest, project));
+  for (const mutate of [
+    (value) => { delete value.retiredWorkingCopies[0].recoveryId; },
+    (value) => { value.retiredWorkingCopies[0].recoveryId = "../unsafe"; },
+    (value) => { delete value.retiredWorkingCopies[0].preferredFileStem; },
+    (value) => { value.retiredWorkingCopies[0].sourceRelativePath = "../outside.html"; },
+    (value) => { delete value.currentDraftSchemaVersion; },
+    (value) => { value.retiredWorkingCopies = {}; },
+  ]) {
+    const invalid = structuredClone(manifest); mutate(invalid);
+    await validateRejects("project-manifest.v4.schema.json", invalid);
+    assert.throws(() => assertManifest(invalid, project));
+  }
+  for (const mutate of [
+    (value) => { value.retiredWorkingCopies.push(structuredClone(value.retiredWorkingCopies[0])); },
+    (value) => { value.retiredWorkingCopies[0].workingCopyId = value.workingCopies[0].workingCopyId; },
+    (value) => { value.retiredWorkingCopies[0].basedOnVersionId = "ver_0999"; },
+  ]) {
+    const invalid = structuredClone(manifest); mutate(invalid);
+    assert.throws(() => assertManifest(invalid, project));
+  }
+  const reusedName = path.join(target.projectRootPath, manifest.retiredWorkingCopies[0].sourceRelativePath);
+  const { rename } = await import("node:fs/promises");
+  await rename(active.exactSourcePath, reusedName);
+  const opened = await value.repository.workspace({ sourcePath: reusedName });
+  assert.equal(opened.target.workingCopyId, active.workingCopyId);
+  assert.equal(opened.target.exactSourcePath, reusedName);
+  assert.equal(opened.manifest.retiredWorkingCopies[0].sourceRelativePath, manifest.retiredWorkingCopies[0].sourceRelativePath);
+});

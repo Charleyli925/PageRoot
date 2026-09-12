@@ -223,10 +223,10 @@ export async function migrateCurrentDraft(loaded, { resolveSource, clock, hit })
 export async function retireLegacyDraftFiles(loaded) {
   for (const member of loaded.manifest.retiredWorkingCopies || []) {
     const record = await readPreservedDraft(loaded, member.recoveryId);
-    if (record.originalWorkingCopyId !== member.workingCopyId || record.originalSourceRelativePath !== member.sourceRelativePath
-      || loaded.manifest.workingCopies.some((active) => active.workingCopyId === member.workingCopyId || active.sourceRelativePath === member.sourceRelativePath)) {
+    if (record.originalWorkingCopyId !== member.workingCopyId || record.originalSourceRelativePath !== member.sourceRelativePath) {
       fail("PRESERVED_DRAFT_INVALID", "The retired file does not match its preserved authority.");
     }
+    if (loaded.manifest.workingCopies.some((active) => active.sourceRelativePath === member.sourceRelativePath)) continue;
     const sourcePath = workingCopySourcePath(loaded.paths, member);
     const source = await readRegularFileWithSha256(sourcePath, "retired draft", options(loaded));
     if (!source) continue;

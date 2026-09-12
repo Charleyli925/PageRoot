@@ -578,41 +578,58 @@ export function assertManifest(manifest, project) {
   if (manifest.currentDraftSchemaVersion !== undefined && (manifest.currentDraftSchemaVersion !== "1.0.0" || manifest.workingCopies.length !== 1)) {
     throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A current-draft project has exactly one editable member.");
   }
+  const retiredWorkingCopies = manifest.retiredWorkingCopies === undefined ? [] : manifest.retiredWorkingCopies;
+  if (!Array.isArray(retiredWorkingCopies) || (manifest.retiredWorkingCopies !== undefined && manifest.currentDraftSchemaVersion !== "1.0.0")) {
+    throw new ProjectFileRepositoryError("INVALID_MANIFEST", "Retired Working Copies require the current-draft contract.");
+  }
   const workingCopyIds = new Set();
-  const workingCopyPaths = new Set();
-  for (const workingCopy of manifest.workingCopies) {
-    if (!isObject(workingCopy)) {
-      throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is invalid.");
-    }
-    assertId(workingCopy.workingCopyId, WORKING_COPY_ID, "workingCopyId");
-    if (
-      workingCopyIds.has(workingCopy.workingCopyId)
-      || !versionIds.has(workingCopy.basedOnVersionId)
-      || !versionIds.has(workingCopy.versionId)
-    ) {
-      throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is inconsistent.");
-    }
-    const sourceRelativePath = topLevelHtmlRelativePath(
-      workingCopy.sourceRelativePath,
-      "sourceRelativePath",
-    );
-    if (workingCopyPaths.has(sourceRelativePath)) {
-      throw new ProjectFileRepositoryError(
-        "INVALID_MANIFEST",
-        "Working Copy source paths must be unique.",
+  const recoveryIds = new Set();
+  for (const { members, retired } of [
+    { members: manifest.workingCopies, retired: false },
+    { members: retiredWorkingCopies, retired: true },
+  ]) {
+    // Retired names are historical metadata; Finder may reuse one for current.
+    const workingCopyPaths = new Set();
+    for (const workingCopy of members) {
+      if (!isObject(workingCopy)) {
+        throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is invalid.");
+      }
+      assertId(workingCopy.workingCopyId, WORKING_COPY_ID, "workingCopyId");
+      if (
+        workingCopyIds.has(workingCopy.workingCopyId)
+        || !versionIds.has(workingCopy.basedOnVersionId)
+        || !versionIds.has(workingCopy.versionId)
+      ) {
+        throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is inconsistent.");
+      }
+      const sourceRelativePath = topLevelHtmlRelativePath(
+        workingCopy.sourceRelativePath,
+        "sourceRelativePath",
       );
+      if (workingCopyPaths.has(sourceRelativePath)) {
+        throw new ProjectFileRepositoryError(
+          "INVALID_MANIFEST",
+          "Working Copy source paths must be unique.",
+        );
+      }
+      workingCopyPaths.add(sourceRelativePath);
+      assertPreferredFileStem(workingCopy.preferredFileStem);
+      if (!HTML_EXTENSIONS.has(String(workingCopy.preferredExtension || "").toLowerCase())) {
+        throw new ProjectFileRepositoryError(
+          "INVALID_MANIFEST",
+          "A Working Copy preferred extension is invalid.",
+        );
+      }
+      ensureRelativePath(workingCopy.stateRelativePath, "stateRelativePath");
+      assertFileIdentity(workingCopy.fileIdentity, "Working Copy fileIdentity");
+      if (retired) {
+        if (!SAFE_OPERATION_ID.test(String(workingCopy.recoveryId || "")) || recoveryIds.has(workingCopy.recoveryId)) {
+          throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A retired Working Copy recovery identity is invalid.");
+        }
+        recoveryIds.add(workingCopy.recoveryId);
+      }
+      workingCopyIds.add(workingCopy.workingCopyId);
     }
-    workingCopyPaths.add(sourceRelativePath);
-    assertPreferredFileStem(workingCopy.preferredFileStem);
-    if (!HTML_EXTENSIONS.has(String(workingCopy.preferredExtension || "").toLowerCase())) {
-      throw new ProjectFileRepositoryError(
-        "INVALID_MANIFEST",
-        "A Working Copy preferred extension is invalid.",
-      );
-    }
-    ensureRelativePath(workingCopy.stateRelativePath, "stateRelativePath");
-    assertFileIdentity(workingCopy.fileIdentity, "Working Copy fileIdentity");
-    workingCopyIds.add(workingCopy.workingCopyId);
   }
   return manifest;
 }
