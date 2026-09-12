@@ -440,7 +440,7 @@ const EMPTY_TRACKED_TARGETS: readonly HtmlCanvasSelection[] = [];
 const EMPTY_RUNTIME_SLOT_DOCUMENT = "<!doctype html><html><head></head><body></body></html>";
 // Do not allocate this inside promotion: its shared closure context can retain
 // previousRegistration and chain every retired Candidate/SourceIndex together.
-const EMPTY_RUNTIME_REGISTRATION_CLEANUP = () => undefined;
+const emptyRuntimeRegistrationCleanup = () => undefined;
 
 type OverlayPosition = {
   toolbarLeft: number;
@@ -1228,7 +1228,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const runtimeFrameRef = useRef<RuntimeFrameContext | null>(null);
   const runtimeReadyReportedRef = useRef(new WeakSet<RuntimeFrameContext>());
   const runtimeSourceElementsRef = useRef<RuntimeSourceElements | null>(null);
-  const runtimeSourceRegistrationCleanupRef = useRef<() => void>(EMPTY_RUNTIME_REGISTRATION_CLEANUP);
+  const runtimeSourceRegistrationCleanupRef = useRef<() => void>(emptyRuntimeRegistrationCleanup);
   const runtimeRefreshPendingRef = useRef<RuntimeRefreshPending | null>(null);
   const lastEditRuntimeGrantRef = useRef(editRuntimeGrant);
   const runtimeFrameCoordinatorRef = useRef<RuntimeFrameCoordinator | null>(null);
@@ -1982,7 +1982,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         })
       : null;
     runtimeSourceRegistrationCleanupRef.current();
-    runtimeSourceRegistrationCleanupRef.current = EMPTY_RUNTIME_REGISTRATION_CLEANUP;
+    runtimeSourceRegistrationCleanupRef.current = emptyRuntimeRegistrationCleanup;
     runtimeSourceElementsRef.current = null;
     // A frame load invalidates every DOM reference. Keep only the logical
     // selection snapshot for the existing selectTarget() rebind path.
@@ -2428,7 +2428,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       },
       runtimeFrame,
       sourceElements: null,
-      registrationCleanup: EMPTY_RUNTIME_REGISTRATION_CLEANUP,
+      registrationCleanup: emptyRuntimeRegistrationCleanup,
       loaded: false,
       candidateInertInjected: candidateInertOwnership.injected,
       handoffContext,
@@ -2897,7 +2897,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     abortInFlightRuntimeCommitRef.current = abortCommit;
     candidate.registrationCleanup();
     runtimeSourceElementsRef.current = candidate.sourceElements;
-    runtimeSourceRegistrationCleanupRef.current = EMPTY_RUNTIME_REGISTRATION_CLEANUP;
+    runtimeSourceRegistrationCleanupRef.current = emptyRuntimeRegistrationCleanup;
     runtimeFrameRef.current = candidate.runtimeFrame;
     activeFrameConnectionPendingRef.current = true;
     frameLoadGenerationRef.current = promotedGeneration;
