@@ -948,6 +948,12 @@ Text, style, sibling reorder, insert, duplicate, delete and cross-parent move
 already use this boundary. Canvas publishes the kernel's single SourcePatch
 materialization, including tracked comment and selection target mappings;
 SourcePatch is not a second public apply. Persistence checks remain independent.
+Element-level style and same-parent up/down intents construct the existing
+semantic operations directly; their old Canvas SourcePatch command adapters
+are retired. The kernel's materialization type drives their local projection.
+Range styles and editable islands retain their bounded pre-planning adapter
+for structure metadata and allocated IDs; they are separate capabilities,
+not alternate paths for element style or sibling reorder.
 Repository and Desktop Main do not own
 or persist the semantic revision or the current-open history stack.
 
