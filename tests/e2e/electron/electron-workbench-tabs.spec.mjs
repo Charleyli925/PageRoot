@@ -1043,7 +1043,7 @@ test("Electron local current draft saves immutable versions and exports with an 
     await exportCheckbox.click();
     await exportMenuItem.click();
     await expect(workbench).toHaveAttribute("data-html-export-state", "exported");
-    await expect(launched.page.locator(".current-draft-result")).toContainText("当前内容已保存在历史版本中");
+    await expect(launched.page.locator(".current-draft-result")).toContainText("HTML 已导出");
     await expect(exportMenuItem).toHaveCount(0);
     expect(await versions()).toHaveLength(3);
     await launched.electronApp.evaluate(({ dialog }) => {
