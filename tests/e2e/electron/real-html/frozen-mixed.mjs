@@ -70,7 +70,7 @@ async function select(page, frame, target, calls, priorSelectionId) {
   finally { calls.push(...localCalls); }
 }
 
-export async function verifyMixedComments(page, readComments, comments) {
+export async function verifyMixedComments(readComments, comments) {
   const stored = await readComments();
   requireFact(Array.isArray(stored) && stored.length === comments.length, "FROZEN_COMMENT_COLLECTION_MISMATCH",
     { expectedCount: comments.length, actualCount: stored?.length });
@@ -79,12 +79,48 @@ export async function verifyMixedComments(page, readComments, comments) {
     const matches = stored.filter(comment => comment.commentId === expected.commentId);
     requireFact(matches.length === 1, "FROZEN_COMMENT_ID_NOT_UNIQUE");
     facts.push(verifyFrozenComment(matches[0], expected));
-    const card = page.locator(`.comment-card[data-comment-measure="${expected.commentId}"]`);
-    await expect(card).toHaveCount(1);
-    await expect(card).toHaveAttribute("data-resolution", "exact");
-    await expect(card).toContainText(expected.text);
   }
   return facts;
+}
+
+export async function verifyFrozenCommentCard(page, expected) {
+  const card = page.locator(`.comment-card[data-comment-measure="${expected.commentId}"]`);
+  await expect(card).toHaveCount(1, { timeout: 2_000 });
+  await expect(card).toHaveAttribute("data-resolution", "exact", { timeout: 2_000 });
+  await expect(card).toContainText(expected.text, { timeout: 2_000 });
+  return card;
+}
+
+// Scroll only toward the already-bound comment ID; never choose another card,
+// force virtualization off, or read a private presentation/controller store.
+export async function revealFrozenCommentCard(page, expected, reset = false) {
+  const rail = page.locator('aside[aria-label="本轮评论"]');
+  const stage = page.locator(".review-scroll-stage");
+  const card = page.locator(`.comment-card[data-comment-measure="${expected.commentId}"]`);
+  async function wheel(delta) {
+    const r = await rail.boundingBox(), s = await stage.boundingBox();
+    requireFact(r && s, "FROZEN_COMMENT_SCROLL_SURFACE_MISSING");
+    await page.mouse.move(r.x + r.width / 2, (Math.max(r.y, s.y) + Math.min(r.y + r.height, s.y + s.height)) / 2);
+    await page.mouse.wheel(0, delta);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  }
+  if (reset) await wheel(-1_000_000);
+  for (let step = 0; step < 80; step += 1) {
+    const count = await card.count(); requireFact(count <= 1, "FROZEN_COMMENT_CARD_DUPLICATE");
+    const box = count === 1 ? await card.boundingBox() : null;
+    let delta = 600;
+    if (box) {
+      const r = await rail.boundingBox(), s = await stage.boundingBox();
+      const header = await rail.locator(".comments-header").boundingBox();
+      requireFact(r && s && header, "FROZEN_COMMENT_SCROLL_SURFACE_MISSING");
+      const top = Math.max(r.y, s.y, header.y + header.height), bottom = Math.min(r.y + r.height, s.y + s.height);
+      const center = box.y + box.height / 2;
+      if (center > top + 8 && center < bottom - 8) return verifyFrozenCommentCard(page, expected);
+      delta = Math.max(-600, Math.min(600, center - (top + bottom) / 2));
+    }
+    await wheel(delta);
+  }
+  requireFact(false, "FROZEN_COMMENT_REVEAL_EXHAUSTED", { commentId: expected.commentId, wheelSteps: 80 });
 }
 
 export async function revealFrozenCommentDelete(card) {
@@ -132,6 +168,7 @@ export async function executeFrozenMixed({ plan, page, editor, readSource, readC
       requireFact(/^[a-zA-Z0-9_-]+$/u.test(commentId), "FROZEN_COMMENT_ID_INVALID");
       const expected = { commentId, text, targetId: target.selectedId };
       const fact = verifyFrozenComment(matches[0], expected);
+      await verifyFrozenCommentCard(page, expected);
       report.comments.push(expected);
       verifyFrozenBytes(await readSource(), { sha256: frozenDigest(before), size: before.length }, "COMMENT_CHANGED_SOURCE");
       return fact;
@@ -161,7 +198,7 @@ export async function executeFrozenMixed({ plan, page, editor, readSource, readC
       requireFact(markers.every(marker => content.includes(`${marker} `) && content.includes(`${marker}_RESUME`)),
         "FROZEN_CUMULATIVE_TEXT_LOST");
       return { cycle: cycle.cycle, display, retainedMarkers: markers.length * 2,
-        comments: await verifyMixedComments(page, readComments, report.comments) };
+        comments: await verifyMixedComments(readComments, report.comments) };
     });
     for (const rows of [cycle.control, cycle.text, cycle.structure, cycle.continuation])
       requireTextOperationLedger(rows, rows.map(row => row.operation));
@@ -178,12 +215,12 @@ export async function finishFrozenMixed({ plan, page, editor, readSource, readCo
       await expect(target).toContainText(`PRCORE_${plan.fileId}_C${cycle}_RESUME`);
     for (const copyId of report.copyIds) await expect(frame.locator(`[data-pageroot-id="${copyId}"]`)).toHaveCount(0);
     const source = verifyFrozenBytes(await readSource(), expectedFinal, "REOPEN_SOURCE_CHANGED");
-    return { source, comments: await verifyMixedComments(page, readComments, report.comments) };
+    return { source, comments: await verifyMixedComments(readComments, report.comments) };
   });
   for (let index = 0; index < report.comments.length; index += 1) {
     const comment = report.comments[index];
     await record(report.checkpoint, `delete-comment-${index + 1}`, async () => {
-      const card = page.locator(`.comment-card[data-comment-measure="${comment.commentId}"]`);
+      const card = await revealFrozenCommentCard(page, comment, index === 0);
       await (await revealFrozenCommentDelete(card)).click({ timeout: 2_000 });
       await card.getByRole("button", { name: "删除", exact: true }).click({ timeout: 2_000 });
       await expect(card).toHaveCount(0);

@@ -1,6 +1,8 @@
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
+import { verifyMixedComments, verifyFrozenCommentCard, revealFrozenCommentCard, revealFrozenCommentDelete } from "./real-html/frozen-mixed.mjs";
 import { expect, test } from "@playwright/test";
 
 import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-contract.js";
@@ -185,6 +187,50 @@ test("frozen Inspector cache follows sandbox iframe replacement without acceptin
       await expect(page.frameLocator("#inspector-sandbox-proof").locator("p")).toHaveText(text);
       cache.verify();
     }
+  });
+});
+
+test("frozen comment evidence accepts persisted comments beyond the virtual DOM window", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(90_000);
+  await withRuntimeProject("pageroot-frozen-virtual-comments-", { "runtime-report.html": STATIC_PAGE }, async ({ page, sourcePath, relaunch }) => {
+    await waitForRuntimeHandoffSettled(page);
+    const frame = await currentEditorFrame(page), target = frame.locator('[data-native-case="continuity-static"]');
+    const targetId = await target.getAttribute("data-pageroot-id");
+    const workingPath = await managedWorkingCopyPath(page, sourcePath);
+    const draftPath = path.join(path.dirname(workingPath), ".pageroot", "drafts", "work_ver_0001.json");
+    const readComments = () => JSON.parse(readFileSync(draftPath, "utf8")).comments;
+    const comments = [];
+    for (let index = 1; index <= 41; index += 1) {
+      await target.click();
+      await page.getByRole("toolbar", { name: /编辑/u }).getByRole("button", { name: /留评论/u }).click();
+      const text = `Fixed virtual comment ${index}`;
+      await page.getByRole("textbox", { name: "评论内容" }).fill(text);
+      await page.getByRole("button", { name: "评论", exact: true }).click();
+      await expect.poll(() => existsSync(draftPath) ? readComments().length : 0).toBe(index);
+      const matches = readComments().filter(comment => comment.text === text);
+      expect(matches).toHaveLength(1);
+      comments.push({ commentId: matches[0].commentId, text, targetId });
+      await verifyFrozenCommentCard(page, comments.at(-1));
+    }
+    expect(await page.locator(".comment-card").count()).toBeLessThan(comments.length);
+    expect(await verifyMixedComments(readComments, comments)).toHaveLength(41);
+    await expect(verifyMixedComments(() => readComments().slice(1), comments)).rejects.toThrow("FROZEN_COMMENT_COLLECTION_MISMATCH");
+    await expect(verifyMixedComments(readComments, comments.map((c, i) => i === 0 ? { ...c, targetId: "wrong-target" } : c)))
+      .rejects.toThrow("FROZEN_COMMENT_IDENTITY_MISMATCH");
+    const reopened = (await relaunch()).page;
+    await waitForRuntimeHandoffSettled(reopened);
+    expect(await verifyMixedComments(readComments, comments)).toHaveLength(41);
+    await revealFrozenCommentCard(reopened, comments[0], true);
+    await expect(verifyFrozenCommentCard(reopened, { ...comments[0], text: "deliberately wrong comment" })).rejects.toThrow();
+    for (let index = 0; index < comments.length; index += 1) {
+      const card = await revealFrozenCommentCard(reopened, comments[index], index === 0);
+      await (await revealFrozenCommentDelete(card)).click({ timeout: 2_000 });
+      await card.getByRole("button", { name: "删除", exact: true }).click({ timeout: 2_000 });
+      await expect.poll(() => readComments().length).toBe(comments.length - index - 1);
+    }
+    expect(readComments()).toHaveLength(0);
   });
 });
 
