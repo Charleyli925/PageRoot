@@ -194,7 +194,10 @@ cycles in one fresh session, with all twenty comments checked after reopening
 and individually deleted. Run it only after same-version eight-file core
 acceptance; the scope alone does not attest that prerequisite. Three-cycle
 diagnostics and different sessions cannot be added to its count. Any failure
-stops the run; fifty/hundred-cycle plans are not accepted by this entry point.
+stops the run. The `core-pressure-50` and `core-pressure-100` scopes use the same
+fixed chain and accept only their exact numeric cycle counts. They require a
+clean analysis of the previous tier before execution; accepting a manifest is
+not pressure qualification, and counts from separate sessions cannot be joined.
 Initial load and reopen also wait for the manifest's declared Runtime terminal
 before the handoff barrier: an idle temporary static iframe during resource
 preparation is not a completed dynamic startup. Fallback remains explicit failure.
