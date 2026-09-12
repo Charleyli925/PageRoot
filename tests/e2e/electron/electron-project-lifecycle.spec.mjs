@@ -246,6 +246,8 @@ test("Electron retries a managed Working Copy activation after the first respons
       }
     }, {
       ...payload,
+      versionId: workspace.target.versionId,
+      expectedSha256: workspace.sourceSha256,
       operationId: "e2e_managed_activation_stale_0001",
     });
     const stateAfterStaleAttempt = JSON.parse(readFileSync(
@@ -254,7 +256,7 @@ test("Electron retries a managed Working Copy activation after the first respons
     ));
     expect(staleOperation).toMatchObject({
       inputOperationId: "e2e_managed_activation_stale_0001",
-      message: "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+      message: "项目记录无法确认这个托管工作文件，当前文件没有切换。",
     });
     expect(stateAfterStaleAttempt.lastManagedActivation?.operationId).toBe(payload.operationId);
   } finally {
