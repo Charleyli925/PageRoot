@@ -154,6 +154,7 @@ import {
 import {
   browserSha256,
   copyText,
+  downloadHtml,
   fileAsBase64,
   isImageFile,
 } from "./workbench/browser-io";
@@ -1303,7 +1304,13 @@ export default function Workbench() {
       },
       versionWorkflow: {
         files: {
-          exportHtmlCopy: (input) => window.htmlAIProjects!.exportHtmlCopy!(input),
+          exportHtmlCopy: async (input) => {
+            if (typeof window.htmlAIProjects?.exportHtmlCopy === "function") {
+              return window.htmlAIProjects.exportHtmlCopy(input);
+            }
+            downloadHtml(input.html, input.suggestedName || "项目.html");
+            return { kind: "download-started" as const };
+          },
         },
         codecs: {
           versionsFromWorkspace,
@@ -6186,6 +6193,7 @@ export default function Workbench() {
         data-edit-revision={String(editRevision)}
         data-persisted-revision={String(lastPersistedRevision)}
         data-canvas-generation={String(canvasGeneration)}
+        data-html-export-state={workspaceControllerSnapshot?.version?.export?.phase || "idle"}
         data-render-generation={String(canvasGeneration)}
         data-rendered-sha256={renderedContentSha256 || undefined}
         data-project-state={

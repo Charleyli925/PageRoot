@@ -24,11 +24,13 @@ export function CurrentDraftStatus({ state, contextKey, onRetry, onShowFile }: {
   const label = showExport
     ? exported?.phase === "exporting" ? "正在导出…"
       : exported?.phase === "saving-version" ? "HTML 已导出，正在保存版本…"
-        : exported?.phase === "exported" ? "HTML 已导出" : exported?.reason
+        : exported?.phase === "exported" ? "HTML 已导出"
+          : exported?.phase === "download-started" ? "HTML 下载已开始" : exported?.reason
     : version?.phase === "saving" ? "正在保存版本…"
       : version?.phase === "saved" ? `已保存 V${version.result?.versionOrdinal}`
         : version?.phase === "unchanged" ? "当前内容已保存在历史版本中" : version?.reason;
   const canRetry = !busy && (showExport ? exported?.phase === "version-pending"
+    && Boolean(exported.versionOperationId && exported.versionOperationId === version?.operationId)
     : ["unknown", "failed", "refresh-pending"].includes(version?.phase || ""));
   return <div className="current-draft-result" role="status">
     <span>{label}</span>
