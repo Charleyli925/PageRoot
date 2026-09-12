@@ -27,7 +27,6 @@ import {
   stopPageRoot,
   tmpdir,
   waitForRuntimeHandoffSettled,
-  waitForProjectReady,
   writeFileSync,
 } from "./electron-native-harness.mjs";
 import { queuedStaticFallbackOracle } from "./queued-static-fallback-oracle.mjs";
@@ -610,6 +609,71 @@ test("author script cannot preclaim a future parser-authored source object", {
   });
 });
 
+test("fixed structure samples prove expected-copyable and expected-non-copyable without fallback", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Fixed copyability</title></head><body>
+  <p data-native-case="copyable" data-test-copyability="expected-copyable">可复制源码元素</p>
+  <div data-native-case="non-copyable" data-test-copyability="expected-non-copyable">
+    运行时子树宿主
+  </div>
+  <script>
+    const generated = document.createElement('span');
+    generated.textContent = '运行时生成内容';
+    document.querySelector('[data-test-copyability="expected-non-copyable"]').append(generated);
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-fixed-copyability-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "copyable");
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    const toolbar = page.getByRole("toolbar");
+    const copyableSelector =
+      '[data-test-copyability="expected-copyable"][data-pageroot-id]';
+    const nonCopyableSelector =
+      '[data-test-copyability="expected-non-copyable"][data-pageroot-id]';
+
+    await expect(frame.locator(copyableSelector)).toHaveCount(1);
+    await expect(frame.locator(nonCopyableSelector)).toHaveCount(1);
+    const originalId = await frame.locator(copyableSelector).getAttribute("data-pageroot-id");
+
+    await frame.locator(copyableSelector).click();
+    const duplicateButton = toolbar.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await expect(editor).toHaveAttribute("data-element-copy-availability", "available");
+    await waitForRuntimeHandoffSettled(page);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator(copyableSelector)).toHaveCount(2);
+    const ids = await frame.locator(copyableSelector).evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-pageroot-id"))
+    ));
+    expect(new Set(ids).size).toBe(2);
+    const duplicateId = ids.find((id) => id && id !== originalId);
+    expect(duplicateId).toBeTruthy();
+
+    await frame.locator(`[data-pageroot-id="${duplicateId}"]`).click();
+    page.once("dialog", (dialog) => dialog.accept());
+    await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
+    await waitForRuntimeHandoffSettled(page);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator(copyableSelector)).toHaveCount(1);
+    expect(await frame.locator(copyableSelector).evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-pageroot-id"))
+    ))).toEqual([originalId]);
+
+    await frame.locator(nonCopyableSelector).click();
+    await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
+    expect(await frame.locator(nonCopyableSelector).evaluate(
+      (element) => element.isContentEditable,
+    )).toBe(false);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
 test("author Script cannot add source authority after Runtime starts or save Runtime DOM", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -716,6 +780,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await expect(frame.locator("body")).not.toHaveAttribute("data-worker-executed", "true");
 
     await frame.locator("#runtime-generated").click();
+    const editor = page.getByTestId("html-canvas-editor");
     const toolbar = page.getByRole("toolbar");
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
@@ -725,6 +790,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await frame.locator('[data-native-case="runtime-host"]').evaluate((element) => {
       element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    await expect(editor).toHaveAttribute("data-selection-runtime-generated", "false");
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
     await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
@@ -945,6 +1011,17 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
     const table = frame.locator("#runtime-table-first");
     await expect(table).toBeVisible();
     await table.locator("caption").click();
+    const editor = page.getByTestId("html-canvas-editor");
+    await expect(editor).toHaveAttribute("data-selection-runtime-generated", "true");
+    await expect(editor).toHaveAttribute(
+      "data-selection-runtime-source-anchor-id",
+      /pr1_[a-f0-9]{32}/u,
+    );
+    await expect(editor).toHaveAttribute("data-selection-runtime-kind", "table");
+    await expect(editor).toHaveAttribute(
+      "data-selection-runtime-path",
+      "table:nth-of-type(1)",
+    );
     await expect(toolbar).toHaveAttribute("aria-label", "评论财务数据表");
     await expect(toolbar.getByRole("button", { name: /给财务数据表留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);

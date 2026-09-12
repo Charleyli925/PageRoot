@@ -8795,6 +8795,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     isEditing,
     toolbarStyle: selectionChromeProjection.toolbarStyle,
     selectedPagePresentationAction: selectionChromeProjection.selectedPagePresentationAction,
+    activeFrameGeneration: frameRender.elementGeneration,
+    currentNativeDomGeneration: nativeDomGenerationRef.current,
     readOnly: effectiveReadOnly || runtimeGeneratedSelection,
     selectedNativeEditAvailable,
     selectedStyle,
@@ -8817,6 +8819,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     editFeedbackActionAvailable,
     elementCopyAvailability,
     enableReorder,
+    frameRender.elementGeneration,
     hasTextRange,
     hoverChrome,
     hoverTargetIsSelected,
@@ -8980,6 +8983,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       data-testid="html-canvas-editor"
       data-locked={interactionLocked ? "true" : undefined}
       data-runtime-degradation={runtimeDegradation === "none" ? undefined : runtimeDegradation}
+      data-selection-runtime-generated={selection
+        ? runtimeGeneratedSelection ? "true" : "false"
+        : undefined}
+      data-selection-runtime-generation={runtimeGeneratedSelection
+        ? String(frameLoadGenerationRef.current)
+        : undefined}
+      data-selection-runtime-source-anchor-id={runtimeGeneratedSelection
+        ? selection?.commentAnchor?.elementId
+        : undefined}
+      data-selection-runtime-kind={runtimeGeneratedSelection
+        ? selection?.visualHint?.kind
+        : undefined}
+      data-selection-runtime-path={runtimeGeneratedSelection
+        ? selection?.visualHint?.relativePath
+        : undefined}
       data-interaction-mode={renderedMode} data-runtime-library-origins={editRuntimeGrant?.libraryOrigins?.join(",") || undefined}
       data-runtime-libraries={editRuntimeGrant?.runtimeLibraries?.join(",") || undefined}
       aria-readonly={effectiveReadOnly || interactionLocked}

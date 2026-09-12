@@ -71,6 +71,46 @@ async function attemptDirectEdit(frame, id) {
   return doubleClickRenderedText(frame, id);
 }
 
+test("a transparent inline text hit selects its canonical source host", async ({ page }) => {
+  const { frame } = await openFixture(page);
+  const host = frame.locator('[data-native-case="exact-boundaries"]');
+  const inline = host.locator("strong");
+  const inlineId = await inline.getAttribute("data-pageroot-id");
+  expect(inlineId).toMatch(/^pr1_/u);
+
+  await inline.dblclick();
+
+  await expect(host).toHaveAttribute("contenteditable", "true");
+  await expect(inline).not.toHaveAttribute("contenteditable", /.+/u);
+  await expect(host.locator("em")).not.toHaveAttribute("contenteditable", /.+/u);
+  expect(await frame.evaluate(() => (
+    document.activeElement?.getAttribute("data-native-case") || null
+  ))).toBe("exact-boundaries");
+});
+
+test("a wrong canonical parent identity rejects the same inline text hit", async ({ page }) => {
+  const { frame } = await openFixture(page);
+  const host = frame.locator('[data-native-case="exact-boundaries"]');
+  const inline = host.locator("strong");
+  const inlineId = await inline.getAttribute("data-pageroot-id");
+  expect(inlineId).toMatch(/^pr1_/u);
+  await host.evaluate((element) => {
+    element.setAttribute(
+      "data-pageroot-id",
+      "pr1_ffffffffffff4fff8fffffffffffffff",
+    );
+  });
+  await expect(inline).toHaveAttribute("data-pageroot-id", inlineId);
+
+  await inline.dblclick();
+
+  await expect(host).not.toHaveAttribute("contenteditable", /.+/u);
+  await expect(inline).not.toHaveAttribute("contenteditable", /.+/u);
+  await expect(frame.locator('[contenteditable="true"], [contenteditable="plaintext-only"]'))
+    .toHaveCount(0);
+  expect((await exportCurrentHtml(page)).equals(identifiedSource)).toBe(true);
+});
+
 async function setExactBoundaryPoint(target, point) {
   await target.evaluate((element, placement) => {
     const emphasis = element.querySelector("em");
