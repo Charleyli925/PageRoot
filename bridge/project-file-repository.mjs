@@ -186,6 +186,12 @@ import {
 export { PROJECT_FILE_SCHEMA_VERSION } from "./project-file-repository/constants.mjs";
 export { ProjectFileRepositoryError } from "./project-file-repository/errors.mjs";
 
+export function projectVersionDisplayFileName({ manifest, version, currentSourcePath, versionSourcePath }) {
+  return path.basename(manifest.currentDraftSchemaVersion === CURRENT_DRAFT_SCHEMA_VERSION
+    ? currentSourcePath
+    : versionSourcePath || `版本-${version.ordinal}.html`);
+}
+
 const LEGACY_PROMOTION_WORKING_COPY_HASH = Symbol(
   "legacy-promotion-working-copy-hash",
 );
@@ -5200,7 +5206,10 @@ export class ProjectFileRepository {
         (entry) => entry.versionId === version.versionId,
       );
       const isActiveWorkingCopy = workingCopy?.workingCopyId === activeWorkingCopy.workingCopyId;
-      const displayFileName = path.basename(isActiveWorkingCopy ? activeDisplayPath : workingCopy?.sourceRelativePath || `版本-${version.ordinal}.html`);
+      const displayFileName = projectVersionDisplayFileName({
+        manifest: loaded.manifest, version, currentSourcePath: activeDisplayPath,
+        versionSourcePath: isActiveWorkingCopy ? activeDisplayPath : workingCopy?.sourceRelativePath,
+      });
       return {
         projectId: loaded.project.projectId,
         documentId: loaded.project.documentId,

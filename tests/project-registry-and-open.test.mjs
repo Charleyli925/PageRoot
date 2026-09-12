@@ -287,6 +287,59 @@ test("registered version summaries stay content-free and expose the safe active 
   assert.equal(Object.hasOwn(summary.versions[0], "attachments"), false);
 });
 
+test("single-current history uses its document filename without changing immutable Version facts", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "辨识项目.html");
+  let target = imported.target;
+  for (const label of ["summary_second", "summary_third"]) {
+    target = await promoteNextVersion(value.repository, target, label);
+  }
+  const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+  const manifestBytes = await readFile(manifestPath);
+  const manifest = JSON.parse(manifestBytes);
+  const snapshots = await Promise.all(manifest.versions.map(async (version) => {
+    const snapshot = await value.repository.readVersionFile({ target, versionId: version.versionId });
+    return { version, path: snapshot.path, bytes: await readFile(snapshot.path) };
+  }));
+
+  for (const fileName of ["辨识项目.html", "Finder 新文件名.html"]) {
+    if (fileName !== path.basename(target.exactSourcePath)) {
+      await rename(target.exactSourcePath, path.join(target.projectRootPath, fileName));
+    }
+    const summary = await value.repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId });
+    assert.equal(summary.currentBasedOnVersionId, "ver_0003");
+    assert.equal(summary.latestVersionId, "ver_0003");
+    assert.deepEqual(summary.versions.map((version) => ({
+      versionId: version.versionId, ordinal: version.ordinal, displayFileName: version.displayFileName,
+      modifiedAt: version.modifiedAt, isActiveWorkingCopy: version.isActiveWorkingCopy,
+    })), snapshots.map(({ version }) => ({
+      versionId: version.versionId, ordinal: version.ordinal, displayFileName: fileName,
+      modifiedAt: version.createdAt, isActiveWorkingCopy: version.versionId === "ver_0003",
+    })));
+    assert.deepEqual(await readFile(manifestPath), manifestBytes);
+    for (const snapshot of snapshots) {
+      const bytes = await readFile(snapshot.path);
+      assert.deepEqual(bytes, snapshot.bytes);
+      assert.equal(sha256(bytes), snapshot.version.contentSha256);
+    }
+  }
+});
+
+test("legacy history summaries keep each Version's visible Working Copy filename", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "legacy summary.html");
+  const manifestPath = path.join(imported.target.projectRootPath, ".pageroot", "manifest.json");
+  const manifest = await json(manifestPath);
+  delete manifest.currentDraftSchemaVersion;
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  const target = await promoteNextVersion(value.repository, imported.target, "legacy_summary_second");
+  const summary = await value.repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId });
+  assert.deepEqual(summary.versions.map((version) => version.displayFileName), [
+    path.basename(imported.target.exactSourcePath), path.basename(target.exactSourcePath),
+  ]);
+  assert.notEqual(summary.versions[0].displayFileName, summary.versions[1].displayFileName);
+});
+
 test("reading a current V4 Registry never rewrites its bytes", async (t) => {
   const value = await fixture(t);
   await importSource(value, "current-registry.html");

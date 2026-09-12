@@ -30,6 +30,7 @@ import {
 import {
   ProjectFileRepository,
   ProjectFileRepositoryError,
+  projectVersionDisplayFileName,
 } from "./project-file-repository.mjs";
 import {
   conversationListResponse,
@@ -595,14 +596,12 @@ function projectFileVersionRows(workspace, requirements = new Map()) {
       // import and for rounds whose records are gone.
       requirement: requirements.get(version.versionId) || null,
       workingCopyId: workingCopy?.workingCopyId || null,
-      displayFileName: workingCopy?.sourceRelativePath
-        ? path.basename(workingCopy.sourceRelativePath)
-        : `版本-${version.ordinal}.html`,
-      // Version timestamps are immutable. The active Working Copy is the one
-      // exception: show its last successful PageRoot write, never Finder mtime.
-      modifiedAt: isActiveWorkingCopy
-        ? String(workspace.workingCopyState?.lastSavedAt || version.createdAt)
-        : version.createdAt,
+      displayFileName: projectVersionDisplayFileName({
+        manifest: workspace.manifest, version,
+        currentSourcePath: workspace.target.exactSourcePath,
+        versionSourcePath: workingCopy?.sourceRelativePath,
+      }),
+      modifiedAt: version.createdAt,
       isActiveWorkingCopy,
       isLatestOfficial: version.versionId === workspace.manifest.latestOfficialVersionId,
       differsFromBase: workingCopyProjection?.differsFromBase === true,

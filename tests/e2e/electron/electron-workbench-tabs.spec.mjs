@@ -876,7 +876,14 @@ for (const recoveryCase of ["pending", "rename", "superseded"]) {
         expectedPath = next.target.exactSourcePath;
         expect((await repository.queryHistoryCreation({ target: next.target, operationId })).recoveryState).toBe("superseded");
       }
-      await closePageRootGracefully(app.electronApp, app.page);
+      if (recoveryCase === "pending") {
+        // The simulated workspace outage also prevents verifying the replaced
+        // current file for graceful close. Exercise crash recovery while keeping
+        // that protection and the unopened history receipt intact.
+        await stopPageRoot(app.electronApp, userData, { cleanup: false });
+      } else {
+        await closePageRootGracefully(app.electronApp, app.page);
+      }
       app = null;
       if (recoveryCase === "rename") {
         const renamed = path.join(target.projectRootPath, "renamed-history.html");

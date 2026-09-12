@@ -94,6 +94,11 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+  const editedWorkspace = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`);
+  assert.equal(editedWorkspace.response.status, 200, JSON.stringify(editedWorkspace.body));
+  assert.equal(editedWorkspace.body.versions[0].displayFileName, "external.htm");
+  assert.equal(editedWorkspace.body.versions[0].modifiedAt, manifest.versions[0].createdAt);
+  assert.equal(editedWorkspace.body.versions[0].contentSha256, manifest.versions[0].contentSha256);
 });
 
 test("the Bridge exposes every Registry member and opens one only by projectId", async (t) => {
@@ -383,6 +388,15 @@ test("Bridge reads immutable V1 and V2 after saving V2 in the single current dra
   const manifest = JSON.parse(manifestBefore);
   assert.equal(manifest.workingCopies.length, 1);
   assert.equal(manifest.workingCopies[0].versionId, "ver_0002");
+  const workspace = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(target.exactSourcePath)}`);
+  assert.equal(workspace.response.status, 200, JSON.stringify(workspace.body));
+  assert.deepEqual(workspace.body.versions.map((version) => ({
+    versionId: version.versionId, ordinal: version.ordinal, displayFileName: version.displayFileName,
+    modifiedAt: version.modifiedAt, contentSha256: version.contentSha256,
+  })), manifest.versions.map((version) => ({
+    versionId: version.versionId, ordinal: version.ordinal, displayFileName: "history.html",
+    modifiedAt: version.createdAt, contentSha256: version.contentSha256,
+  })));
   const readVersion = (versionId) => bridge.requestJson(
     `/version-file?sourcePath=${encodeURIComponent(target.exactSourcePath)}&versionId=${versionId}`,
   );
