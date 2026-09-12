@@ -35,6 +35,7 @@ export function reviewSourceFactsByteSize(facts: ReviewSourceFacts): number {
     + JSON.stringify(facts.diagnostics).length
     + JSON.stringify(facts.visualBinding).length
     + JSON.stringify(facts.visualEvidence).length
+    + JSON.stringify(facts.annotationAvailability).length
   );
 }
 
@@ -162,4 +163,3 @@ export async function prepareReviewAnalysis({
     }),
   };
 }
-
