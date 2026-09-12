@@ -1669,6 +1669,88 @@ test("an old adoption receipt cannot open after current advances even with ident
   assert.equal(h.documentSession.html, BASE_HTML);
 });
 
+for (const reconcile of [false, true]) {
+  test(`superseded adoption ${reconcile ? "reconciliation" : "response"} ends its operation without replacing current authority`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const run = readyRun({ candidateId: "candidate_superseded" });
+    let replies = 0;
+    const h = createHarness({ currentDraft: true, activation: async () => {
+      if (reconcile && ++replies <= 2) {
+        throw new BridgeRequestError("lost committed reply", { outcome: "unknown" });
+      }
+      return { ...run.readyPayload, openTarget: h.projectSession.openTarget };
+    } });
+    t.after(() => h.workflow.dispose());
+    h.projectSession.register({ ...h.context, openTarget: {
+      ...h.projectSession.openTarget, versionId: "ver_0003", sourceSha256: sha256(DRAINED_HTML),
+    } });
+    h.documentSession.publishAuthority({ html: DRAINED_HTML, persistedSourceSha256: sha256(DRAINED_HTML) });
+    h.versionSession.hydrate({
+      versions: decodedVersions([versionRecord({ id: "ver_0003", content: DRAINED_HTML })]),
+      latestVersionId: "ver_0003", currentBasedOnVersionId: "ver_0003", currentExactVersionId: "ver_0003",
+    });
+    const currentContext = h.projectSession.context;
+    const currentVersions = h.versionSession.captureSnapshot();
+    h.runSession.trackRun(run, { activate: "always" });
+    h.runSession.publishHandoff({ ...run, status: "starting" });
+    const settled = deferred();
+    h.runSession.subscribe(({ activeRun }) => {
+      if (activeRun?.status === "complete") settled.resolve();
+    });
+    const outcome = await h.workflow.activateReadyVersion({ run });
+    if (reconcile) {
+      assert.equal(outcome.status, "unknown");
+      assert.equal(h.runSession.isOperationBusy("activate", operationKey(run)), true);
+      t.mock.timers.tick(1000);
+      await settled.promise;
+    } else {
+      assert.equal(outcome.code, "VERSION_ACTIVATION_SUPERSEDED");
+    }
+    assert.equal(h.runSession.activeRun.status, "complete");
+    assert.equal(h.runSession.activeRun.adoptionPhase, undefined);
+    assert.equal(h.runSession.activeHandoff, null);
+    assert.equal(h.runSession.hasRun(run), false);
+    assert.equal(h.runSession.activeLocked, false);
+    assert.equal(h.runSession.isOperationBusy("activate", operationKey(run)), false);
+    assert.equal(h.workflow.getSnapshot().navigation.phase, "idle");
+    assert.deepEqual(h.projectSession.context, currentContext);
+    assert.deepEqual(h.versionSession.captureSnapshot(), currentVersions);
+    assert.equal(h.documentSession.html, DRAINED_HTML);
+    assert.equal(h.documentSession.persistedSourceSha256, sha256(DRAINED_HTML));
+    assert.equal(h.calls.prepare.length, 0);
+    assert.equal(h.calls.commit.length, 0);
+    assert.equal(h.calls.refresh.length, 0);
+    assert.equal(h.calls.versionFile.length, 0);
+    await h.workflow.activateReadyVersion({ run });
+    t.mock.timers.tick(60_000);
+    assert.equal(h.calls.activate, reconcile ? 3 : 1);
+  });
+}
+
+test("a superseded activation response cannot reclaim a newer active run or handoff", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const pending = deferred();
+  const requested = deferred();
+  const h = createHarness({ activation: async () => { requested.resolve(); return pending.promise; } });
+  t.after(() => h.workflow.dispose());
+  const run = readyRun({ candidateId: "candidate_superseded_owner" });
+  h.runSession.trackRun(run, { activate: "always" });
+  const activation = h.workflow.activateReadyVersion({ run });
+  await requested.promise;
+  const newerRun = readyRun({ requestId: "req_0002", candidateId: "candidate_new_owner" });
+  h.runSession.trackRun(newerRun, { activate: "always" });
+  h.runSession.publishHandoff({ ...newerRun, status: "starting" });
+  const newerHandoff = h.runSession.activeHandoff;
+  pending.resolve({ ...run.readyPayload, openTarget: { ...run.readyPayload.openTarget, versionId: "ver_0003" } });
+  assert.equal((await activation).status, "stale");
+  assert.deepEqual(h.runSession.activeRun, newerRun);
+  assert.deepEqual(h.runSession.activeHandoff, newerHandoff);
+  assert.equal(h.runSession.isOperationBusy("activate", operationKey(run)), false);
+  assert.equal(h.calls.commit.length, 0);
+  t.mock.timers.tick(60_000);
+  assert.equal(h.calls.activate, 1);
+});
+
 
 test("a committed local version accepts the existing macOS path alias without losing draft hydration", async () => {
   const h = createHarness({ currentDraft: true, currentPath: "/private/tmp/version-workflow-a.html",
