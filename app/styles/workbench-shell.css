@@ -74,7 +74,8 @@
   min-height: 0;
 }
 
-.workbench[data-document-persistence-banner="true"] {
+.workbench[data-document-persistence-banner="true"],
+.workbench:has(> .current-draft-result) {
   grid-template-rows:
     var(--workbench-tabbar-height)
     var(--workbench-header-height)
@@ -83,8 +84,29 @@
 }
 
 .workbench[data-document-persistence-banner="true"] > .review-scroll-stage,
-.workbench[data-document-persistence-banner="true"] > [data-testid="ai-review-workspace"] {
+.workbench[data-document-persistence-banner="true"] > [data-testid="ai-review-workspace"],
+.workbench:has(> .current-draft-result) > .review-scroll-stage,
+.workbench:has(> .current-draft-result) > [data-testid="ai-review-workspace"] {
   grid-row: 4;
+}
+
+.workbench > .current-draft-result {
+  grid-column: 2;
+  grid-row: 3;
+  min-width: 0;
+}
+
+.workbench[data-document-persistence-banner="true"]:has(> .current-draft-result) {
+  grid-template-rows: var(--workbench-tabbar-height) var(--workbench-header-height) auto auto minmax(0, 1fr);
+}
+
+.workbench[data-document-persistence-banner="true"]:has(> .current-draft-result) > .document-persistence-banner {
+  grid-row: 4;
+}
+
+.workbench[data-document-persistence-banner="true"]:has(> .current-draft-result) > .review-scroll-stage,
+.workbench[data-document-persistence-banner="true"]:has(> .current-draft-result) > [data-testid="ai-review-workspace"] {
+  grid-row: 5;
 }
 
 .workbench > .document-persistence-banner {

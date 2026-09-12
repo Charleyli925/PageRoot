@@ -480,6 +480,7 @@ body {
 
 .current-draft-result {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 6px 16px;
@@ -487,6 +488,8 @@ body {
   font-size: 12px;
   background: var(--paper);
 }
+
+.current-draft-result > span { overflow-wrap: anywhere; }
 
 .current-draft-result button {
   border: 0;

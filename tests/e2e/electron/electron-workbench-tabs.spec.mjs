@@ -964,7 +964,7 @@ test("Electron local current draft saves immutable versions and exports with an 
     await more.click();
     await launched.page.getByRole("menuitem", { name: "保存为新版本", exact: true }).click();
     await expect.poll(async () => (await versions()).length).toBe(2);
-    await expect(launched.page.locator(".current-draft-result")).toBeVisible();
+    await expect(launched.page.locator(".current-draft-result")).toContainText("已保存 V2");
     expect(await currentIdentity()).toEqual(identity);
     const afterSave = (await repository.workspace({ sourcePath: currentPath })).target;
     expect(afterSave.versionId).toBe("ver_0002");
@@ -978,6 +978,12 @@ test("Electron local current draft saves immutable versions and exports with an 
     await expect(current).toHaveAttribute("aria-current", "page");
     await expect(project.locator(".sidebar-project-history-toggle")).toHaveAttribute("aria-expanded", "false");
     await expect(project.locator(".sidebar-version-file")).toHaveCount(0);
+    const resultBounds = await launched.page.locator(".current-draft-result").boundingBox();
+    const headerBounds = await launched.page.locator(".workbench-header").boundingBox();
+    const stageBounds = await launched.page.locator(".review-scroll-stage").boundingBox();
+    expect(resultBounds.x).toBe(headerBounds.x);
+    expect(resultBounds.y).toBeGreaterThanOrEqual(headerBounds.y + headerBounds.height);
+    expect(stageBounds.y).toBeGreaterThanOrEqual(resultBounds.y + resultBounds.height);
     await launched.page.screenshot({ path: test.info().outputPath("current-draft-sidebar.png") });
     await project.locator(".sidebar-project-history-toggle").click();
     await expect(project.locator(".sidebar-version-index")).toHaveText(["V1", "V2"]);
