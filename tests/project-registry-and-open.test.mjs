@@ -52,7 +52,7 @@ test("atomic import creates V1 facts once and ordinary saves never create a Vers
   assert.equal(imported.target.targetKind, "working-copy");
   assert.equal(imported.target.workingCopyId, "work_ver_0001");
   assert.equal(imported.target.versionId, "ver_0001");
-  assert.match(imported.target.exactSourcePath, /原文件-V1\.htm$/u);
+  assert.match(imported.target.exactSourcePath, /原文件\.htm$/u);
   assert.deepEqual(
     Object.keys(await json(path.join(imported.target.projectRootPath, ".pageroot", "project.json"))).sort(),
     ["createdAt", "documentId", "projectId", "schemaVersion"],
@@ -277,7 +277,7 @@ test("registered version summaries stay content-free and expose the safe active 
     ordinal: 1,
     basedOnVersionId: null,
     previousVersionId: null,
-    displayFileName: "summary repository-V1.html",
+    displayFileName: "summary repository.html",
     modifiedAt: summary.versions[0].modifiedAt,
     isActiveWorkingCopy: true,
     isLatestOfficial: true,
@@ -393,7 +393,7 @@ test("unlisted HTML never acquires a v4 binding from equal bytes or an inode", a
   ));
   assert.deepEqual(
     manifestBeforeImport.workingCopies.map((entry) => entry.sourceRelativePath),
-    ["managed-V1.html"],
+    ["managed.html"],
   );
 
   const fresh = await value.repository.importExternal({
@@ -579,7 +579,7 @@ test("import reserves UTF-8 component space and skips every occupied project-roo
   const imported = await importSource(utf8, longName);
   assert.ok(Buffer.byteLength(path.basename(imported.target.exactSourcePath), "utf8") <= 255);
   assert.ok(Buffer.byteLength(path.basename(imported.target.projectRootPath), "utf8") <= 255);
-  assert.match(path.basename(imported.target.exactSourcePath), /-V1\.html$/u);
+  assert.match(path.basename(imported.target.exactSourcePath), /\.html$/u);
 
   for (const kind of ["file", "directory", "symlink"]) {
     const value = await fixture(t);
@@ -631,7 +631,7 @@ test("classifyOpenPath is read-only for managed, known and new HTML", async (t) 
   const fresh = await value.repository.classifyOpenPath({ sourcePath: freshPath });
   assert.equal(fresh.kind, "new-external");
   assert.equal(fresh.sourceFileName, "尚未导入.html");
-  assert.equal(fresh.visibleV1FileName, "尚未导入-V1.html");
+  assert.equal(fresh.visibleV1FileName, "尚未导入.html");
 
   assert.deepEqual(await readFile(registryPath(value)), registryBefore);
 });
@@ -716,7 +716,7 @@ test("promoting V2 still returns the current V2 working copy for the original pa
   const value = await fixture(t);
   const imported = await importSource(value, "晋升后重开.html");
   const active = await promoteNextVersion(value.repository, imported.target, "promoted_reopen");
-  assert.equal(active.workingCopyId, "work_ver_0002");
+  assert.equal(active.workingCopyId, "work_ver_0001");
   assert.equal(active.versionId, "ver_0002");
 
   const classified = await value.repository.classifyOpenPath({
@@ -724,7 +724,7 @@ test("promoting V2 still returns the current V2 working copy for the original pa
   });
   assert.equal(classified.kind, "known-external");
   assert.equal(classified.projectFacts.projectId, imported.target.projectId);
-  assert.equal(classified.projectFacts.openTarget.workingCopyId, "work_ver_0002");
+  assert.equal(classified.projectFacts.openTarget.workingCopyId, "work_ver_0001");
   assert.equal(classified.projectFacts.latestOfficialVersionId, "ver_0002");
   assert.equal(classified.projectFacts.currentBasedOnVersionId, "ver_0002");
   assert.equal(classified.projectFacts.initialVersionId, "ver_0001");
@@ -735,7 +735,7 @@ test("promoting V2 still returns the current V2 working copy for the original pa
     expectedSourceSha256: sha256(imported.buffer),
   });
   assert.equal(retried.imported, false);
-  assert.equal(retried.target.workingCopyId, "work_ver_0002");
+  assert.equal(retried.target.workingCopyId, "work_ver_0001");
   assert.equal(retried.target.versionId, "ver_0002");
   assert.equal(Object.keys((await json(registryPath(value))).projects).length, 1);
 });
@@ -743,6 +743,10 @@ test("promoting V2 still returns the current V2 working copy for the original pa
 test("a historical active Working Copy is returned instead of silently jumping to latest", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "历史工作稿.html");
+  const legacyManifestPath = path.join(imported.target.projectRootPath, ".pageroot/manifest.json");
+  const legacyManifest = await json(legacyManifestPath);
+  delete legacyManifest.currentDraftSchemaVersion;
+  await writeFile(legacyManifestPath, JSON.stringify(legacyManifest));
   let active = imported.target;
   for (const label of ["history_v2", "history_v3"]) {
     active = await promoteNextVersion(value.repository, active, label);
@@ -822,7 +826,7 @@ test("equal bytes on another path remain a new external source", async (t) => {
   const classified = await value.repository.classifyOpenPath({ sourcePath: otherPath });
   assert.equal(classified.kind, "new-external");
   assert.equal(classified.sourceFileName, "same-bytes.html");
-  assert.equal(classified.visibleV1FileName, "same-bytes-V1.html");
+  assert.equal(classified.visibleV1FileName, "same-bytes.html");
   assert.equal(classified.sourceSha256, sha256(imported.buffer));
   assert.deepEqual(await readFile(registryPath(value)), registryBefore);
 
@@ -1043,6 +1047,10 @@ test("reconcileWorkingCopyLocator refuses a version mismatch and does not guess 
 test("unknown Runtime root and historyActivation members survive a confirmation", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "运行态未知成员.html");
+  const legacyManifestPath = path.join(imported.target.projectRootPath, ".pageroot/manifest.json");
+  const legacyManifest = await json(legacyManifestPath);
+  delete legacyManifest.currentDraftSchemaVersion;
+  await writeFile(legacyManifestPath, JSON.stringify(legacyManifest));
   const active = await promoteNextVersion(
     value.repository,
     imported.target,

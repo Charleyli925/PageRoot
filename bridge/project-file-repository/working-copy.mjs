@@ -956,6 +956,7 @@ export function assertWorkingCopyState(
     || state.draftRelativePath !== expectedDraftRelativePath
     || (state.draftSha256 !== null && !SHA256.test(String(state.draftSha256 || "")))
     || !validRevision(state.draftRevision)
+    || (state.snapshotBaselineSha256 !== undefined && !SHA256.test(String(state.snapshotBaselineSha256)))
     || !WORKING_COPY_SAVE_STATES.has(state.saveState)
     || !validRevision(state.lastPersistedRevision)
     || !validStateTimestamp(state.lastSavedAt)

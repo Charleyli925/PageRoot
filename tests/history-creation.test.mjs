@@ -4,7 +4,7 @@ import { sha256 } from "../bridge/lifecycle-core.mjs";
 import path from "node:path";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { readFile, writeFile, rename, unlink } from "node:fs/promises";
-import { fixture, html, importSource, promoteNextVersion } from "./project-file-repository-harness.mjs";
+import { fixture, html, importSource, importLegacySource, promoteNextVersion } from "./project-file-repository-harness.mjs";
 
 test("history creation allocates V9 from V3 and replays the same operation", async (t) => {
   const value = await fixture(t);
@@ -19,16 +19,18 @@ test("history creation allocates V9 from V3 and replays the same operation", asy
   assert.equal(result.basedOnVersionId, "ver_0003");
   assert.equal(result.previousVersionId, "ver_0008");
   assert.match(await readFile(result.sourcePath, "utf8"), /Version3/);
-  assert.equal(await readFile(target.exactSourcePath, "utf8"), before);
+  assert.equal(result.sourcePath, target.exactSourcePath);
+  assert.ok((await value.repository.listPreservedDrafts({ projectId: target.projectId })).some((entry) => entry.sourceSha256 === sha256(Buffer.from(before))));
   assert.deepEqual(await value.repository.createVersionFromHistory(request), result);
   assert.deepEqual(await value.repository.queryHistoryCreation({ target, operationId: request.operationId }), result);
   const workspace = await value.repository.workspace({ sourcePath: result.sourcePath });
   assert.equal(workspace.manifest.versions.length, 9);
-  assert.equal(workspace.runtime.activeWorkingCopyId, "work_ver_0009");
+  assert.equal(workspace.runtime.activeWorkingCopyId, target.workingCopyId);
+  assert.equal(workspace.manifest.workingCopies.length, 1);
   assert.equal(workspace.manifest.versions.at(-1).sourceType, "history-copy");
 });
 
-for (const stage of ["prepared", "working-copy-prepared", "working-copy-created", "manifest-committed", "completed"]) {
+for (const stage of ["prepared", "snapshot-written", "source-written", "manifest-written", "completed"]) {
   test(`history creation recovers after ${stage} without duplicating the Version`, async (t) => {
     const value = await fixture(t);
     const { target } = await importSource(value);
@@ -37,7 +39,7 @@ for (const stage of ["prepared", "working-copy-prepared", "working-copy-created"
     const draftPath = path.join(target.projectRootPath, ".pageroot/drafts/work_ver_0001.json");
     const draftBefore = await readFile(draftPath, "utf8");
     const rulesBefore = await readFile(path.join(target.projectRootPath, "PROJECT.md"), "utf8");
-    const repository = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: (name) => name === `history-creation-${stage}` });
+    const repository = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: (name) => name === `current-version-${stage}` });
     const request = { target, versionId: "ver_0001", operationId: "history_recover_0001", expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 };
     await assert.rejects(repository.createVersionFromHistory(request), { code: "INJECTED_FAILPOINT" });
     const recovered = new ProjectFileRepository({ projectsRoot: value.projects });
@@ -48,8 +50,10 @@ for (const stage of ["prepared", "working-copy-prepared", "working-copy-created"
     assert.deepEqual(await recovered.createVersionFromHistory(request), result);
     const workspace = await recovered.workspace({ sourcePath: result.sourcePath });
     assert.equal(workspace.manifest.versions.length, 2);
-    assert.equal(workspace.draft, null);
-    assert.equal(await readFile(draftPath, "utf8"), draftBefore);
+    assert.deepEqual(workspace.draft.comments, []);
+    const preserved = await recovered.listPreservedDrafts({ projectId: target.projectId });
+    const record = await recovered.readPreservedDraft({ projectId: target.projectId, recoveryId: preserved[0].recoveryId });
+    assert.deepEqual(record.draft, JSON.parse(draftBefore));
     assert.equal(await readFile(path.join(target.projectRootPath, "PROJECT.md"), "utf8"), rulesBefore);
     const opened = await recovered.queryHistoryCreation({ target, operationId: request.operationId, markOpened: true });
     assert.ok(opened.openedAt);
@@ -57,24 +61,16 @@ for (const stage of ["prepared", "working-copy-prepared", "working-copy-created"
   });
 }
 
-test("two repository instances replay one creation and preserve a colliding user file", async (t) => {
+test("two repository instances replay one creation without allocating another current file", async (t) => {
   const value = await fixture(t);
   const { target } = await importSource(value);
-  let collisionPath;
-  const collideBeforePublication = async (name, details) => {
-    if (name === "history-creation-before-link" && !collisionPath) {
-      collisionPath = details.visiblePath;
-      await writeFile(collisionPath, "user owned file");
-    }
-    return false;
-  };
-  const first = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: collideBeforePublication });
-  const second = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: collideBeforePublication });
+  const first = new ProjectFileRepository({ projectsRoot: value.projects });
+  const second = new ProjectFileRepository({ projectsRoot: value.projects });
   const request = { target, versionId: "ver_0001", operationId: "history_concurrent_0001", expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 };
   const [a, b] = await Promise.all([first.createVersionFromHistory(request), second.createVersionFromHistory(request)]);
   assert.deepEqual(a, b);
-  assert.notEqual(a.sourcePath, collisionPath);
-  assert.equal(await readFile(collisionPath, "utf8"), "user owned file");
+  assert.equal(a.sourcePath, target.exactSourcePath);
+  assert.equal((await first.workspace({ sourcePath: a.sourcePath })).manifest.workingCopies.length, 1);
 });
 
 test("creation refuses changed snapshots, changed current bytes and pending Candidates", async (t) => {
@@ -106,13 +102,12 @@ test("a changed source before manifest commit aborts without overwriting user fi
   const value = await fixture(t);
   const { target } = await importSource(value);
   const repository = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: async (name) => {
-    if (name === "history-creation-working-copy-created") await writeFile(target.exactSourcePath, html("external current"));
+    if (name === "current-version-state-written") await writeFile(target.exactSourcePath, html("external current"));
     return false;
   } });
   const request = { target, versionId: "ver_0001", operationId: "history_abort_0001", expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 };
-  const outcome = await repository.createVersionFromHistory(request);
-  assert.equal(outcome.status, "not-created");
-  assert.equal(outcome.aborted, true);
+  await assert.rejects(repository.createVersionFromHistory(request), { code: "WORKING_COPY_CONFLICT" });
+  assert.equal((await repository.queryHistoryCreation({ target, operationId: request.operationId })).status, "not-created");
   assert.equal(await readFile(target.exactSourcePath, "utf8"), html("external current"));
   const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
   await restarted.recoverProject({ projectRootPath: target.projectRootPath });
@@ -126,11 +121,11 @@ test("a changed source before manifest commit aborts without overwriting user fi
 
 test("legacy current Working Copy remains selected until explicit historical creation", async (t) => {
   const value = await fixture(t);
-  const { target } = await importSource(value);
+  const { target } = await importLegacySource(value);
   const latest = await promoteNextVersion(value.repository, target, "latest");
   const activated = await value.repository.activateVersionWorkingCopy({ target: latest, versionId: "ver_0001",
     operationId: "legacy_activation_0001", expectedActiveWorkingCopyId: "work_ver_0002" });
-  await value.repository.confirmVersionWorkingCopyActivation({ target: latest, operationId: "legacy_activation_0001",
+  await value.repository.confirmVersionWorkingCopyActivation({ target: activated.target, operationId: "legacy_activation_0001",
     previousWorkingCopyId: "work_ver_0002", activatedWorkingCopyId: "work_ver_0001", versionId: "ver_0001" });
   const before = await value.repository.workspace({ sourcePath: activated.target.exactSourcePath });
   assert.equal(before.runtime.activeWorkingCopyId, "work_ver_0001");
@@ -167,38 +162,34 @@ test("completed creation survives registered rename and reports supersession wit
   assert.equal(older.versionId, created.versionId);
 });
 
-for (const stage of ["working-copy-prepared", "working-copy-created"]) {
-  for (const replacement of [null, "prepared", "visible"]) {
-    if (stage === "working-copy-prepared" && replacement === "visible") continue;
-    test(`history recovery ${stage}: ${replacement || "observation drift"}`, async (t) => {
+for (const stage of ["prepared", "source-written"]) {
+  for (const replace of [false, true]) {
+    test(`current history recovery ${stage}: ${replace ? "same-byte replacement" : "observation drift"}`, async (t) => {
       const value = await fixture(t);
       const { target } = await importSource(value);
+      await value.repository.saveWorkingCopy({ target, html: html("local"), expectedSourceSha256: target.sourceSha256 });
+      const active = (await value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId })).target;
       const operationId = "history_identity_recovery_0001";
-      const repository = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: (name) => name === `history-creation-${stage}` });
-      await assert.rejects(repository.createVersionFromHistory({ target, versionId: "ver_0001", operationId,
-        expectedSourceSha256: target.sourceSha256, expectedSnapshotSha256: target.sourceSha256 }), { code: "INJECTED_FAILPOINT" });
-      const directory = path.join(target.projectRootPath, ".pageroot/transactions", `history_${operationId}`);
+      const repository = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: (name) => name === `current-version-${stage}` });
+      await assert.rejects(repository.createVersionFromHistory({ target: active, versionId: "ver_0001", operationId,
+        expectedSourceSha256: active.sourceSha256, expectedSnapshotSha256: target.sourceSha256 }), { code: "INJECTED_FAILPOINT" });
+      const directory = path.join(target.projectRootPath, ".pageroot/transactions", `current_${operationId}`);
       const journalPath = path.join(directory, "transaction.json");
       const journal = JSON.parse(await readFile(journalPath, "utf8"));
-      // Durable observations differ from this process; no authority is inferred
-      // from these values. Current anchor links must still prove the object.
-      journal.preparedFileIdentity.device += 17;
-      journal.preparedFileIdentity.inode += 23;
+      journal.beforeMember.fileIdentity.device += "17";
+      journal.beforeMember.fileIdentity.inode += "23";
       await writeFile(journalPath, JSON.stringify(journal));
-      if (replacement) {
-        const file = replacement === "prepared" ? path.join(directory, "working-copy.html")
-          : path.join(target.projectRootPath, journal.finalWorkingCopyRelativePath);
-        const bytes = await readFile(file);
-        await unlink(file);
-        await writeFile(file, bytes);
+      if (replace) {
+        const bytes = await readFile(target.exactSourcePath);
+        await unlink(target.exactSourcePath);
+        await writeFile(target.exactSourcePath, bytes);
       }
       const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
-      await restarted.recoverProject({ projectRootPath: target.projectRootPath });
+      if (replace) await assert.rejects(restarted.recoverProject({ projectRootPath: target.projectRootPath }), { code: "WORKING_COPY_CONFLICT" });
+      else await restarted.recoverProject({ projectRootPath: target.projectRootPath });
       const result = await restarted.queryHistoryCreation({ target, operationId });
-      assert.equal(result.status, replacement ? "not-created" : "created");
-      if (replacement) assert.equal(result.code, "HISTORY_CREATION_FILE_CHANGED");
-      else assert.equal(result.versionId, "ver_0002");
-      assert.equal(await readFile(target.exactSourcePath, "utf8"), html("V1"));
+      assert.equal(result.status, replace ? "not-created" : "created");
+      assert.equal(await readFile(target.exactSourcePath, "utf8"), stage === "prepared" && replace ? html("local") : html("V1"));
     });
   }
 }

@@ -201,6 +201,10 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     validateRejects("project-runtime-state.v4.schema.json", activeRequestWithTerminalDisplay),
   ]);
 
+  // A pending adoption written by the old build still uses its recoverable legacy journal.
+  const legacyManifest = await json(path.join(controlRoot, "manifest.json"));
+  delete legacyManifest.currentDraftSchemaVersion;
+  await writeFile(path.join(controlRoot, "manifest.json"), JSON.stringify(legacyManifest));
   const promoted = await repository.promoteCandidate({
     target: imported.target,
     candidateId: candidate.candidate.candidateId,
@@ -300,4 +304,25 @@ test("v4 schemas validate manual historical provenance without rewriting legacy 
   const fakeAi = structuredClone(workspace.manifest);
   fakeAi.versions[1].sourceRequestId = "req_fake_ai";
   await validateRejects("project-manifest.v4.schema.json", fakeAi);
+});
+
+test("current draft disk schemas validate one member, local snapshots and recovery records", async (t) => {
+  const { fixture, importSource } = await import("./project-file-repository-harness.mjs");
+  const value = await fixture(t); const { target } = await importSource(value);
+  await value.repository.saveWorkingCopy({ target, html: html("local"), expectedSourceSha256: target.sourceSha256 });
+  const active = (await value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId })).target;
+  const saved = await value.repository.createVersionFromCurrent({ target: active, operationId: "schema_local_snapshot", expectedSourceSha256: active.sourceSha256 });
+  await validate("current-version-transaction.v1.schema.json", await json(path.join(target.projectRootPath, ".pageroot/transactions/current_schema_local_snapshot/transaction.json")));
+  const local = (await value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId })).target;
+  await value.repository.createVersionFromHistory({ target: local, versionId: "ver_0001", operationId: "schema_current_replace", expectedSourceSha256: local.sourceSha256, expectedSnapshotSha256: target.sourceSha256 });
+  const records = await value.repository.listPreservedDrafts({ projectId: target.projectId });
+  await validate("preserved-draft.v1.schema.json", await json(path.join(target.projectRootPath, ".pageroot/recovery/preserved-drafts", records[0].recoveryId, "record.json")));
+  const manifest = await json(path.join(target.projectRootPath, ".pageroot/manifest.json"));
+  await validate("project-manifest.v4.schema.json", manifest);
+  assert.equal(manifest.versions[1].sourceType, "local-save");
+  const extra = structuredClone(manifest); extra.workingCopies.push(structuredClone(extra.workingCopies[0]));
+  await validateRejects("project-manifest.v4.schema.json", extra);
+  const unknown = structuredClone(manifest); unknown.currentDraftSchemaVersion = "2.0.0";
+  await validateRejects("project-manifest.v4.schema.json", unknown);
+  assert.equal(saved.workingCopyId, target.workingCopyId);
 });

@@ -1893,6 +1893,23 @@ async function projectFileHistoryCreation(body, action) {
   } catch (cause) { throw projectFileHttpError(cause); }
 }
 
+async function projectFileCurrentVersion(body, action) {
+  const allowedKeys = new Set(["target", "operationId", "expectedSourceSha256", "recoveryId"]);
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !allowedKeys.has(key))) {
+    throw new HttpError(400, "INVALID_CURRENT_VERSION", "The current Version payload is invalid.");
+  }
+  const target = projectFileTargetFromBody(body.target);
+  if (!target || target.targetKind !== "working-copy") throw new HttpError(400, "OPEN_TARGET_REQUIRED", "A current draft identity is required.");
+  try {
+    const input = { target, operationId: body.operationId, expectedSourceSha256: body.expectedSourceSha256, recoveryId: body.recoveryId };
+    const result = action === "create" ? await projectFileRepository.createVersionFromCurrent(input)
+      : action === "restore" ? await projectFileRepository.restorePreservedDraft(input)
+        : action === "restore-result" ? await projectFileRepository.queryPreservedDraftRestore(input)
+          : await projectFileRepository.queryCurrentVersionCreation(input);
+    return { ok: true, ...result };
+  } catch (cause) { throw projectFileHttpError(cause); }
+}
+
 async function continueProjectFileHistoryVersion(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new HttpError(400, "INVALID_HISTORY_CONTINUE", "The history continuation payload is invalid.");
@@ -2671,6 +2688,21 @@ async function route(request, response) {
   }
   if (request.method === "GET" && url.pathname === "/registered-projects") {
     sendJson(response, 200, await registeredProjectCatalog());
+    return;
+  }
+  if (request.method === "GET" && ["/preserved-drafts", "/preserved-draft"].includes(url.pathname)) {
+    try {
+      const projectId = registeredProjectId(url.searchParams.get("projectId"));
+      const result = url.pathname === "/preserved-drafts"
+        ? { ok: true, projectId, drafts: await projectFileRepository.listPreservedDrafts({ projectId }) }
+        : { ok: true, ...await projectFileRepository.readPreservedDraft({ projectId, recoveryId: url.searchParams.get("recoveryId") }) };
+      sendJson(response, 200, result);
+    } catch (cause) { throw projectFileHttpError(cause); }
+    return;
+  }
+  if (request.method === "POST" && ["/current-version/create", "/current-version/result", "/preserved-draft/restore", "/preserved-draft/result"].includes(url.pathname)) {
+    const action = url.pathname === "/current-version/create" ? "create" : url.pathname === "/preserved-draft/restore" ? "restore" : url.pathname === "/preserved-draft/result" ? "restore-result" : "result";
+    sendJson(response, 200, await projectFileCurrentVersion(await readBody(request), action));
     return;
   }
   if (request.method === "GET" && url.pathname === "/registered-project/versions") {
