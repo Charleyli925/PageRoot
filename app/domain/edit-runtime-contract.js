@@ -1,3 +1,4 @@
+import { parse as parseJavaScript } from "acorn";
 import { parse as parseHtmlDocument } from "parse5";
 
 /**
@@ -19,6 +20,7 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   declaredAssetBytes: 2 * 1024 * 1024,
   remoteLibraryDeadlineMs: 60_000,
   runtimeDeadlineMs: 4_000,
+  runtimeSurfaceDeadlineMs: 12_000,
   orphanSessionTtlMs: 60_000,
 });
 
@@ -27,7 +29,8 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
 // fail-safe for hostile or broken author code and never a minimum wait.
 export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS = (
   EDIT_AUTHOR_RUNTIME_BUDGET.remoteLibraryDeadlineMs
-  + (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2)
+  + EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
+  + EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs
 ) + 1_000;
 
 export const EDIT_RUNTIME_PROTOCOL_SCHEME = "pageroot-edit-runtime";
@@ -60,27 +63,6 @@ function frozenArray(value) {
 
 function asciiLower(value) {
   return String(value || "").toLowerCase();
-}
-
-function isNameBoundary(value) {
-  return value === "" || /[\t\n\f\r />]/u.test(value);
-}
-
-function htmlTagEnd(source, start) {
-  let quote = "";
-  for (let cursor = start; cursor < source.length; cursor += 1) {
-    const character = source[cursor];
-    if (quote) {
-      if (character === quote) quote = "";
-      continue;
-    }
-    if (character === "\"" || character === "'") {
-      quote = character;
-      continue;
-    }
-    if (character === ">") return cursor;
-  }
-  return -1;
 }
 
 function attributesFromOpeningTag(openingTag) {
@@ -152,23 +134,36 @@ function scriptPolicy(attributes) {
 }
 
 /**
- * Returns the first authored, live-document <base href> using HTML parser tree
- * order. A base without href does not win, and inert template contents never
- * participate in the document base URL.
+ * Parses one exact HTML revision once and derives every authored-program fact
+ * consumed by the Edit Runtime. Template descendants and scripting-enabled
+ * noscript text are deliberately excluded from the live document tree.
  */
-export function authoredDocumentBase(html) {
-  const source = String(html || "");
+export function analyzeEditRuntimeDocument(html) {
+  const source = String(html ?? "");
+  const scripts = [];
+  let unsupportedReason = null;
+  let activeIndex = 0;
+  let documentBase = null;
   let document;
   try {
-    document = parseHtmlDocument(source, { sourceCodeLocationInfo: true });
+    document = parseHtmlDocument(source, {
+      scriptingEnabled: true,
+      sourceCodeLocationInfo: true,
+    });
   } catch {
-    return null;
+    return Object.freeze({
+      source,
+      scripts: frozenArray(scripts),
+      executableScripts: frozenArray([]),
+      unsupportedReason: "invalid-html",
+      documentBase: null,
+      programIdentity: null,
+    });
   }
-  let result = null;
   const visit = (node) => {
-    if (result) return;
     if (
-      node?.namespaceURI === HTML_NAMESPACE
+      !documentBase
+      && node?.namespaceURI === HTML_NAMESPACE
       && String(node?.tagName || "").toLowerCase() === "base"
     ) {
       const hrefAttribute = (node.attrs || []).find((attribute) => (
@@ -176,87 +171,96 @@ export function authoredDocumentBase(html) {
       ));
       const startTag = node.sourceCodeLocation?.startTag;
       if (hrefAttribute && startTag) {
-        result = Object.freeze({
+        documentBase = Object.freeze({
           href: String(hrefAttribute.value || ""),
           openingTag: source.slice(startTag.startOffset, startTag.endOffset),
         });
-        return;
       }
     }
-    // parse5 stores template descendants in node.content. Deliberately visit
-    // only live childNodes: inert template contents cannot set document.baseURI.
+    if (
+      String(node?.tagName || "").toLowerCase() === "script"
+      && node.sourceCodeLocation?.startTag
+    ) {
+      const location = node.sourceCodeLocation;
+      if (!location.endTag) {
+        unsupportedReason ||= "unterminated-script";
+        return;
+      }
+      const openingTag = source.slice(
+        location.startTag.startOffset,
+        location.startTag.endOffset,
+      );
+      const body = source.slice(
+        location.startTag.endOffset,
+        location.endTag.startOffset,
+      );
+      const attributes = attributesFromOpeningTag(openingTag);
+      const policy = scriptPolicy(attributes);
+      const src = attributeValue(attributes, "src");
+      const entry = Object.freeze({
+        startOffset: location.startTag.startOffset,
+        endOffset: location.endTag.endOffset,
+        openingTag,
+        attributes,
+        type: asciiLower(attributeValue(attributes, "type") || "").trim(),
+        src: src === null ? null : src,
+        inline: body,
+        executable: policy.executable,
+        index: policy.executable ? activeIndex : null,
+        reason: policy.reason,
+      });
+      scripts.push(entry);
+      if (policy.reason) unsupportedReason ||= policy.reason;
+      if (policy.executable) activeIndex += 1;
+    }
+    // Template descendants live under node.content and are deliberately not
+    // visited. Raw-text containers expose their apparent markup only as text.
     for (const child of node?.childNodes || []) visit(child);
   };
   visit(document);
-  return result;
+  const frozenScripts = frozenArray(scripts);
+  const executableScripts = frozenArray(
+    frozenScripts.filter((script) => script.executable),
+  );
+  const programIdentity = unsupportedReason || executableScripts.length < 1
+    ? null
+    : JSON.stringify({
+        documentBase: documentBase?.openingTag || null,
+        scripts: executableScripts.map((script) => ({
+          openingTag: script.openingTag,
+          inline: script.inline,
+        })),
+      });
+  return Object.freeze({
+    source,
+    scripts: frozenScripts,
+    executableScripts,
+    unsupportedReason,
+    documentBase,
+    programIdentity,
+  });
 }
 
 /**
- * Scans HTML executable script elements. The parser also treats a closing
- * script tag inside a JavaScript string as a terminator, so this deliberately
- * conservative scanner follows browser parsing instead of inventing JS rules.
+ * Returns the first authored, live-document <base href> using HTML parser tree
+ * order. A base without href does not win, and inert template contents never
+ * participate in the document base URL.
+ */
+export function authoredDocumentBase(html) {
+  return analyzeEditRuntimeDocument(html).documentBase;
+}
+
+/**
+ * Collects authored Script elements from the live parsed document tree. Exact
+ * source locations preserve author bytes while naturally excluding comments,
+ * raw-text element content and inert template.content from execution identity.
  */
 export function collectEditRuntimeScripts(html) {
-  const source = String(html ?? "");
-  const scripts = [];
-  let unsupportedReason = null;
-  let cursor = 0;
-  let activeIndex = 0;
-  const lower = source.toLowerCase();
-  while (cursor < source.length) {
-    const comment = source.indexOf("<!--", cursor);
-    const opening = lower.indexOf("<script", cursor);
-    if (comment >= 0 && (opening < 0 || comment < opening)) {
-      const end = source.indexOf("-->", comment + 4);
-      cursor = end < 0 ? source.length : end + 3;
-      continue;
-    }
-    if (opening < 0) break;
-    if (!isNameBoundary(source[opening + 7] || "")) {
-      cursor = opening + 7;
-      continue;
-    }
-    const openingEnd = htmlTagEnd(source, opening + 7);
-    if (openingEnd < 0) break;
-    let closingStart = lower.indexOf("</script", openingEnd + 1);
-    while (closingStart >= 0 && !isNameBoundary(source[closingStart + 8] || "")) {
-      closingStart = lower.indexOf("</script", closingStart + 8);
-    }
-    if (closingStart < 0) {
-      unsupportedReason ||= "unterminated-script";
-      break;
-    }
-    const closingEnd = htmlTagEnd(source, closingStart + 8);
-    if (closingEnd < 0) {
-      unsupportedReason ||= "unterminated-script";
-      break;
-    }
-    const openingTag = source.slice(opening, openingEnd + 1);
-    const attributes = attributesFromOpeningTag(openingTag);
-    const policy = scriptPolicy(attributes);
-    const src = attributeValue(attributes, "src");
-    const body = source.slice(openingEnd + 1, closingStart);
-    const entry = Object.freeze({
-      startOffset: opening,
-      endOffset: closingEnd + 1,
-      openingTag,
-      attributes,
-      type: asciiLower(attributeValue(attributes, "type") || "").trim(),
-      src: src === null ? null : src,
-      inline: body,
-      executable: policy.executable,
-      index: policy.executable ? activeIndex : null,
-      reason: policy.reason,
-    });
-    scripts.push(entry);
-    if (policy.reason) unsupportedReason ||= policy.reason;
-    if (policy.executable) activeIndex += 1;
-    cursor = closingEnd + 1;
-  }
+  const analysis = analyzeEditRuntimeDocument(html);
   return Object.freeze({
-    scripts: frozenArray(scripts),
-    executableScripts: frozenArray(scripts.filter((script) => script.executable)),
-    unsupportedReason,
+    scripts: analysis.scripts,
+    executableScripts: analysis.executableScripts,
+    unsupportedReason: analysis.unsupportedReason,
   });
 }
 
@@ -267,15 +271,57 @@ export function collectEditRuntimeScripts(html) {
  * new Canvas generation and a new Main-authorized resource closure.
  */
 export function editRuntimeProgramIdentity(html) {
-  const contract = collectEditRuntimeScripts(html);
-  if (contract.unsupportedReason || contract.executableScripts.length < 1) return null;
-  return JSON.stringify({
-    documentBase: authoredDocumentBase(html)?.openingTag || null,
-    scripts: contract.executableScripts.map((script) => ({
-      openingTag: script.openingTag,
-      inline: script.inline,
-    })),
-  });
+  return analyzeEditRuntimeDocument(html).programIdentity;
+}
+
+function containsImportInAst(root) {
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node || typeof node !== "object") continue;
+    if (
+      node.type === "ImportDeclaration"
+      || node.type === "ImportExpression"
+      || (
+        (node.type === "ExportAllDeclaration" || node.type === "ExportNamedDeclaration")
+        && node.source
+      )
+    ) return true;
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) pending.push(...value);
+      else if (value && typeof value === "object") pending.push(value);
+    }
+  }
+  return false;
+}
+
+function containsJavaScriptImportSyntax(source) {
+  const options = {
+    ecmaVersion: "latest",
+    allowImportExportEverywhere: true,
+    allowAwaitOutsideFunction: true,
+  };
+  try {
+    return containsImportInAst(parseJavaScript(source, {
+      ...options,
+      sourceType: "script",
+    }));
+  } catch {
+    try {
+      // Module-only grammar such as top-level using declarations is valid in
+      // supported import-free module scripts. A second maintained-parser goal
+      // prevents a real dependency later in that program from failing open.
+      return containsImportInAst(parseJavaScript(source, {
+        ...options,
+        sourceType: "module",
+      }));
+    } catch {
+      // Syntax errors are Runtime Script failures, not proof of an unsupported
+      // loading dependency. Acorn owns syntax distinctions such as Annex-B
+      // HTML comments, regexps, strings, property names and import.meta.
+    }
+  }
+  return false;
 }
 
 /**
@@ -285,7 +331,7 @@ export function editRuntimeProgramIdentity(html) {
  */
 export function unsupportedEditRuntimeProgramReason(source) {
   const program = String(source || "");
-  if (/\bimport\s*\(/u.test(program) || /\bimport\s+[^('"\x60]/u.test(program)) {
+  if (containsJavaScriptImportSyntax(program)) {
     return "dynamic-or-module-import";
   }
   return null;

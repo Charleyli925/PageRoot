@@ -37,6 +37,22 @@ function suiteIds(plan) {
   return plan.suites.map(({ id }) => id);
 }
 
+test("real HTML observer changes select the paired Browser trust probe", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["tests/e2e/electron/real-html/runtime-observer.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "node-targeted",
+    "build-web",
+    "browser-editing-smoke",
+  ]);
+  assert.ok(plan.selectedNodeTests.includes("tests/real-html-stage-contracts.test.mjs"));
+});
+
 const TASK_OWNER_CASES = [
   {
     file: "app/lib/comment-rail-layout.js",
@@ -96,6 +112,7 @@ const TASK_OWNER_CASES = [
     file: "app/workbench/review-document.ts",
     nodeTests: [
       "tests/review-analysis-session.test.mjs",
+      "tests/review-annotation-fallback.test.mjs",
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-projection-facts.test.mjs",
     ],
@@ -112,6 +129,7 @@ const TASK_OWNER_CASES = [
       "tests/review-analysis-session.test.mjs",
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-projection-facts.test.mjs",
+      "tests/review-annotation-fallback.test.mjs",
     ],
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
@@ -123,6 +141,7 @@ const TASK_OWNER_CASES = [
   {
     file: "app/workbench/review/parse.ts",
     nodeTests: [
+      "tests/review-annotation-fallback.test.mjs",
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-projection-facts.test.mjs",
     ],
@@ -135,7 +154,7 @@ const TASK_OWNER_CASES = [
       "build-desktop",
       "ai-review-smoke",
     ],
-    directOwners: ["tests/review-badge-aggregation.test.mjs", "tests/review-projection-facts.test.mjs"],
+    directOwners: ["tests/review-badge-aggregation.test.mjs", "tests/review-projection-facts.test.mjs", "tests/review-annotation-fallback.test.mjs"],
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
       "tests/desktop-preload-ipc.test.mjs",
@@ -214,6 +233,7 @@ const TASK_OWNER_CASES = [
     nodeTests: [
       "tests/durable-working-copy-binding.test.mjs",
       "tests/history-creation.test.mjs",
+      "tests/legacy-history-activation.test.mjs",
       "tests/project-ai-task-projection.test.mjs",
       "tests/project-candidate-promotion.test.mjs",
       "tests/project-catalog-readonly.test.mjs",
@@ -225,6 +245,7 @@ const TASK_OWNER_CASES = [
       "tests/project-registry-and-open.test.mjs",
       "tests/project-request-authority.test.mjs",
       "tests/project-working-copy-save.test.mjs",
+      "tests/save-retirement.test.mjs",
       "tests/source-element-identity-migration.test.mjs",
       "tests/workspace-performance-timing.test.mjs",
     ],
@@ -695,7 +716,42 @@ test("real-HTML gate changes run the discovery oracle instead of an unrelated sm
     lane: "task",
     changedFiles: ["tests/e2e/browser/real-complex-html.gate.mjs"],
   });
-  assert.deepEqual(suiteIds(plan), ["typecheck", "lint", "build-web", "real-html"]);
+  assert.deepEqual(
+    suiteIds(plan),
+    ["typecheck", "lint", "build-web", "dom-editing-compatibility"],
+  );
+});
+
+test("real-HTML result and byte oracles select their focused Node tests", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: [
+      "tests/e2e/electron/real-html/result-model.mjs",
+      "tests/helpers/source-byte-region-oracle.mjs",
+    ],
+  });
+  assert.deepEqual(plan.selectedNodeTests, [
+    "tests/clipboard-snapshot.test.mjs",
+    "tests/real-html-extended-format-evidence.test.mjs",
+    "tests/real-html-result-model.test.mjs",
+    "tests/real-html-source-scope.test.mjs",
+    "tests/real-html-stage-contracts.test.mjs",
+    "tests/source-byte-region-oracle.test.mjs",
+    "tests/workspace-provenance.test.mjs",
+  ]);
+  assert.deepEqual(suiteIds(plan), ["node-targeted"]);
+
+  for (const changedFile of [
+    "tests/e2e/electron/helpers/clipboard-snapshot.mjs",
+    "tests/e2e/electron/local-html-corpus.mjs",
+  ]) {
+    const runnerPlan = selectGatePlan({ map, lane: "edit", changedFiles: [changedFile] });
+    assert.equal(runnerPlan.selectedNodeTests.includes("tests/clipboard-snapshot.test.mjs"), true);
+    assert.equal(runnerPlan.selectedNodeTests.includes("tests/real-html-extended-format-evidence.test.mjs"), true);
+    assert.equal(runnerPlan.selectedNodeTests.includes("tests/real-html-source-scope.test.mjs"), true);
+    assert.equal(runnerPlan.selectedNodeTests.includes("tests/real-html-stage-contracts.test.mjs"), true);
+  }
 });
 
 test("the shared fixture driver schedules both browser and Electron smoke", () => {
@@ -802,6 +858,19 @@ test("Qoder ACP transport changes select Qoder and ACP owners without the packag
   assert.equal(plan.selectedNodeTests.includes("tests/desktop-package.test.mjs"), false);
 });
 
+test("native HTTP provider imports retain the packaged Bridge resource closure", () => {
+  for (const file of [
+    "shared/agent-input-policy.mjs",
+    "bridge/agent/providers/openai-compatible-provider.mjs",
+  ]) {
+    const plan = selectGatePlan({ map, lane: "task", changedFiles: [file] });
+    assert.ok(
+      plan.selectedNodeTests.includes("tests/desktop-package.test.mjs"),
+      file,
+    );
+  }
+});
+
 test("notification, comment, and presentation Browser owners select their smoke lane", () => {
   const cases = [
     ["tests/e2e/browser/native-dom-notification-recovery.spec.mjs", "browser-comments-smoke"],
@@ -828,7 +897,7 @@ test("release and artifact lanes use complete automated coverage and never smoke
     "build-web",
     "node-full",
     "browser-full",
-    "real-html",
+    "dom-editing-compatibility",
     "build-desktop",
     "electron-full",
     "ai-closed-loop",

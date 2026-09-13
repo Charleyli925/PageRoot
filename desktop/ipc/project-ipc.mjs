@@ -120,10 +120,6 @@ export function registerProjectIpc({
     trustedProject(handlers.prepareEditAuthorRuntime, "edit_runtime_prepare"),
   );
   ipcMain.handle(
-    EDIT_RUNTIME_CHANNELS.recover,
-    trustedProject(handlers.recoverEditAuthorRuntime, "edit_runtime_recover"),
-  );
-  ipcMain.handle(
     EDIT_RUNTIME_CHANNELS.revoke,
     trustedProject(handlers.revokeEditAuthorRuntime, "edit_runtime_revoke"),
   );

@@ -320,6 +320,35 @@
   opacity: .58;
 }
 
+.settings-range {
+  width: 154px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 9px;
+}
+
+.settings-range input {
+  width: 100%;
+  accent-color: #6159d3;
+}
+
+.settings-range input:focus-visible {
+  outline: 2px solid rgb(90 85 223 / 35%);
+  outline-offset: 2px;
+}
+
+.settings-range output {
+  color: #66636f;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.settings-range:has(input:disabled) {
+  opacity: .58;
+}
+
 .settings-secondary-action {
   min-height: 34px;
   display: inline-flex;

@@ -170,3 +170,53 @@ export function reviewRegionAnnotations(records, options = {}) {
     || first.changeId.localeCompare(second.changeId)
   ));
 }
+
+/**
+ * Decide whether one already-selected focus region is useful as a visible
+ * outline. Navigation and the context mask remain independent of this answer.
+ * Multi-screen/page-sized geometry fails closed; it is never cropped into a
+ * smaller box because that would visually claim a target the analyzer did not.
+ * @param {{left:number,top:number,right:number,bottom:number,viewportWidth:number,viewportHeight:number,documentWidth:number,documentHeight:number}} geometry
+ */
+export function reviewFocusOutlineIsUseful(geometry) {
+  if (!geometry || typeof geometry !== "object") return false;
+  const left = Number(geometry.left);
+  const top = Number(geometry.top);
+  const right = Number(geometry.right);
+  const bottom = Number(geometry.bottom);
+  const viewportWidth = Number(geometry.viewportWidth);
+  const viewportHeight = Number(geometry.viewportHeight);
+  const documentWidth = Number(geometry.documentWidth);
+  const documentHeight = Number(geometry.documentHeight);
+  if (![left, top, right, bottom, viewportWidth, viewportHeight, documentWidth, documentHeight]
+    .every(Number.isFinite)) return false;
+  const width = right - left;
+  const height = bottom - top;
+  if (width <= 1 || height <= 1 || viewportWidth <= 0 || viewportHeight <= 0) return false;
+  if (height > viewportHeight * 1.15 || width > viewportWidth * 1.35) return false;
+  if (width * height > viewportWidth * viewportHeight * 1.15) return false;
+  const nearlyWholeDocument = top <= 8
+    && bottom >= documentHeight - 8
+    && width >= Math.min(documentWidth, viewportWidth) * .8;
+  return !nearlyWholeDocument;
+}
+
+/**
+ * Short targets read best in the viewport center. A target approaching a full
+ * viewport instead exposes its authored beginning so the reader can proceed
+ * downward without landing in the middle of a long table/list/section.
+ * @param {{scrollTop:number,rectTop:number,rectHeight:number,viewportHeight:number,maximumScrollTop:number}} geometry
+ */
+export function reviewTargetScrollTop(geometry) {
+  const scrollTop = Number(geometry?.scrollTop);
+  const rectTop = Number(geometry?.rectTop);
+  const rectHeight = Number(geometry?.rectHeight);
+  const viewportHeight = Number(geometry?.viewportHeight);
+  const maximumScrollTop = Number(geometry?.maximumScrollTop);
+  if (![scrollTop, rectTop, rectHeight, viewportHeight, maximumScrollTop].every(Number.isFinite)
+    || rectHeight <= 0 || viewportHeight <= 0 || maximumScrollTop < 0) return null;
+  const desired = rectHeight <= viewportHeight * .72
+    ? scrollTop + rectTop - (viewportHeight - rectHeight) / 2
+    : scrollTop + rectTop - Math.max(18, viewportHeight * .08);
+  return Math.min(maximumScrollTop, Math.max(0, desired));
+}

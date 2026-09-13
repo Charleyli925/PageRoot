@@ -243,14 +243,6 @@ test("preload exposes one narrow disposable Edit runtime resource port", async (
         executionId: "abcdefabcdefabcdefabcdef",
       });
     }
-    if (args[0] === "html-edit-runtime:recover") {
-      return success({
-        contractVersion: 2,
-        sessionId: "11111111111111111111111111111111",
-        executionId: "222222222222222222222222",
-        resourceMode: "exact",
-      });
-    }
     return success({ revoked: true });
   });
   const payload = {
@@ -268,30 +260,16 @@ test("preload exposes one narrow disposable Edit runtime resource port", async (
     executionId: "abcdefabcdefabcdefabcdef",
   });
   assert.deepEqual(calls[0], ["html-edit-runtime:prepare", payload]);
-  const recovery = {
-    sessionId: "0123456789abcdef0123456789abcdef",
-    sourceSha256: payload.sourceSha256,
-    programIdentity: payload.programIdentity,
-    canvasGeneration: payload.canvasGeneration,
-  };
-  assert.deepEqual(await editRuntime.recover(recovery), {
-    contractVersion: 2,
-    sessionId: "11111111111111111111111111111111",
-    executionId: "222222222222222222222222",
-    resourceMode: "exact",
-  });
-  assert.deepEqual(calls[1], ["html-edit-runtime:recover", recovery]);
   assert.deepEqual(
     await editRuntime.revoke("0123456789abcdef0123456789abcdef"),
     { revoked: true },
   );
-  assert.deepEqual(calls[2], [
+  assert.deepEqual(calls[1], [
     "html-edit-runtime:revoke",
     "0123456789abcdef0123456789abcdef",
   ]);
   assert.deepEqual(Object.keys(editRuntime).sort(), [
     "prepare",
-    "recover",
     "revoke",
   ]);
 });
@@ -349,8 +327,18 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
       defaultAgentProviderId: "qoder",
     },
   });
+  await uiPreferences.record({
+    workspace: {
+      reviewChangeContextVisibility: 31,
+      reviewCommentContextVisibility: 19,
+    },
+  });
   assert.equal(calls[1][0], "html-ui-preferences:record");
   assert.equal(calls[1][1].workspace.sidebarWidth, 320);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[2][1].workspace)), {
+    reviewChangeContextVisibility: 31,
+    reviewCommentContextVisibility: 19,
+  });
   await assert.rejects(
     () => uiPreferences.record({ action: "dismissed" }),
     /工作台偏好记录无效/u,
@@ -360,18 +348,22 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     /工作台偏好记录无效/u,
   );
   await assert.rejects(
+    () => uiPreferences.record({ workspace: { reviewChangeContextVisibility: 101 } }),
+    /工作台偏好记录无效/u,
+  );
+  await assert.rejects(
     () => uiPreferences.record({ workspace: { defaultAgentProviderId: "gemini" } }),
     /工作台偏好记录无效/u,
   );
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   await uiPreferences.record({ workspace: { defaultAgentProviderId: "pageroot" } });
-  assert.equal(calls[2][1].workspace.defaultAgentProviderId, "pageroot");
+  assert.equal(calls[3][1].workspace.defaultAgentProviderId, "pageroot");
   await assert.rejects(
     () => uiPreferences.record({ workspace: { disabledAgentProviderIds: ["gemini"] } }),
     /工作台偏好记录无效/u,
   );
   await uiPreferences.record({ workspace: { disabledAgentProviderIds: ["codex"] } });
-  assert.deepEqual(calls[3][1].workspace.disabledAgentProviderIds, ["codex"]);
+  assert.deepEqual(calls[4][1].workspace.disabledAgentProviderIds, ["codex"]);
   assert.deepEqual(Object.keys(uiPreferences).sort(), ["get", "record"]);
 });
 
@@ -1325,6 +1317,7 @@ test("preload exposes a clean product error without IPC implementation details",
     error: {
       code: "PERMISSION_DENIED",
       message: "没有访问该位置的权限，请选择其他位置。",
+      details: { operationId: "operation_0001", reason: "destination" },
     },
   }));
 
@@ -1333,10 +1326,109 @@ test("preload exposes a clean product error without IPC implementation details",
     (error) => {
       assert.equal(error.code, "PERMISSION_DENIED");
       assert.equal(error.message, "没有访问该位置的权限，请选择其他位置。");
+      assert.deepEqual(JSON.parse(JSON.stringify(error.details)), {
+        operationId: "operation_0001",
+        reason: "destination",
+      });
+      assert.equal("stack" in error, false);
+      assert.equal("channel" in error, false);
       assert.doesNotMatch(
         error.message,
         /Error invoking remote method|html-projects:|ProjectFileError|stack/i,
       );
+      return true;
+    },
+  );
+});
+
+test("preload preserves only a validated public reclassification confirmation", async () => {
+  const api = await loadPreload(async () => ({
+    protocol: PROJECT_IPC_PROTOCOL,
+    version: PROJECT_IPC_VERSION,
+    ok: false,
+    error: {
+      code: "OPEN_INTENT_RECLASSIFIED",
+      message: "这个文件之前已经导入过了，请确认后打开之前的项目。",
+      details: {
+        confirmation: {
+          openKind: "confirmation",
+          requestId: "req_reclassified",
+          classification: "known-external",
+          sourceFileName: "产品首页.html",
+          visibleV1FileName: "产品首页.html",
+          projectsRootLabel: "HTML编辑器",
+          projectName: "产品首页",
+          currentBasedOnVersionId: null,
+          currentBasedOnOrdinal: 0,
+          latestOfficialVersionId: null,
+          latestOfficialOrdinal: 0,
+          currentDiffersFromBase: false,
+          sourceRelation: "unchanged",
+          sourcePath: "/private/secret.html",
+          nested: { secret: "do-not-forward" },
+        },
+        safeReason: "reclassified",
+        unknownNested: { channel: "html-projects:open" },
+      },
+    },
+  }));
+
+  await assert.rejects(
+    api.openHtml(),
+    (error) => {
+      assert.equal(error.code, "OPEN_INTENT_RECLASSIFIED");
+      assert.deepEqual(JSON.parse(JSON.stringify(error.details)), {
+        confirmation: {
+          openKind: "confirmation",
+          requestId: "req_reclassified",
+          classification: "known-external",
+          sourceFileName: "产品首页.html",
+          projectName: "产品首页",
+          currentBasedOnVersionId: null,
+          currentBasedOnOrdinal: 0,
+          latestOfficialVersionId: null,
+          latestOfficialOrdinal: 0,
+          currentDiffersFromBase: false,
+          sourceRelation: "unchanged",
+        },
+        safeReason: "reclassified",
+      });
+      assert.doesNotMatch(JSON.stringify(error), /secret|channel|html-projects|sourcePath/u);
+      return true;
+    },
+  );
+
+  const forgedCodeApi = await loadPreload(async () => ({
+    protocol: PROJECT_IPC_PROTOCOL,
+    version: PROJECT_IPC_VERSION,
+    ok: false,
+    error: {
+      code: "PERMISSION_DENIED",
+      message: "拒绝访问。",
+      details: {
+        confirmation: {
+          openKind: "confirmation",
+          requestId: "req_reclassified",
+          classification: "known-external",
+          sourceFileName: "产品首页.html",
+          visibleV1FileName: "产品首页.html",
+          projectsRootLabel: "HTML编辑器",
+          projectName: "产品首页",
+          currentBasedOnVersionId: null,
+          currentBasedOnOrdinal: 0,
+          latestOfficialVersionId: null,
+          latestOfficialOrdinal: 0,
+          currentDiffersFromBase: false,
+          sourceRelation: "unchanged",
+        },
+      },
+    },
+  }));
+  await assert.rejects(
+    forgedCodeApi.openHtml(),
+    (error) => {
+      assert.equal(error.code, "PERMISSION_DENIED");
+      assert.equal(error.details, undefined);
       return true;
     },
   );

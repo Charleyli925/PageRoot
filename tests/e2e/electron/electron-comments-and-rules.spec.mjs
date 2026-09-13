@@ -104,6 +104,37 @@ test("长期规则入口打开唯一规则标签并保留 HTML 画布", async ()
       "utf8",
     )).toContain("只修改首页标题");
 
+    await editor.focus();
+    await editor.press("End");
+    await editor.evaluate((element) => {
+      window.__rulesCompositionTextarea = element;
+      window.__rulesCompositionEvents = [];
+      for (const type of ["compositionstart", "compositionend"]) {
+        element.addEventListener(type, () => window.__rulesCompositionEvents.push(type));
+      }
+    });
+    const cdp = await launched.page.context().newCDPSession(launched.page);
+    await cdp.send("Input.imeSetComposition", { text: "zhongwen", selectionStart: 8, selectionEnd: 8 });
+    await cdp.send("Input.insertText", { text: "中文" });
+    await editor.pressSequentially("规则");
+    await expect(editor).toHaveValue("**只修改首页标题**中文规则");
+    expect(await editor.evaluate((element) => ({
+      sameElement: element === window.__rulesCompositionTextarea,
+      focused: document.activeElement === element,
+      caret: element.selectionStart,
+      end: element.selectionEnd,
+      length: element.value.length,
+      events: window.__rulesCompositionEvents,
+    }))).toEqual({
+      sameElement: true, focused: true, caret: "**只修改首页标题**中文规则".length, end: "**只修改首页标题**中文规则".length, length: "**只修改首页标题**中文规则".length,
+      events: ["compositionstart", "compositionend"],
+    });
+    await launched.page.keyboard.press("Meta+s");
+    await expect.poll(() => readFileSync(
+      path.join(path.dirname(managedSourcePath), "PROJECT.md"), "utf8",
+    )).toBe("**只修改首页标题**中文规则");
+    await cdp.detach();
+
     await rulesEntry.click();
     await expect(launched.page.getByRole("tab", { name: "长期规则", exact: true }))
       .toHaveCount(1);
@@ -474,9 +505,10 @@ test("orphaned comments stay card-local and block send without a relink flow", a
 
     await activeLaunch.page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
-    // The settled AI history stays visible until the user returns to comments;
-    // the orphaned cards and their focus state live in the comments rail.
-    await activeLaunch.page.getByRole("button", { name: "AI 助手", exact: true }).click();
+    // A blocked handoff returns to Edit, which closes the AI presentation while
+    // preserving its Document history and restores the orphaned comment cards.
+    await expect(activeLaunch.page.getByRole("button", { name: "AI 助手", exact: true }))
+      .toHaveAttribute("aria-expanded", "false");
     await expect(activeLaunch.page.locator(".comment-rail")).toBeVisible();
     await expect(activeLaunch.page.locator(".comment-rail .rail-relink-status"))
       .toHaveCount(0);
@@ -1045,9 +1077,9 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
 
     const aiToggle = launched.page.getByRole("button", { name: "AI 助手", exact: true });
     await expect(aiToggle).toHaveAttribute("aria-expanded", "true");
-    await aiToggle.click();
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
     await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(aiToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
     await expect(stage).toHaveAttribute("data-inspector", "comments");
     await expect(launched.page.locator(".review-scroll-stage > .comments-panel.comment-rail"))
       .toBeVisible();

@@ -8,7 +8,7 @@
 const HTTPS_URL = /https:\/\/[^\s<>"'`]+/giu;
 
 export const AGENT_LOGIN_HOST_SUFFIXES = Object.freeze({
-  qoder: Object.freeze(["qoder.ai"]),
+  qoder: Object.freeze(["qoder.com", "qoder.ai"]),
   codex: Object.freeze(["chatgpt.com", "openai.com"]),
 });
 

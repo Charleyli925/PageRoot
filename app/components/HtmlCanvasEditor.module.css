@@ -591,6 +591,13 @@
   pointer-events: none;
 }
 
+/* Hidden Candidate and retired slots are never reading-position authority.
+   Excluding them from Chromium scroll anchoring prevents their srcdoc/layout
+   mutations from snapping the shared Workbench scroller during handoff. */
+.editor > iframe[data-frame-role] {
+  overflow-anchor: none;
+}
+
 /* Runtime handoff keeps the connected document as the visual authority until
    the replacement has restored its viewport. Candidate iframe positioning
    happens while this attribute is still `preparing`, so the Active frame

@@ -24,7 +24,7 @@ test("HtmlCanvasEditor draft canary includes all three runtime continuity scenar
     "continuous editing keeps the Runtime document through type, Enter, style and save",
     "continuous editing on a Script page keeps the Runtime document",
     "comment rail and canvas width stay visually continuous while typing in a nested scroller",
-    "double-clicking the sixth blank line after a Runtime refresh places the caret on that br",
+    "ending Runtime text editing keeps the document and the sixth blank-line caret",
   ]) {
     assert.match(source, new RegExp(`${title}[\\s\\S]{0,80}@smoke-editing`, "u"));
   }
@@ -35,6 +35,9 @@ test("Playwright inventory stays aligned with the repository and E2E README", as
   assert.ok(inventory.specFiles.includes("tests/e2e/electron/electron-runtime-continuity.spec.mjs"));
   assert.ok(inventory.specFiles.includes("tests/e2e/electron/electron-seeded-faults.spec.mjs"));
   assert.ok(inventory.gateFiles.includes("tests/e2e/browser/real-complex-html.gate.mjs"));
+  assert.ok(inventory.execution.lanes.some(
+    (lane) => lane.id === "browser-dom-editing-compatibility",
+  ));
   assert.ok(inventory.execution.filesByStage["on-demand"].includes(
     "tests/e2e/electron/review-annotation-clarity.spec.mjs",
   ));

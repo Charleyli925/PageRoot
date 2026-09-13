@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
 
 import styles from "./read-only-comment-marker.module.css";
 
@@ -42,6 +50,8 @@ export type ReadOnlyCommentMarkerProps = {
   testId?: string;
   bubbleTestId?: string;
   onActiveChange?: (active: boolean) => void;
+  /** Parent-owned Escape dismissal for pointer-open bubbles without DOM focus. */
+  dismissRevision?: number;
 };
 
 const EDGE_MARGIN = 96;
@@ -82,22 +92,39 @@ export default function ReadOnlyCommentMarker({
   testId = "read-only-comment-marker",
   bubbleTestId = "read-only-comment-bubble",
   onActiveChange,
+  dismissRevision = 0,
 }: ReadOnlyCommentMarkerProps) {
   const count = group.items.length;
-  const activeRef = useRef({ pointer: false, focus: false });
+  const [bubbleOpen, setBubbleOpen] = useState(false);
+  const activeRef = useRef(false);
+  const pointerInsideRef = useRef(false);
+  const keyboardActiveRef = useRef(false);
+  const suppressPointerRef = useRef(false);
+  const dismissRevisionRef = useRef(dismissRevision);
   const onActiveChangeRef = useRef(onActiveChange);
   useEffect(() => {
     onActiveChangeRef.current = onActiveChange;
   }, [onActiveChange]);
-  const publishActive = useCallback(() => {
-    onActiveChangeRef.current?.(activeRef.current.pointer || activeRef.current.focus);
+  const setActive = useCallback((active: boolean) => {
+    if (activeRef.current === active) return;
+    activeRef.current = active;
+    setBubbleOpen(active);
+    onActiveChangeRef.current?.(active);
   }, []);
 
   useEffect(() => () => {
-    if (!activeRef.current.pointer && !activeRef.current.focus) return;
-    activeRef.current = { pointer: false, focus: false };
+    if (!activeRef.current) return;
+    activeRef.current = false;
     onActiveChangeRef.current?.(false);
   }, []);
+
+  useEffect(() => {
+    if (dismissRevisionRef.current === dismissRevision) return;
+    dismissRevisionRef.current = dismissRevision;
+    suppressPointerRef.current = pointerInsideRef.current;
+    keyboardActiveRef.current = false;
+    setActive(false);
+  }, [dismissRevision, setActive]);
 
   // Hover and keyboard focus open the same bubble through the same measurement,
   // so a keyboard user is never left without the comment body.
@@ -110,34 +137,57 @@ export default function ReadOnlyCommentMarker({
   }, [viewportRef]);
 
   const handlePointerEnter = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    pointerInsideRef.current = true;
     reposition(event.currentTarget);
-    activeRef.current.pointer = true;
-    publishActive();
-  }, [publishActive, reposition]);
+    if (!suppressPointerRef.current) setActive(true);
+  }, [reposition, setActive]);
 
   const handlePointerLeave = useCallback(() => {
-    activeRef.current.pointer = false;
-    publishActive();
-  }, [publishActive]);
+    pointerInsideRef.current = false;
+    suppressPointerRef.current = false;
+    if (!keyboardActiveRef.current) setActive(false);
+  }, [setActive]);
 
   const handleFocus = useCallback((event: { currentTarget: HTMLButtonElement }) => {
     reposition(event.currentTarget);
-    activeRef.current.focus = true;
-    publishActive();
-  }, [publishActive, reposition]);
+    // Pointer focus is deliberately not a second owner. This prevents a mouse
+    // click from pinning the 15% comment context after the pointer leaves.
+    if (pointerInsideRef.current && !event.currentTarget.matches(":focus-visible")) return;
+    keyboardActiveRef.current = true;
+    setActive(true);
+  }, [reposition, setActive]);
 
   const handleBlur = useCallback(() => {
-    activeRef.current.focus = false;
-    publishActive();
-  }, [publishActive]);
+    keyboardActiveRef.current = false;
+    if (!pointerInsideRef.current || suppressPointerRef.current) setActive(false);
+  }, [setActive]);
 
   // The marker is read-only. Enter and Space must not activate anything, and in
   // particular must never open the editing toolbar or move the selection.
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Escape" && activeRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressPointerRef.current = pointerInsideRef.current;
+      keyboardActiveRef.current = false;
+      setActive(false);
+      return;
+    }
     if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
       event.preventDefault();
     }
-  }, []);
+  }, [setActive]);
+
+  const handleClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (event.target instanceof Element && event.target.closest('[data-comment-bubble="true"]')) {
+      return;
+    }
+    suppressPointerRef.current = pointerInsideRef.current;
+    keyboardActiveRef.current = false;
+    setActive(false);
+    event.currentTarget.blur();
+  }, [setActive]);
 
   return (
     <button
@@ -148,19 +198,26 @@ export default function ReadOnlyCommentMarker({
       data-comment-count={count}
       data-bubble-placement={initialPlacement}
       data-bubble-vertical={initialVertical}
+      data-bubble-open={bubbleOpen ? "true" : "false"}
       aria-label={markerLabel(group.items)}
+      aria-expanded={bubbleOpen}
       style={{ left, top }}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      onClick={(event) => event.preventDefault()}
+      onClick={handleClick}
     >
       <span className={styles.glyph} aria-hidden="true">
         {count > 1 ? `评${count}` : "评"}
       </span>
-      <span className={styles.bubble} data-testid={bubbleTestId} aria-hidden="true">
+      <span
+        className={styles.bubble}
+        data-testid={bubbleTestId}
+        data-comment-bubble="true"
+        aria-hidden={!bubbleOpen}
+      >
         <strong>用户评论</strong>
         {group.items.map((item, index) => (
           <span className={styles.item} key={`${group.key}-${index}`}>

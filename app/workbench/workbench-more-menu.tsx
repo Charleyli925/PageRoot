@@ -15,6 +15,8 @@ type MoreMenuItem = Readonly<{
   icon: ReactNode;
   onSelect: () => void;
   dividerBefore?: boolean;
+  disabled?: boolean;
+  reason?: string;
 }>;
 
 export type WorkbenchMoreMenuProps = Readonly<{
@@ -26,6 +28,7 @@ export type WorkbenchMoreMenuProps = Readonly<{
   canExportCurrentHtml: boolean;
   onExportCurrentHtml: () => void;
   canReloadCurrentSource: boolean;
+  reloadCurrentSourceUnavailableReason?: string;
   onReloadCurrentSource: () => void;
   onRetryDynamicContent?: () => void;
 }>;
@@ -51,6 +54,7 @@ export function WorkbenchMoreMenu({
   canExportCurrentHtml,
   onExportCurrentHtml,
   canReloadCurrentSource,
+  reloadCurrentSourceUnavailableReason,
   onReloadCurrentSource,
   onRetryDynamicContent,
 }: WorkbenchMoreMenuProps) {
@@ -88,16 +92,20 @@ export function WorkbenchMoreMenu({
     }] : []),
     {
       id: "reload-source",
-      label: "重新载入当前 HTML",
+      label: "从磁盘重新载入 HTML",
       icon: <ArrowClockwiseIcon aria-hidden="true" size={16} weight="duotone" />,
       onSelect: onReloadCurrentSource,
       dividerBefore: true,
+      disabled: !canReloadCurrentSource,
+      reason: reloadCurrentSourceUnavailableReason,
     },
   ], [
+    canReloadCurrentSource,
     isHistory,
     onExportCurrentHtml,
     onOpenInBrowser,
     onReloadCurrentSource,
+    reloadCurrentSourceUnavailableReason,
     onRetryDynamicContent,
     onShowInFolder,
   ]);
@@ -105,14 +113,19 @@ export function WorkbenchMoreMenu({
     item.id === "show-in-folder" ? canShowInFolder
       : item.id === "open-in-browser" ? canOpenInBrowser
         : item.id === "export-html" ? canExportCurrentHtml
-          : canReloadCurrentSource
+          : canReloadCurrentSource || Boolean(reloadCurrentSourceUnavailableReason)
   )), [
     canExportCurrentHtml,
     canOpenInBrowser,
     canReloadCurrentSource,
     canShowInFolder,
     items,
+    reloadCurrentSourceUnavailableReason,
   ]);
+  const interactiveItems = useMemo(
+    () => visibleItems.filter((item) => !item.disabled),
+    [visibleItems],
+  );
   const close = (returnFocus = true) => {
     setOpen(false);
     if (returnFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
@@ -123,7 +136,7 @@ export function WorkbenchMoreMenu({
     if (!trigger) return undefined;
     const updatePosition = () => setPosition(menuPosition(trigger));
     const focusFirst = () => {
-      itemRefs.current.get(visibleItems[0]?.id || "")?.focus();
+      itemRefs.current.get(interactiveItems[0]?.id || "")?.focus();
     };
     updatePosition();
     window.requestAnimationFrame(focusFirst);
@@ -149,7 +162,8 @@ export function WorkbenchMoreMenu({
         close();
         return;
       }
-      const currentIndex = visibleItems.findIndex(
+      if (!interactiveItems.length) return;
+      const currentIndex = interactiveItems.findIndex(
         (item) => item.id === document.activeElement?.getAttribute("data-menu-item"),
       );
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -157,10 +171,10 @@ export function WorkbenchMoreMenu({
       const nextIndex = event.key === "Home"
         ? 0
         : event.key === "End"
-          ? visibleItems.length - 1
-          : (currentIndex + (event.key === "ArrowUp" ? -1 : 1) + visibleItems.length)
-            % visibleItems.length;
-      itemRefs.current.get(visibleItems[nextIndex]?.id || "")?.focus();
+          ? interactiveItems.length - 1
+          : (currentIndex + (event.key === "ArrowUp" ? -1 : 1) + interactiveItems.length)
+            % interactiveItems.length;
+      itemRefs.current.get(interactiveItems[nextIndex]?.id || "")?.focus();
     };
     window.addEventListener("resize", onViewportChange);
     window.addEventListener("scroll", onViewportChange, true);
@@ -172,7 +186,7 @@ export function WorkbenchMoreMenu({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [open, visibleItems]);
+  }, [interactiveItems, open, visibleItems]);
 
   return (
     <span className="workbench-more-menu-wrap">
@@ -210,15 +224,22 @@ export function WorkbenchMoreMenu({
                   else itemRefs.current.delete(item.id);
                 }}
                 type="button"
-                role="menuitem"
-                data-menu-item={item.id}
+              role="menuitem"
+              data-menu-item={item.id}
+              disabled={item.disabled}
+              aria-describedby={item.reason ? `${menuId}-${item.id}-reason` : undefined}
                 onClick={() => {
                   close();
                   item.onSelect();
                 }}
               >
                 {item.icon}
-                <span>{item.label}</span>
+                <span className="workbench-more-menu-copy">
+                  <span>{item.label}</span>
+                  {item.reason ? (
+                    <small id={`${menuId}-${item.id}-reason`}>{item.reason}</small>
+                  ) : null}
+                </span>
               </button>
             </div>
           ))}

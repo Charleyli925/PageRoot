@@ -20,6 +20,16 @@ export const CANVAS_POINTER_CAPABILITIES: Readonly<
   Record<CanvasPointerCapabilityKind, CanvasPointerCapability>
 >;
 
+export type ElementCopyAvailability = "available" | "busy" | "unsupported";
+
+export const ELEMENT_COPY_AVAILABILITIES: readonly ElementCopyAvailability[];
+
+export function elementCopyAvailabilityFromProof(input: {
+  sourceMutationAuthority?: boolean | null;
+  containsRuntimeGeneratedContent?: boolean;
+  transientBusy?: boolean;
+}): ElementCopyAvailability;
+
 export function canvasPointerCapabilityFromProof(input: {
   canStartTextEdit?: boolean;
   sourceResolution?: HtmlCanvasTargetResolution | null;

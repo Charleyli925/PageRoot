@@ -1,5 +1,14 @@
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
+import { createServer } from "node:http";
+import { existsSync } from "node:fs";
+import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
+import { verifyMixedComments, verifyFrozenCommentCard, revealFrozenCommentCard, revealFrozenCommentDelete } from "./real-html/frozen-mixed.mjs";
 import { expect, test } from "@playwright/test";
+import { FROZEN_ELEMENT_OPERATIONS, frozenDigest, frozenFrameAccess, executeFrozenSelection, verifyFrozenHostPoint } from "./real-html/frozen-selection.mjs";
+import { executeFrozenText, requireFrozenTextFocus } from "./real-html/frozen-text.mjs";
+import { startRuntimeLifecycleObservation, stopRuntimeLifecycleObservation } from "./real-html/runtime-observer.mjs";
+
+import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-contract.js";
 
 import {
   activateNativeEdit,
@@ -20,6 +29,7 @@ import {
   stopPageRoot,
   tmpdir,
   writeFileSync,
+  waitForRuntimeHandoffSettled,
 } from "./electron-native-harness.mjs";
 
 async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
@@ -92,6 +102,128 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
   }
 }
 
+test("frozen character selection reveals oversized targets and rejects clipped host points", async () => {
+  const text = "Fixed character " + "cumulative content ".repeat(100);
+  const html = `<!doctype html><html><head><title>Fixed point</title></head><body><p data-native-case="oversized" style="width:400px;font-size:60px">${text}</p></body></html>`;
+  await withRuntimeProject("pageroot-frozen-oversized-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "oversized");
+    const locator = frame.locator('[data-native-case="oversized"]');
+    const id = await locator.getAttribute("data-pageroot-id");
+    const handle = await locator.elementHandle();
+    await expect(verifyFrozenHostPoint(handle, { x: 20, y: -10 }))
+      .rejects.toMatchObject({ code: "FROZEN_HOST_POINTER_HIT_MISMATCH", details: { withinViewport: false, hostHitMatches: false } });
+    await expect(verifyFrozenHostPoint(handle, { x: 20, y: 20 }))
+      .rejects.toMatchObject({ code: "FROZEN_HOST_POINTER_HIT_MISMATCH" });
+    await handle.dispose();
+    await locator.evaluate(element => element.scrollIntoView({ block: "end", behavior: "instant" }));
+    const target = { clickId: id, selectedId: id, clickTag: "p", selectedTag: "p", selectionClick: "frozen-text-character",
+      textEntry: { path: [0], offset: 0, textSha256: frozenDigest(text) } };
+    const calls = [];
+    const result = await executeFrozenSelection({ access: frozenFrameAccess(frame, target, calls), keyboard: page.keyboard,
+      mouse: page.mouse, target, calls });
+    expect(result.state).toBe("PASS");
+    expect(calls.filter(call => call.kind === "pointer-click")).toHaveLength(1);
+    expect(calls.find(call => call.kind === "pointer-click").host)
+      .toMatchObject({ withinViewport: true, activeFrame: true, hostHitMatches: true });
+  });
+});
+
+test("frozen element entry rejects wrong text bindings and edits heading paragraph list and cell", async () => {
+  test.setTimeout(90_000);
+  const html = '<!doctype html><html><head><style>h1,p,li,td{font-size:18px;font-weight:400}</style></head><body>'
+    + '<h1 data-native-case="entry-heading"> Heading</h1><p data-native-case="entry-paragraph">  Paragraph <i>tail</i>.</p>'
+    + '<ul><li data-native-case="entry-list"><b>Label</b> item</li></ul>'
+    + '<p data-native-case="entry-tail">  Footer <a href="#">link</a>.\n    </p>'
+    + '<table><tbody><tr><td data-native-case="entry-cell">Cell</td></tr></tbody></table></body></html>';
+  await withRuntimeProject("pageroot-frozen-elements-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+    const { editor, frame } = await loadedDiskFrame(page, sourcePath, "entry-heading");
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await editor.evaluate(startRuntimeLifecycleObservation);
+    try {
+      for (const [index, [name, tag, entryPath, offset, text, trailingText = ""]] of [
+        ["entry-heading", "h1", [0], 1, " Heading"], ["entry-paragraph", "p", [0], 2, "  Paragraph "],
+        ["entry-list", "li", [1], 1, " item"], ["entry-cell", "td", [0], 0, "Cell"],
+        ["entry-tail", "p", [0], 2, "  Footer ", "\n    "],
+      ].entries()) {
+        const id = await frame.locator(`[data-native-case="${name}"]`).getAttribute("data-pageroot-id");
+        const target = { clickId: id, selectedId: id, clickTag: tag, selectedTag: tag, mapping: "self",
+          selectionClick: "frozen-text-character",
+          operations: FROZEN_ELEMENT_OPERATIONS, textEntry: { path: entryPath, offset, textSha256: frozenDigest(text), trailingText },
+          initialBold: false, historyAdoption: "editable-island-in-place", historyResume: "in-place",
+          formatCapability: { scope: "element" } };
+        const calls = [], access = frozenFrameAccess(frame, target, calls);
+        if (index === 0) {
+          const wrongTagCalls = [], wrongHashCalls = [];
+          await expect(executeFrozenSelection({ access: frozenFrameAccess(frame, target, wrongTagCalls), keyboard: page.keyboard, mouse: page.mouse,
+            target: { ...target, clickTag: "aside" }, calls: wrongTagCalls }))
+            .rejects.toMatchObject({ code: "FROZEN_IDENTITY_MISMATCH" });
+          await expect(executeFrozenSelection({ access: frozenFrameAccess(frame, target, wrongHashCalls), keyboard: page.keyboard, mouse: page.mouse,
+            target: { ...target, textEntry: { ...target.textEntry, textSha256: "a".repeat(64) } }, calls: wrongHashCalls }))
+            .rejects.toMatchObject({ code: "FROZEN_CLICK_TEXT_DRIFT" });
+        }
+        await executeFrozenSelection({ access, keyboard: page.keyboard, mouse: page.mouse, target, calls });
+        const rows = () => target.operations.map(operation => ({ operation, state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED" }));
+        const input = { frame, access, page, editor, calls, fileId: `H0${index + 1}`,
+          readSource: () => readPublishedWorkingCopy(working, null) };
+        if (index === 0) {
+          const before = readFileSync(working);
+          for (const [entry, code] of [[{ ...target.textEntry, textSha256: "a".repeat(64) }, "FROZEN_ENTRY_TEXT_DRIFT"],
+            [{ ...target.textEntry, path: [999] }, "FROZEN_TEXT_PLAIN_LEAF_DRIFT"]]) {
+            await expect(executeFrozenText({ ...input, target: { ...target, textEntry: entry }, rows: rows() }))
+              .rejects.toMatchObject({ code });
+            expect(readFileSync(working)).toEqual(before);
+          }
+        }
+        if (trailingText) {
+          const before = readFileSync(working);
+          await expect(executeFrozenText({ ...input, target: { ...target,
+            textEntry: { ...target.textEntry, trailingText: "" } }, rows: rows() }))
+            .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+          const handle = await access.target(id).elementHandle();
+          await requireFrozenTextFocus(handle, id, { atEnd: true, trailingText });
+          await expect(requireFrozenTextFocus(handle, id, { atEnd: true, trailingText: "    " }))
+            .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+          await page.keyboard.press("ArrowLeft");
+          await expect(requireFrozenTextFocus(handle, id, { atEnd: true, trailingText }))
+            .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+          expect(readFileSync(working)).toEqual(before);
+        }
+        const operationRows = rows();
+        let result;
+        try { result = await executeFrozenText({ ...input, target, rows: operationRows }); }
+        catch (error) {
+          await test.info().attach("frozen-operation-failure", { contentType: "application/json",
+            body: JSON.stringify({ name, rows: operationRows, code: error.code, details: error.details }) });
+          throw error;
+        }
+        expect(result.state).toBe("PASS");
+      }
+    } finally { await editor.evaluate(stopRuntimeLifecycleObservation); }
+  });
+});
+
+test("a real Space key edits a nested summary instead of toggling its disclosure", async () => {
+  const html = '<!doctype html><html><head><title>Summary space</title></head><body>'
+    + '<details open data-native-case="summary-details">'
+    + '<summary data-native-case="summary-space">Heading <span>nested</span></summary>'
+    + '<p>body</p></details></body></html>';
+  await withRuntimeProject("pageroot-summary-space-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "summary-space");
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    const target = frame.locator('[data-native-case="summary-space"]');
+    const details = frame.locator('[data-native-case="summary-details"]');
+    await activateNativeEdit(frame, "summary-space");
+    await expect(target).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
+    await page.keyboard.press(keyShortcut("ArrowDown"));
+    await page.keyboard.type("A B");
+    await expect(target).toContainText("nestedA B");
+    await expect(details).toHaveAttribute("open", "");
+    await expectCheckpointPersisted(page, 0);
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("nestedA B</span>");
+  });
+});
+
 async function enableContinuityProbe(page) {
   await expect.poll(() => page.evaluate(() => ({
     editor: Boolean(document.querySelector('[data-testid="html-canvas-editor"]')),
@@ -131,6 +263,135 @@ const STATIC_PAGE = `<!doctype html>
   <div aria-hidden="true" style="height:1800px"></div>
 </body></html>`;
 
+test("frozen Inspector cache bounds response bodies without losing fetch data or network events", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const body = "synthetic-response-".repeat(8192);
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "Access-Control-Allow-Origin": "*", "Content-Type": "text/plain" });
+    response.end(body);
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await withRuntimeProject("pageroot-inspector-cache-e2e-", { "runtime-report.html": STATIC_PAGE }, async ({ page }) => {
+      await waitForRuntimeHandoffSettled(page);
+      const endpoint = `http://127.0.0.1:${server.address().port}`;
+      const fetchResponse = async suffix => {
+        const url = `${endpoint}/${suffix}`;
+        const [response, length] = await Promise.all([
+          page.waitForResponse(r => r.url() === url),
+          page.evaluate(async address => (await (await fetch(address)).text()).length, url),
+        ]);
+        expect(length).toBe(body.length); expect(response.status()).toBe(200);
+        return response;
+      };
+      // The uncontrolled path retains the body; this would fail the bounded oracle.
+      const before = await fetchResponse("unbounded");
+      expect((await before.body()).length).toBe(body.length);
+      const cache = await boundFrozenInspectorCache(page);
+      const after = await fetchResponse("bounded");
+      await expect(after.body()).rejects.toThrow(/evict|No resource|No data/u);
+      cache.verify();
+    });
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test("frozen Inspector cache follows sandbox iframe replacement without accepting unbounded sessions", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  await withRuntimeProject("pageroot-inspector-sandbox-e2e-", { "runtime-report.html": STATIC_PAGE }, async ({ page }) => {
+    await waitForRuntimeHandoffSettled(page);
+    const cache = await boundFrozenInspectorCache(page);
+    for (const text of ["first sandbox document", "replacement sandbox document"]) {
+      await page.evaluate(content => {
+        document.querySelector("#inspector-sandbox-proof")?.remove();
+        const iframe = document.createElement("iframe");
+        iframe.id = "inspector-sandbox-proof"; iframe.setAttribute("sandbox", "");
+        iframe.srcdoc = `<p>${content}</p>`; document.body.append(iframe);
+      }, text);
+      await expect(page.frameLocator("#inspector-sandbox-proof").locator("p")).toHaveText(text);
+      cache.verify();
+    }
+  });
+});
+
+test("frozen comment evidence accepts persisted comments beyond the virtual DOM window", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(90_000);
+  await withRuntimeProject("pageroot-frozen-virtual-comments-", { "runtime-report.html": STATIC_PAGE }, async ({ page, sourcePath, relaunch }) => {
+    await waitForRuntimeHandoffSettled(page);
+    const frame = await currentEditorFrame(page), target = frame.locator('[data-native-case="continuity-static"]');
+    const targetId = await target.getAttribute("data-pageroot-id");
+    const workingPath = await managedWorkingCopyPath(page, sourcePath);
+    const draftPath = path.join(path.dirname(workingPath), ".pageroot", "drafts", "work_ver_0001.json");
+    const readComments = () => JSON.parse(readFileSync(draftPath, "utf8")).comments;
+    const comments = [];
+    for (let index = 1; index <= 41; index += 1) {
+      await target.click();
+      await page.getByRole("toolbar", { name: /编辑/u }).getByRole("button", { name: /留评论/u }).click();
+      const text = `Fixed virtual comment ${index}`;
+      await page.getByRole("textbox", { name: "评论内容" }).fill(text);
+      await page.getByRole("button", { name: "评论", exact: true }).click();
+      await expect.poll(() => existsSync(draftPath) ? readComments().length : 0).toBe(index);
+      const matches = readComments().filter(comment => comment.text === text);
+      expect(matches).toHaveLength(1);
+      comments.push({ commentId: matches[0].commentId, text, targetId });
+      await verifyFrozenCommentCard(page, comments.at(-1));
+    }
+    expect(await page.locator(".comment-card").count()).toBeLessThan(comments.length);
+    expect(await verifyMixedComments(readComments, comments)).toHaveLength(41);
+    await expect(verifyMixedComments(() => readComments().slice(1), comments)).rejects.toThrow("FROZEN_COMMENT_COLLECTION_MISMATCH");
+    await expect(verifyMixedComments(readComments, comments.map((c, i) => i === 0 ? { ...c, targetId: "wrong-target" } : c)))
+      .rejects.toThrow("FROZEN_COMMENT_IDENTITY_MISMATCH");
+    const reopened = (await relaunch()).page;
+    await waitForRuntimeHandoffSettled(reopened);
+    expect(await verifyMixedComments(readComments, comments)).toHaveLength(41);
+    await revealFrozenCommentCard(reopened, comments[0], true);
+    await expect(verifyFrozenCommentCard(reopened, { ...comments[0], text: "deliberately wrong comment" })).rejects.toThrow();
+    for (let index = 0; index < comments.length; index += 1) {
+      const card = await revealFrozenCommentCard(reopened, comments[index], index === 0);
+      await (await revealFrozenCommentDelete(card)).click({ timeout: 2_000 });
+      await card.getByRole("button", { name: "删除", exact: true }).click({ timeout: 2_000 });
+      await expect.poll(() => readComments().length).toBe(comments.length - index - 1);
+    }
+    expect(readComments()).toHaveLength(0);
+  });
+});
+
+test("successful Candidate retirement does not retain a growing Document chain", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async ({}, testInfo) => {
+  const source = '<!doctype html><html><head><title>Retirement memory</title></head><body><p data-native-case="retirement-copy">Fixed copy target</p><script>window.authoredReady=true;</script></body></html>';
+  await withRuntimeProject("pageroot-retirement-memory-e2e-", { "runtime-report.html": source }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, "retirement-copy");
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true });
+    await waitForRuntimeHandoffSettled(page);
+    const active = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
+    const id = await active.locator('[data-native-case="retirement-copy"]').getAttribute("data-pageroot-id");
+    expect(id).toMatch(/^pr1_[a-f0-9]{32}$/u);
+    const cdp = await page.context().newCDPSession(page);
+    const samples = [];
+    try {
+      for (let cycle = 0; cycle < 4; cycle += 1) {
+        const generation = Number(await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute("data-frame-generation"));
+        await active.locator(`[data-pageroot-id="${id}"]`).click();
+        await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+        await waitForRuntimeHandoffSettled(page, { priorGeneration: generation, requireGenerationAdvance: true });
+        await expect(active.locator('[data-native-case="retirement-copy"]')).toHaveCount(cycle + 2);
+        await cdp.send("HeapProfiler.collectGarbage");
+        samples.push(await cdp.send("Memory.getDOMCounters"));
+      }
+      // Compare settled promotions, not cold startup. Two-slot replacement and
+      // the current canonical source may overlap; historical frames must not accumulate.
+      expect(samples[3].documents, JSON.stringify(samples)).toBeLessThanOrEqual(samples[0].documents + 2);
+    } finally {
+      await testInfo.attach("retirement-dom-counts", { body: JSON.stringify(samples), contentType: "application/json" });
+      await cdp.detach();
+    }
+  });
+});
+
 const NESTED_SCROLL_PAGE = `<!doctype html>
 <html><head><title>Nested scroll continuity</title></head><body>
   <div aria-hidden="true" style="height:850px"></div>
@@ -153,6 +414,8 @@ const CHART_PAGE = `<!doctype html>
   <div aria-hidden="true" style="height:1800px"></div>
   <script src="echarts.js"></script>
   <script>
+    parent.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ =
+      (parent.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0) + 1;
     echarts.init(document.querySelector('#chart')).setOption({series:[{type:'bar',data:[1,2,3]}]});
   </script>
 </body></html>`;
@@ -328,7 +591,7 @@ test("comment rail and canvas width stay visually continuous while typing in a n
   });
 });
 
-test("double-clicking the sixth blank line after a Runtime refresh places the caret on that br", {
+test("ending Runtime text editing keeps the document and the sixth blank-line caret", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const marker = "SIXTH_BLANK_LINE_MARKER";
@@ -351,22 +614,24 @@ test("double-clicking the sixth blank line after a Runtime refresh places the ca
     const beforeGeneration = await page.getByTestId("html-canvas-editor")
       .locator('iframe:not([data-frame-role])')
       .getAttribute("data-frame-generation");
+    const beforeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0
+    ));
 
     await page.keyboard.press("Escape");
     await expect(target).not.toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
-    await expect.poll(async () => {
-      const generation = await page.getByTestId("html-canvas-editor")
-        .locator('iframe:not([data-frame-role])')
-        .getAttribute("data-frame-generation");
-      const token = await documentToken(page);
-      const summary = await continuitySummary(page);
-      return generation !== beforeGeneration
-        || token !== beforeDocument
-        || summary.frameCreated > 0
-        || summary.framePromoted > 0;
-    }).toBe(true);
-    await expect.poll(() => page.locator(".canvas-edit-surface")
-      .getAttribute("data-edit-runtime-outcome")).toBe("ready");
+    await page.waitForTimeout(900);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0
+    ))).toBe(beforeScriptCount);
+    const afterBoundary = await continuitySummary(page);
+    expect(afterBoundary.frameCreated).toBe(0);
+    expect(afterBoundary.framePromoted).toBe(0);
+    expect(afterBoundary.candidateCreated).toBe(0);
     frame = await currentEditorFrame(page);
     target = frame.locator('[data-native-case="continuity-blank-caret"]');
     await expect(target.locator(":scope > br")).toHaveCount(8);
@@ -409,8 +674,14 @@ const DELAYED_CHART_PAGE = `<!doctype html><html><head><title>Continuous report<
 <style>body{font:18px system-ui;padding:32px;color:#25232a}main{display:grid;grid-template-columns:1fr 1fr;gap:24px}#chart{height:180px}canvas{width:320px;height:180px}</style></head>
 <body><h1>Quarterly report</h1><main><p data-native-case="format-chart">Revenue grew steadily this quarter.</p><div id="chart"></div></main>
 <script>
+ parent.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ =
+   (parent.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0) + 1;
  const text = document.querySelector('[data-native-case="format-chart"]').textContent;
- if (text.includes('FAIL_CHART')) throw new Error('synthetic chart initialization failure');
+ if (text.includes('FAIL_CHART')) {
+   parent.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ =
+     (parent.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0) + 1;
+   throw new Error('synthetic chart initialization failure');
+ }
  setTimeout(() => {
    const canvas = document.createElement('canvas'); canvas.width=320; canvas.height=180;
    document.querySelector('#chart').append(canvas);
@@ -419,7 +690,7 @@ const DELAYED_CHART_PAGE = `<!doctype html><html><head><title>Continuous report<
  }, text.includes('UPDATED') ? 700 : 30);
 </script></body></html>`;
 
-test("formatting preserves charts and a delayed replacement never presents missing surfaces", {
+test("formatting preserves charts without an edit-boundary Runtime rebuild", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({}, testInfo) => {
   await withRuntimeProject("pageroot-chart-format-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
@@ -427,6 +698,10 @@ test("formatting preserves charts and a delayed replacement never presents missi
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     const editor = page.getByTestId('html-canvas-editor');
     const generation = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+    const beforeDocument = await documentToken(page);
+    const beforeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ));
     await activateNativeEdit(frame, 'format-chart');
     const target = frame.locator('[data-native-case="format-chart"]');
     await target.press('End');
@@ -447,7 +722,14 @@ test("formatting preserves charts and a delayed replacement never presents missi
       }, 16);
     });
     await page.keyboard.press('Escape');
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', generation);
+    await page.keyboard.press(keyShortcut('s'));
+    await page.waitForTimeout(1_100);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', generation);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ))).toBe(beforeScriptCount);
+    await expect(editor).not.toHaveAttribute('data-runtime-refresh-pending', '');
     frame = await currentEditorFrame(page);
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     const samples = await page.evaluate(() => { clearInterval(window.__chartContinuityTimer); return window.__chartContinuitySamples; });
@@ -459,42 +741,87 @@ test("formatting preserves charts and a delayed replacement never presents missi
   });
 });
 
-test("failed chart refresh retains the usable frame and identifies it as an older preview", async ({}, testInfo) => {
+test("failed chart refresh keeps the latest static source quietly editable across repeated retries", async ({}, testInfo) => {
   await withRuntimeProject("pageroot-chart-failure-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
-    const { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
+    let { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
+    const editor = page.getByTestId('html-canvas-editor').filter({ visible: true }).first();
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     await activateNativeEdit(frame, 'format-chart');
     await frame.locator('[data-native-case="format-chart"]').press('End');
     await page.keyboard.insertText(' FAIL_CHART');
     await page.keyboard.press('Escape');
-    const notice = page.getByTestId('edit-runtime-static-fallback');
-    await expect(notice).toContainText('上一次可用预览');
-    await expect(notice.getByRole('button', { name: '重新加载', exact: true })).toBeVisible();
-    await expect((await currentEditorFrame(page)).locator('#chart canvas')).toHaveCount(1);
     const working = await managedWorkingCopyPath(page, sourcePath);
-    expect(await readPublishedWorkingCopy(working, 'utf8')).toContain('FAIL_CHART');
-    await page.screenshot({ path: testInfo.outputPath('chart-failed-refresh.png') });
+    await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('FAIL_CHART');
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    const failuresBeforeFirstRetry = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    ));
+    await editor.getByRole('button', { name: '复制元素', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeFirstRetry);
+    await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
+    await expect(editor).toHaveAttribute(
+      'data-runtime-degradation',
+      'static-visible',
+      { timeout: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs + 8_000 },
+    );
+    await expect(editor).toHaveAttribute('data-runtime-surface-budget', 'exceeded');
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('#chart canvas')).toHaveCount(0);
+
+    let target = frame.locator('[data-native-case="format-chart"]').first();
+    await target.dblclick();
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    await target.press('End');
+    await page.keyboard.insertText('        CONTINUED');
+    await page.keyboard.press(keyShortcut('s'));
+    await page.keyboard.press('Escape');
+    await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('CONTINUED');
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+
+    const failuresBeforeRetry = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    ));
+    await page.getByRole('button', { name: '更多', exact: true }).click();
+    await page.getByRole('menuitem', { name: '重新加载动态内容', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeRetry);
+    await expect(editor).toHaveAttribute(
+      'data-runtime-degradation',
+      'static-visible',
+      { timeout: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs + 8_000 },
+    );
+    await expect(editor).toHaveAttribute('aria-readonly', 'false');
+    frame = await currentEditorFrame(page);
+    target = frame.locator('[data-native-case="format-chart"]').first();
+    await target.dblclick();
+    await expect(target).toHaveAttribute('contenteditable', 'true');
+    await target.press('End');
+    await page.keyboard.insertText(' STILL_EDITABLE');
+    await page.keyboard.press('Escape');
+    await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('STILL_EDITABLE');
+    await page.screenshot({ path: testInfo.outputPath('chart-failed-refresh-editable.png') });
   });
 });
 
 const HIDDEN_TAB_CHART_PAGE = `<!doctype html><html><head><title>Tabbed report</title>
 <style>body{font:18px system-ui;padding:32px}.panel[hidden]{display:none}#chart{width:500px;height:240px}</style>
 <script src="echarts.js"></script></head><body>
-<nav role="tablist"><button role="tab" aria-controls="overview" aria-selected="true" class="tab active" data-p="overview">Overview</button><button role="tab" aria-controls="details" aria-selected="false" class="tab" data-p="details">Details</button></nav>
-<section role="tabpanel" id="overview" class="panel active"><p data-native-case="overview-copy">Report overview</p></section>
+<nav role="tablist"><button role="tab" aria-controls="overview" aria-selected="true" class="tab" data-p="overview">Overview</button><button role="tab" aria-controls="details" aria-selected="false" class="tab" data-p="details">Details</button></nav>
+<section role="tabpanel" id="overview" class="panel"><p data-native-case="overview-copy">Report overview</p></section>
 <section role="tabpanel" id="details" class="panel" hidden><p data-native-case="hidden-chart-copy">Revenue grew this quarter.</p><div id="chart"></div></section>
 <script>
+parent.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ =
+ (parent.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0) + 1;
 const chart = echarts.init(document.querySelector('#chart'));
 chart.setOption({animation:false,xAxis:{data:['A','B']},yAxis:{},series:[{type:'bar',data:[30,60]}]});
 window.addEventListener('resize',()=>chart.resize());
-document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{
- document.querySelectorAll('.tab,.panel').forEach(el=>el.classList.remove('active'));
- document.querySelectorAll('.panel').forEach(el=>el.hidden=true);
- tab.classList.add('active');document.getElementById(tab.dataset.p).classList.add('active');document.getElementById(tab.dataset.p).hidden=false;chart.resize();
-}));
 </script></body></html>`;
 
-test("restored hidden tabs initialize real charts with visible geometry before frame promotion", {
+test("an active hidden tab keeps chart geometry without ordinary edit promotion", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({}, testInfo) => {
   await withRuntimeProject('pageroot-hidden-chart-e2e-', {
@@ -502,20 +829,31 @@ test("restored hidden tabs initialize real charts with visible geometry before f
     'echarts.js': readFileSync(new URL('../../../node_modules/echarts/dist/echarts.min.js', import.meta.url), 'utf8'),
   }, async ({ page, sourcePath }) => {
     let { frame, editor } = await loadedDiskFrame(page, sourcePath, 'overview-copy');
-    await page.getByRole('button', { name: '预览', exact: true }).click();
-    const preview = page.frameLocator('iframe[title="HTML 交互预览"]');
-    await preview.locator('.tab[data-p="details"]').click();
-    await page.getByRole('button', { name: '编辑', exact: true }).click();
+    await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    await frame.locator('.tab[data-p="details"]').click();
+    await editor.getByRole('button', { name: '切换到此页签', exact: true }).click();
     frame = await currentEditorFrame(page);
+    await expect(frame.locator('#details')).toBeVisible();
     const chartWidth = () => frame.locator('#chart canvas').first().evaluate(canvas => canvas.width);
     await expect.poll(chartWidth).toBeGreaterThan(400);
+    const initialDocument = await documentToken(page);
+    const initialGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute('data-frame-generation');
+    const initialScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0
+    ));
     for (const marker of [' First edit.', ' Second edit.']) {
-      const generation = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
       await activateNativeEdit(frame, 'hidden-chart-copy');
       await frame.locator('[data-native-case="hidden-chart-copy"]').press('End');
       await page.keyboard.insertText(marker);
       await page.keyboard.press('Escape');
-      await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', generation);
+      await page.waitForTimeout(700);
+      await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', initialGeneration);
+      await expect.poll(() => documentToken(page)).toBe(initialDocument);
+      expect(await page.evaluate(() => (
+        window.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0
+      ))).toBe(initialScriptCount);
+      await expect(editor).not.toHaveAttribute('data-runtime-refresh-pending', '');
       frame = await currentEditorFrame(page);
       await expect(frame.locator('#details')).toBeVisible();
       await expect.poll(chartWidth).toBeGreaterThan(400);
@@ -552,15 +890,23 @@ test("owned composition snapshots keep formatted source nodes editable but autho
     await page.keyboard.press(keyShortcut("s"));
     const working = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(async () => await readPublishedWorkingCopy(working, "utf8")).toContain("CONTINUED");
-    const retiringGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+    const activeGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
+    const activeDocument = await documentToken(page);
+    const activeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ));
     await page.keyboard.press("Escape");
     await expect(paragraph).not.toHaveAttribute("contenteditable", "true");
-    // Escape publishes the deferred runtime refresh. Inject into its completed
-    // active document; a disposable clone in the retiring iframe should vanish.
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute('data-frame-generation', retiringGeneration);
-    // Both physical slots persist. The retired document becomes the empty
-    // inactive slot only after promotion cleanup (it was `previous` before).
+    await page.waitForTimeout(900);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', activeGeneration);
+    await expect.poll(() => documentToken(page)).toBe(activeDocument);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ))).toBe(activeScriptCount);
+    // Both physical slots persist, but an ordinary successful text/style edit
+    // leaves the second slot empty instead of preparing a deferred Candidate.
     await expect(editor.locator('iframe[data-runtime-slot-role="inactive"]')).toHaveCount(1);
+    await expect(editor.locator('iframe[data-runtime-slot-role="candidate"]')).toHaveCount(0);
     await expect(editor).toHaveAttribute('data-render-verified', 'true');
     // Public attributes and source-identical bytes cannot grant authority.
     await paragraph.evaluate((node) => {
@@ -575,33 +921,48 @@ test("owned composition snapshots keep formatted source nodes editable but autho
   });
 });
 
-test("source reload recovers editing from a read-only frame even when dynamic preparation fails", async ({}, testInfo) => {
+test("the read-only recovery notice reloads source authority even when dynamic preparation fails", async ({}, testInfo) => {
   await withRuntimeProject("pageroot-static-reload-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, electronApp, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, 'format-chart');
     const editor = page.getByTestId('html-canvas-editor');
     const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
-    const target = frame.locator('[data-native-case="format-chart"]');
+    const target = frame.locator('[data-native-case="format-chart"]').first();
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     await target.dblclick();
     await expect(target).toHaveAttribute('contenteditable', 'true');
     await target.press(keyShortcut('ArrowRight'));
     await page.keyboard.insertText(' FAIL_CHART');
     await page.keyboard.press('Escape');
+    const failuresBeforeReload = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    ));
+    await editor.getByRole('button', { name: '复制元素', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+    )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeReload);
     await expect(editor).toHaveAttribute('aria-readonly', 'true', { timeout: 20_000 });
     await expect(page.getByTestId('edit-runtime-static-fallback')).toContainText('页面暂时无法编辑');
     const working = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(() => readPublishedWorkingCopy(working)).toContain('FAIL_CHART');
+    const activeFrame = editor.locator('iframe[data-runtime-slot-role="active"]');
+    await activeFrame.evaluate((frame) => {
+      window.__M5_BEFORE_AUTHORITY_CONTENT_DOCUMENT__ = frame.contentDocument;
+    });
     // A second, independent failure during reload used to retain the previous
     // runtime's read-only flag forever, despite a verified static document.
     await electronApp.evaluate(({ ipcMain }) => {
       ipcMain.removeHandler('html-edit-runtime:prepare');
       ipcMain.handle('html-edit-runtime:prepare', () => { throw new Error('synthetic preparation unavailable'); });
     });
-    await page.getByRole('button', { name: '更多', exact: true }).click();
-    await page.getByRole('menuitem', { name: '重新载入当前 HTML', exact: true }).click();
+    await page.getByTestId('edit-runtime-static-fallback')
+      .getByRole('button', { name: '重新载入当前 HTML', exact: true }).click();
     await expect(page.locator('.workbench-chrome-status')).toHaveText('页面已重新加载，可以继续编辑');
     await expect(editor).toHaveAttribute('aria-readonly', 'false');
     await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
+    await expect.poll(() => activeFrame.evaluate((frame) => Boolean(
+      frame.contentDocument
+      && frame.contentDocument !== window.__M5_BEFORE_AUTHORITY_CONTENT_DOCUMENT__
+    ))).toBe(true);
     await target.dblclick();
     await expect(target).toHaveAttribute('contenteditable', 'true');
     await target.press(keyShortcut('ArrowRight'));
@@ -609,6 +970,10 @@ test("source reload recovers editing from a read-only frame even when dynamic pr
     await page.keyboard.press(keyShortcut('s'));
     await expect.poll(() => readPublishedWorkingCopy(working)).toContain('RECOVERED');
     await page.screenshot({ path: testInfo.outputPath('reload-editing-restored.png') });
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_STATIC_CANDIDATE_FAILURE: "1",
+    },
   });
 });
 
@@ -634,17 +999,180 @@ test("Canvas shortcuts follow the promoted frame and same-source reload keeps ch
     // during Undo's save/acknowledgement must execute after it, not disappear.
     await page.keyboard.press(keyShortcut("Shift+z"));
     await expect.poll(() => readPublishedWorkingCopy(working)).toContain("HISTORY_CONTINUITY");
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).not.toHaveAttribute("data-frame-generation", generation);
+    // The verified editable-island history path stays in the current Document;
+    // Redo must not consume a deferred whole-page Runtime refresh.
+    await expect.poll(() => editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute("data-frame-generation")).toBe(generation);
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-runtime-slot-role"))).toBe("active");
+    await expect(editor).toHaveAttribute("data-runtime-activation", "activation-ready");
+    await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    const activeFrame = editor.locator('iframe[data-runtime-slot-role="active"]');
+    const beforeReloadDocument = await documentToken(page);
+    const beforeReloadScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ));
+    const beforeReloadLastKnownGood = await editor.getAttribute(
+      "data-runtime-last-known-good-id",
+    );
+    await activeFrame.evaluate((frame) => {
+      window.__M5_BEFORE_SAME_BYTE_AUTHORITY_CONTENT_DOCUMENT__ = frame.contentDocument;
+    });
     await page.getByRole("button", { name: "更多", exact: true }).click();
-    await page.getByRole("menuitem", { name: "重新载入当前 HTML", exact: true }).click();
+    await page.getByRole("menuitem", { name: "从磁盘重新载入 HTML", exact: true }).click();
     await expect(page.locator(".workbench-chrome-status")).toHaveText("页面已重新加载，可以继续编辑");
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ))).toBe(beforeReloadScriptCount + 1);
+    await expect.poll(() => documentToken(page)).not.toBe(beforeReloadDocument);
+    await expect.poll(() => activeFrame.evaluate((frame) => Boolean(
+      frame.contentDocument
+      && frame.contentDocument !== window.__M5_BEFORE_SAME_BYTE_AUTHORITY_CONTENT_DOCUMENT__
+    ))).toBe(true);
+    await expect(editor).toHaveAttribute("data-runtime-activation", "activation-ready");
+    await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .not.toBe(beforeReloadLastKnownGood);
     await expect.poll(() => frame.locator("#chart canvas").evaluateAll(canvases => canvases.filter(canvas => (
       canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data.some((value, index) => index % 4 === 3 && value > 0)
     )).length)).toBe(1);
     await target.dblclick();
     await expect(target).toHaveAttribute("contenteditable", "true");
     await page.screenshot({ path: testInfo.outputPath("history-focus-and-reload-chart.png") });
+  });
+});
+
+test("a layout-safe format refusal keeps the Runtime text session active", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const source = `<!doctype html><html><head><title>Flex format refusal</title></head><body>
+  <p style="display:inline-flex;gap:8px" data-native-case="flex-format-refusal">Flexible source text</p>
+  <script>
+    parent.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ =
+      (parent.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0) + 1;
+  </script></body></html>`;
+  await withRuntimeProject("pageroot-flex-format-refusal-e2e-", {
+    "runtime-report.html": source,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "flex-format-refusal");
+    const editor = page.getByTestId("html-canvas-editor");
+    const target = frame.locator('[data-native-case="flex-format-refusal"]');
+    const beforeDocument = await documentToken(page);
+    const beforeGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute("data-frame-generation");
+    const beforeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0
+    ));
+
+    await activateNativeEdit(frame, "flex-format-refusal");
+    await target.evaluate((element) => {
+      const text = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
+      if (!(text instanceof Text) || text.data.length < 4) {
+        throw new Error("Flex formatting fixture text is missing.");
+      }
+      const range = element.ownerDocument.createRange();
+      range.setStart(text, text.data.length - 4);
+      range.setEnd(text, text.data.length);
+      const selection = element.ownerDocument.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.ownerDocument.dispatchEvent(new Event("selectionchange"));
+    });
+    const bold = editor.getByRole("button", { name: "加粗", exact: true });
+    await expect(bold).toBeEnabled();
+    await bold.click();
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "rejected:requested:resumed",
+    );
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await target.press("End");
+    await page.keyboard.insertText(" STILL_TYPING_AFTER_REFUSAL");
+    await page.keyboard.press(keyShortcut("s"));
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("STILL_TYPING_AFTER_REFUSAL");
+    expect(await readPublishedWorkingCopy(working, "utf8")).not.toMatch(/font-weight\s*:/u);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(800);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0
+    ))).toBe(beforeScriptCount);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+  });
+});
+
+test("a partial background fill refusal validates the Kernel result before publication", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const source = `<!doctype html><html><head><title>Background format refusal</title></head><body>
+  <p data-native-case="background-format-refusal">Background source text</p>
+  <script>
+    parent.__PAGEROOT_BACKGROUND_FORMAT_RUNTIME_COUNT__ =
+      (parent.__PAGEROOT_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0) + 1;
+  </script></body></html>`;
+  await withRuntimeProject("pageroot-background-format-refusal-e2e-", {
+    "runtime-report.html": source,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "background-format-refusal");
+    const editor = page.getByTestId("html-canvas-editor");
+    const target = frame.locator('[data-native-case="background-format-refusal"]');
+    const beforeDocument = await documentToken(page);
+    const beforeGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
+      .getAttribute("data-frame-generation");
+    const beforeScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0
+    ));
+
+    await activateNativeEdit(frame, "background-format-refusal");
+    await target.evaluate((element) => {
+      const text = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
+      if (!(text instanceof Text) || text.data.length < 10) {
+        throw new Error("Background formatting fixture text is missing.");
+      }
+      const range = element.ownerDocument.createRange();
+      range.setStart(text, 0);
+      range.setEnd(text, 10);
+      const selection = element.ownerDocument.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.ownerDocument.dispatchEvent(new Event("selectionchange"));
+    });
+    await editor.getByText("样式与间距", { exact: true }).click();
+    const fill = editor.getByLabel("元素填充色");
+    await expect(fill).toBeEnabled();
+    await fill.evaluate((element) => {
+      if (!(element instanceof HTMLInputElement)) throw new Error("Fill input is missing.");
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(element, "#ff0000");
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "rejected:requested:resumed",
+    );
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    expect(await readPublishedWorkingCopy(working, "utf8"))
+      .not.toMatch(/background-color\s*:/u);
+    await target.press("End");
+    await page.keyboard.insertText(" STILL_TYPING_AFTER_BACKGROUND_REFUSAL");
+    await page.keyboard.press(keyShortcut("s"));
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("STILL_TYPING_AFTER_BACKGROUND_REFUSAL");
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0
+    ))).toBe(beforeScriptCount);
   });
 });
 
@@ -689,6 +1217,60 @@ test("format state ignores unselected boundary text and unchanged formatting kee
 });
 
 
+test("in-place text Undo and Redo leave no deferred Runtime refresh", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  await withRuntimeProject("pageroot-history-no-refresh-e2e-", {
+    "runtime-report.html": DELAYED_CHART_PAGE,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "format-chart");
+    const editor = page.getByTestId("html-canvas-editor");
+    const target = frame.locator('[data-native-case="format-chart"]');
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    const initialDocument = await documentToken(page);
+    const initialScriptCount = await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ));
+
+    await activateNativeEdit(frame, "format-chart");
+    await target.press("End");
+    await page.keyboard.insertText(" HISTORY_NO_REFRESH");
+    await page.keyboard.press(keyShortcut("s"));
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("HISTORY_NO_REFRESH");
+
+    await page.keyboard.press(keyShortcut("z"));
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .not.toContain("HISTORY_NO_REFRESH");
+    await expect(editor).toHaveAttribute(
+      "data-history-adopt-path",
+      "editable-island-in-place",
+    );
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+
+    await page.keyboard.press(keyShortcut("Shift+z"));
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("HISTORY_NO_REFRESH");
+    await expect(editor).toHaveAttribute(
+      "data-history-adopt-path",
+      "editable-island-in-place",
+    );
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+
+    await page.keyboard.press("Escape");
+    await frame.locator("#chart").click();
+    await page.keyboard.press(keyShortcut("s"));
+    await page.waitForTimeout(700);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+    ))).toBe(initialScriptCount);
+  });
+});
+
 test("editing a published Undo projection remains available while its save receipt waits", async () => {
   await withRuntimeProject('pageroot-history-followup-e2e-', { 'runtime-report.html': DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, 'format-chart');
@@ -706,19 +1288,36 @@ test("editing a published Undo projection remains available while its save recei
     let started;
     const saving = new Promise(resolve => { started = resolve; });
     const routePattern = /\/autosave(?:\?|$)/u;
-    await page.route(routePattern, async route => {
+    let finishRoute;
+    const routeDone = new Promise(resolve => { finishRoute = resolve; });
+    let routeStarted = false;
+    const routeHandler = async route => {
+      routeStarted = true;
       started();
-      await barrier;
-      await route.continue();
-    });
+      try {
+        await barrier;
+        await route.continue();
+      } finally {
+        finishRoute();
+      }
+    };
+    await page.route(routePattern, routeHandler);
     try {
       await page.keyboard.press(keyShortcut('z'));
       await saving;
       await expect(target).not.toContainText('BEFORE_UNDO');
+      await expect(editor).toHaveAttribute('data-render-verified', 'true');
+      await expect.poll(() => editor.getAttribute('data-runtime-handoff'))
+        .not.toBe('positioning');
       await target.dblclick();
+      await expect(target).toHaveAttribute('contenteditable', 'true');
       await target.press(keyShortcut('ArrowLeft'));
       for (let i = 0; i < 6; i++) await page.keyboard.press('Shift+ArrowRight');
       await editor.getByRole('button', { name: '加粗', exact: true }).click();
+      await expect(editor).toHaveAttribute(
+        'data-native-format-resume',
+        'source:requested:resumed',
+      );
       await expect(target).toHaveAttribute('contenteditable', 'true');
       await target.press(keyShortcut('ArrowRight'));
       await page.keyboard.insertText(' AFTER_UNDO');
@@ -728,7 +1327,8 @@ test("editing a published Undo projection remains available while its save recei
       expect(await readPublishedWorkingCopy(working)).not.toContain('BEFORE_UNDO');
     } finally {
       release();
-      await page.unroute(routePattern);
+      if (routeStarted) await routeDone;
+      await page.unroute(routePattern, routeHandler);
     }
   });
 });

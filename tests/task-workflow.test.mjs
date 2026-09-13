@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -21,6 +21,12 @@ import {
 
 const agentGuidance = await readFile(new URL("../AGENTS.md", import.meta.url), "utf8");
 const codexWorkflow = await readFile(new URL("../docs/CODEX_WORKFLOW.md", import.meta.url), "utf8");
+const subagentRouting = await readFile(
+  new URL("../docs/CODEX_SUBAGENT_ROUTING_WORKSHEET.md", import.meta.url),
+  "utf8",
+);
+const reviewerProfile = await readFile(new URL("../.codex/agents/reviewer.toml", import.meta.url), "utf8");
+const testerProfile = await readFile(new URL("../.codex/agents/tester.toml", import.meta.url), "utf8");
 
 async function run(root, command, args) {
   const child = spawn(command, args, {
@@ -94,11 +100,37 @@ test("durable agent guidance keeps progressive disclosure and review boundaries"
   assert.match(agentGuidance, /^## Code Review Rules$/mu);
   assert.match(agentGuidance, /update that document in the same PR/u);
   assert.match(agentGuidance, /ENGINEERING_STANDARDS\.md/u);
+  assert.match(agentGuidance, /read gates, not optional references/u);
+  assert.match(agentGuidance, /required_reading/u);
+  assert.match(subagentRouting, /required_reading/u);
+  assert.match(reviewerProfile, /required_reading/u);
+  assert.match(testerProfile, /required_reading/u);
   assert.match(agentGuidance, /Do not merge, create or move a tag, publish a Release/u);
   assert.doesNotMatch(agentGuidance, /\/Users\/|[A-Za-z]:\\/u);
   assert.doesNotMatch(codexWorkflow, /\/Users\/|[A-Za-z]:\\/u);
   assert.match(codexWorkflow, /^## Documentation impact$/mu);
   assert.match(codexWorkflow, /^## Scheduled monitoring$/mu);
+});
+
+test("project agent profiles keep built-ins and native Ultra thread selection", async () => {
+  const directory = new URL("../.codex/agents/", import.meta.url);
+  assert.deepEqual((await readdir(directory)).filter((name) => name.endsWith(".toml")).sort(),
+    ["reviewer.toml", "tester.toml"]);
+  for (const profile of [reviewerProfile, testerProfile]) {
+    assert.doesNotMatch(profile, /^\s*(?:model|model_reasoning_effort)\s*=/mu);
+  }
+  assert.match(reviewerProfile, /^sandbox_mode = "read-only"$/mu);
+  assert.match(testerProfile, /^sandbox_mode = "workspace-write"$/mu);
+  const config = await readFile(new URL("../.codex/config.toml", import.meta.url), "utf8");
+  assert.doesNotMatch(config, /^\s*(?:max_concurrent_threads_per_session|max_threads)\s*=/mu);
+  for (const source of [agentGuidance, codexWorkflow]) {
+    const references = [...source.matchAll(/CODEX_SUBAGENT_ROUTING_WORKSHEET\.md` section (5(?:\.\d+)?)/gu)];
+    assert.ok(references.length, "missing handoff read gate");
+    for (const [, section] of references) {
+      assert.ok(subagentRouting.split("\n").some((line) => line.startsWith(`${section === "5" ? "##" : "###"} ${section}.`) || line.startsWith(`### ${section} `)),
+        `missing referenced section ${section}`);
+    }
+  }
 });
 
 test("task start synchronizes clean main and creates an isolated worktree", async (t) => {

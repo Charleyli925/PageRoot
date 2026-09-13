@@ -43,6 +43,11 @@ worktree path; run all edits and task checks from that isolated checkout.
 `integration/` is reserved for an explicitly reviewed combination of multiple
 pending task branches. `test/` is only for test infrastructure.
 
+Agent handoffs and write-ownership transfers follow
+`CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5. Resolve routine implementation
+issues within the existing authorization; a child report is not a new user
+approval requirement. This does not authorize additional Git or release actions.
+
 ### Latest-installer source composition
 
 The phrases "latest installer" and "latest developer test installer" select a

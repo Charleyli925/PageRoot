@@ -647,9 +647,10 @@ export default function AiConversationSidebar({
           </section>
         ) : null}
 
-        {/* Public Agent narration grows in one stable article. It is presentation
-            evidence only and never changes Candidate authority. */}
-        {runProgress?.narrationUpdates && !displayedGroups.some((group) => group.kind === "current" && group.primary.some((message) => message.actor === "agent" && message.kind === "result-summary")) ? (
+        {/* Public Agent narration and its live execution status share one stable
+            article. The timer belongs to the Agent currently speaking; later
+            Stemmio verification facts can then follow it in chronological order. */}
+        {(runProgress?.narrationUpdates || executionStatus) && !displayedGroups.some((group) => group.kind === "current" && group.primary.some((message) => message.actor === "agent" && message.kind === "result-summary")) ? (
           <article
             ref={liveMessageRef}
             className={styles.message}
@@ -668,6 +669,13 @@ export default function AiConversationSidebar({
                 {runProgress.narrationUpdates.map((update) => (
                   <div key={update.id}>{sidebarNarrationParagraphs(update.text).map((text, index) => <p key={index} className={styles.narrationLine}>{text}</p>)}</div>
                 ))}
+              </div>
+            ) : null}
+            {executionStatus ? (
+              <div className={styles.executionStatus} data-testid="ai-conversation-execution-status">
+                <span className={styles.liveStatus}>{executionStatus.title}</span>
+                <span>{executionStatus.detail}{agentLastActivityAt && clockNow - Date.parse(agentLastActivityAt) > 30_000 ? " · 暂未收到新响应" : ""}</span>
+                <span>已接收 {Math.ceil(agentReceivedBytes / 1024)} KB · 完整结果校验后可查看</span>
               </div>
             ) : null}
             {agentWorking ? (
@@ -713,13 +721,12 @@ export default function AiConversationSidebar({
           * (ADR 0037 §4). The selected Agent's public words follow in their
           * own stable article, so the two speakers never blur together.
           */}
-        {executionStatus || runProgress?.liveLabel || runProgress?.headline ? (
+        {!executionStatus && (runProgress?.liveLabel || runProgress?.headline) ? (
           <section
             className={`${styles.message} ${styles.runActivity}`}
             data-actor="pageroot"
             data-tone={runProgress?.tone || "quiet"}
             data-testid="ai-conversation-run-progress"
-            data-execution={executionStatus ? "true" : undefined}
             aria-label="本轮进度"
           >
             <PageRootAvatar />
@@ -733,15 +740,8 @@ export default function AiConversationSidebar({
               className={`${styles.text} ${styles.liveStatus}`}
               aria-live="off"
             >
-              {executionStatus?.title || runProgress?.liveLabel || runProgress?.headline}
+              {runProgress?.liveLabel || runProgress?.headline}
             </p>
-            {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}{agentLastActivityAt && clockNow - Date.parse(agentLastActivityAt) > 30_000 ? " · 暂未收到新响应" : ""}</small> : null}
-            {executionStatus ? (
-              <>
-                <small className={styles.runSummaryDetail}>已接收 {Math.ceil(agentReceivedBytes / 1024)} KB · 完整结果校验后可查看</small>
-
-              </>
-            ) : null}
           </section>
         ) : null}
 

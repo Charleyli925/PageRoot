@@ -115,6 +115,7 @@ const BRIDGE_FILES = [
   "project-file-repository/path-safety.mjs",
   "project-file-repository/source-binding.mjs",
   "project-file-repository/submission.mjs",
+  "project-file-repository/save-retirement.mjs",
   "project-file-repository/registry.mjs",
   "project-file-repository/request-draft.mjs",
   "project-file-repository/request-attachments.mjs",
@@ -225,6 +226,18 @@ function fixtureExtraResources() {
     {
       from: "node_modules/echarts/NOTICE",
       to: "edit-runtime-libraries/echarts/5.6.0/NOTICE",
+    },
+    {
+      from: "node_modules/echarts-5-4-3/dist/echarts.min.js",
+      to: "edit-runtime-libraries/echarts/5.4.3/echarts.min.js",
+    },
+    {
+      from: "node_modules/echarts-5-4-3/LICENSE",
+      to: "edit-runtime-libraries/echarts/5.4.3/LICENSE",
+    },
+    {
+      from: "node_modules/echarts-5-4-3/NOTICE",
+      to: "edit-runtime-libraries/echarts/5.4.3/NOTICE",
     },
     {
       from: "output/release-metadata/build-info.json",
@@ -504,6 +517,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/agent-input-policy.mjs",
+      "export const HTTP_AGENT_INPUT_POLICY_REVISION = 'fixture';\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/agent-vendor-key-url.mjs",
       "export const AGENT_VENDOR_KEY_VENDOR_IDS = Object.freeze([]);\nexport const publicAgentVendorKeyUrl = () => null;\n",
     ),
@@ -621,6 +639,7 @@ export async function createSyntheticAppBundle(t, {
       "agent-access-operation.mjs",
       "agent-login-url.mjs",
       "agent-auth-source.mjs",
+      "agent-input-policy.mjs",
       "openai-compatible-vendors.mjs",
       "supported-agent-models.mjs",
       "agent-feature-gates.mjs",
@@ -655,6 +674,12 @@ export async function createSyntheticAppBundle(t, {
     writeFixtureFile(productRoot, "node_modules/echarts/dist/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
     writeFixtureFile(productRoot, "node_modules/echarts/LICENSE", "Apache License 2.0 fixture\n"),
     writeFixtureFile(productRoot, "node_modules/echarts/NOTICE", "Apache ECharts fixture notice\n"),
+    writeFixtureFile(productRoot, "node_modules/echarts-5-4-3/dist/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
+    writeFixtureFile(productRoot, "node_modules/echarts-5-4-3/LICENSE", "Apache License 2.0 fixture\n"),
+    writeFixtureFile(productRoot, "node_modules/echarts-5-4-3/NOTICE", "Apache ECharts fixture notice\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.4.3/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.4.3/LICENSE", "Apache License 2.0 fixture\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.4.3/NOTICE", "Apache ECharts fixture notice\n"),
     writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
     writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/LICENSE", "Apache License 2.0 fixture\n"),
     writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/NOTICE", "Apache ECharts fixture notice\n"),

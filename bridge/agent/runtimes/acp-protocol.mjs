@@ -6,6 +6,7 @@ import {
   AGENT_POLICY_BRAND,
   MAX_HTML_BYTES,
   MAX_PROMPT_BYTES,
+  assertAbsolutePath,
   assertObject,
 } from "../policies/execution-policy.mjs";
 import { createExecutionHost } from "../hosts/execution-host.mjs";
@@ -327,6 +328,92 @@ function buildClient(host) {
     ));
 }
 
+export async function probeAcpSession({
+  connection,
+  cwd,
+  startupTimeoutMs = DEFAULT_ACP_STARTUP_TIMEOUT_MS,
+  cancellationSignal,
+  expectedAgentName,
+  clock = Date,
+  scheduler,
+} = {}) {
+  const isStream = Boolean(connection?.readable && connection?.writable);
+  const isAgentApp = typeof connection?.connect === "function"
+    && typeof connection?.connectWith === "function";
+  if (!isStream && !isAgentApp) {
+    throw new TypeError("An ACP Stream or AgentApp connection is required.");
+  }
+  const sessionCwd = assertAbsolutePath(cwd, "ACP probe cwd");
+  if (expectedAgentName !== undefined && !(expectedAgentName instanceof RegExp)) {
+    throw new TypeError("expectedAgentName must be a RegExp.");
+  }
+  const client = acp.client({ name: "pageroot-agent-bridge-diagnose" });
+  const startupTimeout = timeoutController(startupTimeoutMs, { clock, scheduler });
+  const cancellation = cancellationGate(cancellationSignal);
+  try {
+    const connected = client.connectWith(connection, async (context) => {
+      const startupSignal = combinedSignal(
+        startupTimeout.controller.signal,
+        cancellationSignal,
+      );
+      const initialized = await Promise.race([
+        context.request(
+          acp.methods.agent.initialize,
+          {
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {
+              fs: { readTextFile: false, writeTextFile: false },
+              terminal: false,
+            },
+            clientInfo: {
+              name: "pageroot-agent-bridge-diagnose",
+              title: "PageRoot Agent Bridge Diagnose",
+              version: "1.0.0",
+            },
+          },
+          { cancellationSignal: startupSignal },
+        ),
+        startupTimeout.expired,
+        cancellation.promise,
+      ]);
+      if (initialized.protocolVersion !== acp.PROTOCOL_VERSION) {
+        throw acpPolicyError(
+          "ACP_PROTOCOL_UNSUPPORTED",
+          `The ACP Agent selected unsupported ACP protocol ${initialized.protocolVersion}.`,
+        );
+      }
+      const agentInfo = normalizedAgentInfo(initialized.agentInfo);
+      if (expectedAgentName) expectedAgentName.lastIndex = 0;
+      if (expectedAgentName && !expectedAgentName.test(agentInfo.name)) {
+        throw acpPolicyError(
+          "ACP_AGENT_IDENTITY_MISMATCH",
+          "The selected ACP executable did not identify itself as the expected Agent.",
+        );
+      }
+      const session = await Promise.race([
+        context.buildSession({ cwd: sessionCwd, mcpServers: [] }).start({
+          cancellationSignal: startupSignal,
+        }),
+        startupTimeout.expired,
+        cancellation.promise,
+      ]);
+      try {
+        return Object.freeze({
+          initialized,
+          sessionId: String(session.sessionId || ""),
+        });
+      } finally {
+        session.dispose();
+      }
+    });
+    void connected.catch(() => {});
+    return await Promise.race([connected, startupTimeout.expired, cancellation.promise]);
+  } finally {
+    startupTimeout.clear();
+    cancellation.dispose();
+  }
+}
+
 function driverProfile({
   mode,
   createHost,
@@ -573,10 +660,16 @@ export async function runAcpTask({
               || message.update?.message_id
               || "",
             ).trim();
+            const segmentId = String(
+              message.update?.segmentId
+              || message.update?.segment_id
+              || "",
+            ).trim();
             onEvent(Object.freeze({
               kind: "visible-text",
               text: chunk,
               ...(messageId ? { messageId } : {}),
+              ...(!messageId && segmentId ? { segmentId } : {}),
             }));
           }
           if (visibleText.truncated && !visibleTextTruncationReported) {

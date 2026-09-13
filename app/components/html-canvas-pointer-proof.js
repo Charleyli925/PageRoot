@@ -25,6 +25,24 @@ export const CANVAS_POINTER_CAPABILITIES = Object.freeze({
   }),
 });
 
+export const ELEMENT_COPY_AVAILABILITIES = Object.freeze([
+  "available",
+  "busy",
+  "unsupported",
+]);
+
+export function elementCopyAvailabilityFromProof({
+  sourceMutationAuthority,
+  containsRuntimeGeneratedContent = false,
+  transientBusy = false,
+} = {}) {
+  if (containsRuntimeGeneratedContent || sourceMutationAuthority === false) {
+    return "unsupported";
+  }
+  if (transientBusy || sourceMutationAuthority !== true) return "busy";
+  return "available";
+}
+
 export function canvasPointerCapabilityFromProof({
   canStartTextEdit,
   sourceResolution,

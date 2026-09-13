@@ -17,13 +17,15 @@ const TRIGGER_LABEL = "AI 助手";
  * Opens the AI conversation. Everything about a round — the destination, the stages,
  * the Agent's own words, the decision — happens inside that conversation, so this
  * control has exactly one meaning and never competes with the thread for authority.
- * A quiet dot marks that something in there is waiting; the words do not change.
+ * A quiet dot marks ordinary attention; when Review is hidden, the concise
+ * "待决定" label preserves the unfinished decision as the single re-entry cue.
  */
 export function AgentDeliveryButton({
   status,
   disabled,
   attention = false,
   expanded = false,
+  label = TRIGGER_LABEL,
   onToggle,
 }: {
   status: string;
@@ -31,6 +33,7 @@ export function AgentDeliveryButton({
   /** The conversation holds something the user has not dealt with yet. */
   attention?: boolean;
   expanded?: boolean;
+  label?: string;
   onToggle: () => void;
 }) {
   return (
@@ -46,7 +49,7 @@ export function AgentDeliveryButton({
       onClick={onToggle}
     >
       <ChatCircleTextIcon aria-hidden="true" size={15} weight="fill" />
-      <span>{TRIGGER_LABEL}</span>
+      <span>{label}</span>
     </button>
   );
 }

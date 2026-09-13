@@ -13,6 +13,8 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwis
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CloudArrowUpIcon } from "@phosphor-icons/react/dist/csr/CloudArrowUp";
 import { DesktopIcon } from "@phosphor-icons/react/dist/csr/Desktop";
+import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
+import { ChatCircleDotsIcon } from "@phosphor-icons/react/dist/csr/ChatCircleDots";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
@@ -190,6 +192,34 @@ function SettingsSelect({
   );
 }
 
+function SettingsRange({
+  value,
+  label,
+  disabled,
+  onChange,
+}: {
+  value: number;
+  label: string;
+  disabled?: boolean;
+  onChange(value: number): void;
+}) {
+  return (
+    <label className="settings-range">
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value={value}
+        disabled={disabled}
+        aria-label={label}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <output>{value}%</output>
+    </label>
+  );
+}
+
 function SettingsSection({
   title,
   children,
@@ -276,6 +306,50 @@ function GeneralSettings({
             label="启动时恢复上次标签页"
             onChange={(checked) => onUpdate({ restoreTabsOnLaunch: checked })}
           />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="审阅">
+        <SettingRow
+          icon={<EyeIcon size={20} weight="regular" />}
+          title="变化聚焦时的上下文"
+          description="聚焦变化时，非目标区域保留的可见度"
+        >
+          <SettingsRange
+            value={workspace.reviewChangeContextVisibility}
+            disabled={saving}
+            label="变化聚焦时的上下文可见度"
+            onChange={(reviewChangeContextVisibility) => onUpdate({ reviewChangeContextVisibility })}
+          />
+        </SettingRow>
+        <SettingRow
+          icon={<ChatCircleDotsIcon size={20} weight="regular" />}
+          title="评论聚焦时的上下文"
+          description="聚焦评论时，非目标区域保留的可见度"
+        >
+          <SettingsRange
+            value={workspace.reviewCommentContextVisibility}
+            disabled={saving}
+            label="评论聚焦时的上下文可见度"
+            onChange={(reviewCommentContextVisibility) => onUpdate({ reviewCommentContextVisibility })}
+          />
+        </SettingRow>
+        <SettingRow
+          icon={<ArrowClockwiseIcon size={20} weight="regular" />}
+          title="恢复默认背景可见度"
+          description="评论恢复为 15%，变化恢复为 25%"
+        >
+          <button
+            className="settings-secondary-action"
+            type="button"
+            disabled={saving}
+            onClick={() => onUpdate({
+              reviewChangeContextVisibility: 25,
+              reviewCommentContextVisibility: 15,
+            })}
+          >
+            恢复默认可见度
+          </button>
         </SettingRow>
       </SettingsSection>
     </div>

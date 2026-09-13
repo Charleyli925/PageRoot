@@ -25,13 +25,22 @@ import { createEditRuntimeLibraryStore } from "../desktop/edit-runtime-library-s
 const SESSION_ID = "0123456789abcdef0123456789abcdef";
 const EXECUTION_ID = "abcdefabcdefabcdefabcdef";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const bundledEchartsPath = path.join(
-  repositoryRoot,
-  "node_modules",
-  "echarts",
-  "dist",
-  "echarts.min.js",
-);
+const bundledEchartsPaths = Object.freeze({
+  "5.4.3": path.join(
+    repositoryRoot,
+    "node_modules",
+    "echarts-5-4-3",
+    "dist",
+    "echarts.min.js",
+  ),
+  "5.6.0": path.join(
+    repositoryRoot,
+    "node_modules",
+    "echarts",
+    "dist",
+    "echarts.min.js",
+  ),
+});
 const HTML = [
   '<!doctype html><html><head><title>Report</title><link rel="stylesheet" href="report.css"></head><body>',
   '<main id="chart-host" style="width:640px;height:360px"></main>',
@@ -46,12 +55,6 @@ const REMOTE_ECHARTS_HTML = HTML.replace(
 const COMPATIBLE_ECHARTS_BYTES = Buffer.from(
   "window.echarts={version:'5.4.3',init(){return {}}};",
 );
-const RECOVERY_IDENTITY = Object.freeze({
-  sourceSha256: "sha256:" + "a".repeat(64),
-  authoritySourcePath: "/authority/report.html",
-  programIdentity: "synthetic-compatible-program",
-  canvasGeneration: 4,
-});
 
 function remoteEchartsHtml(url, extraScript = "") {
   return HTML.replace('src="vendor/echarts.js"', `src="${url}"`).replace(
@@ -421,8 +424,8 @@ test("exact ECharts redirects cannot change the immutable version identity", asy
   assert.equal(fetches, 1);
 });
 
-test("the three exact ECharts 5.4.3 core URLs admit only the fixed compatible variant", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-compatible-"));
+test("the three exact ECharts 5.4.3 core URLs use pinned exact packaged bytes", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-bundled-543-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const urls = [
@@ -434,36 +437,36 @@ test("the three exact ECharts 5.4.3 core URLs admit only the fixed compatible va
   let remoteLoads = 0;
   const controller = createEditRuntimeProtocolController({
     protocolApi: { handle() {} },
-    bundledEchartsPath,
+    bundledEchartsPaths,
     runtimeLibraryStore: {
       async get() {
         return null;
       },
       load() {
         remoteLoads += 1;
-        return new Promise(() => {});
+        throw new Error("exact packaged bytes should win");
       },
     },
-    netFetch: async () => new Promise(() => {}),
+    netFetch: async () => {
+      remoteLoads += 1;
+      throw new Error("exact packaged bytes should win");
+    },
     randomSessionId: () => (++identity).toString(16).repeat(32),
     randomExecutionId: () => (identity + 8).toString(16).repeat(24),
   });
   for (const url of urls) {
     const html = remoteEchartsHtml(url);
     await writeFile(sourcePath, html);
-    const session = await controller.createSession({
-      html,
-      sourcePath,
-      recoveryIdentity: RECOVERY_IDENTITY,
-    });
-    assert.equal(session.resourceMode, "compatible");
-    assert.equal(session.recoveryAvailable, true);
-    assert.deepEqual(session.libraryOrigins, ["bundled-compatible", "inline"]);
+    const session = await controller.createSession({ html, sourcePath });
+    assert.equal(session.resourceMode, "exact");
+    assert.equal("recoveryAvailable" in session, false);
+    assert.deepEqual(session.libraryOrigins, ["bundled", "inline"]);
+    assert.deepEqual(session.runtimeLibraries, ["echarts"]);
   }
-  assert.equal(remoteLoads, 3);
+  assert.equal(remoteLoads, 0);
 });
 
-test("accurate bundled and disk-cache bytes take priority over compatibility", async (t) => {
+test("exact packaged bytes take priority before the exact immutable disk cache", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-exact-first-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
@@ -471,7 +474,7 @@ test("accurate bundled and disk-cache bytes take priority over compatibility", a
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
   const bundledController = createEditRuntimeProtocolController({
     protocolApi: { handle() {} },
-    bundledEchartsPath,
+    bundledEchartsPaths,
     netFetch: async () => {
       fetches += 1;
       throw new Error("accurate bundled bytes should win");
@@ -486,14 +489,14 @@ test("accurate bundled and disk-cache bytes take priority over compatibility", a
   assert.equal(bundled.resourceMode, "exact");
   assert.deepEqual(bundled.libraryOrigins, ["bundled", "inline"]);
 
-  const exactUrl = "https://unpkg.com/echarts@5.4.3/dist/echarts.min.js";
+  const exactUrl = "https://unpkg.com/echarts@5.5.0/dist/echarts.min.js";
   const exactHtml = remoteEchartsHtml(exactUrl);
   await writeFile(sourcePath, exactHtml);
   const store = createEditRuntimeLibraryStore({ userDataPath: path.join(temporaryRoot, "data") });
   await store.load(exactUrl, async () => COMPATIBLE_ECHARTS_BYTES);
   const cachedController = createEditRuntimeProtocolController({
     protocolApi: { handle() {} },
-    bundledEchartsPath,
+    bundledEchartsPaths,
     runtimeLibraryStore: store,
     netFetch: async () => {
       fetches += 1;
@@ -509,7 +512,7 @@ test("accurate bundled and disk-cache bytes take priority over compatibility", a
   assert.equal(fetches, 0);
 });
 
-test("near matches, plugins, nonstandard paths and multiple externals never use compatibility", async (t) => {
+test("near matches, plugins and nonstandard paths stay on their exact remote bytes", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-near-match-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
@@ -531,7 +534,7 @@ test("near matches, plugins, nonstandard paths and multiple externals never use 
   let sessionIdentity = 0;
   const controller = createEditRuntimeProtocolController({
     protocolApi: { handle() {} },
-    bundledEchartsPath,
+    bundledEchartsPaths,
     runtimeLibraryStore: {
       async get() {
         return null;
@@ -549,7 +552,6 @@ test("near matches, plugins, nonstandard paths and multiple externals never use 
     const session = await controller.createSession({ html, sourcePath });
     assert.equal(session.resourceMode, "exact");
     assert.equal("recoveryAvailable" in session, false);
-    await assert.rejects(controller.recoverSession(session.sessionId), /no compatible recovery/u);
   }
   const emptyExternal = remoteEchartsHtml(
     "https://unpkg.com/echarts@5.4.3/dist/echarts.min.js",
@@ -561,151 +563,54 @@ test("near matches, plugins, nonstandard paths and multiple externals never use 
   );
 });
 
-test("compatible preparation returns before stalled exact bytes and background completion mutates only cache", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-background-"));
+test("an unavailable packaged version waits for that exact immutable remote version", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-exact-remote-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-  const userDataPath = path.join(temporaryRoot, "user-data");
   const sourcePath = path.join(temporaryRoot, "report.html");
   const exactUrl = "https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js";
   const html = remoteEchartsHtml(exactUrl);
   await writeFile(sourcePath, html);
-  const store = createEditRuntimeLibraryStore({ userDataPath });
-  let releaseNetwork = null;
-  const networkGate = new Promise((resolve) => {
-    releaseNetwork = resolve;
-  });
-  let networkStarted = null;
-  const started = new Promise((resolve) => {
-    networkStarted = resolve;
-  });
-  let handler = null;
+  let requestedUrl = null;
   const controller = createEditRuntimeProtocolController({
-    protocolApi: {
-      handle(_scheme, nextHandler) {
-        handler = nextHandler;
-      },
-    },
-    bundledEchartsPath,
-    runtimeLibraryStore: store,
-    netFetch: async () => {
-      networkStarted();
-      await networkGate;
-      return new Response(COMPATIBLE_ECHARTS_BYTES, { status: 200 });
-    },
-    randomSessionId: () => "a".repeat(32),
-    randomExecutionId: () => "b".repeat(24),
-  });
-  controller.install();
-  const sessionPromise = controller.createSession({
-    html,
-    sourcePath,
-    recoveryIdentity: RECOVERY_IDENTITY,
-  });
-  await started;
-  const session = await Promise.race([
-    sessionPromise,
-    new Promise((_, reject) => setTimeout(
-      () => reject(new Error("compatible session waited for exact network bytes")),
-      1_000,
-    )),
-  ]);
-  assert.equal(session.resourceMode, "compatible");
-  assert.equal(controller.sessionCount(), 1);
-  const originalDescriptor = { ...session };
-  const originalScript = await (await handler(new Request(
-    `pageroot-edit-runtime://${session.sessionId}/.pageroot/author/0.js`,
-  ))).arrayBuffer();
-
-  releaseNetwork();
-  let cached = null;
-  for (let attempt = 0; attempt < 100 && !cached; attempt += 1) {
-    cached = await store.get(exactUrl);
-    if (!cached) await new Promise((resolve) => setImmediate(resolve));
-  }
-  assert.ok(cached);
-  assert.deepEqual(cached.bytes, COMPATIBLE_ECHARTS_BYTES);
-  assert.deepEqual({ ...session }, originalDescriptor);
-  assert.equal(controller.sessionCount(), 1);
-  const unchangedScript = await (await handler(new Request(
-    `pageroot-edit-runtime://${session.sessionId}/.pageroot/author/0.js`,
-  ))).arrayBuffer();
-  assert.deepEqual(Buffer.from(unchangedScript), Buffer.from(originalScript));
-  assert.notDeepEqual(Buffer.from(unchangedScript), COMPATIBLE_ECHARTS_BYTES);
-});
-
-test("compatible recovery creates one new immutable exact session and leaves the old session intact", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-recover-"));
-  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-  const sourcePath = path.join(temporaryRoot, "report.html");
-  const exactUrl = "https://unpkg.com/echarts@5.4.3/dist/echarts.min.js";
-  const html = remoteEchartsHtml(exactUrl);
-  await writeFile(sourcePath, html);
-  let handler = null;
-  const sessionIds = ["1".repeat(32), "2".repeat(32)];
-  const executionIds = ["3".repeat(24), "4".repeat(24)];
-  const controller = createEditRuntimeProtocolController({
-    protocolApi: {
-      handle(_scheme, nextHandler) {
-        handler = nextHandler;
-      },
-    },
-    bundledEchartsPath,
+    protocolApi: { handle() {} },
+    bundledEchartsPaths: { "5.6.0": bundledEchartsPaths["5.6.0"] },
     runtimeLibraryStore: {
-      async get() {
-        return null;
-      },
-      async load(_url, fetchRemote) {
+      async get() { return null; },
+      async load(url, fetchRemote) {
+        requestedUrl = url;
         return { bytes: await fetchRemote(), origin: "network" };
       },
     },
     netFetch: async () => new Response(COMPATIBLE_ECHARTS_BYTES, { status: 200 }),
-    randomSessionId: () => sessionIds.shift(),
-    randomExecutionId: () => executionIds.shift(),
+    randomSessionId: () => "a".repeat(32),
+    randomExecutionId: () => "b".repeat(24),
   });
-  controller.install();
-  const compatible = await controller.createSession({
-    html,
-    sourcePath,
-    recoveryIdentity: RECOVERY_IDENTITY,
-  });
-  const recoveryRequest = {
-    sessionId: compatible.sessionId,
-    ...RECOVERY_IDENTITY,
-  };
-  await assert.rejects(
-    controller.recoverSession({
-      ...recoveryRequest,
-      sourceSha256: "sha256:" + "b".repeat(64),
-    }),
-    /recovery identity is invalid/u,
-  );
-  await assert.rejects(
-    controller.recoverSession({
-      ...recoveryRequest,
-      authoritySourcePath: "/authority/other-report.html",
-    }),
-    /recovery identity is invalid/u,
-  );
-  const exact = await controller.recoverSession(recoveryRequest);
-  assert.equal(exact.resourceMode, "exact");
-  assert.equal("recoveryAvailable" in exact, false);
-  assert.notEqual(exact.sessionId, compatible.sessionId);
-  assert.notEqual(exact.executionId, compatible.executionId);
-  assert.notEqual(exact.resourceSha256, compatible.resourceSha256);
-  assert.deepEqual(exact.libraryOrigins, ["network", "inline"]);
-  assert.equal(controller.sessionCount(), 2);
+  const session = await controller.createSession({ html, sourcePath });
+  assert.equal(requestedUrl, exactUrl);
+  assert.equal(session.resourceMode, "exact");
+  assert.deepEqual(session.libraryOrigins, ["network", "inline"]);
+  assert.deepEqual(session.runtimeLibraries, ["echarts"]);
+});
 
-  const oldScript = await (await handler(new Request(
-    `pageroot-edit-runtime://${compatible.sessionId}/.pageroot/author/0.js`,
-  ))).arrayBuffer();
-  const exactScript = await (await handler(new Request(
-    `pageroot-edit-runtime://${exact.sessionId}/.pageroot/author/0.js`,
-  ))).arrayBuffer();
-  assert.notDeepEqual(Buffer.from(oldScript), COMPATIBLE_ECHARTS_BYTES);
-  assert.deepEqual(Buffer.from(exactScript), COMPATIBLE_ECHARTS_BYTES);
+test("pinned packaged ECharts bytes fail closed when their integrity changes", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-integrity-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  const bundledPath = path.join(temporaryRoot, "echarts.min.js");
+  await Promise.all([
+    writeFile(sourcePath, REMOTE_ECHARTS_HTML),
+    writeFile(bundledPath, COMPATIBLE_ECHARTS_BYTES),
+  ]);
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: { handle() {} },
+    bundledEchartsPaths: { "5.6.0": bundledPath },
+    netFetch: async () => {
+      throw new Error("integrity failure must not silently switch to the network");
+    },
+  });
   await assert.rejects(
-    controller.recoverSession(recoveryRequest),
-    /already consumed/u,
+    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath }),
+    /failed integrity verification/u,
   );
 });
 
@@ -733,6 +638,7 @@ test("a non-compatible remote load may outlive local preparation but remains rem
   const session = await controller.createSession({ html, sourcePath });
   assert.equal(session.resourceMode, "exact");
   assert.deepEqual(session.libraryOrigins, ["network", "inline"]);
+  assert.deepEqual(session.runtimeLibraries, ["echarts"]);
 });
 
 test("separate runtime sessions do not retain a hidden script-preparation cache", async (t) => {

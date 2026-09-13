@@ -21,6 +21,8 @@ import {
   reviewBadgeLabelText,
 } from "../../app/lib/review-badge-aggregation.js";
 import {
+  reviewFocusOutlineIsUseful,
+  reviewTargetScrollTop,
   reviewRegionAnnotations,
 } from "../../app/lib/review-region-annotation.js";
 import { OPAQUE_SANDBOX_STORAGE_BOOTSTRAP } from "../../app/lib/opaque-sandbox-storage.js";
@@ -78,6 +80,8 @@ export function generatedReviewBootstrap(
     reviewBadgeFactCount,
     aggregateReviewBadgeLabels,
     reviewRegionAnnotations,
+    reviewFocusOutlineIsUseful,
+    reviewTargetScrollTop,
     OPAQUE_SANDBOX_STORAGE_BOOTSTRAP,
   });
   // The bootstrap receives its helpers as `${fn.toString()}` injections, so a

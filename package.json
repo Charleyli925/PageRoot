@@ -37,7 +37,8 @@
     "test:browser:smoke": "npm run build && playwright test --config tests/e2e/browser/playwright.smoke.config.mjs",
     "test:browser:full": "npm run build && playwright test --config tests/e2e/browser/playwright.config.mjs",
     "test:real-html:electron": "npm run desktop:renderer && node tests/e2e/electron/local-html-corpus.mjs",
-    "test:real-html": "npm run build && playwright test --config tests/e2e/browser/playwright.real-html.config.mjs",
+    "test:dom-editing-compatibility": "npm run build && playwright test --config tests/e2e/browser/playwright.real-html.config.mjs",
+    "test:real-html": "npm run test:dom-editing-compatibility",
     "test:electron:smoke": "npm run desktop:renderer && playwright test --config tests/e2e/electron/playwright.smoke.config.mjs",
     "test:electron:ci-preflight": "playwright test --config tests/e2e/electron/playwright.ci-preflight.config.mjs",
     "test:electron:full": "npm run desktop:renderer && playwright test --config tests/e2e/electron/playwright.config.mjs",
@@ -86,7 +87,9 @@
     "@agentclientprotocol/sdk": "1.3.0",
     "@noble/hashes": "2.4.0",
     "@phosphor-icons/react": "2.1.10",
+    "acorn": "8.16.0",
     "echarts": "5.6.0",
+    "echarts-5-4-3": "npm:echarts@5.4.3",
     "electron-updater": "6.8.9",
     "entities": "8.0.0",
     "next": "16.3.3",
@@ -97,30 +100,30 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.50.0",
+    "@cloudflare/vite-plugin": "1.54.6",
     "@electron/notarize": "2.5.0",
     "@electron/osx-sign": "1.3.3",
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "4.3.3",
-    "@types/node": "22.20.1",
+    "@types/node": "22.20.2",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
-    "@vitejs/plugin-react": "6.0.5",
-    "@vitejs/plugin-rsc": "0.5.32",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitejs/plugin-rsc": "0.5.34",
     "ajv": "8.20.0",
     "app-builder-lib": "26.15.3",
-    "electron": "43.2.0",
+    "electron": "43.6.0",
     "electron-builder": "26.15.3",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.3.0",
+    "eslint-config-next": "16.3.4",
     "playwright": "^1.61.1",
     "react-server-dom-webpack": "19.2.8",
     "tailwindcss": "4.3.3",
     "temp-file": "3.4.0",
     "typescript": "5.9.3",
     "vinext": "0.0.45",
-    "vite": "8.2.0",
-    "wrangler": "4.118.0"
+    "vite": "8.2.2",
+    "wrangler": "4.130.0"
   },
   "overrides": {
     "next": {
@@ -225,6 +228,18 @@
       {
         "from": "node_modules/echarts/NOTICE",
         "to": "edit-runtime-libraries/echarts/5.6.0/NOTICE"
+      },
+      {
+        "from": "node_modules/echarts-5-4-3/dist/echarts.min.js",
+        "to": "edit-runtime-libraries/echarts/5.4.3/echarts.min.js"
+      },
+      {
+        "from": "node_modules/echarts-5-4-3/LICENSE",
+        "to": "edit-runtime-libraries/echarts/5.4.3/LICENSE"
+      },
+      {
+        "from": "node_modules/echarts-5-4-3/NOTICE",
+        "to": "edit-runtime-libraries/echarts/5.4.3/NOTICE"
       },
       {
         "from": "bridge/workspace-bridge.mjs",
@@ -365,6 +380,10 @@
       {
         "from": "bridge/project-file-repository/submission.mjs",
         "to": "bridge/project-file-repository/submission.mjs"
+      },
+      {
+        "from": "bridge/project-file-repository/save-retirement.mjs",
+        "to": "bridge/project-file-repository/save-retirement.mjs"
       },
       {
         "from": "bridge/project-file-repository/constants.mjs",
@@ -529,6 +548,10 @@
       {
         "from": "shared/agent-auth-source.mjs",
         "to": "shared/agent-auth-source.mjs"
+      },
+      {
+        "from": "shared/agent-input-policy.mjs",
+        "to": "shared/agent-input-policy.mjs"
       },
       {
         "from": "shared/openai-compatible-vendors.mjs",

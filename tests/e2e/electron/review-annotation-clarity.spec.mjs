@@ -303,31 +303,47 @@ async function readProjection(frame) {
 }
 
 async function activeFootprintVisibleInOuterViewport(page, frame, side) {
-  const footprint = await frame.locator(
-    '[data-pageroot-review-overlay-box][data-active="true"]',
-  ).first().evaluate((box) => ({
-    left: Number(box.getAttribute("data-left")),
-    right: Number(box.getAttribute("data-left")) + Number(box.getAttribute("data-width")),
-    top: Number(box.getAttribute("data-top")),
-    bottom: Number(box.getAttribute("data-top")) + Number(box.getAttribute("data-height")),
-    scrollTop: scrollY,
-    viewportHeight: innerHeight,
-  })).catch(() => null);
+  const footprint = await frame.locator("html").evaluate(() => {
+    const groupId = document.documentElement.dataset.pagerootReviewFocusGroup || "";
+    const escapedGroupId = CSS.escape(groupId);
+    const target = document.querySelector(
+      `[data-pageroot-review-mask-hole][data-pageroot-review-focus-group="${escapedGroupId}"]`,
+    ) || document.querySelector('[data-pageroot-review-overlay-box][data-active="true"]');
+    if (!target) return null;
+    return {
+      left: Number(target.getAttribute("data-left")),
+      right: Number(target.getAttribute("data-left")) + Number(target.getAttribute("data-width")),
+      top: Number(target.getAttribute("data-top")),
+      bottom: Number(target.getAttribute("data-top")) + Number(target.getAttribute("data-height")),
+      scrollTop: scrollY,
+      viewportHeight: innerHeight,
+    };
+  });
   if (!footprint) return true;
-  if (
+  const verticallyVisible = !(
     footprint.bottom <= footprint.scrollTop
     || footprint.top >= footprint.scrollTop + footprint.viewportHeight
-  ) return false;
-  return page.locator(`[aria-label="${side === "before" ? "修改前" : "修改后"}画布滚动区"]`)
+  );
+  const outerGeometry = await page.locator(
+    `[aria-label="${side === "before" ? "修改前" : "修改后"}画布滚动区"]`,
+  )
     .evaluate((viewport, geometry) => {
       const frameElement = viewport.querySelector("iframe");
-      if (!frameElement || frameElement.offsetWidth <= 0) return false;
+      if (!frameElement || frameElement.offsetWidth <= 0) return null;
       const scale = frameElement.getBoundingClientRect().width / frameElement.offsetWidth;
       const left = geometry.left * scale;
       const right = geometry.right * scale;
-      return right > viewport.scrollLeft
-        && left < viewport.scrollLeft + viewport.clientWidth;
+      return {
+        left,
+        right,
+        scrollLeft: viewport.scrollLeft,
+        clientWidth: viewport.clientWidth,
+      };
     }, footprint);
+  const horizontallyVisible = Boolean(outerGeometry)
+    && outerGeometry.right > outerGeometry.scrollLeft
+    && outerGeometry.left < outerGeometry.scrollLeft + outerGeometry.clientWidth;
+  return verticallyVisible && horizontallyVisible;
 }
 
 async function focusGroupForFact(frame, selector, predicate) {
@@ -348,6 +364,9 @@ async function focusGroupForFact(frame, selector, predicate) {
       const id = fact.structureChange === "style"
         ? `focus-${fact.displayGroupId}`
         : `focus-${changeId}-${fact.displayGroupId}`;
+      if (!document.querySelector(
+        `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${CSS.escape(id)}"]`,
+      )) continue;
       return { id, changeId, displayGroupId: fact.displayGroupId };
     }
     return null;
@@ -513,11 +532,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
         const boxes = frame.locator(
           `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
         );
-        await expect(boxes).toHaveCount(1);
-        await expect(boxes).toHaveAttribute("data-scope", "text-block");
-        await expect(boxes.locator("[data-pageroot-review-overlay-label]")).toHaveCount(1);
-        await expect(boxes.locator("[data-pageroot-review-overlay-label]")).not.toContainText("×");
-        await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(1);
+        await expect(boxes).toHaveCount(0);
+        await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
         await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
       }
       const selector = index === 0 ? "[data-review-paragraph-one]" : "[data-review-paragraph-two]";
@@ -534,8 +550,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
         launched.page, beforeFrame, "before",
       )).toBe(true);
       paragraphFocusTops.push(await afterFrame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
-      ).evaluate((box) => Number(box.getAttribute("data-top"))));
+        `[data-pageroot-review-mask-hole][data-pageroot-review-focus-group="${group.id}"]`,
+      ).evaluate((hole) => Number(hole.getAttribute("data-top"))));
       await launched.page.screenshot({
         path: path.join(captureDirectory, `review-focus-paragraph-${index + 1}.png`),
         animations: "disabled",
@@ -566,7 +582,14 @@ test("the review projection annotates a dense report cleanly and accurately", as
       document.querySelector("#review-plaintext-editable")?.remove();
     });
     await launched.page.getByRole("button", { name: "收起会话面板" }).click();
-    await launched.page.getByRole("button", { name: "采纳修改" }).click();
+    const pendingDecisionEntry = launched.page.getByRole("button", {
+      name: "待决定",
+      exact: true,
+    });
+    await expect(pendingDecisionEntry).toBeVisible();
+    await pendingDecisionEntry.click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    await launched.page.getByRole("button", { name: "采用修改" }).click();
     const confirmationDialog = launched.page.getByRole("dialog");
     await expect(confirmationDialog).toBeVisible();
     await confirmationDialog.getByRole("button", { name: "继续审阅" }).press("Escape");
@@ -575,6 +598,29 @@ test("the review projection annotates a dense report cleanly and accurately", as
       await expect(frame.locator("html"))
         .toHaveAttribute("data-pageroot-review-focus-group", paragraphTwoGroup.id);
     }
+    const preservedReviewPosition = await afterFrame.locator("html").evaluate(() => scrollY);
+    const reviewTabs = launched.page.getByRole("tablist", { name: "已打开的页面" });
+    const reviewDocumentTab = reviewTabs.getByRole("tab").first();
+    await launched.page.getByRole("button", { name: "新标签页" }).click();
+    await expect(reviewTabs.getByRole("tab").last()).toHaveAttribute("aria-selected", "true");
+    await expect(launched.page.getByTestId("ai-review-workspace")).toBeHidden();
+    await reviewDocumentTab.click();
+    await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    for (const frame of [beforeFrame, afterFrame]) {
+      await expect(frame.locator("html"))
+        .toHaveAttribute("data-pageroot-review-focus-group", paragraphTwoGroup.id);
+    }
+    const restoredReviewPosition = await afterFrame.locator("html").evaluate((root, requestedTop) => {
+      const scrollingElement = root.ownerDocument.scrollingElement;
+      const maximumScrollTop = Math.max(
+        0,
+        (scrollingElement?.scrollHeight || 0) - root.ownerDocument.defaultView.innerHeight,
+      );
+      return Math.min(requestedTop, maximumScrollTop);
+    }, preservedReviewPosition);
+    await expect.poll(() => afterFrame.locator("html").evaluate(() => scrollY))
+      .toBeCloseTo(restoredReviewPosition, 0);
     await afterFrame.locator("body").press("Escape");
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html"))
@@ -592,20 +638,12 @@ test("the review projection annotates a dense report cleanly and accurately", as
       const cssBox = frame.locator(
         `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${cssGroup.id}"]`,
       );
-      await expect(cssBox).toHaveCount(1);
-      await expect(cssBox).toHaveAttribute("data-scope", "container");
-      await expect(cssBox.locator("[data-pageroot-review-overlay-label]")).toHaveCount(1);
+      // A stylesheet rule identifies candidate targets but does not itself
+      // provide region-local computed-style evidence. Keep navigation/masking
+      // and fail closed on the optional outline until that Stable host has a
+      // current pure-style visual verdict.
+      await expect(cssBox).toHaveCount(0);
       await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
-      await expect.poll(() => cssBox.evaluate((box) => {
-        const grid = document.querySelector(".metrics");
-        if (!grid) return false;
-        const boxRect = box.getBoundingClientRect();
-        const gridRect = grid.getBoundingClientRect();
-        return Math.abs(boxRect.left - (gridRect.left - 3)) < .75
-          && Math.abs(boxRect.top - (gridRect.top - 3)) < .75
-          && Math.abs(boxRect.width - (gridRect.width + 6)) < .75
-          && Math.abs(boxRect.height - (gridRect.height + 6)) < .75;
-      })).toBe(true);
     }
     await launched.page.screenshot({
       path: path.join(captureDirectory, "review-focus-css-grid.png"),
@@ -633,50 +671,10 @@ test("the review projection annotates a dense report cleanly and accurately", as
       const localityBoxes = frame.locator(
         `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${firstLocalityGroup.id}"]`,
       );
-      await expect(localityBoxes).toHaveCount(2);
-      await expect(localityBoxes.locator("[data-pageroot-review-overlay-label]"))
-        .toHaveCount(1);
+      await expect(localityBoxes).toHaveCount(0);
       await expect(frame.locator("[data-pageroot-review-mask-hole]"))
-        .toHaveCount(2);
+        .toHaveCount(1);
     }
-    const singleCardCssGroup = await afterFrame.locator(
-      '.metric[data-report-metric="overall"]',
-    ).evaluate((element, excludedDisplayGroupId) => {
-      const fact = JSON.parse(
-        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
-      ).find((candidate) => (
-        candidate.type === "structure"
-        && candidate.structureChange === "style"
-        && candidate.displayGroupId?.startsWith("display-css-")
-        && candidate.displayGroupId !== excludedDisplayGroupId
-      ));
-      return fact ? {
-        id: `focus-${fact.displayGroupId}`,
-        changeId: element.getAttribute("data-pageroot-review-marker") || "",
-        displayGroupId: fact.displayGroupId,
-      } : null;
-    }, cssGroup.displayGroupId);
-    await activateFocusGroup(beforeFrame, afterFrame, singleCardCssGroup);
-    for (const frame of [beforeFrame, afterFrame]) {
-      const cardBox = frame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${singleCardCssGroup.id}"]`,
-      );
-      await expect(cardBox).toHaveCount(1);
-      await expect.poll(() => cardBox.evaluate((box) => {
-        const card = document.querySelector('.metric[data-report-metric="overall"]');
-        if (!card) return false;
-        const boxRect = box.getBoundingClientRect();
-        const cardRect = card.getBoundingClientRect();
-        return Math.abs(boxRect.left - (cardRect.left - 3)) < .75
-          && Math.abs(boxRect.top - (cardRect.top - 3)) < .75
-          && Math.abs(boxRect.width - (cardRect.width + 6)) < .75
-          && Math.abs(boxRect.height - (cardRect.height + 6)) < .75;
-      })).toBe(true);
-    }
-    await launched.page.screenshot({
-      path: path.join(captureDirectory, "review-focus-single-card.png"),
-      animations: "disabled",
-    });
     const singleStyleGroup = await focusGroupForFact(
       afterFrame,
       "[data-review-single-style]",
@@ -797,9 +795,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     const focusedOutsidePixels = await Promise.all([beforeFrame, afterFrame].map(
       (frame) => captureAuthoredElement(frame, "[data-review-single-style]"),
     ));
-    await afterFrame.locator(
-      `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${inlineStyleGroupA.id}"]`,
-    ).first().evaluate((bar) => bar.click());
+    await afterFrame.locator("body").press("Escape");
     await expect.poll(async () => Promise.all([beforeFrame, afterFrame].map((frame) => (
       frame.locator("html").getAttribute("data-pageroot-review-focus-group")
     )))).toEqual(["", ""]);
@@ -846,12 +842,14 @@ test("the review projection annotates a dense report cleanly and accurately", as
       activeFootprintVisibleInOuterViewport(launched.page, afterFrame, "after"),
     ]).then((visible) => visible.every(Boolean)), { timeout: 30_000 }).toBe(true);
 
-    const activePathsMatch = (frame) => frame.locator("html").evaluate(() => {
+    const activePaintBudget = (frame) => frame.locator("html").evaluate(() => {
       const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
         .map((box) => box.getAttribute("data-path") || "").sort();
       const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
         .map((hole) => hole.getAttribute("d") || "").sort();
-      return boxes.length > 0 && JSON.stringify(boxes) === JSON.stringify(holes);
+      return holes.length === 1
+        && boxes.length <= 1
+        && boxes.every((path) => holes.includes(path));
     });
     for (const frame of [beforeFrame, afterFrame]) {
       await frame.locator("html").evaluate(async () => {
@@ -864,8 +862,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
       });
     }
     await expect.poll(async () => Promise.all([
-      activePathsMatch(beforeFrame),
-      activePathsMatch(afterFrame),
+      activePaintBudget(beforeFrame),
+      activePaintBudget(afterFrame),
     ]).then((matches) => matches.every(Boolean))).toBe(true);
     for (const frame of [beforeFrame, afterFrame]) {
       await frame.locator("html").evaluate(() => {
@@ -874,8 +872,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
       });
     }
     await expect.poll(async () => Promise.all([
-      activePathsMatch(beforeFrame),
-      activePathsMatch(afterFrame),
+      activePaintBudget(beforeFrame),
+      activePaintBudget(afterFrame),
     ]).then((matches) => matches.every(Boolean))).toBe(true);
 
     await launched.page.screenshot({
@@ -910,35 +908,39 @@ test("the review projection annotates a dense report cleanly and accurately", as
         projection.documentWidth,
         `${side}: projection chrome must not widen the authored document`,
       ).toBeLessThanOrEqual(projection.authoredDocumentWidth + 0.01);
-      expect(projection.holes.length, `${side}: active outlines and holes share one record set`)
-        .toBe(projection.boxes.length);
+      expect(projection.holes.length, `${side}: one active locality cuts one mask hole`)
+        .toBe(1);
+      expect(projection.boxes.length, `${side}: one active locality paints at most one outline`)
+        .toBeLessThanOrEqual(1);
       expect(
         projection.boxes.filter((box) => box.labelVisible).length,
         `${side}: one active focus group has at most one label`,
       ).toBeLessThanOrEqual(1);
       expect(projection.boxes.every((box) => !box.label.includes("×"))).toBe(true);
       projection.holes.forEach((hole) => {
-        const box = projection.boxes.find((candidate) => (
-          candidate.changeId === hole.changeId
-          && candidate.owner === hole.owner
-          && candidate.fact === hole.fact
-        ));
-        expect(box, `${side}: every emphasized mask hole needs a canonical box`).toBeTruthy();
-        expect(box.active, `${side}: only active focus records cut mask holes`).toBe("true");
-        for (const [kind, geometry] of [["box", box], ["hole", hole]]) {
-          expect(geometry.left, `${side}: ${kind} ${box.changeId} crosses the left edge`)
+        for (const [kind, geometry] of [["hole", hole]]) {
+          expect(geometry.left, `${side}: ${kind} ${hole.changeId} crosses the left edge`)
             .toBeGreaterThanOrEqual(0);
-          expect(geometry.top, `${side}: ${kind} ${box.changeId} crosses the top edge`)
+          expect(geometry.top, `${side}: ${kind} ${hole.changeId} crosses the top edge`)
             .toBeGreaterThanOrEqual(0);
           expect(
             geometry.left + geometry.width,
-            `${side}: ${kind} ${box.changeId} crosses the right edge`,
+            `${side}: ${kind} ${hole.changeId} crosses the right edge`,
           ).toBeLessThanOrEqual(projection.authoredDocumentWidth);
           expect(
             geometry.top + geometry.height,
-            `${side}: ${kind} ${box.changeId} crosses the bottom edge`,
+            `${side}: ${kind} ${hole.changeId} crosses the bottom edge`,
           ).toBeLessThanOrEqual(projection.authoredDocumentHeight);
         }
+      });
+      projection.boxes.forEach((box) => {
+        const hole = projection.holes.find((candidate) => (
+          candidate.changeId === box.changeId
+          && candidate.owner === box.owner
+          && candidate.fact === box.fact
+        ));
+        expect(hole, `${side}: an outline must reuse its locality mask geometry`).toBeTruthy();
+        expect(box.active, `${side}: only active focus records paint outlines`).toBe("true");
         expect(hole.left, `${side}: box/hole left`).toBeCloseTo(box.left, 5);
         expect(hole.top, `${side}: box/hole top`).toBeCloseTo(box.top, 5);
         expect(hole.width, `${side}: box/hole width`).toBeCloseTo(box.width, 5);
@@ -1084,6 +1086,12 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await afterFrame.locator(
       `[data-pageroot-review-overlay-box="${edgeChangeId}"] [data-pageroot-review-overlay-label]`,
     ).evaluate((label) => label.click());
+    // Re-selecting is navigation, not an implicit exit toggle.
+    for (const frame of [beforeFrame, afterFrame]) {
+      await expect(frame.locator("html"))
+        .toHaveAttribute("data-pageroot-review-focus-group", edgeFocusGroupId);
+    }
+    await afterFrame.locator("body").press("Escape");
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html"))
         .toHaveAttribute("data-pageroot-review-focus-group", "");
@@ -1102,11 +1110,14 @@ test("the review projection annotates a dense report cleanly and accurately", as
     }));
     await settleReviewScroll();
     const missingSideBeforeActivation = await missingSideState();
+    const missingSideOuterLeft = await outerViewports.before.evaluate(
+      (element) => element.scrollLeft,
+    );
     await afterFrame.locator(
       `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
     ).first().evaluate((bar) => bar.click());
     await expect.poll(() => outerViewports.before.evaluate((element) => element.scrollLeft))
-      .toBe(0);
+      .toBe(missingSideOuterLeft);
     await settleReviewScroll();
     await expect.poll(missingSideState).toEqual(missingSideBeforeActivation);
     await expect.poll(() => activeFootprintVisibleInOuterViewport(
@@ -1120,9 +1131,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
       "utf8",
     );
 
-    // 1. One source fact draws one outline. Independent localized facts may
-    //    coexist inside a parent reorder region, but duplicate geometry for
-    //    the same fact/owner must still collapse.
+    // 1. When policy permits an outline, only the active local source fact may
+    //    own it; duplicate geometry for that fact/owner must still collapse.
     for (const [side, projection] of Object.entries(projections)) {
       for (const box of projection.boxes) {
         const container = projection.boxes.find((candidate) => (
@@ -1200,7 +1210,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
       }
     }
 
-    // 1b. Focus claims exactly one semantic group; inactive groups have no box.
+    // 1b. Focus claims exactly one semantic group; an outline is optional and
+    //     only the active locality may receive one.
     await afterFrame.locator("[data-pageroot-review-region-bar]").first().click();
     await expect.poll(async () => {
       const sides = {
@@ -1209,7 +1220,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
       };
       const activeBoxes = [...sides.before.boxes, ...sides.after.boxes]
         .filter((box) => box.active === "true");
-      if (!activeBoxes.length) return "no active box";
+      const activeHoles = [...sides.before.holes, ...sides.after.holes];
+      if (!activeHoles.length) return "no active mask hole";
       const claimed = activeBoxes.every((box) => (
         box.borderColor === "rgb(109, 92, 231)"
       ));
@@ -1217,6 +1229,9 @@ test("the review projection annotates a dense report cleanly and accurately", as
         .every((box) => box.active === "true");
       const barClaimed = [...sides.before.bars, ...sides.after.bars]
         .some((bar) => bar.active === "true");
+      if (sides.before.boxes.length > 1 || sides.after.boxes.length > 1) {
+        return "more than one outline painted on a side";
+      }
       if (!claimed) return "active box lacks the canonical purple border";
       if (!noInactiveBoxes) return "an inactive group still rendered a box";
       if (!barClaimed) return "no active revision bar";

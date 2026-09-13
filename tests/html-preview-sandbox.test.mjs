@@ -13,6 +13,26 @@ test("Edit runtime CSP keeps workers outside the admitted program closure", () =
   assert.doesNotMatch(EDIT_RUNTIME_CSP, /worker-src[^;]*blob:/u);
 });
 
+test("disposable Runtime inert ownership stays outside the author DOM", async () => {
+  const sandboxSource = await readFile(
+    new URL("../app/components/html-preview-sandbox.js", import.meta.url),
+    "utf8",
+  );
+  const editorSource = await readFile(
+    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(sandboxSource, /function isolateRuntimeCandidateFocus/u);
+  assert.match(sandboxSource, /const injected = !root\.hasAttribute\("inert"\)/u);
+  assert.match(sandboxSource, /candidateInertOwnership\.injected = injected/u);
+  assert.match(sandboxSource, /root\.setAttribute\("inert", ""\)/u);
+  assert.match(sandboxSource, /querySelectorAll\("\[autofocus\]"\)/u);
+  assert.match(sandboxSource, /removeAttribute\("autofocus"\)/u);
+  assert.doesNotMatch(sandboxSource, /data-pageroot-runtime-candidate-inert/u);
+  assert.match(editorSource, /candidateInertInjected: candidateInertOwnership\.injected/u);
+  assert.match(editorSource, /if \(candidate\.candidateInertInjected\)/u);
+});
+
 test("preview sandbox disables scripts without losing authored type metadata", () => {
   const disabled = disableExecutableMarkup(
     '<script type="module" data-x="1">run()</script><script>run2()</script>',

@@ -673,6 +673,9 @@ function createSyntheticAgent(fixture, observed) {
           update: {
             sessionUpdate: "agent_message_chunk",
             content: { type: "text", text },
+            ...(observed.visibleTextMessageId
+              ? { messageId: observed.visibleTextMessageId }
+              : {}),
           },
         });
       }
@@ -907,6 +910,7 @@ test("ACP session progress retains and publishes only a bounded update prefix", 
 test("ACP execution projects public Agent messages and marks a bounded text tail", async (t) => {
   const fixture = await createFixture(t);
   const observed = {
+    visibleTextMessageId: "qoder_message_001",
     visibleTextChunks: [
       "先读取 capacity、quota 和 model unavailable 说明。\u0000",
       "再写入 Candidate。",
@@ -930,6 +934,10 @@ test("ACP execution projects public Agent messages and marks a bounded text tail
   assert.deepEqual(
     events.filter((event) => event.kind === "visible-text").map((event) => event.text).slice(0, 2),
     ["先读取 capacity、quota 和 model unavailable 说明。", "再写入 Candidate。"],
+  );
+  assert.deepEqual(
+    events.filter((event) => event.kind === "visible-text").map((event) => event.messageId),
+    ["qoder_message_001", "qoder_message_001", "qoder_message_001"],
   );
   assert.equal(events.filter((event) => event.kind === "visible-text-truncated").length, 1);
 });

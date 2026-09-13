@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import AiReviewWorkspace from "./AiReviewWorkspace";
+import AiReviewWorkspace, { type ReviewConfirmationAction } from "./AiReviewWorkspace";
 import type { ReviewDocuments } from "./review-document";
+import type { ReviewPresentationSnapshot } from "./review-state";
 type WorkbenchReviewSession = Readonly<{
   sessionId: string;
   documents: ReviewDocuments;
+  sourceContentEqual: boolean;
   sourcePath: string;
   beforeLabel: string;
   afterLabel: string;
@@ -22,6 +24,13 @@ export type WorkbenchReviewOverlayProps = Readonly<{
   assistantEntry: ReactNode;
   sidebar: ReactNode;
   fileName: string;
+  changeContextVisibility: number;
+  commentContextVisibility: number;
+  initialPresentation?: ReviewPresentationSnapshot | null;
+  onPresentationChange?: (presentation: ReviewPresentationSnapshot) => void;
+  registerDecisionRequest: (
+    request: (action: ReviewConfirmationAction) => void,
+  ) => () => void;
   registerReload: (reload: () => void) => () => void;
 }>;
 
@@ -36,6 +45,11 @@ export function WorkbenchReviewOverlay({
   assistantEntry,
   sidebar,
   fileName,
+  changeContextVisibility,
+  commentContextVisibility,
+  initialPresentation,
+  onPresentationChange,
+  registerDecisionRequest,
   registerReload,
 }: WorkbenchReviewOverlayProps) {
   const [reloadRevision, setReloadRevision] = useState(0);
@@ -58,12 +72,14 @@ export function WorkbenchReviewOverlay({
 
   return (
     <AiReviewWorkspace
+      key={session.sessionId}
       embedded
       fileName={fileName}
       beforeLabel={session.beforeLabel}
       afterLabel={session.afterLabel}
       sessionId={session.sessionId}
       documents={session.documents}
+      sourceContentEqual={session.sourceContentEqual}
       sourcePath={session.sourcePath || undefined}
       accepting={accepting}
       error={activeRunError}
@@ -73,6 +89,11 @@ export function WorkbenchReviewOverlay({
       onRevealAiTask={onRevealAiTask}
       assistantEntry={assistantEntry}
       sidebar={sidebar}
+      changeContextVisibility={changeContextVisibility}
+      commentContextVisibility={commentContextVisibility}
+      initialPresentation={initialPresentation}
+      onPresentationChange={onPresentationChange}
+      registerDecisionRequest={registerDecisionRequest}
       reloadRevision={reloadRevision}
     />
   );

@@ -11,6 +11,10 @@ import { describeQoderAuthSource, describeCodexAuthSource } from "../shared/agen
 
 test("login URLs accept only https hosts for the selected provider", () => {
   assert.equal(
+    publicAgentLoginUrl("https://qoder.com/account/integrations?source=cli", { providerId: "qoder" }),
+    "https://qoder.com/account/integrations?source=cli",
+  );
+  assert.equal(
     publicAgentLoginUrl("https://auth.qoder.ai/device?code=1", { providerId: "qoder" }),
     "https://auth.qoder.ai/device?code=1",
   );
@@ -33,6 +37,7 @@ test("login URLs accept only https hosts for the selected provider", () => {
 
 test("the packaged and shared login URL allowlists stay in agreement", () => {
   const samples = [
+    ["https://qoder.com/account/integrations?source=cli", "qoder"],
     ["https://auth.qoder.ai/device?code=1", "qoder"],
     ["https://chatgpt.com/auth/login", "codex"],
     ["https://auth.openai.com/authorize", "codex"],
@@ -47,10 +52,10 @@ test("the packaged and shared login URL allowlists stay in agreement", () => {
     );
   }
   assert.equal(
-    extractDesktopAgentLoginUrl("Open https://auth.qoder.ai/start then continue.", {
+    extractDesktopAgentLoginUrl("Open https://qoder.com/account/integrations then continue.", {
       providerId: "qoder",
     }),
-    extractAgentLoginUrl("Open https://auth.qoder.ai/start then continue.", {
+    extractAgentLoginUrl("Open https://qoder.com/account/integrations then continue.", {
       providerId: "qoder",
     }),
   );

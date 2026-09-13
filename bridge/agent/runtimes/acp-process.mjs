@@ -16,6 +16,7 @@ import {
   AcpFrameGuard,
   acpPolicyError,
   acpProcessEnvironment,
+  probeAcpSession,
   runAcpTask,
   truncateUtf8Tail,
 } from "./acp-protocol.mjs";
@@ -63,7 +64,7 @@ async function waitForExit(child) {
 async function spawnAcpChild({
   command,
   args,
-  policy,
+  cwd,
   environment,
   baseEnvironment,
   expectedExecutable,
@@ -99,7 +100,7 @@ async function spawnAcpChild({
     });
     const child = await prepared.spawn({
       args,
-      cwd: policy.requestRoot,
+      cwd,
       detached: processGroup,
       stdin: "pipe",
     });
@@ -111,7 +112,7 @@ async function spawnAcpChild({
   const childEnvironment = acpProcessEnvironment(environment, baseEnvironment);
   try {
     const child = spawn(executable, [...args], {
-      cwd: policy.requestRoot,
+      cwd,
       env: childEnvironment,
       detached: processGroup,
       shell: false,
@@ -151,7 +152,7 @@ export async function runAcpProcessTask({
   const { child, processGroup } = await spawnAcpChild({
     command,
     args,
-    policy,
+    cwd: policy.requestRoot,
     environment,
     baseEnvironment,
     expectedExecutable,
@@ -247,6 +248,102 @@ export async function runAcpProcessTask({
     throw error;
   } finally {
     codexAdapter?.close();
+    child.stdin?.end();
+    if (!(await terminateManagedProcess(child, { processGroup }))) {
+      throw acpPolicyError(
+        "ACP_PROCESS_CLEANUP_UNCONFIRMED",
+        "The ACP Agent process group could not be confirmed stopped.",
+      );
+    }
+  }
+}
+
+export async function probeAcpProcess({
+  command,
+  args = ["--acp"],
+  cwd,
+  environment = {},
+  baseEnvironment = process.env,
+  expectedAgentName,
+  expectedExecutable,
+  useVerifiedJavaScriptRuntime = false,
+  startupTimeoutMs,
+  cancellationSignal,
+  stderrFieldPrefix = "agent",
+  clock = Date,
+  scheduler,
+} = {}) {
+  if (cancellationSignal?.aborted) {
+    throw acpPolicyError("ACP_CANCELLED", "The PageRoot ACP probe was cancelled.");
+  }
+  const probeCwd = assertAbsolutePath(cwd, "ACP probe cwd");
+  const { child, processGroup } = await spawnAcpChild({
+    command,
+    args,
+    cwd: probeCwd,
+    environment,
+    baseEnvironment,
+    expectedExecutable,
+    useVerifiedJavaScriptRuntime,
+  });
+  const childExitPromise = waitForExit(child);
+  void childExitPromise.catch(() => {});
+  const earlyExitPromise = childExitPromise.then(
+    async (status) => {
+      await new Promise((resolve) => setTimeout(resolve, PROCESS_PROTOCOL_DRAIN_MS));
+      throw acpPolicyError(
+        "ACP_AGENT_EXITED_EARLY",
+        "The ACP Agent process exited before the probe completed.",
+        { status },
+      );
+    },
+    (cause) => {
+      const error = acpPolicyError(
+        "ACP_AGENT_PROCESS_ERROR",
+        "The ACP Agent process could not be started or observed.",
+      );
+      error.cause = cause;
+      throw error;
+    },
+  );
+  void earlyExitPromise.catch(() => {});
+  const stderr = { value: "", truncated: false };
+  child.stdin?.on("error", () => {});
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    const next = truncateUtf8Tail(stderr.value + chunk, 16 * 1024);
+    stderr.value = next.value;
+    stderr.truncated ||= next.truncated;
+  });
+  const guardedStdout = child.stdout.pipe(new AcpFrameGuard());
+  const stream = acp.ndJsonStream(
+    Writable.toWeb(child.stdin),
+    Readable.toWeb(guardedStdout),
+  );
+  try {
+    const result = await Promise.race([
+      probeAcpSession({
+        connection: stream,
+        cwd: probeCwd,
+        expectedAgentName,
+        cancellationSignal,
+        ...(startupTimeoutMs ? { startupTimeoutMs } : {}),
+        clock,
+        scheduler,
+      }),
+      earlyExitPromise,
+    ]);
+    return Object.freeze({
+      ...result,
+      stderr: stderr.value,
+      stderrTruncated: stderr.truncated,
+    });
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    error[`${stderrFieldPrefix}Stderr`] = stderr.value;
+    error[`${stderrFieldPrefix}StderrTruncated`] = stderr.truncated;
+    throw error;
+  } finally {
     child.stdin?.end();
     if (!(await terminateManagedProcess(child, { processGroup }))) {
       throw acpPolicyError(

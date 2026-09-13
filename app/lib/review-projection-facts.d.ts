@@ -20,6 +20,8 @@ export type ReviewFocusGeometryMode =
   | "container-box"
   | "numbered-line-range";
 
+export type ReviewFocusOutlinePolicy = "never" | "source-change" | "visual-change";
+
 export type ReviewProjectionFact = {
   id: string;
   type: ReviewProjectionFactType;

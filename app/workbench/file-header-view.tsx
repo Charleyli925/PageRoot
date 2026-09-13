@@ -8,7 +8,6 @@ import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 
 import type { WorkbenchPresentation } from "./workbench-header-projection";
-import { ReviewToolbarControls } from "./review-toolbar-controls";
 import { WorkbenchMoreMenu, type WorkbenchMoreMenuProps } from "./workbench-more-menu";
 import {
   WorkbenchHeaderActions,
@@ -99,24 +98,23 @@ export function WorkbenchHeaderToolbar({
             </div>
           </div>
           <div className="workbench-toolbar-center">
-            <span className="toolbar-section-divider" aria-hidden="true" />
+            {reviewActive ? <span className="toolbar-section-divider" aria-hidden="true" /> : null}
             <div
               id="workbench-review-tools-slot"
               className="workbench-review-tools-slot"
               aria-label="审阅工具与结果操作"
             >
-              {!reviewActive ? <ReviewToolbarControls disabled /> : null}
             </div>
-            <span className="toolbar-section-divider" aria-hidden="true" />
+            {reviewActive ? <span className="toolbar-section-divider" aria-hidden="true" /> : null}
           </div>
           <div className="workbench-toolbar-actions">
             <button
               className="workbench-refresh-button"
               type="button"
-              aria-label={reviewActive ? "刷新审阅画布" : presentation.mode === "preview" ? "刷新预览" : "刷新画布"}
+              aria-label={reviewActive ? "刷新本页面" : presentation.mode === "preview" ? "刷新预览" : "刷新画布"}
               disabled={!refreshAvailable}
               data-tooltip={reviewActive
-                ? "刷新审阅画布"
+                ? "刷新本页面"
                 : presentation.mode === "preview"
                   ? "刷新预览"
                   : "进入预览或审阅后可刷新"}

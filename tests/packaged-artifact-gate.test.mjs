@@ -124,7 +124,7 @@ test("release commands use one automated artifact lane with full tests and packa
     "browser-full",
     "electron-full",
     "ai-closed-loop",
-    "real-html",
+    "dom-editing-compatibility",
     "package-build",
     "packaged-runtime",
     "packaged-verify",
@@ -340,6 +340,9 @@ test("retired editor guard rejects dependencies, bundled code, and legacy editin
     "replace-editable-island",
     "planEditableIslandPatch()",
     "plainTextFlow",
+    "scope.lexical.indexOf(name)",
+    "const scope = { lexical: [] }",
+    "Acorn tracks lexical declarations while parsing modules",
   ]) {
     assert.doesNotThrow(() => assertNoRetiredEditorArtifacts(
       contents,
@@ -349,6 +352,11 @@ test("retired editor guard rejects dependencies, bundled code, and legacy editin
   for (const [label, contents] of [
     ["source package.json", '{"dependencies":{"lexical":"0.48.0"}}'],
     ["source package-lock.json", '{"packages":{"node_modules/@lexical/history":{}}}'],
+    ["source package-lock.json", '{"packages":{"node_modules/lexical":{}}}'],
+    ["source package alias", '{"dependencies":{"legacy-editor":"npm:lexical@0.48.0"}}'],
+    ["source module", 'import { createEditor } from "lexical"'],
+    ["source commonjs module", 'const editor = require("lexical")'],
+    ["source dynamic import", 'const editor = await import("lexical")'],
     ["renderer bundle", "Minified Lexical error"],
     ["renderer bundle", "new TextFlowSession()"],
     ["renderer bundle", "startTextFlowEditing()"],
@@ -482,6 +490,19 @@ test("the app-bundle gate reports each mutated closure boundary", async (t) => {
         JSON.stringify({ ...buildInfo, version: "9.9.9" }) + "\n",
       ),
       expected: /build provenance mismatch for version/u,
+    },
+    {
+      name: "ECharts 5.4.3 packaged byte drift",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ resourcesPath }) => writeFile(
+        path.join(
+          resourcesPath,
+          "edit-runtime-libraries/echarts/5.4.3/echarts.min.js",
+        ),
+        "stale ECharts 5.4.3 bytes\n",
+      ),
+      expected: /bundled ECharts 5\.4\.3 echarts\.min\.js does not match source/u,
     },
     {
       name: "missing fresh renderer oracle",

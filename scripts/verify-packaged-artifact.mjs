@@ -85,6 +85,7 @@ const REQUIRED_BRIDGE_FILES = [
   "project-file-repository/path-safety.mjs",
   "project-file-repository/source-binding.mjs",
   "project-file-repository/submission.mjs",
+  "project-file-repository/save-retirement.mjs",
   "project-file-repository/registry.mjs",
   "project-file-repository/request-draft.mjs",
   "project-file-repository/request-attachments.mjs",
@@ -151,6 +152,7 @@ export const REQUIRED_SHARED_FILES = [
   "agent-access-operation.mjs",
   "agent-login-url.mjs",
   "agent-auth-source.mjs",
+  "agent-input-policy.mjs",
   "openai-compatible-vendors.mjs",
   "supported-agent-models.mjs",
   "agent-feature-gates.mjs",
@@ -215,7 +217,10 @@ export const REQUIRED_APP_SOURCE_FILES = [
 const RETIRED_EDITOR_ARTIFACTS = [
   { name: "Edit runtime probe owner", pattern: /edit-runtime-probe-owner/iu },
   { name: "Edit runtime capture owner", pattern: /edit-runtime-capture-owner/iu },
-  { name: "Lexical", pattern: /(?:@lexical\/|\blexical\b)/iu },
+  {
+    name: "Lexical",
+    pattern: /(?:@lexical\/|\bnode_modules[/\\]lexical(?:[/\\"']|$)|["']lexical["']\s*:|["'][^"']+["']\s*:\s*["']npm:lexical@|\b(?:from|import)\s*["']lexical["']|\b(?:import|require)\s*\(\s*["']lexical["']\s*\)|\bMinified Lexical error\b)/iu,
+  },
   {
     name: "TextFlow",
     pattern: /(?:\b(?:TextFlow(?:Editor|Session|Surface)?|textFlow(?:Editor|Session|Surface)|startTextFlowEditing)\b|"(?:node_modules\/)?(?:@[^"/]+\/)?text-?flow"\s*:|"[^"]+"\s*:\s*"npm:(?:@[^"/]+\/)?text-?flow@)/iu,
@@ -956,12 +961,22 @@ export async function verifyAppBundle({
       fileName,
     );
   }
-  for (const fileName of ["echarts.min.js", "LICENSE", "NOTICE"]) {
-    await assertFilesEqual(
-      path.join(productRoot, "node_modules", "echarts", fileName === "echarts.min.js" ? "dist/echarts.min.js" : fileName),
-      path.join(resourcesPath, "edit-runtime-libraries", "echarts", "5.6.0", fileName),
-      `bundled ECharts 5.6.0 ${fileName}`,
-    );
+  for (const { packageName, version } of [
+    { packageName: "echarts-5-4-3", version: "5.4.3" },
+    { packageName: "echarts", version: "5.6.0" },
+  ]) {
+    for (const fileName of ["echarts.min.js", "LICENSE", "NOTICE"]) {
+      await assertFilesEqual(
+        path.join(
+          productRoot,
+          "node_modules",
+          packageName,
+          fileName === "echarts.min.js" ? "dist/echarts.min.js" : fileName,
+        ),
+        path.join(resourcesPath, "edit-runtime-libraries", "echarts", version, fileName),
+        `bundled ECharts ${version} ${fileName}`,
+      );
+    }
   }
 
   if (

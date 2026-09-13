@@ -172,7 +172,7 @@ function deriveRunProgressCopy({
   if (status === "no-change") {
     return progressPresentationCopy(
       "处理结果",
-      "这次没有产生有效变化",
+      "未识别到明确的页面变化",
       "没有新版本",
       "页面与评论可以继续编辑",
       "原评论和附件都已保留，调整要求后可以重新发送",
@@ -698,6 +698,10 @@ export function activeRunFromRecord(raw) {
   return {
     projectId: String(raw.projectId || ""),
     documentId: String(raw.documentId || ""),
+    // Legacy records have no origin Working Copy. The current screen, path
+    // and based-on Version cannot supply that missing Request identity.
+    sourceWorkingCopyId: typeof raw.sourceWorkingCopyId === "string"
+      && raw.sourceWorkingCopyId.length > 0 ? raw.sourceWorkingCopyId : null,
     requestId,
     attemptId: String(raw.attemptId || "attempt_001"),
     requestPath: String(raw.requestPath || ""),

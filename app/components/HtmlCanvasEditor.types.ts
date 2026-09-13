@@ -5,6 +5,7 @@ import type {
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
 import type { EditRuntimeGrant } from "../domain/edit-runtime-contract.js";
+import type { DocumentSourceReceipt } from "../application/document-session.js";
 import type { RuntimeFrameIdentity } from "./runtime-frame-coordinator.js";
 import type {
   SemanticIdentityDelta,
@@ -141,6 +142,7 @@ export type HtmlCanvasEditRuntimeLoadOutcome =
 
 export type HtmlCanvasRuntimeDegradation =
   | "none"
+  | "runtime-partial"
   | "static-preparing"
   | "static-visible"
   | "last-known-good-readonly";
@@ -152,6 +154,8 @@ export type HtmlCanvasEditRuntimeSettlement = Readonly<{
   preserveLastKnownGood: boolean;
   /** A real failure has no usable Runtime projection and may enter static fallback. */
   shouldUseStaticFallback: boolean;
+  /** A usable Runtime was promoted with a noncritical author-script error. */
+  runtimePartial: boolean;
 }>;
 
 export type HtmlCanvasFreezeSnapshot = {
@@ -252,6 +256,8 @@ export type HtmlCanvasEditorHandle = {
   getRenderedSourceHtml: () => string | null;
   /** Identifies a verified physical frame, including same-source reloads. */
   getRenderedFrameGeneration: () => number | null;
+  /** Returns the physical iframe Document for identity fencing. */
+  getRenderedFrameDocument: () => Document | null;
   /** Readiness only; semantic commits still validate their own source target. */
   isCurrentProjectionEditable: () => boolean;
   /**
@@ -324,6 +330,10 @@ export type HtmlCanvasEditorHandle = {
     source: string,
     target: HtmlCanvasSelection | null,
     selection?: NativeEditSelection | null,
+    operation?: Readonly<{
+      kind: HtmlCanvasMutation["kind"];
+      property?: string;
+    }>,
   ) => boolean;
   /** Restores the pre-action target/caret when a history request fails or becomes ineligible. */
   cancelHistoryAction: (options?: { restore?: boolean }) => boolean;
@@ -341,14 +351,16 @@ export type HtmlCanvasEditorHandle = {
 export type HtmlCanvasEditorProps = {
   /** A complete document or an HTML fragment. Fragments are normalized to a complete document. */
   html: string;
+  /** Source-owner receipt for this exact HTML projection. */
+  sourceReceipt: DocumentSourceReceipt | null;
   /** Host-owned edit revision used as the semantic operation base revision. */
   semanticRevision?: number;
-  /** Called with the exact next source produced by SourcePatchEngine. */
+  /** Called with the exact next source; returns the source-owner receipt synchronously. */
   onChange: (
     nextSourceHtml: string,
     mutation?: HtmlCanvasMutation,
     transaction?: HtmlCanvasSourceTransaction,
-  ) => boolean;
+  ) => DocumentSourceReceipt | false;
   /** Called when an element is selected or the selection is cleared. */
   onSelect?: (selection: HtmlCanvasSelection | null) => void;
   /** Notifies the host about any pointer interaction inside the isolated iframe. */

@@ -67,11 +67,16 @@ the historical synthetic-spike decision.
   project/document identities, canonical path, Version state, HTML bytes and
   Hash are validated before one synchronous renderer publication. No async
   query may expose a new path or Hash beside old Document bytes.
-- `DocumentSession` advances one Canvas authority generation whenever the
-  authoritative bytes/view are replaced. Edit and preview readiness are
-  disposable acknowledgements tagged by that generation and the rendered
-  source Hash; stale acknowledgements are ignored. “Safely saved” additionally
-  requires the visible surface acknowledgement to match the persisted source.
+- `DocumentSession` publishes a monotonic source receipt for every accepted
+  local edit/history result and every authority/reset/reload transition. The
+  receipt carries its origin, operation, edit revision, Canvas generation,
+  source Hash and complete project/session context. Local/history receipts keep
+  the mounted iframe; authority receipts advance the generation and require a
+  fresh physical frame even when the HTML bytes are unchanged. Edit and preview
+  readiness are disposable acknowledgements tagged by the exact receipt,
+  rendered HTML/Hash and context; stale, duplicate or cross-document
+  acknowledgements are ignored. “Safely saved” additionally requires the
+  visible surface acknowledgement to match the persisted source.
 - A clean projection mismatch is repaired automatically by one authoritative
   source reread and one bounded Canvas rebuild. Failure stays fail-closed and
   never asks the user to reconcile internal Hash state manually.
@@ -93,17 +98,18 @@ the historical synthetic-spike decision.
   program may receive one Main-authorized resource closure. The visible Edit
   iframe parses source with author scripts inert, proves the complete parser-
   authored object set, then activates those scripts in source order; PageRoot does not
-  wait for visual paint, freeze activity or audit Runtime DOM against source.
+  wait for arbitrary script completion, freeze activity or audit Runtime DOM against source.
   Same-origin `window.parent` access, including renderer-exposed preload APIs,
   remains the accepted in-place-editing cost. Unsupported programs fail closed
-  to static Edit. An exact cached ECharts library wins; the narrowly reviewed
-  5.4.3 core CDN mapping may render immediately with packaged 5.6.0 while the
-  exact bytes download into a verified content-addressed store. The first
-  successful runtime locks the current Canvas generation. Exact bytes never
-  replace a successful compatible page; only a failed compatible run may
-  consume one exact recovery. Semantic source changes rebuild the disposable iframe and
-  rerun the unchanged author program; native input may defer that one rebuild
-  until composition/editing finishes. Generated descendants are display-only
+  to static Edit. Reviewed 5.4.3 and 5.6.0 core CDN mappings render from their
+  respective same-version SHA-pinned packaged files; other immutable versions
+  use only exact cache/network bytes. No cross-version substitution or recovery
+  session exists. Resource failures reject the Candidate; noncritical author
+  errors may keep a critical-content-ready page as an explicit partial Runtime.
+  Structural or author-program changes that cannot be proven in place rebuild
+  the disposable iframe and rerun the author program; successful ordinary text,
+  common-style and same-parent reorder projections end in the mounted document.
+  Generated descendants are display-only
   and map to the nearest still-proven authored source host for comments. Runtime
   DOM has no persistence authority and Edit screenshot/capture/projection count
   remains 0.
@@ -222,9 +228,10 @@ the historical synthetic-spike decision.
   complex list items/cells keep the smallest inner reading block, and numbered
   `br` lines stay separate. A simple-selector CSS source may span several
   targets; each inline-style attribute remains its own operation even when a
-  sibling has the same property delta. Shared CSS targets promote only when at
-  least two branches cover 75% of a Runtime-proven grid/flex/list/repeated-card
-  container. Geometry or distance never creates a group.
+  sibling has the same property delta. Shared CSS facts may keep one semantic
+  group, but each reading locality and concrete owner receives its own region;
+  geometry, target count or distance never creates a group or promotes a parent
+  container into the visible target.
   The analyzer is the sole author of bounded `ReviewFocusGroupPlan` records,
   including change-scoped exact atom keys, per-side region IDs, correlation,
   presentation, owner IDs, geometry modes and presence. The first bootstrap
@@ -232,13 +239,16 @@ the historical synthetic-spike decision.
   geometry but never reconstructs group membership or IDs. Exact-evidence
   occurrence bindings are validated independently, so an invalid/oversized
   semantic plan closes frames and masks without erasing red/green source facts.
-  `changeId` remains navigation identity and `activeFocusGroupId` alone owns
-  visual focus.
-  Overview has no outline or dim mask. Focus rendering consumes one set of final
-  canonical outline records, and global context masking consumes those records:
-  one SVG luminance mask keeps a full-page white background and adds the record
-  paths as black holes, so `outlinePaths = maskHoles` and overlapping holes remain a set union rather than an
-  `evenodd` XOR and mask and frame cannot diverge. Its per-render identifier is
+  `changeId` remains navigation identity; `activeFocusGroupId` plus one explicit
+  per-side region ID owns the current locality.
+  Overview has no outline or dim mask. A pure paint plan keeps source evidence,
+  navigation cues, context masking and focus outlines as independent channels.
+  Explicit focus may create one local mask hole per side without any outline;
+  text and ordinary attributes never outline, source structural changes may,
+  and style outlines additionally require a confirmed visual-change verdict.
+  When an outline exists it reuses its region mask path, but `maskHoles` does not
+  imply `outlinePaths`. One SVG luminance mask keeps a full-page white background
+  and adds the chosen region path as a black hole. Its per-render identifier is
   scoped to the review session, side and projection epoch. The disposable
   projection uses reserved attributes plus inline and static important resets,
   preventing authored `svg`/`div` rules from restyling its mask primitives or
@@ -248,8 +258,7 @@ the historical synthetic-spike decision.
   `mix-blend-mode`; real backdrop blur is not part of the formal Review
   contract because Chromium may composite it before applying the SVG hole.
   Mask correctness is proved from final rendered pixels as well as DOM paths.
-  Stable
-  outline regions remain navigation-only. `page-presentation-dom` is the
+  Inactive regions remain navigation-only. `page-presentation-dom` is the
   shared explicit-ID and strict indexed-Tab discovery contract consumed by
   Canvas comment presentation and formal review. Before/after panel and action keys
   are assigned as pairs before either isolated document is prepared, so safe
@@ -292,7 +301,7 @@ services.
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
 | External OS/QoderWork HTML-open FIFO delivery with explicit renderer acknowledgement, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, blocker-gated deferred head retention, request-keyed ack-only retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
 | First-open and already-imported confirmation prompt | Auto-confirmed by Workbench from `ProjectWorkflow.openConfirmation`; delete-original still uses a registered `window.confirm` |
-| Current source bytes, persisted/working/Canvas/protection Hashes, revisions, persistence projection, source-write single flight, coalesced recovery-journal queue, verified recovery/export evidence and Canvas authority generation | `app/application/document-session.js` and `app/application/document-workflow.js`; reversible detach requires working = Canvas = protection, while failed/conflict and the disk-confirmed persisted Hash remain visible |
+| Current source bytes, persisted/working/Canvas/protection Hashes, revisions, persistence projection, source-write single flight, coalesced recovery-journal queue, monotonic source receipts, verified recovery/export evidence and Canvas authority generation | `app/application/document-session.js` and `app/application/document-workflow.js`; reversible detach requires working = Canvas = protection, while failed/conflict and the disk-confirmed persisted Hash remain visible |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
@@ -472,10 +481,12 @@ must preserve the binding Hash; structural identity drift is an explicit
 conflict and only force-unlock may adopt it before controlled migration.
 Immutable Versions, frozen Requests and Runtime DOM are never migration inputs
 or destinations.
-On the existing direct-edit path, `IslandEditingController` retains IDs on
-authored descendants and allocates an ID when the browser creates a new inline
-wrapper or line break; deleting that hard break retires its ID with the node.
-The text-range style planner likewise identifies each new source wrapper. The
+On the existing direct-edit path, `IslandEditingController` owns only the
+controlled DOM, Selection and IME checkpoint. Canvas submits logical `setText`
+with canonical content HTML and no new IDs; the Kernel's single materialization
+allocates any browser-created line-break IDs, and Canvas seals the accepted IDs
+before synchronizing the live projection. New inline wrappers remain owned by
+the text-range style planner. Deleting a hard break retires its ID with the node. The
 Repository verifies that every current non-break claim survives and may fill
 only otherwise-valid missing IDs on genuinely new source elements before the
 CAS; it never repairs a lost prior claim.
@@ -523,10 +534,16 @@ Authored structure edits use the same boundary. Insert accepts one identity-free
 source element and allocates IDs for its whole subtree; duplicate first removes
 the selected subtree's IDs; delete retires them; same-parent and cross-parent
 move preserve them. Only current `SourceIndex` elements are eligible. Script-
-generated nodes and preview DOM are never structural inputs. The visible toolbar
-keeps this deliberately small: duplicate, delete and sibling up/down; the Canvas
-port exposes raw insertion and cross-parent move for product workflows without
-adding a component or layout system. See ADR 0064.
+generated nodes and preview DOM are never structural inputs. Duplicate additionally
+compares the complete selected live subtree with its current canonical source
+subtree; a generated descendant, opaque runtime surface or authored program makes
+the parent selection unsupported. Known-unsupported copy is absent from the
+toolbar and rejected again at the common command boundary, while independent
+source-backed siblings, delete/move, text copy and complete-HTML save/export keep
+their existing contracts. The visible toolbar keeps this deliberately small:
+duplicate, delete and sibling up/down; the Canvas port exposes raw insertion and
+cross-parent move for product workflows without adding a component or layout
+system. See ADR 0064 and ADR 0065.
 
 Undo and redo first checkpoint any active editable island and drain the source
 queue. The renderer applies the exact inverse or forward patches locally, then

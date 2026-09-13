@@ -11,6 +11,8 @@ export type WorkspacePreferences = Readonly<{
   inspectorWidth: number;
   motion: WorkspacePreferenceMotion;
   restoreTabsOnLaunch: boolean;
+  reviewChangeContextVisibility: number;
+  reviewCommentContextVisibility: number;
   defaultAgentProviderId: WorkspacePreferenceAgentId;
   documentAgentSelections: Readonly<Record<string, "pageroot" | "qoder" | "codex">>;
   agentConfigurations: Readonly<Record<string, Readonly<{ modelId: string | null; reasoning: string | null }>>>;
@@ -28,6 +30,8 @@ export const DEFAULT_WORKSPACE_PREFERENCES: WorkspacePreferences;
 export const WORKSPACE_PREFERENCE_LIMITS: Readonly<{
   sidebarWidth: Readonly<{ min: 200; max: 420 }>;
   inspectorWidth: Readonly<{ min: 280; max: 520 }>;
+  reviewChangeContextVisibility: Readonly<{ min: 0; max: 100 }>;
+  reviewCommentContextVisibility: Readonly<{ min: 0; max: 100 }>;
 }>;
 export function normalizeWorkspacePreferences(value: unknown): WorkspacePreferences;
 export function normalizeWorkspacePatch(value: unknown): Readonly<Partial<WorkspacePreferences>>;

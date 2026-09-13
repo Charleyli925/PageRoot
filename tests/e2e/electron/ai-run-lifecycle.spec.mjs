@@ -310,8 +310,7 @@ test("ending a copied run still warns after restart and blocks late finalization
       "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
       { exact: true },
     )).toBeVisible();
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
-    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeHidden();
     const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true });
     await expect(globalCommentButton).toBeVisible();

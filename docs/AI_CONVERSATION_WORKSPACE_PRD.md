@@ -643,7 +643,8 @@ Candidate 待决定时 Composer 恢复发送能力，意图开关默认停在“
 - AI 侧栏保持打开，不返回旧处理工作台。
 - Conversation、Context、模型与草稿不丢失。
 - 两页默认都不显示评论标记；审阅工具栏的“显示评论”开关默认关闭。
-- 审阅工具栏继续控制页面、变化类型、上下文可见度、导航、滚动和缩放。
+- 审阅工具栏继续控制页面、变化类型、目录导航、滚动和缩放；上下文可见度移到“设置 → 常规”，
+  变化聚焦与评论聚焦分别保存，默认 25% / 15%。
 
 ### 14.2 审阅讨论
 
@@ -1025,7 +1026,7 @@ Version manifest 保持不可变；历史通过稳定身份读取 Conversation �
 ### 19.3 拒绝与 no-change
 
 - 拒绝 Candidate：Conversation 保留该轮 Qoder 回复、PageRoot 校验、拒绝决定和 Candidate 关联。
-- no-change：不创建新 Version；Conversation 记录“本轮没有可采用变化”。
+- no-change：不创建新 Version；Conversation 记录“未识别到明确的页面变化”。
 - error：Conversation 记录安全错误摘要和恢复结果，不持久化原始 stderr 或敏感诊断。
 - cancelled：记录是谁、何时、在哪个 Context 结束；不暗示外部 Agent 已停止。
 

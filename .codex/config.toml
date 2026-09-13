@@ -1,0 +1,6 @@
+[features]
+multi_agent_v2 = true
+
+[agents]
+enabled = true
+interrupt_message = true

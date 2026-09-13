@@ -30,6 +30,7 @@ import {
   waitForAgentAuthentication,
 } from "../catalog/agent-login-command.mjs";
 import { describeQoderAuthSource } from "../../../shared/agent-auth-source.mjs";
+import { probeAcpProcess } from "../runtimes/acp-process.mjs";
 
 export const QODER_PROVIDER_ID = "qoder";
 export const QODER_RUNTIME_ID = "acp";
@@ -127,6 +128,11 @@ export function qoderFailure(code) {
       return "Qoder 连接中断，Request 与当前 HTML 均已保留。";
     case "ACP_AGENT_IDENTITY_MISMATCH":
       return "ACP 进程没有证明自己是 Qoder CLI，PageRoot 已停止它。";
+    case "ACP_PROTOCOL_UNSUPPORTED":
+    case "ACP_PROTOCOL_INVALID":
+      return "Qoder CLI 的 ACP 协议未通过连接检查。当前 HTML 与 Request 均未改变。";
+    case "ACP_PROCESS_CLEANUP_UNCONFIRMED":
+      return "Qoder 连接检查进程未确认停止。PageRoot 已停止继续操作。";
     case "ACP_RUNTIME_AUTHORITY_DRIFT":
       return "本轮 Request 权限已经变化，Qoder 的后续写入已被拒绝。";
     case "AGENT_RETRY_OUTPUT_PRESENT":
@@ -163,15 +169,23 @@ export function qoderPreflightFailure(code) {
       return "Qoder 当前没有返回可用模型。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
     case "QODER_PREFLIGHT_TIMEOUT":
       return "Qoder CLI 预检超时。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+    case "ACP_AGENT_IDENTITY_MISMATCH":
+      return "Qoder ACP 进程身份不符。PageRoot 尚未创建本轮 Request，也没有执行任务。";
+    case "ACP_PROTOCOL_UNSUPPORTED":
+    case "ACP_PROTOCOL_INVALID":
+      return "Qoder ACP 协议未通过连接检查。PageRoot 尚未创建本轮 Request；请更新或重新安装后再试。";
     default:
       return "Qoder CLI 预检没有完成。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
   }
 }
 
 export function normalizedQoderPreflightError(cause) {
-  const code = cause instanceof AgentProviderError
-    ? cleanProviderText(cause.code, 120) || "QODER_PREFLIGHT_FAILED"
-    : "QODER_COMMAND_UNTRUSTED";
+  const rawCode = cleanProviderText(cause?.code, 120);
+  const code = rawCode === "ACP_PROCESS_CLEANUP_UNCONFIRMED"
+    ? "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED"
+    : cause instanceof AgentProviderError || rawCode.startsWith("ACP_")
+      ? rawCode || "QODER_PREFLIGHT_FAILED"
+      : "QODER_COMMAND_UNTRUSTED";
   const status = code === "QODER_AUTH_REQUIRED"
     ? 401
     : code === "QODER_COMMAND_NOT_FOUND"
@@ -183,7 +197,7 @@ export function normalizedQoderPreflightError(cause) {
 }
 
 export function classifyQoderPreflightFailure(cause) {
-  const combined = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.message || ""}`;
+  const combined = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.qoderStderr || ""}\n${cause?.message || ""}`;
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
   }
@@ -434,8 +448,8 @@ export async function resolveQoderAcpCommand({
     });
   }
 
-  // Collect every source before selecting one. A stale global shim must not
-  // mask a healthy PageRoot-managed installation. Valid user CLIs still win.
+  // Collect every source before selecting one. PageRoot-managed Qoder is the
+  // reproducible default; a valid user installation remains the fallback.
   const [userResult, managedResult] = await Promise.all([
     commandCandidates(environment, homeDirectory),
     typeof managedCandidates === "function"
@@ -462,10 +476,10 @@ export async function resolveQoderAcpCommand({
     return null;
   };
 
-  const user = await candidatesFor(userResult, "user");
-  if (user) return user;
   const managed = await candidatesFor(managedResult, "managed");
   if (managed) return managed;
+  const user = await candidatesFor(userResult, "user");
+  if (user) return user;
   if (diagnostics[0]?.cause) throw diagnostics[0].cause;
   fail("QODER_COMMAND_NOT_FOUND", "没有找到独立安装的 Qoder CLI。", { status: 404 });
 }
@@ -514,9 +528,41 @@ async function executePreflightCommand(command, args, environment, timeout) {
   });
 }
 
-// Settings diagnosis intentionally uses only the CLI's read-only version and
-// model-list commands. It never starts the ACP runtime or creates a ticket.
-export async function diagnoseQoder(command, environment) {
+async function inspectQoderRuntime(command, environment, {
+  probeRunner = probeAcpProcess,
+} = {}) {
+  const versionResult = await executePreflightCommand(command, ["--version"], environment, 10_000);
+  const reportedVersion = cleanProviderText(versionResult.stdout, 80).split(/\s+/u)[0];
+  if (!semver.valid(reportedVersion)) fail("QODER_VERSION_INVALID", "Qoder CLI 没有返回可验证的版本号。");
+  if (command.version && reportedVersion !== command.version) {
+    fail("QODER_VERSION_MISMATCH", "Qoder CLI 版本与安装清单不一致。");
+  }
+  const modelResult = await executePreflightCommand(command, ["--list-models"], environment, 30_000);
+  const models = parsePublicModels(modelResult.stdout);
+  if (models.length === 0) fail("QODER_MODEL_CATALOG_EMPTY", "Qoder 当前没有返回可用模型。");
+  await probeRunner({
+    command: command.command,
+    args: ["--acp"],
+    cwd: os.tmpdir(),
+    environment: {},
+    baseEnvironment: environment,
+    expectedExecutable: command.identity
+      ? { path: command.command, identity: command.identity }
+      : undefined,
+    useVerifiedJavaScriptRuntime: command.source === "verified-npm-package",
+    expectedAgentName: command.source === "e2e-override"
+      ? /qoder|pageroot-e2e/iu
+      : /qoder/iu,
+    startupTimeoutMs: 15_000,
+    stderrFieldPrefix: "qoder",
+  });
+  return Object.freeze({ reportedVersion, models });
+}
+
+// Settings diagnosis creates only a short-lived, no-capability ACP smoke
+// session. It never prompts the Agent, creates a ticket, or touches a Request.
+export async function diagnoseQoder(command, environment, options) {
+  let authenticationReady = false;
   try {
     const versionResult = await executePreflightCommand(command, ["--version"], environment, 10_000);
     const reportedVersion = cleanProviderText(versionResult.stdout, 80).split(/\s+/u)[0];
@@ -527,6 +573,23 @@ export async function diagnoseQoder(command, environment) {
     const modelResult = await executePreflightCommand(command, ["--list-models"], environment, 30_000);
     const models = parsePublicModels(modelResult.stdout);
     if (models.length === 0) fail("QODER_MODEL_CATALOG_EMPTY", "Qoder 当前没有返回可用模型。");
+    authenticationReady = true;
+    await (options?.probeRunner || probeAcpProcess)({
+      command: command.command,
+      args: ["--acp"],
+      cwd: os.tmpdir(),
+      environment: {},
+      baseEnvironment: environment,
+      expectedExecutable: command.identity
+        ? { path: command.command, identity: command.identity }
+        : undefined,
+      useVerifiedJavaScriptRuntime: command.source === "verified-npm-package",
+      expectedAgentName: command.source === "e2e-override"
+        ? /qoder|pageroot-e2e/iu
+        : /qoder/iu,
+      startupTimeoutMs: 15_000,
+      stderrFieldPrefix: "qoder",
+    });
     return Object.freeze({
       readiness: "ready",
       cause: null,
@@ -534,14 +597,29 @@ export async function diagnoseQoder(command, environment) {
       facts: Object.freeze({
         installation: "ready",
         authentication: "ready",
-        protocol: "unknown",
-        service: "unknown",
+        protocol: "ready",
+        service: "ready",
       }),
     });
   } catch (cause) {
+    if (authenticationReady && cause?.code !== "ACP_PROCESS_CLEANUP_UNCONFIRMED") {
+      return Object.freeze({
+        readiness: "connection-failed",
+        cause: cleanProviderText(cause?.code, 120) || classifyQoderPreflightFailure(cause),
+        activeInstallation: null,
+        facts: Object.freeze({
+          installation: "ready",
+          authentication: "ready",
+          protocol: "failed",
+          service: "unknown",
+        }),
+      });
+    }
     const code = cause instanceof AgentProviderError
       ? cause.code
-      : classifyQoderPreflightFailure(cause);
+      : cause?.code === "ACP_PROCESS_CLEANUP_UNCONFIRMED"
+        ? cause.code
+        : classifyQoderPreflightFailure(cause);
     fail(code, qoderFailure(code), {
       status: code === "QODER_AUTH_REQUIRED"
         ? 401
@@ -552,27 +630,16 @@ export async function diagnoseQoder(command, environment) {
   }
 }
 
-export async function preflightQoder(command, environment) {
+export async function preflightQoder(command, environment, options) {
   try {
-    const versionResult = await executePreflightCommand(command, ["--version"], environment, 10_000);
-    const reportedVersion = cleanProviderText(versionResult.stdout, 80).split(/\s+/u)[0];
-    if (!semver.valid(reportedVersion)) fail("QODER_VERSION_INVALID", "Qoder CLI 没有返回可验证的版本号。");
-    if (command.version && reportedVersion !== command.version) {
-      fail("QODER_VERSION_MISMATCH", "Qoder CLI 版本与安装清单不一致。");
-    }
-    const modelResult = await executePreflightCommand(command, ["--list-models"], environment, 30_000);
-    const models = String(modelResult.stdout || "")
-      .split(/\r?\n/u)
-      .map((line) => cleanProviderText(line, 160))
-      .filter((line) => line && line.toUpperCase() !== "MODEL");
-    if (models.length === 0) fail("QODER_MODEL_CATALOG_EMPTY", "Qoder 当前没有返回可用模型。");
+    const inspected = await inspectQoderRuntime(command, environment, options);
     return Object.freeze({
-      version: reportedVersion,
-      modelCount: models.length,
-      models: namespaceQoderModels(parsePublicModels(modelResult.stdout)),
+      version: inspected.reportedVersion,
+      modelCount: inspected.models.length,
+      models: namespaceQoderModels(inspected.models),
     });
   } catch (cause) {
-    const code = cause?.code === "ACP_PREFLIGHT_CLEANUP_UNCONFIRMED"
+    const code = cause?.code === "ACP_PROCESS_CLEANUP_UNCONFIRMED"
       ? "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED"
       : cause instanceof AgentProviderError
         ? cause.code
@@ -600,7 +667,9 @@ export async function startQoderLogin(command, {
     await loginRunner({
       executable: command.command,
       args: ["login"],
-      env: qoderAcpEnvironment({}, environment),
+      // Keep one browser owner: Qoder prints the URL and Stemmio opens the
+      // validated destination through Main.
+      env: { ...qoderAcpEnvironment({}, environment), NO_BROWSER: "1" },
       providerId: QODER_PROVIDER_ID,
       signal,
       timeoutMs,

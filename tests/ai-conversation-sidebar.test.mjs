@@ -4,9 +4,9 @@ import test from "node:test";
 import {
   FORBIDDEN_MESSAGE_KEYS,
   sidebarAgentLine,
-  sidebarAgentStageSteps,
   sidebarReasoningLine,
   conversationLoadedForView,
+  sidebarConversationPresentation,
   conversationReadyForDocument,
   sidebarActionBar,
   sidebarFailureRetryable,
@@ -408,25 +408,6 @@ test("the Composer names thinking depth only when the Agent actually offers it",
   });
   assert.equal(explicit.text, "思考 · 关闭");
   assert.equal(explicit.selectedId, "none");
-});
-
-test("managed Agent progress exposes the four public execution stages", () => {
-  const generating = sidebarAgentStageSteps({
-    state: "processing",
-    phase: "generating-modification",
-  });
-  assert.deepEqual(generating.map((step) => [step.label, step.state]), [
-    ["正在发送任务", "completed"],
-    ["正在生成修改", "current"],
-    ["正在校验 HTML", "pending"],
-    ["正在准备审阅", "pending"],
-  ]);
-  const ready = sidebarAgentStageSteps({ state: "ready-to-open", phase: "completed" });
-  assert.equal(ready.every((step) => step.state === "completed"), true);
-  const cancelling = sidebarAgentStageSteps({ state: "processing", phase: "cancelling" });
-  assert.deepEqual(cancelling.map((step) => step.state), [
-    "completed", "current", "pending", "pending",
-  ]);
 });
 
 test("the header's mode is derived from Request authority, not guessed", () => {
@@ -1079,19 +1060,19 @@ test("adoption uncertainty takes precedence over Review and exposes no opposite 
   }
 });
 
-test("turn presentation prioritizes requirements, sealed public summary, result and decision while preserving chronological feed blocks", async () => {
+test("turn presentation preserves Conversation sequence across Agent and Stemmio facts", async () => {
   const { sidebarTurnPresentation } = await import("../app/workbench/ai-conversation-model.js");
   const requirements = factMessage({ actor: "user", text: "调整标题" });
   const progress = factMessage({ kind: "progress", text: "正在生成修改。" });
-  const legacy = factMessage({ actor: "pageroot", kind: "text", text: "已发出本轮修改要求。" });
-  const result = factMessage({ kind: "result-summary", text: "修改已准备好，尚未采用。" });
   const summary = factMessage({ actor: "agent", kind: "result-summary", text: "标题已缩短。" });
+  const result = factMessage({ kind: "result-summary", text: "修改已准备好，尚未采用。" });
+  const ended = factMessage({ actor: "agent", kind: "progress", text: "本轮执行已结束。" });
   const decision = factMessage({ kind: "decision-outcome", text: "已采用本次修改。" });
-  const presentation = sidebarTurnPresentation([requirements, progress, legacy, result, summary, decision]);
+  const presentation = sidebarTurnPresentation([requirements, progress, summary, result, ended, decision]);
   assert.deepEqual(presentation.primary, [requirements, summary, result, decision]);
-  assert.deepEqual(presentation.process, [progress, legacy]);
+  assert.deepEqual(presentation.process, [progress, ended]);
   assert.deepEqual(presentation.timeline.map((block) => block.messages), [
-    [requirements], [progress, legacy], [result], [summary], [decision],
+    [requirements], [progress], [summary], [result], [ended], [decision],
   ]);
 });
 
@@ -1109,4 +1090,29 @@ test("process blocks preserve executor boundaries and narration sentences surviv
   ];
   assert.deepEqual(sidebarTurnPresentation(messages).timeline.map(block => block.messages[0].actor), ['pageroot', 'agent', 'pageroot']);
   assert.deepEqual(sidebarNarrationParagraphs('读取资料。生成结果。\n\n版本 1.2 保持原样。'), ['读取资料。', '生成结果。', '版本 1.2 保持原样。']);
+});
+
+
+test("sidebar local facts reject the previous Document before a new load and preserve close draft lock", () => {
+  const context = { projectId: "project_one", documentId: "doc_one", draftReadOnly: false };
+  const messages = [{ text: "private document one history" }];
+  const snapshot = { status: "ready", context, title: "One", messages, draftText: "unsent one", conversation: { turns: [] } };
+  const ready = sidebarConversationPresentation(snapshot, context);
+  assert.equal(ready.messages, messages);
+  assert.equal(ready.draftText, "unsent one");
+  assert.equal(ready.draftAvailable, true);
+  assert.equal(ready.loading, false);
+  for (const changed of [{ ...context, documentId: "doc_two" }, { ...context, projectId: "project_two" }]) {
+    const pending = sidebarConversationPresentation(snapshot, changed);
+    assert.deepEqual(pending.messages, []);
+    assert.equal(pending.draftText, "");
+    assert.equal(pending.draftAvailable, false);
+    assert.equal(pending.loading, true);
+  }
+  const closing = sidebarConversationPresentation(snapshot, { ...context, draftReadOnly: true });
+  assert.equal(closing.draftAvailable, false);
+  assert.equal(closing.messages, messages);
+  assert.equal(closing.draftText, "unsent one");
+  assert.equal(sidebarConversationPresentation(snapshot, context).draftAvailable, true);
+  assert.equal(sidebarConversationPresentation({ ...snapshot, status: "failed" }, context).draftAvailable, false);
 });
