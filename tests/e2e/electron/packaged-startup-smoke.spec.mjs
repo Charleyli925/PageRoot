@@ -254,7 +254,10 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
       }
       writeFileSync(file, JSON.stringify(staleManifest));
     }
-    expect(migratedMembers).toHaveLength(3);
+    // Current-draft projects keep one Working Copy per registered project;
+    // promoting the startup candidate replaces its current Working Copy
+    // instead of creating an additional historical member.
+    expect(migratedMembers).toHaveLength(2);
     electronApp = await electron.launch({
       executablePath: packagedApp.executable,
       cwd: productRoot,
