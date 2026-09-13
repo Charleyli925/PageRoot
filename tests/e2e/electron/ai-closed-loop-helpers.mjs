@@ -381,7 +381,19 @@ export async function openAgentSettingsPage(page) {
   await sidebar.getByRole("button", { name: "设置", exact: true }).press("Enter");
   const settings = page.locator(".workbench-settings-page");
   await expect(settings).toBeVisible();
-  await page.getByRole("button", { name: "AI 服务", exact: true }).click();
+  const aiNavigation = page.getByRole("button", { name: "AI 服务", exact: true });
+  const aiHeading = settings.getByRole("heading", { name: "AI 服务", level: 1 });
+  await expect(aiNavigation).toBeVisible();
+  // The settings shell can be mounted one frame before the sidebar navigation
+  // handler is ready after a fresh external-project launch. Verify the
+  // category transition, then retry the same idempotent click once instead of
+  // letting a stale "常规" page turn into a misleading missing-agent-row
+  // timeout later in the helper.
+  await aiNavigation.click();
+  if (!(await aiHeading.isVisible().catch(() => false))) {
+    await aiNavigation.click();
+  }
+  await expect(aiHeading).toBeVisible({ timeout: 20_000 });
   return settings;
 }
 
