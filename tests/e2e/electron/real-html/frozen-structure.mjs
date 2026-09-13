@@ -297,7 +297,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
   const selectCopy = async (priorSelectionId) => {
     const audit = [];
     try { return await executeFrozenSelection({ access: frozenFrameAccess(frame, copyTarget, audit),
-      keyboard: page.keyboard, target: copyTarget, calls: audit, priorSelectionId }); }
+      keyboard: page.keyboard, mouse: page.mouse, target: copyTarget, calls: audit, priorSelectionId }); }
     finally { calls.push(...audit); }
   };
   const rebuild = async (action, verifySource) => {

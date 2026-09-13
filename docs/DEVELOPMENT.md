@@ -182,6 +182,15 @@ Format scope is also frozen: source-safe range wrapping and element-level style
 overrides are distinct capabilities. A forbidden flex/grid range wrapper does
 not authorize an execution-time switch to element formatting or another target.
 These partial scopes do not attest eight-file core acceptance or full qualification.
+The separate `element-text-format` scope accepts reviewed h1–h6/p/li/td/th
+hosts with a frozen text-node path, character offset and initial text digest.
+The reviewed native-end trailing whitespace is frozen too; it must match exactly,
+not be inferred from the live caret. This scope permits only link raw attribute-token
+reordering inside the edited host, retaining exact values and outside bytes.
+It reuses the in-place text/history and element-format oracles, adds explicit
+forward Delete and Enter-with-continuation evidence, and requires exactly one
+fresh source break with unchanged surrounding bytes. It does not broaden old
+paragraph/pressure manifests or discover replacement targets during execution.
 `core-three-cycle` composes the same text/structure operations over two reviewed
 targets in one Electron session. It runs exactly three cycles, retaining text,
 comments and history; copy insertion offsets never change or get rediscovered.

@@ -41,12 +41,54 @@ import {
 } from "./e2e/electron/real-html/continuity-chain.mjs";
 import { summarizeRuntimeObserverRecords } from "./e2e/electron/real-html/runtime-observer.mjs";
 import { normalizeCapabilityProbeObservations } from "./e2e/electron/real-html/capability-driver.mjs";
-import { assertReadOnlyCorpusMode, frozenInitialRuntimeDecision, FROZEN_COPY_DENIED_OPERATIONS, FROZEN_STRUCTURE_PROBE_OPERATIONS, FROZEN_STRUCTURE_OPERATIONS, FROZEN_FORMAT_OPERATIONS, FROZEN_REENTRY_FORMAT_OPERATIONS, FROZEN_TEXT_OPERATIONS, frozenDigest, readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay }
+import { assertReadOnlyCorpusMode, frozenInitialRuntimeDecision, FROZEN_ELEMENT_OPERATIONS, FROZEN_COPY_DENIED_OPERATIONS, FROZEN_STRUCTURE_PROBE_OPERATIONS, FROZEN_STRUCTURE_OPERATIONS, FROZEN_FORMAT_OPERATIONS, FROZEN_REENTRY_FORMAT_OPERATIONS, FROZEN_TEXT_OPERATIONS, frozenDigest, readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay }
   from "./e2e/electron/real-html/frozen-selection.mjs";
-import { requireTextOperationLedger, verifyEndedHistorySession, verifyFrozenHistory } from "./e2e/electron/real-html/frozen-text.mjs";
+import { verifiedUndoTail, requireTextOperationLedger, verifyEndedHistorySession, verifyFrozenHistory } from "./e2e/electron/real-html/frozen-text.mjs";
+
+test("cumulative Undo binds only a previously verified exact-target bookmark", () => {
+  const b = { actual: { id: "fixed", activeId: "fixed", collapsed: true, remainingText: "\n      " },
+    conditions: { identityMatches: true, focusMatches: true, editable: true, selectionInside: true, caretAtEnd: true } };
+  assert.equal(verifiedUndoTail(b, "fixed"), "\n      ");
+  for (const bad of [null, { ...b, conditions: {} }, { ...b, actual: { ...b.actual, id: "wrong" } },
+    { ...b, actual: { ...b.actual, remainingText: "unexpected text" } },
+    { ...b, actual: { ...b.actual, collapsed: false } }])
+    assert.throws(() => verifiedUndoTail(bad, "fixed"), { code: "FROZEN_PRIOR_BOOKMARK_INVALID" });
+});
 import { verifyFrozenCopyCapability, verifyFrozenDenialWitness, verifyFrozenEndedContinuation, verifyFrozenStructureLifecycle } from "./e2e/electron/real-html/frozen-structure.mjs";
 import { publicDiagnosticValue } from "./e2e/electron/real-html/diagnostic-sanitizer.mjs";
-import { verifyFrozenComment, mixedCycleRows, mixedCheckpointOperations, verifyFreshCommentStorage } from "./e2e/electron/real-html/frozen-mixed.mjs";
+import { verifyMixedMarkers, bindMixedSource, verifyFrozenComment, mixedCycleRows, mixedCheckpointOperations, verifyFreshCommentStorage } from "./e2e/electron/real-html/frozen-mixed.mjs";
+
+test("mixed newline markers retain both edits and reject either missing half", () => {
+  const content = "PRCORE_H02_C1PRLINE_H02_C1 PRCORE_H02_C1_RESUME";
+  assert.doesNotThrow(() => verifyMixedMarkers(content, "H02", 1, true));
+  assert.doesNotThrow(() => verifyMixedMarkers("PRCORE_H02_C1 PRCORE_H02_C1_RESUME", "H02", 1, false));
+  for (const bad of [content.replace("PRLINE_H02_C1", ""), content.replace("_RESUME", "_WRONG"), "PRCORE_H02_C1_RESUME"])
+    assert.throws(() => verifyMixedMarkers(bad, "H02", 1, true), { code: "FROZEN_CUMULATIVE_TEXT_LOST" });
+});
+
+test("mixed binding shifts bytes only outside a verified fixed text island", () => {
+  const id = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+  const before = Buffer.from(`<p data-pageroot-id="${id}">文字</p><span>Copy</span><!--keep-->`);
+  const after = Buffer.from(before.toString().replace("文字", "文字 added"));
+  const text = { selectedId: id, selectedTag: "p", textEntry: { path: [0], offset: 0, textSha256: frozenDigest("文字") } };
+  const structure = { copyBinding: { byteOffset: before.indexOf("<!--"), parentId: "fixed" } };
+  const result = bindMixedSource(before, after, text, structure);
+  assert.equal(result.structure.copyBinding.byteOffset, structure.copyBinding.byteOffset + 6);
+  assert.equal(result.text.textEntry.textSha256, frozenDigest("文字 added"));
+  assert.throws(() => bindMixedSource(before, after, { ...text, textEntry: { ...text.textEntry, textSha256: "wrong" } }, structure));
+  const end = before.indexOf("<span>");
+  const same = { selectedId: id, copyBinding: { byteOffset: end, originalElementSha256: frozenDigest(before.subarray(0, end)) } };
+  assert.equal(bindMixedSource(before, after, text, same).structure.copyBinding.originalElementSha256,
+    frozenDigest(after.subarray(0, end + 6)));
+  assert.throws(() => bindMixedSource(before, after, text, { ...same, copyBinding: { ...same.copyBinding, originalElementSha256: "wrong" } }));
+  assert.equal(bindMixedSource(before, after, text, { copyBinding: { byteOffset: 0 } }).structure.copyBinding.byteOffset, 0);
+  for (const bad of [after.toString().replace("keep", "wrong"), after.toString().replace("Copy", "wrong"),
+    after.toString().replace(id, "wrong"), after.toString() + `<p data-pageroot-id="${id}">duplicate</p>`])
+    assert.throws(() => bindMixedSource(before, Buffer.from(bad), text, structure));
+  assert.throws(() => bindMixedSource(before, after, { ...text, selectedTag: "span" }, structure));
+  assert.throws(() => bindMixedSource(before, after, text, { copyBinding: { byteOffset: 5 } }));
+  assert.throws(() => bindMixedSource(before, after, { ...text, textEntry: { path: [9] } }, structure));
+});
 import {
   CAPABILITY_EXPECTATION_RULES,
   attachOperationGroupsToAuthoredDenominator,
@@ -1012,6 +1054,40 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
       targets: [{ ...formatPlan.targets[0], initialBold }] }));
     assert.doesNotThrow(() => readFrozenSelection(bytes, frozenDigest(bytes)));
   }
+  const elementPlan = { ...formatPlan, scope: "element-text-format", targets: [{ ...formatPlan.targets[0],
+    selectionClick: "frozen-text-character",
+    textNodePath: undefined, textEntry: { path: [1], offset: 2, textSha256: "a".repeat(64), trailingText: "" },
+    textCapability: { ...formatPlan.targets[0].textCapability, clickPoint: "frozen-text-character" },
+    formatCapability: { expected: "AVAILABLE", scope: "element", basis: "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER" },
+    operations: FROZEN_ELEMENT_OPERATIONS }] };
+  const readElement = (change = {}, scope = elementPlan.scope) => {
+    const bytes = Buffer.from(JSON.stringify({ ...elementPlan, scope, targets: [{ ...elementPlan.targets[0], ...change }] }));
+    return readFrozenSelection(bytes, frozenDigest(bytes));
+  };
+  for (const tag of ["h1", "h2", "p", "li", "td", "th", "span"])
+    assert.doesNotThrow(() => readElement({ clickTag: tag, selectedTag: tag }));
+  for (const selectionClick of [undefined, "auto", "retry", "ancestor"])
+    assert.throws(() => readElement({ selectionClick }), { code: "FROZEN_CLICK_CONTRACT_INVALID" });
+  assert.throws(() => readElement({ tabRoute: { buttonId: "unplanned" } }),
+    { code: "FROZEN_TARGET_CONTRACT_INVALID" });
+  const reentryElement = [...FROZEN_REENTRY_FORMAT_OPERATIONS.slice(0, -2), ...FROZEN_ELEMENT_OPERATIONS.slice(6)];
+  const reentryContract = { historyAdoption: "runtime-candidate", historyResume: "explicit-reentry",
+    historyBasis: "REVIEWED_CANONICAL_MAPPING_FALLBACK", operations: reentryElement };
+  assert.doesNotThrow(() => readElement(reentryContract));
+  assert.throws(() => readElement({ ...reentryContract, operations: FROZEN_ELEMENT_OPERATIONS }),
+    { code: "FROZEN_TEXT_CONTRACT_INVALID" });
+  assert.doesNotThrow(() => readElement({ textEntry: { ...elementPlan.targets[0].textEntry, trailingText: "\n    " } }));
+  for (const trailingText of [undefined, null, "word", "\u00a0"])
+    assert.throws(() => readElement({ textEntry: { ...elementPlan.targets[0].textEntry, trailingText } }),
+      { code: "FROZEN_ELEMENT_ENTRY_INVALID" });
+  for (const entry of [null, { path: [], offset: 0, textSha256: "a".repeat(64) },
+    { path: [-1], offset: 0, textSha256: "a".repeat(64) }, { path: [0], offset: -1, textSha256: "a".repeat(64) },
+    { path: [0], offset: 0, textSha256: "" }])
+    assert.throws(() => readElement({ textEntry: entry }), { code: "FROZEN_ELEMENT_ENTRY_INVALID" });
+  assert.throws(() => readElement({}, "core-text-format"), { code: "FROZEN_ELEMENT_ENTRY_INVALID" });
+  for (const change of [{ clickTag: "script", selectedTag: "script" }, { clickTag: "div", selectedTag: "div" },
+    { operations: FROZEN_FORMAT_OPERATIONS }, { clickTag: "h1", selectedTag: "p" }])
+    assert.throws(() => readElement(change), { code: "FROZEN_TEXT_CONTRACT_INVALID" });
   const fallback = Buffer.from(JSON.stringify({ ...formatPlan, targets: [{ ...formatPlan.targets[0],
     historyAdoption: "runtime-candidate", historyBasis: "REVIEWED_CANONICAL_MAPPING_FALLBACK",
     historyResume: "explicit-reentry", operations: FROZEN_REENTRY_FORMAT_OPERATIONS }] }));

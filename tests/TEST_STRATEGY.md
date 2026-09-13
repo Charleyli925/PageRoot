@@ -464,6 +464,18 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 冻结格式显式支持 `core-pressure-20/50/100`，各自只接受完全匹配的数值循环数，
 不会把多次短 session 拼成该档位。后续档位必须由上一档分析批准；格式支持不构成压力资格。
 目标必须由主代理核对并在执行前保存成本地冻结清单，预期不得从本次执行的 UI 反推。
+独立 `element-text-format` 是不同元素的定向编辑线路，不改变旧核心或压力清单。
+只接受已核对的 h1–h6/p/li/td/th 文字宿主，固定文字节点 path、字符 offset 与初始文字 Hash；
+同时冻结原生末尾光标之后的精确空白，不得从实时光标反推。该线路允许岛内链接的原始属性 token
+顺序规范化，但属性值、引号、空白、文字、注释与岛外字节仍须保持；报告保留原始变化范围。
+执行只读取该位置，不搜索文字或替换目标。初态、in-place 历史与元素级格式能力预先声明。
+在既有文字/Backspace/保存/Undo/Redo 之后，单独记录前向删除准备、Delete、Enter 后续写及
+换行保存，再验证未加粗→加粗。换行必须只新增一个带 fresh Stable ID 的 br，使用封闭源码
+插入 Oracle；元素外字节与既有内容不得改写。旧 Document、错文字绑定和错落点仍须失败。
+该线路不等于 60% 覆盖，也不自动继承旧 head 的核心或压力资格。
+浏览器双击助手在宿主 realm 等待 iframe 祖先的有限布局动画结束，再测量文字点击位置。
+禁脚本 iframe 的 Playwright 重试计时器可能停滞；不得通过 force、开放脚本权限或加长超时规避。
+保留动画期间直接双击的失败负例，以及宿主等待后的正常选词正例。
 `local-html-corpus.mjs` 当前只允许 `capability-preflight-only`；旧的现场发现资格入口
 以 `AUTOMATIC_DISCOVERY_EXECUTION_RETIRED` 终止，尚未迁移的行为不会假算为完成。
 微验收入口 `frozen-html-operation.mjs` 消费 `PAGEROOT_FROZEN_MANIFEST` 与独立传入的
@@ -497,6 +509,10 @@ generation、提升身份、Runtime ready 和源码一致性后重新定位同�
 来自唯一 Active iframe 且非空；提升身份绑定 iframe 自身的 Candidate ID，不能借用
 滞后的 last-known-good 字段。相关正反例拒绝缺失身份、错误提升和未知历史路径。
 清单、种子工作稿和完整结果全部是本地私有产物，不能提交；原始文件始终只读。
+元素扩展清单显式冻结 `selectionClick`（中心点或既有文字路径中的固定字符）；预检和执行
+共用 `executeFrozenSelection`，不得用扫描命中点的预检为中心点击背书。字符路径、文字 Hash
+和实际命中 ID 不符立即失败，不寻找替代点或提升到父级。标准页签能力之外的作者脚本页签
+保留为范围缺口；经用户批准的缩减核心验收只使用当前页冻结目标，不把该缺口计为 PASS。
 复制拒绝的固定证据还可为：源码不存在的非空 style/SVG/图表属性、Runtime 填充的 authored
 空容器，或不透明 Canvas。见证 ID、源码相对诊断路径及唯一点击坐标必须预先冻结；执行期
 只查该见证，不搜索失败节点。Canvas 原始命中父容器与最终选中 Canvas 分别核验，不能
@@ -517,7 +533,14 @@ UI/实时能力与精确原因、新鲜 probe 回执、复制按钮不存在、D
 
 `core-three-cycle` 只组合已有固定操作：两份目标事实、同一 Electron session、恰好三轮
 文字/格式、评论创建、复制/副本编辑/删除及原文字目标重入。结构目标前缀与插入 byte offset
-事前冻结，漂移时失败，不重新推导；后续格式初态来自前轮已验证的加粗结果，每次加粗
+事前冻结，漂移时失败，不重新推导。明确启用 `verified-text-region` 的补测链路只允许
+已验证文字岛的字节增减调整该固定插入位置：岛外 byte 不变、原始文字绑定与结构 Hash
+先核验，父级/相邻节点/目标 ID 不变，不发现或替换目标。同叶文字/复制必须显式声明。
+累计 Undo 位置绑定前轮已验证的同 ID 书签，重建后重新读取已验证 Active；静态页使用
+既有 static-rebuild 契约，不强求 Candidate。同 Hash 的新重建请求按实际请求轮次分别记录。
+冻结字符点击先显露同一目标起点，并确认宿主视口内命中当前 Active iframe；不能仅凭
+iframe 内 elementFromPoint 成功就点击被宿主裁剪的坐标，也不查找替代点击点。
+后续格式初态来自前轮已验证的加粗结果，每次加粗
 仍以已验证的未加粗源码为基线。每轮保留累计文字与评论，最终只重开一次，分别核验
 持久化 comment ID/sourceAnchor、文字、Stable ID 和源码，再删除测试评论。
 所有依赖行预先记为 NOT_EXECUTED，首错停止同链后续操作。这是代表页三轮定向证据，

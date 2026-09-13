@@ -44,28 +44,31 @@ export async function requireCurrentTextDocument(frame, documentHandle, targetHa
   return conditions;
 }
 
-export async function requireFrozenTextFocus(targetHandle, expectedId, { atEnd = false } = {}) {
+export async function requireFrozenTextFocus(targetHandle, expectedId, { atEnd = false, trailingText = "" } = {}) {
   const actual = await targetHandle.evaluate((element) => {
     const document = element.ownerDocument;
     const selection = document.getSelection();
     const inside = selection?.rangeCount === 1
       && element.contains(selection.anchorNode) && element.contains(selection.focusNode);
     let remainingLength = null;
+    let remainingText = null;
     if (inside && selection.isCollapsed) {
       const remaining = document.createRange();
       remaining.selectNodeContents(element);
       remaining.setStart(selection.focusNode, selection.focusOffset);
       remainingLength = remaining.toString().length;
+      remainingText = remaining.toString();
     }
     return { id: element.getAttribute("data-pageroot-id"),
       activeId: document.activeElement?.getAttribute("data-pageroot-id"),
       editable: element.isContentEditable, focused: document.activeElement === element,
-      selectionInside: inside, collapsed: selection?.isCollapsed === true, remainingLength };
+      selectionInside: inside, collapsed: selection?.isCollapsed === true, remainingLength, remainingText };
   });
   const conditions = { identityMatches: actual.id === expectedId,
     focusMatches: actual.activeId === expectedId && actual.focused,
     editable: actual.editable, selectionInside: actual.selectionInside,
-    caretAtEnd: !atEnd || (actual.collapsed && actual.remainingLength === 0) };
+    caretAtEnd: !atEnd || (actual.collapsed && /^[\t\n\r ]*$/u.test(trailingText)
+      && actual.remainingText === trailingText) };
   requireFact(Object.values(conditions).every(Boolean), "FROZEN_TEXT_FOCUS_MISMATCH", { actual, conditions });
   return { actual, conditions };
 }
@@ -127,14 +130,29 @@ export function verifyEndedHistorySession(actual) {
 }
 
 // Six fixed operations on the same frozen leaf. No target enumeration or fallback.
+export function verifiedUndoTail(bookmark, targetId) {
+  requireFact(bookmark?.actual?.id === targetId && bookmark.actual.activeId === targetId
+    && bookmark.actual.collapsed === true && typeof bookmark.actual.remainingText === "string"
+    && /^[\t\n\r ]*$/u.test(bookmark.actual.remainingText)
+    && ["identityMatches", "focusMatches", "editable", "selectionInside", "caretAtEnd"]
+      .every(key => bookmark.conditions?.[key] === true), "FROZEN_PRIOR_BOOKMARK_INVALID", { bookmark, targetId });
+  return bookmark.actual.remainingText;
+}
+
 export async function executeFrozenText({ frame, target, access, page, editor,
-  fileId, readSource, rows, calls }) {
+  fileId, readSource, rows, calls, undoBookmark = null }) {
+  const undoTail = undoBookmark === null ? "" : verifiedUndoTail(undoBookmark, target.selectedId);
   let locator = access.target(target.selectedId);
   requireFact(await locator.count() === 1, "FROZEN_IDENTITY_COUNT_MISMATCH");
   let handle = await locator.elementHandle();
   let documentHandle = await frame.evaluateHandle(() => document);
   const before = await readSource();
   const beforeText = await handle.textContent();
+  // Reviewed native end position. Never infer a new suffix from the live caret.
+  const trailingText = target.textEntry?.trailingText || "";
+  requireFact(beforeText.endsWith(trailingText), "FROZEN_TEXT_TAIL_DRIFT");
+  const insertedText = text => (trailingText ? beforeText.slice(0, -trailingText.length) : beforeText) + text + trailingText;
+  const endFocus = () => requireFrozenTextFocus(handle, target.selectedId, { atEnd: true, trailingText });
   const marker = ` PRCORE_${fileId}`;
   requireFact(!before.toString().includes(marker), "FROZEN_MARKER_ALREADY_PRESENT");
   let saved;
@@ -150,6 +168,8 @@ export async function executeFrozenText({ frame, target, access, page, editor,
   const sourceScope = (after) => {
     const oracle = compareElementScopedMutation({ before, after, sourceId: target.selectedId,
       normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
+      allowAttributeOrderOnly: Boolean(target.textEntry),
+      allowSpanAttributeOrder: target.formatCapability?.scope === "text-range",
       expectedAfterContains: [marker], expectedAppendedPattern: new RegExp(marker, "u") });
     requireFact(oracle.ok, "SOURCE_SCOPE_ORACLE_FAILED", oracle);
     return { changedRanges: oracle.changedRanges, outsideUnchanged: oracle.outsideUnchanged,
@@ -206,7 +226,12 @@ export async function executeFrozenText({ frame, target, access, page, editor,
       });
       actual.sessionEnded = await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true";
       focus = verifyEndedHistorySession(actual);
-    } else focus = await requireFrozenTextFocus(handle, target.selectedId, { atEnd: true });
+    } else {
+      // Undo restores the original host-end bookmark; redo restores the saved
+      // input bookmark before the explicitly frozen collapsed whitespace.
+      focus = await requireFrozenTextFocus(handle, target.selectedId,
+        { atEnd: true, trailingText: shortcut === "z" ? undoTail : trailingText });
+    }
     return { sourceSha256: frozenDigest(expectedBytes), history: proof, focus };
   };
   const record = async (operation, expected, action) => {
@@ -224,38 +249,55 @@ export async function executeFrozenText({ frame, target, access, page, editor,
       throw error;
     } finally { row.durationMs = performance.now() - started; }
   };
-  const activate = async () => {
-      const position = await handle.evaluate((element, path) => {
-        const first = element.firstChild;
-        if ((!path && element.childNodes.length !== 1) || (path && JSON.stringify(path) !== "[0]")
+  const activate = async (verifiedSource = null) => {
+      const position = await handle.evaluate((element, { path, entry }) => {
+        const first = entry ? entry.path.reduce((node, index) => node?.childNodes[index], element) : element.firstChild;
+        if ((!entry && ((!path && element.childNodes.length !== 1) || (path && JSON.stringify(path) !== "[0]")))
           || first?.nodeType !== 3 || !first.textContent?.trim()) return null;
+        const offset = entry?.offset || 0;
+        if (offset >= first.length || (entry && !first.textContent[offset].trim())) return null;
         const range = element.ownerDocument.createRange();
-        range.setStart(first, 0); range.setEnd(first, 1);
+        range.setStart(first, offset); range.setEnd(first, offset + 1);
         const rect = range.getBoundingClientRect();
         const outer = element.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0
-          ? { x: rect.left - outer.left + rect.width / 2, y: rect.top - outer.top + rect.height / 2 } : null;
-      }, target.textNodePath || null);
+          ? { x: rect.left - outer.left + rect.width / 2, y: rect.top - outer.top + rect.height / 2,
+            text: first.textContent } : null;
+      }, { path: target.textNodePath || null, entry: target.textEntry || null });
       requireFact(position, "FROZEN_TEXT_PLAIN_LEAF_DRIFT");
-      await handle.dblclick({ position, timeout: 3_000 });
+      if (target.textEntry) {
+        // Redo reentry binds to the already verified saved source, not the
+        // initial text hash. Identity and the declared path remain unchanged.
+        const expectedText = verifiedSource === null ? null : await handle.evaluate((element, { source, path }) => {
+          const document = new DOMParser().parseFromString(source, "text/html");
+          const targets = document.querySelectorAll(`[data-pageroot-id="${element.getAttribute("data-pageroot-id")}"]`);
+          if (targets.length !== 1) return null;
+          const node = path.reduce((node, index) => node?.childNodes[index], targets[0]);
+          return node?.nodeType === 3 ? node.textContent : null;
+        }, { source: verifiedSource.toString(), path: target.textEntry.path });
+        requireFact(verifiedSource === null || expectedText !== null, "FROZEN_ENTRY_SOURCE_DRIFT");
+        requireFact(frozenDigest(position.text) === (verifiedSource === null
+          ? target.textEntry.textSha256 : frozenDigest(expectedText)), "FROZEN_ENTRY_TEXT_DRIFT", { textHashMatches: false });
+      }
+      await handle.dblclick({ position: { x: position.x, y: position.y }, timeout: 3_000 });
       await expect(locator).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u, { timeout: 2_000 });
       // Native caret positioning, not a synthetic selection assignment.
       await page.keyboard.press(keyShortcut("ArrowDown"));
-      return requireFrozenTextFocus(handle, target.selectedId, { atEnd: true });
+      return endFocus();
   };
   try {
     await record("activate", { editableId: target.selectedId }, activate);
     await record("input", { appended: `${marker}X` }, async () => {
-      await requireFrozenTextFocus(handle, target.selectedId, { atEnd: true });
+      await endFocus();
       await page.keyboard.type(`${marker}X`);
       const actual = await handle.textContent();
-      requireFact(actual === `${beforeText}${marker}X`, "FROZEN_INPUT_LANDING_MISMATCH", { actual });
+      requireFact(actual === insertedText(`${marker}X`), "FROZEN_INPUT_LANDING_MISMATCH", { actual });
       return { appended: `${marker}X`, focusedId: target.selectedId };
     });
     await record("backspace", { removed: "X" }, async () => {
-      await requireFrozenTextFocus(handle, target.selectedId, { atEnd: true });
+      await endFocus();
       await page.keyboard.press("Backspace");
-      requireFact(await handle.textContent() === `${beforeText}${marker}`, "FROZEN_DELETE_MISMATCH");
+      requireFact(await handle.textContent() === insertedText(marker), "FROZEN_DELETE_MISMATCH");
       return { removed: "X" };
     });
     await record("save", { sourceContains: marker }, async () => {
@@ -267,7 +309,7 @@ export async function executeFrozenText({ frame, target, access, page, editor,
       const oracle = sourceScope(saved);
       // Save is a soft checkpoint. Ending the session here removes the history
       // bookmark and would test the separate fresh-frame history fallback.
-      const focus = await requireFrozenTextFocus(handle, target.selectedId, { atEnd: true });
+      const focus = await endFocus();
       return { sourceSha256: frozenDigest(saved), sessionPreserved: focus.conditions.focusMatches, ...oracle };
     });
     await record("undo", { sourceSha256: frozenDigest(before) }, async () => {
@@ -282,7 +324,45 @@ export async function executeFrozenText({ frame, target, access, page, editor,
       return { ...adoption, ...sourceScope(after) };
     });
     if (target.historyResume === "explicit-reentry") {
-      await record("resume-after-redo", { editableId: target.selectedId }, activate);
+      await record("resume-after-redo", { editableId: target.selectedId }, () => activate(saved));
+    }
+    if (target.operations.includes("delete-forward")) {
+      await record("prepare-forward-delete", { sentinel: "X", caretBeforeSentinel: true }, async () => {
+        await endFocus();
+        await page.keyboard.type("X"); await page.keyboard.press("ArrowLeft");
+        requireFact(await handle.textContent() === insertedText(`${marker}X`), "FROZEN_DELETE_PREPARATION_FAILED");
+        const focus = await requireFrozenTextFocus(handle, target.selectedId);
+        requireFact(focus.actual.collapsed && focus.actual.remainingText === `X${trailingText}`, "FROZEN_DELETE_CARET_MISMATCH", focus);
+        return { sentinel: "X", remainingLength: 1 + trailingText.length };
+      });
+      await record("delete-forward", { removed: "X" }, async () => {
+        await page.keyboard.press("Delete");
+        requireFact(await handle.textContent() === insertedText(marker), "FROZEN_DELETE_MISMATCH");
+        await endFocus();
+        return { removed: "X" };
+      });
+      const lineMarker = `PRLINE_${fileId}`;
+      await record("enter-and-continue", { insertedLine: lineMarker, freshBreaks: 1 }, async () => {
+        const beforeBreaks = await handle.evaluate(element => element.querySelectorAll("br").length);
+        await page.keyboard.press("Enter"); await page.keyboard.type(lineMarker);
+        const afterBreaks = await handle.evaluate(element => element.querySelectorAll("br").length);
+        const proof = { oneBreakAdded: afterBreaks === beforeBreaks + 1,
+          textMatches: await handle.textContent() === insertedText(`${marker}${lineMarker}`) };
+        requireFact(Object.values(proof).every(Boolean), "FROZEN_ENTER_LANDING_MISMATCH", proof);
+        await endFocus();
+        return proof;
+      });
+      await record("save-newline", { sourceContains: lineMarker, outsideUnchanged: true }, async () => {
+        await page.keyboard.press(keyShortcut("s"));
+        await expect.poll(async () => (await readSource()).toString().includes(lineMarker), { timeout: 5_000 }).toBe(true);
+        const after = await readSource();
+        const oracle = compareElementScopedMutation({ before: saved, after, sourceId: target.selectedId,
+          normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_NEWLINE, expectedAfterContains: [lineMarker],
+          expectedAppendedPattern: new RegExp(`<br data-pageroot-id="pr1_[0-9a-f]{32}">${lineMarker}`, "u") });
+        requireFact(oracle.ok, "SOURCE_SCOPE_ORACLE_FAILED", oracle); saved = after;
+        return { changedRanges: oracle.changedRanges, outsideUnchanged: oracle.outsideUnchanged,
+          freshStableIdsValid: oracle.freshStableIdsValid };
+      });
     }
     if (target.operations.includes("bold") && target.formatCapability.scope === "element") {
       let formatBaseline = saved;

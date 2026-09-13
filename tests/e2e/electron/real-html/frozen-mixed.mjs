@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
-import { executeFrozenSelection, frozenFrameAccess, frozenDigest, FROZEN_TEXT_OPERATIONS,
+import { parse } from "parse5";
+import { executeFrozenSelection, frozenFrameAccess, frozenDigest, FROZEN_TEXT_OPERATIONS, FROZEN_REENTRY_FORMAT_OPERATIONS,
   verifyFrozenBytes, verifyFrozenDisplay } from "./frozen-selection.mjs";
 import { executeFrozenText, requireTextOperationLedger } from "./frozen-text.mjs";
 import { executeFrozenStructure } from "./frozen-structure.mjs";
@@ -8,11 +9,65 @@ function requireFact(condition, code, details) {
   if (!condition) throw Object.assign(new Error(code), { code, details });
 }
 
+// Bind evolving bytes, never discover a target. The caller supplies only source
+// snapshots already verified by completed operations and the original frozen IDs.
+export function bindMixedSource(baseline, current, text, structure) {
+  const locate = bytes => {
+    const source = bytes.toString(), found = [];
+    const visit = node => {
+      if (node.attrs?.some(a => a.name === "data-pageroot-id" && a.value === text.selectedId)) found.push(node);
+      for (const child of node.childNodes || []) visit(child);
+      if (node.content) visit(node.content);
+    };
+    visit(parse(source, { sourceCodeLocationInfo: true }));
+    requireFact(found.length === 1 && found[0].tagName === text.selectedTag && found[0].sourceCodeLocation,
+      "FROZEN_MIXED_SOURCE_IDENTITY_INVALID");
+    const node = found[0], loc = node.sourceCodeLocation;
+    return { node, start: Buffer.byteLength(source.slice(0, loc.startOffset)),
+      end: Buffer.byteLength(source.slice(0, loc.endOffset)) };
+  };
+  const before = locate(baseline), after = locate(current), offset = structure.copyBinding.byteOffset;
+  const conditions = {
+    prefixUnchanged: baseline.subarray(0, before.start).equals(current.subarray(0, after.start)),
+    suffixUnchanged: baseline.subarray(before.end).equals(current.subarray(after.end)),
+    separateStructure: offset <= before.start || offset >= before.end,
+  };
+  requireFact(Object.values(conditions).every(Boolean), "FROZEN_MIXED_SOURCE_SCOPE_DRIFT", conditions);
+  const rebound = { ...text };
+  if (text.textEntry) {
+    const originalEntry = text.textEntry.path.reduce((node, index) => node?.childNodes[index], before.node);
+    requireFact(originalEntry?.nodeName === "#text" && frozenDigest(originalEntry.value) === text.textEntry.textSha256,
+      "FROZEN_MIXED_BASELINE_ENTRY_DRIFT");
+    const node = text.textEntry.path.reduce((node, index) => node?.childNodes[index], after.node);
+    requireFact(node?.nodeName === "#text", "FROZEN_MIXED_ENTRY_PATH_DRIFT");
+    rebound.textEntry = { ...text.textEntry, textSha256: frozenDigest(node.value) };
+  }
+  if (text.selectedId === structure.selectedId)
+    requireFact(frozenDigest(baseline.subarray(before.start, before.end)) === structure.copyBinding.originalElementSha256,
+      "FROZEN_MIXED_BASELINE_STRUCTURE_DRIFT");
+  return { text: rebound, structure: { ...structure, copyBinding: { ...structure.copyBinding,
+    originalElementSha256: text.selectedId === structure.selectedId
+      ? frozenDigest(current.subarray(after.start, after.end)) : structure.copyBinding.originalElementSha256,
+    byteOffset: offset + (offset >= before.end ? current.length - baseline.length : 0) } }, conditions };
+}
+
 export const frozenRows = (operations, targetId) => operations.map(operation => ({ operation, targetId,
   state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null }));
 
 export const mixedCheckpointOperations = plan => ["reopen-cumulative",
   ...Array.from({ length: plan.cycles }, (_, index) => `delete-comment-${index + 1}`)];
+const continuationOperations = target => target.historyResume === "explicit-reentry"
+  ? FROZEN_REENTRY_FORMAT_OPERATIONS.slice(0, -2) : FROZEN_TEXT_OPERATIONS;
+
+export function verifyMixedMarkers(content, fileId, count, newline) {
+  const conditions = Array.from({ length: count }, (_, index) => {
+    const suffix = `${fileId}_C${index + 1}`, marker = `PRCORE_${suffix}`;
+    return { cycle: index + 1, editedTextRetained: content.includes(`${marker}${newline ? `PRLINE_${suffix}` : " "}`),
+      continuationRetained: content.includes(`${marker}_RESUME`) };
+  });
+  requireFact(conditions.every(c => c.editedTextRetained && c.continuationRetained), "FROZEN_CUMULATIVE_TEXT_LOST", { conditions });
+  return conditions;
+}
 
 export function mixedCycleRows(plan) {
   const [text, structure] = plan.targets;
@@ -20,7 +75,7 @@ export function mixedCycleRows(plan) {
     control: frozenRows(["select-text", "create-comment", "select-structure", "resume-text", "verify-cycle"], text.selectedId)
       .map(row => ({ ...row, targetId: row.operation === "select-structure" ? structure.selectedId : text.selectedId })),
     text: frozenRows(text.operations, text.selectedId), structure: frozenRows(structure.operations, structure.selectedId),
-    continuation: frozenRows(FROZEN_TEXT_OPERATIONS, text.selectedId) }));
+    continuation: frozenRows(continuationOperations(text), text.selectedId) }));
 }
 
 export function verifyFrozenComment(comment, expected) {
@@ -66,7 +121,7 @@ async function activeFrame(editor) {
 
 async function select(page, frame, target, calls, priorSelectionId) {
   const localCalls = [], access = frozenFrameAccess(frame, target, localCalls);
-  try { return await executeFrozenSelection({ page, access, target, calls: localCalls, keyboard: page.keyboard, priorSelectionId }); }
+  try { return await executeFrozenSelection({ page, access, target, calls: localCalls, keyboard: page.keyboard, mouse: page.mouse, priorSelectionId }); }
   finally { calls.push(...localCalls); }
 }
 
@@ -140,16 +195,26 @@ export async function revealFrozenCommentDelete(card) {
 export async function executeFrozenMixed({ plan, page, editor, readSource, readComments, report, calls }) {
   const [textTarget, structureTarget] = plan.targets;
   let frame = await activeFrame(editor), finalSource;
+  const baseline = await readSource();
+  let verifiedSource = baseline;
+  let priorBookmark = null;
   report.comments = []; report.copyIds = [];
   for (const cycle of report.cycles) {
     const markerId = `${plan.fileId}_C${cycle.cycle}`;
     // Later initial bold is the preceding verified operation's promised result,
     // not an expectation inferred from current DOM or live capability.
-    const target = Object.freeze({ ...textTarget, initialBold: cycle.cycle === 1 ? textTarget.initialBold : true });
+    verifyFrozenBytes(await readSource(), { sha256: frozenDigest(verifiedSource), size: verifiedSource.length }, "FROZEN_MIXED_CHECKPOINT_DRIFT");
+    const binding = plan.sourceEvolution ? bindMixedSource(baseline, verifiedSource, textTarget, structureTarget) : { text: textTarget };
+    const target = Object.freeze({ ...binding.text, initialBold: cycle.cycle === 1 ? textTarget.initialBold : true });
     await record(cycle.control, "select-text", () => select(page, frame, target, calls,
       cycle.cycle === 1 ? null : target.selectedId));
     await executeFrozenText({ frame, target, access: frozenFrameAccess(frame, target, calls), page, editor,
-      fileId: markerId, readSource, rows: cycle.text, calls });
+      fileId: markerId, readSource, rows: cycle.text, calls,
+      undoBookmark: plan.sourceEvolution && textTarget.historyAdoption === "editable-island-in-place" ? priorBookmark : null });
+    frame = await activeFrame(editor); // Text executor has independently verified history adoption.
+    verifiedSource = await readSource();
+    const nextBinding = plan.sourceEvolution ? bindMixedSource(baseline, verifiedSource, textTarget, structureTarget)
+      : { text: target, structure: structureTarget };
     await record(cycle.control, "create-comment", async () => {
       const before = await readSource(), text = `PRCOMMENT_${markerId}`;
       const selected = frame.locator("[data-html-canvas-selected]");
@@ -175,28 +240,33 @@ export async function executeFrozenMixed({ plan, page, editor, readSource, readC
     });
     await record(cycle.control, "select-structure", async () => {
       const source = await readSource();
-      requireFact(frozenDigest(source.subarray(0, structureTarget.copyBinding.byteOffset)) === plan.structurePrefixSha256,
+      if (!plan.sourceEvolution) requireFact(frozenDigest(source.subarray(0, structureTarget.copyBinding.byteOffset)) === plan.structurePrefixSha256,
         "FROZEN_STRUCTURE_PREFIX_DRIFT");
+      else verifyFrozenBytes(source, { sha256: frozenDigest(verifiedSource), size: verifiedSource.length }, "FROZEN_MIXED_CHECKPOINT_DRIFT");
       return select(page, frame, structureTarget, calls, target.selectedId);
     });
-    const structure = await executeFrozenStructure({ frame, target: structureTarget, page, editor,
+    const structure = await executeFrozenStructure({ frame, target: nextBinding.structure, page, editor,
       fileId: markerId, readSource, rows: cycle.structure, calls });
     report.copyIds.push(structure.copyId);
     frame = await activeFrame(editor); // Only after proven Candidate/generation/terminal and direct-focus probe.
-    await record(cycle.control, "resume-text", () => select(page, frame, target, calls, null));
-    const continuation = Object.freeze({ ...target, operations: FROZEN_TEXT_OPERATIONS });
+    await record(cycle.control, "resume-text", () => select(page, frame, nextBinding.text, calls, null));
+    const continuation = Object.freeze({ ...nextBinding.text, operations: continuationOperations(nextBinding.text) });
     await executeFrozenText({ frame, target: continuation, access: frozenFrameAccess(frame, continuation, calls), page,
       editor, fileId: `${markerId}_RESUME`, readSource, rows: cycle.continuation, calls });
+    frame = await activeFrame(editor);
+    priorBookmark = cycle.continuation.find(row => row.operation === "redo")?.actual?.focus || null;
+    if (plan.sourceEvolution && textTarget.historyAdoption === "editable-island-in-place")
+      requireFact(priorBookmark, "FROZEN_PRIOR_BOOKMARK_MISSING");
     await record(cycle.control, "verify-cycle", async () => {
       finalSource = await readSource();
+      verifiedSource = finalSource;
       const expected = { sha256: frozenDigest(finalSource), size: finalSource.length };
       const display = verifyFrozenDisplay({ working: await editor.getAttribute("data-working-source-sha256"),
         displayed: await editor.getAttribute("data-rendered-projection-sha256") }, expected);
       const markers = Array.from({ length: cycle.cycle }, (_, index) => `PRCORE_${plan.fileId}_C${index + 1}`);
       const target = frozenFrameAccess(frame, textTarget, calls).target(textTarget.selectedId);
       const content = await target.textContent();
-      requireFact(markers.every(marker => content.includes(`${marker} `) && content.includes(`${marker}_RESUME`)),
-        "FROZEN_CUMULATIVE_TEXT_LOST");
+      verifyMixedMarkers(content, plan.fileId, cycle.cycle, textTarget.operations.includes("enter-and-continue"));
       return { cycle: cycle.cycle, display, retainedMarkers: markers.length * 2,
         comments: await verifyMixedComments(readComments, report.comments) };
     });

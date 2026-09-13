@@ -14,6 +14,54 @@ import {
 
 const SOURCE_ID = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
 
+test("continuing a styled span accepts only raw attribute order normalization", () => {
+  const id = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<p data-pageroot-id="${SOURCE_ID}">Text <span style="font-weight: 700" data-pageroot-id="${id}">bold</span></p><!--keep-->`;
+  const after = before.replace(`style="font-weight: 700" data-pageroot-id="${id}"`,
+    `data-pageroot-id="${id}" style="font-weight: 700"`).replace("bold</", "bold MORE</");
+  const check = (value, allow = true) => compareElementScopedMutation({ before, after: value, sourceId: SOURCE_ID,
+    normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE, expectedAfterContains: [" MORE"],
+    expectedAppendedPattern: / MORE/u, allowSpanAttributeOrder: allow });
+  assert.equal(check(after).ok, true); assert.equal(check(after, false).ok, false);
+  for (const bad of [after.replace("700", "400"), after.replace("keep", "wrong"), after.replace("bold", "wrong"),
+    after.replace('style="font-weight: 700"', "style='font-weight: 700'")])
+    assert.equal(check(bad).ok, false);
+  assert.throws(() => check(after.replace(id, SOURCE_ID)), { code: "SOURCE_SCOPE_IDENTITY_MISSING" });
+});
+
+test("nested newline insertion aligns shared delimiter bytes without allowing other changes", () => {
+  const child = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb", fresh = "pr1_cccccccccccc4ccc8ccccccccccccccc";
+  const before = `<h1 data-pageroot-id="${SOURCE_ID}"><span data-pageroot-id="${child}">文字</span></h1><!-- outside -->`;
+  const inserted = `<br data-pageroot-id="${fresh}">PRLINE_H02`;
+  const after = before.replace("文字", `文字${inserted}`);
+  const check = value => compareElementScopedMutation({ before, after: value, sourceId: SOURCE_ID,
+    normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_NEWLINE, expectedAfterContains: ["PRLINE_H02"],
+    expectedAppendedPattern: /<br data-pageroot-id="pr1_[0-9a-f]{32}">PRLINE_H02/u });
+  const proof = check(after);
+  assert.equal(proof.ok, true);
+  assert.equal(Buffer.from(after).subarray(proof.appendedByteRange.start, proof.appendedByteRange.end).toString(), inserted);
+  for (const bad of [after.replace("文字", "错字"), after.replace("outside", "wrong"),
+    after.replace(fresh, child), after.replace("<br", "br"), after.replace("PRLINE_H02", "PRLINE_H02EXTRA"),
+    after.replace("</span>", "<!-- extra --></span>")]) assert.equal(check(bad).ok, false);
+});
+
+test("element text permits only link attribute order, retaining values and outside bytes", () => {
+  const linkId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<p data-pageroot-id="${SOURCE_ID}">Text <a href="#safe" data-pageroot-id="${linkId}">link</a>.\n    </p><!-- outside -->`;
+  const after = before.replace(`href="#safe" data-pageroot-id="${linkId}"`,
+    `data-pageroot-id="${linkId}" href="#safe"`).replace(".\n", ". MARK\n");
+  const check = (value, allowAttributeOrderOnly = true) => compareElementScopedMutation({
+    before, after: value, sourceId: SOURCE_ID, normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
+    expectedAfterContains: [" MARK"], expectedAppendedPattern: / MARK/u, allowAttributeOrderOnly });
+  assert.equal(check(after).ok, true);
+  assert.equal(check(after, false).ok, false);
+  assert.ok(check(after).changedRanges.before.end > check(after).changedRanges.before.start);
+  for (const bad of [after.replace("#safe", "#wrong"), after.replace(">link<", ">changed<"),
+    after.replace("outside", "wrong"), after.replace("\n    ", "\n   "),
+    after.replace('href="#safe"', "href='#safe'"), after.replace("</a>", "</a><!-- extra -->"),
+    after.replace(". MARK", "wrong. MARK")]) assert.equal(check(bad).ok, false);
+});
+
 test("each repeated bold operation compares with its verified unbold preparation, not the cycle baseline", () => {
   const bold = `<p data-pageroot-id="${SOURCE_ID}" style="font-weight: 700">Fixed</p><!-- outside -->`;
   const plain = bold.replace("700", "normal");

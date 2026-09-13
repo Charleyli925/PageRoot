@@ -12,6 +12,33 @@ import {
 
 const OBSERVER_KEY = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
 
+test("repeated same-source rebuild requests remain separate without inventing missing requests", async ({ page }) => {
+  await page.setContent('<main data-runtime-root></main>');
+  const root = page.locator('[data-runtime-root]');
+  await root.evaluate(startRuntimeLifecycleObservation);
+  for (let cycle = 1; cycle <= 2; cycle++) {
+    await root.evaluate(e => {
+      e.setAttribute('data-runtime-refresh-pending', '');
+      e.setAttribute('data-runtime-refresh-pending-source-revision', 'same-source');
+      e.setAttribute('data-runtime-refresh-pending-reason', 'history');
+    });
+    await expect.poll(() => root.evaluate((e, key) => globalThis[key].lifecycleRecords.filter(r => r.kind === 'rebuild-request').length,
+      OBSERVER_KEY)).toBe(cycle);
+    await root.evaluate(e => {
+      e.removeAttribute('data-runtime-refresh-pending');
+      e.removeAttribute('data-runtime-refresh-pending-source-revision');
+      e.removeAttribute('data-runtime-refresh-pending-reason');
+    });
+  }
+  const before = await root.evaluate((e, key) => globalThis[key].lifecycleRecords.length, OBSERVER_KEY);
+  await root.evaluate(e => e.setAttribute('data-runtime-candidate-id', 'candidate-only'));
+  const stopped = await root.evaluate(stopRuntimeLifecycleObservation);
+  const requests = stopped.records.filter(r => r.kind === 'rebuild-request');
+  expect(requests).toHaveLength(2);
+  expect(requests.map(r => r.requestOrdinal)).toEqual([1, 2]);
+  expect(summarizeRuntimeObserverRecords(stopped.lifecycleRecords.slice(before)).hasRequest).toBe(false);
+});
+
 async function startObservation(root) {
   await root.evaluate(startRuntimeCandidateObservation);
 }

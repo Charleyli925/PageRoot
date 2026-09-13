@@ -92,7 +92,10 @@ export function startRuntimeCandidateObservation(element, options = {}) {
   )?.getAttribute("data-frame-generation") || null;
   const recorded = new Set();
   const frameCandidates = new WeakMap();
+  let requestOrdinal = 0;
   const observer = new MutationObserver((mutations) => {
+    if (mutations.some(m => m.type === "attributes" && m.target === element
+      && m.attributeName === "data-runtime-refresh-pending" && m.oldValue === null)) requestOrdinal++;
     // Promotion removes the iframe's Candidate attribute. Preserve that exact
     // object's binding across batches (or read its removal record in this batch).
     // Root last-known-good metadata is committed later and cannot identify it.
@@ -145,6 +148,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
         record.reason || "unknown",
         record.phase || "unknown",
         record.outcome || "unknown",
+        record.requestOrdinal || "unknown",
       ].join(":");
       if (recorded.has(`lifecycle:${recordKey}`)) return;
       recorded.add(`lifecycle:${recordKey}`);
@@ -185,6 +189,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
         if (!requestWasRaised) continue;
         recordLifecycle({
           kind: "rebuild-request",
+          requestOrdinal,
           evidence: "runtime-refresh-pending",
           status: "submitted",
           sourceRevision: element.getAttribute("data-runtime-refresh-pending-source-revision")

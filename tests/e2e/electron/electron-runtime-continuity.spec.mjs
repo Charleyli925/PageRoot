@@ -4,6 +4,9 @@ import { existsSync } from "node:fs";
 import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
 import { verifyMixedComments, verifyFrozenCommentCard, revealFrozenCommentCard, revealFrozenCommentDelete } from "./real-html/frozen-mixed.mjs";
 import { expect, test } from "@playwright/test";
+import { FROZEN_ELEMENT_OPERATIONS, frozenDigest, frozenFrameAccess, executeFrozenSelection, verifyFrozenHostPoint } from "./real-html/frozen-selection.mjs";
+import { executeFrozenText, requireFrozenTextFocus } from "./real-html/frozen-text.mjs";
+import { startRuntimeLifecycleObservation, stopRuntimeLifecycleObservation } from "./real-html/runtime-observer.mjs";
 
 import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-contract.js";
 
@@ -98,6 +101,128 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
     removeValidatedTemporaryDirectory(sourceDirectory, prefix);
   }
 }
+
+test("frozen character selection reveals oversized targets and rejects clipped host points", async () => {
+  const text = "Fixed character " + "cumulative content ".repeat(100);
+  const html = `<!doctype html><html><head><title>Fixed point</title></head><body><p data-native-case="oversized" style="width:400px;font-size:60px">${text}</p></body></html>`;
+  await withRuntimeProject("pageroot-frozen-oversized-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "oversized");
+    const locator = frame.locator('[data-native-case="oversized"]');
+    const id = await locator.getAttribute("data-pageroot-id");
+    const handle = await locator.elementHandle();
+    await expect(verifyFrozenHostPoint(handle, { x: 20, y: -10 }))
+      .rejects.toMatchObject({ code: "FROZEN_HOST_POINTER_HIT_MISMATCH", details: { withinViewport: false, hostHitMatches: false } });
+    await expect(verifyFrozenHostPoint(handle, { x: 20, y: 20 }))
+      .rejects.toMatchObject({ code: "FROZEN_HOST_POINTER_HIT_MISMATCH" });
+    await handle.dispose();
+    await locator.evaluate(element => element.scrollIntoView({ block: "end", behavior: "instant" }));
+    const target = { clickId: id, selectedId: id, clickTag: "p", selectedTag: "p", selectionClick: "frozen-text-character",
+      textEntry: { path: [0], offset: 0, textSha256: frozenDigest(text) } };
+    const calls = [];
+    const result = await executeFrozenSelection({ access: frozenFrameAccess(frame, target, calls), keyboard: page.keyboard,
+      mouse: page.mouse, target, calls });
+    expect(result.state).toBe("PASS");
+    expect(calls.filter(call => call.kind === "pointer-click")).toHaveLength(1);
+    expect(calls.find(call => call.kind === "pointer-click").host)
+      .toMatchObject({ withinViewport: true, activeFrame: true, hostHitMatches: true });
+  });
+});
+
+test("frozen element entry rejects wrong text bindings and edits heading paragraph list and cell", async () => {
+  test.setTimeout(90_000);
+  const html = '<!doctype html><html><head><style>h1,p,li,td{font-size:18px;font-weight:400}</style></head><body>'
+    + '<h1 data-native-case="entry-heading"> Heading</h1><p data-native-case="entry-paragraph">  Paragraph <i>tail</i>.</p>'
+    + '<ul><li data-native-case="entry-list"><b>Label</b> item</li></ul>'
+    + '<p data-native-case="entry-tail">  Footer <a href="#">link</a>.\n    </p>'
+    + '<table><tbody><tr><td data-native-case="entry-cell">Cell</td></tr></tbody></table></body></html>';
+  await withRuntimeProject("pageroot-frozen-elements-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+    const { editor, frame } = await loadedDiskFrame(page, sourcePath, "entry-heading");
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    await editor.evaluate(startRuntimeLifecycleObservation);
+    try {
+      for (const [index, [name, tag, entryPath, offset, text, trailingText = ""]] of [
+        ["entry-heading", "h1", [0], 1, " Heading"], ["entry-paragraph", "p", [0], 2, "  Paragraph "],
+        ["entry-list", "li", [1], 1, " item"], ["entry-cell", "td", [0], 0, "Cell"],
+        ["entry-tail", "p", [0], 2, "  Footer ", "\n    "],
+      ].entries()) {
+        const id = await frame.locator(`[data-native-case="${name}"]`).getAttribute("data-pageroot-id");
+        const target = { clickId: id, selectedId: id, clickTag: tag, selectedTag: tag, mapping: "self",
+          selectionClick: "frozen-text-character",
+          operations: FROZEN_ELEMENT_OPERATIONS, textEntry: { path: entryPath, offset, textSha256: frozenDigest(text), trailingText },
+          initialBold: false, historyAdoption: "editable-island-in-place", historyResume: "in-place",
+          formatCapability: { scope: "element" } };
+        const calls = [], access = frozenFrameAccess(frame, target, calls);
+        if (index === 0) {
+          const wrongTagCalls = [], wrongHashCalls = [];
+          await expect(executeFrozenSelection({ access: frozenFrameAccess(frame, target, wrongTagCalls), keyboard: page.keyboard, mouse: page.mouse,
+            target: { ...target, clickTag: "aside" }, calls: wrongTagCalls }))
+            .rejects.toMatchObject({ code: "FROZEN_IDENTITY_MISMATCH" });
+          await expect(executeFrozenSelection({ access: frozenFrameAccess(frame, target, wrongHashCalls), keyboard: page.keyboard, mouse: page.mouse,
+            target: { ...target, textEntry: { ...target.textEntry, textSha256: "a".repeat(64) } }, calls: wrongHashCalls }))
+            .rejects.toMatchObject({ code: "FROZEN_CLICK_TEXT_DRIFT" });
+        }
+        await executeFrozenSelection({ access, keyboard: page.keyboard, mouse: page.mouse, target, calls });
+        const rows = () => target.operations.map(operation => ({ operation, state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED" }));
+        const input = { frame, access, page, editor, calls, fileId: `H0${index + 1}`,
+          readSource: () => readPublishedWorkingCopy(working, null) };
+        if (index === 0) {
+          const before = readFileSync(working);
+          for (const [entry, code] of [[{ ...target.textEntry, textSha256: "a".repeat(64) }, "FROZEN_ENTRY_TEXT_DRIFT"],
+            [{ ...target.textEntry, path: [999] }, "FROZEN_TEXT_PLAIN_LEAF_DRIFT"]]) {
+            await expect(executeFrozenText({ ...input, target: { ...target, textEntry: entry }, rows: rows() }))
+              .rejects.toMatchObject({ code });
+            expect(readFileSync(working)).toEqual(before);
+          }
+        }
+        if (trailingText) {
+          const before = readFileSync(working);
+          await expect(executeFrozenText({ ...input, target: { ...target,
+            textEntry: { ...target.textEntry, trailingText: "" } }, rows: rows() }))
+            .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+          const handle = await access.target(id).elementHandle();
+          await requireFrozenTextFocus(handle, id, { atEnd: true, trailingText });
+          await expect(requireFrozenTextFocus(handle, id, { atEnd: true, trailingText: "    " }))
+            .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+          await page.keyboard.press("ArrowLeft");
+          await expect(requireFrozenTextFocus(handle, id, { atEnd: true, trailingText }))
+            .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
+          expect(readFileSync(working)).toEqual(before);
+        }
+        const operationRows = rows();
+        let result;
+        try { result = await executeFrozenText({ ...input, target, rows: operationRows }); }
+        catch (error) {
+          await test.info().attach("frozen-operation-failure", { contentType: "application/json",
+            body: JSON.stringify({ name, rows: operationRows, code: error.code, details: error.details }) });
+          throw error;
+        }
+        expect(result.state).toBe("PASS");
+      }
+    } finally { await editor.evaluate(stopRuntimeLifecycleObservation); }
+  });
+});
+
+test("a real Space key edits a nested summary instead of toggling its disclosure", async () => {
+  const html = '<!doctype html><html><head><title>Summary space</title></head><body>'
+    + '<details open data-native-case="summary-details">'
+    + '<summary data-native-case="summary-space">Heading <span>nested</span></summary>'
+    + '<p>body</p></details></body></html>';
+  await withRuntimeProject("pageroot-summary-space-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "summary-space");
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    const target = frame.locator('[data-native-case="summary-space"]');
+    const details = frame.locator('[data-native-case="summary-details"]');
+    await activateNativeEdit(frame, "summary-space");
+    await expect(target).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
+    await page.keyboard.press(keyShortcut("ArrowDown"));
+    await page.keyboard.type("A B");
+    await expect(target).toContainText("nestedA B");
+    await expect(details).toHaveAttribute("open", "");
+    await expectCheckpointPersisted(page, 0);
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("nestedA B</span>");
+  });
+});
 
 async function enableContinuityProbe(page) {
   await expect.poll(() => page.evaluate(() => ({

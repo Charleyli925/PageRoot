@@ -8,8 +8,13 @@ export const FROZEN_TEXT_OPERATIONS = Object.freeze([
   "activate", "input", "backspace", "save", "undo", "redo",
 ]);
 export const FROZEN_FORMAT_OPERATIONS = Object.freeze([...FROZEN_TEXT_OPERATIONS, "prepare-unbold", "bold"]);
+export const FROZEN_ELEMENT_OPERATIONS = Object.freeze([...FROZEN_TEXT_OPERATIONS,
+  "prepare-forward-delete", "delete-forward", "enter-and-continue", "save-newline", "prepare-unbold", "bold"]);
 export const FROZEN_REENTRY_FORMAT_OPERATIONS = Object.freeze([
   "activate", "input", "backspace", "save", "undo", "resume-after-undo", "redo", "resume-after-redo", "prepare-unbold", "bold",
+]);
+export const FROZEN_REENTRY_ELEMENT_OPERATIONS = Object.freeze([
+  ...FROZEN_REENTRY_FORMAT_OPERATIONS.slice(0, -2), ...FROZEN_ELEMENT_OPERATIONS.slice(6),
 ]);
 export const FROZEN_STRUCTURE_OPERATIONS = Object.freeze([
   "copy", "select-copy", "activate-copy", "input-copy", "save-copy", "select-copy-for-delete", "delete-copy",
@@ -45,26 +50,31 @@ export function readFrozenSelection(bytes, expectedDigest) {
   const mixedCycles = new Map([["core-three-cycle", 3], ["core-pressure-20", 20],
     ["core-pressure-50", 50], ["core-pressure-100", 100]]).get(plan.scope);
   if (mixedCycles !== undefined) {
-    requireFact(plan.operation === "mixed" && plan.initialRuntime === "runtime" && plan.reopen === true
+    requireFact(plan.operation === "mixed" && ["runtime", "static"].includes(plan.initialRuntime) && plan.reopen === true
       && plan.cycles === mixedCycles
       && Array.isArray(plan.targets) && plan.targets.length === 2,
     "FROZEN_MIXED_PLAN_INVALID");
     // Reuse the existing ingress contracts, not another target fact store.
-    const checked = [["core-text-format", "native-text"], ["core-structure-leaf", "structure"]]
+    requireFact(plan.textScope === undefined || ["core-text-format", "element-text-format"].includes(plan.textScope),
+      "FROZEN_MIXED_TEXT_SCOPE_INVALID");
+    const checked = [[plan.textScope || "core-text-format", "native-text"], ["core-structure-leaf", "structure"]]
       .map(([scope, operation], index) => {
         const bytes = Buffer.from(JSON.stringify({ ...plan, scope, operation, targets: [plan.targets[index]] }));
         return readFrozenSelection(bytes, frozenDigest(bytes)).targets[0];
       });
-    requireFact(checked[0].selectedId !== checked[1].selectedId && checked[0].initialBold === false
-      && checked[0].formatCapability.scope === "element" && checked[0].historyAdoption === "editable-island-in-place"
-      && checked[1].rebuildPath === "runtime-candidate" && checked[1].continuationProbe === "session-ended-no-refocus"
+    requireFact((checked[0].selectedId !== checked[1].selectedId ? plan.sharedTextStructure === undefined
+      : plan.sharedTextStructure === "verified-same-leaf" && plan.sourceEvolution === "verified-text-region")
+      && checked[1].rebuildPath === (plan.initialRuntime === "static" ? "static-rebuild" : "runtime-candidate")
+      && checked[1].continuationProbe === "session-ended-no-refocus"
+      && (plan.sourceEvolution === undefined || plan.sourceEvolution === "verified-text-region")
       && plan.commentBasis === "EXACT_AUTHORED_SOURCE_ANCHOR"
       && HASH.test(plan.structurePrefixSha256 || ""), "FROZEN_MIXED_CONTRACT_INVALID");
     plan.targets = Object.freeze(checked);
     Object.freeze(plan.original); Object.freeze(plan.seed);
     return Object.freeze(plan);
   }
-  const formatCore = plan.scope === "core-text-format";
+  const elementCore = plan.scope === "element-text-format";
+  const formatCore = plan.scope === "core-text-format" || elementCore;
   const structureCore = plan.scope === "core-structure-leaf";
   const copyDenied = plan.scope === "core-copy-denied";
   const textMicro = plan.scope === "native-text-core-micro" || formatCore;
@@ -84,7 +94,7 @@ export function readFrozenSelection(bytes, expectedDigest) {
     && target.expectedCapability === "AVAILABLE"
     && target.contractReason === "UNIQUE_REACHABLE_AUTHORED_TARGET"
     && target.sourceProof === "REVIEWED_EXACT_SEED"
-    && target.tabId === null && target.scrollContainer === "document",
+    && target.tabId === null && target.tabRoute === undefined && target.scrollContainer === "document",
   "FROZEN_TARGET_CONTRACT_INVALID");
   requireFact(copyDenied || target.selectionPoint === undefined, "FROZEN_POINTER_SCOPE_INVALID");
   if (copyDenied) {
@@ -144,16 +154,30 @@ export function readFrozenSelection(bytes, expectedDigest) {
     for (const value of [binding, target.copyCapability, target.textCapability, target.operations]) Object.freeze(value);
   }
   if (textMicro) {
-    requireFact(target.mapping === "self" && target.selectedTag === "p"
+    const entry = target.textEntry;
+    requireFact(elementCore || entry === undefined, "FROZEN_ELEMENT_ENTRY_INVALID");
+    if (elementCore) {
+      requireFact(["center", "frozen-text-character"].includes(target.selectionClick), "FROZEN_CLICK_CONTRACT_INVALID");
+      requireFact(Array.isArray(entry?.path) && entry.path.length > 0 && entry.path.length <= 8
+        && entry.path.every(index => Number.isSafeInteger(index) && index >= 0)
+        && Number.isSafeInteger(entry.offset) && entry.offset >= 0 && HASH.test(entry.textSha256 || "")
+        && typeof entry.trailingText === "string" && /^[\t\n\r ]*$/u.test(entry.trailingText)
+        && target.textNodePath === undefined
+        && target.formatCapability?.scope === "element", "FROZEN_ELEMENT_ENTRY_INVALID");
+      Object.freeze(entry.path); Object.freeze(entry);
+    }
+    requireFact(target.mapping === "self" && target.clickTag === target.selectedTag
+      && (elementCore ? /^(?:h[1-6]|p|li|td|th|span)$/u.test(target.selectedTag) : target.selectedTag === "p")
       && target.textCapability?.expected === "AVAILABLE"
       && target.textCapability?.basis === (formatCore ? "SOURCE_EDITABLE_ISLAND" : "SOURCE_EDITABLE_ISLAND_PLAIN_LEAF")
-      && target.textCapability?.clickPoint === "first-direct-text-character"
-      && JSON.stringify(target.operations) === JSON.stringify(formatCore
+      && target.textCapability?.clickPoint === (elementCore ? "frozen-text-character" : "first-direct-text-character")
+      && JSON.stringify(target.operations) === JSON.stringify(elementCore
+        ? target.historyAdoption === "runtime-candidate" ? FROZEN_REENTRY_ELEMENT_OPERATIONS : FROZEN_ELEMENT_OPERATIONS : formatCore
         ? target.historyAdoption === "runtime-candidate" ? FROZEN_REENTRY_FORMAT_OPERATIONS : FROZEN_FORMAT_OPERATIONS
         : FROZEN_TEXT_OPERATIONS)
       && (formatCore || (target.historyAdoption === undefined && target.historyBasis === undefined && target.historyResume === undefined))
       && (!formatCore || (typeof target.initialBold === "boolean"
-        && JSON.stringify(target.textNodePath) === "[0]" && plan.reopen === true
+        && (elementCore || JSON.stringify(target.textNodePath) === "[0]") && plan.reopen === true
         && ["editable-island-in-place", "runtime-candidate"].includes(target.historyAdoption)
         && target.historyResume === (target.historyAdoption === "runtime-candidate" ? "explicit-reentry" : "in-place")
         && ["text-range", "element"].includes(target.formatCapability?.scope)
@@ -225,6 +249,24 @@ export function selectionExecutionIssues(calls, target) {
   return issues;
 }
 
+export async function verifyFrozenHostPoint(handle, point) {
+  const frame = await handle.ownerFrame();
+  requireFact(frame, "FROZEN_TARGET_DETACHED");
+  const iframe = await frame.frameElement();
+  try {
+    const evidence = await frame.page().evaluate(({ iframe, point }) => {
+      const hit = document.elementFromPoint(point.x, point.y);
+      return { withinViewport: point.x >= 0 && point.y >= 0 && point.x < innerWidth && point.y < innerHeight,
+        activeFrame: iframe.isConnected && iframe.getAttribute("data-runtime-slot-role") === "active",
+        hostHitMatches: hit === iframe,
+        hostHit: hit ? { tag: hit.localName, className: typeof hit.className === "string" ? hit.className : null,
+          testId: hit.getAttribute("data-testid"), ariaLabel: hit.getAttribute("aria-label") } : null };
+    }, { iframe, point });
+    requireFact(Object.values(evidence).every(Boolean), "FROZEN_HOST_POINTER_HIT_MISMATCH", { point, ...evidence });
+    return evidence;
+  } finally { await iframe.dispose(); }
+}
+
 export async function executeFrozenSelection({ access, keyboard, mouse, target, calls, priorSelectionId = null }) {
   const started = performance.now();
   const clickTarget = access.target(target.clickId);
@@ -254,7 +296,33 @@ export async function executeFrozenSelection({ access, keyboard, mouse, target, 
   const handle = await clickTarget.elementHandle();
   requireFact(handle, "FROZEN_TARGET_DETACHED");
   try {
-    if (target.selectionPoint) {
+    if (target.selectionClick === "frozen-text-character") {
+      requireFact(mouse, "FROZEN_POINTER_INPUT_MISSING");
+      // Reveal the frozen start, even when cumulative text exceeds the host
+      // viewport. Element visibility alone does not make that character visible.
+      await handle.evaluate((element, block) => element.scrollIntoView({ block, inline: "nearest", behavior: "instant" }),
+        target.scrollBlock || "start");
+      const point = await handle.evaluate((element, entry) => {
+        const node = entry.path.reduce((node, index) => node?.childNodes[index], element);
+        if (node?.nodeType !== 3 || entry.offset >= node.length) return null;
+        const range = element.ownerDocument.createRange();
+        range.setStart(node, entry.offset); range.setEnd(node, entry.offset + 1);
+        const rect = range.getBoundingClientRect(), box = element.getBoundingClientRect();
+        const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+        return { x: x - box.left, y: y - box.top, width: rect.width, height: rect.height,
+          text: node.textContent, hitId: element.ownerDocument.elementFromPoint(x, y)
+            ?.closest("[data-pageroot-id]")?.getAttribute("data-pageroot-id") };
+      }, target.textEntry);
+      requireFact(point && point.width > 0 && point.height > 0
+        && frozenDigest(point.text) === target.textEntry.textSha256, "FROZEN_CLICK_TEXT_DRIFT");
+      requireFact(point.hitId === target.clickId, "FROZEN_POINTER_HIT_MISMATCH", { expectedId: target.clickId, actual: point });
+      const box = await handle.boundingBox();
+      requireFact(box, "FROZEN_TARGET_DETACHED");
+      const host = await verifyFrozenHostPoint(handle, { x: box.x + point.x, y: box.y + point.y });
+      const { text, ...evidence } = point;
+      calls.push({ kind: "pointer-click", id: target.clickId, point: evidence, host });
+      await mouse.click(box.x + point.x, box.y + point.y);
+    } else if (target.selectionPoint) {
       const point = target.selectionPoint;
       requireFact(mouse, "FROZEN_POINTER_INPUT_MISSING");
       await handle.evaluate(element => element.scrollIntoView({ block: "start", inline: "nearest" }));

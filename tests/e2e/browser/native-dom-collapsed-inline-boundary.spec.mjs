@@ -71,6 +71,32 @@ async function attemptDirectEdit(frame, id) {
   return doubleClickRenderedText(frame, id);
 }
 
+test("host animation settling avoids sandbox pointer retry stalls without force", async ({ page }) => {
+  await page.setContent('<div data-testid="html-canvas-editor"><iframe title="HTML diagnostic" '
+    + 'sandbox="allow-same-origin" style="width:800px;border:0;transition:width 180ms linear" '
+    + 'srcdoc="<p data-native-case=animation-entry>AB</p>"></iframe></div>');
+  const iframe = page.locator("iframe"), target = iframe.contentFrame().locator("p");
+  await expect(target).toHaveText("AB");
+  const animate = async width => {
+    await iframe.evaluate((element, width) => { element.style.width = `${width}px`; }, width);
+    await page.waitForFunction(() => {
+      const width = document.querySelector("iframe").getBoundingClientRect().width;
+      return width > 310 && width < 790;
+    });
+  };
+  await animate(300);
+  // Negative control: native actionability, not the product, stalls after
+  // the transition has ended because its retry timer is sandboxed.
+  await expect(target.dblclick({ timeout: 900 })).rejects.toThrow(/Timeout 900ms exceeded/u);
+  expect(await iframe.evaluate(element => element.getBoundingClientRect().width)).toBe(300);
+  await animate(800);
+  await iframe.evaluate(element => { setTimeout(() => { element.style.width = "700px"; }, 40); });
+  const resolved = await doubleClickRenderedText(page, "animation-entry");
+  expect(await iframe.evaluate(element => element.getBoundingClientRect().width)).toBe(700);
+  expect(await resolved.evaluate(element => element.ownerDocument.getSelection().toString())).toBe("AB");
+  await expect(iframe).toHaveAttribute("sandbox", "allow-same-origin");
+});
+
 test("a transparent inline text hit selects its canonical source host", async ({ page }) => {
   const { frame } = await openFixture(page);
   const host = frame.locator('[data-native-case="exact-boundaries"]');
