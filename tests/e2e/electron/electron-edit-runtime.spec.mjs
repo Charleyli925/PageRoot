@@ -4332,8 +4332,6 @@ test("a current critical surface already ready wins before an overdue wait is re
     <section id="surface-timeout-host"></section>
   </main>
   <script>
-    parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ =
-      (parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ || 0) + 1;
     const renderSurface = () => {
       const canvas = document.createElement('canvas');
       canvas.width = 120;
@@ -4342,10 +4340,10 @@ test("a current critical surface already ready wins before an overdue wait is re
       canvas.style.height = '80px';
       document.querySelector('#surface-timeout-host').append(canvas);
     };
-    if (parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ === 1) {
-      renderSurface();
-    } else {
+    if (parent.__PAGEROOT_DELAY_READY_SURFACE__) {
       parent.__PAGEROOT_RELEASE_READY_SURFACE__ = renderSurface;
+    } else {
+      renderSurface();
     }
   </script>
 </body></html>`;
@@ -4357,6 +4355,10 @@ test("a current critical surface already ready wins before an overdue wait is re
     const editor = page.getByTestId("html-canvas-editor");
     let frame = (await loadedDiskFrame(page, sourcePath, "surface-timeout-boundary")).frame;
     await expect(frame.locator("#surface-timeout-host canvas")).toHaveCount(1);
+    await page.evaluate(() => {
+      window.__PAGEROOT_DELAY_READY_SURFACE__ = true;
+      window.__PAGEROOT_RELEASE_READY_SURFACE__ = undefined;
+    });
     await frame.locator('[data-native-case="surface-timeout-boundary"]').click();
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
