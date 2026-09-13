@@ -4326,6 +4326,10 @@ export default function Workbench() {
       );
       return;
     }
+    // Opening an external HTML can start project registration just before the
+    // composer is submitted. Await that same registration boundary here so a
+    // slow desktop cannot turn a valid composer into a stale-context no-op.
+    await prepareProjectRecords();
     const commentId = currentComments.composerCommentId
       || recordId("comment", commentCounter.current++);
     const outcome = await requiredWorkspaceController(workspaceController)
@@ -4363,6 +4367,7 @@ export default function Workbench() {
     workspaceController,
     beginTargetRelink,
     commentCanvasPort,
+    prepareProjectRecords,
   ]);
 
   const queueReviewCommentFocus = useCallback((
