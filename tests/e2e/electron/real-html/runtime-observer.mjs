@@ -72,6 +72,55 @@ export function summarizeRuntimeObserverRecords(records) {
 
 export const classifyRuntimeObserverRecords = summarizeRuntimeObserverRecords;
 
+export function attributeRuntimeObserverRequests(records) {
+  const all = Array.isArray(records) ? records : [];
+  const requests = all.filter(record => record?.kind === RUNTIME_OBSERVER_RECORD_KINDS.REQUEST);
+  return requests.map(request => {
+    const related = all.filter(record => record !== request
+      && record?.requestOrdinal === request.requestOrdinal);
+    const candidateIds = [...new Set(related
+      .filter(record => record.kind === RUNTIME_OBSERVER_RECORD_KINDS.CANDIDATE)
+      .map(record => nonEmpty(record.candidateId)).filter(Boolean))];
+    return {
+      requestOrdinal: request.requestOrdinal,
+      execution: request.execution || null,
+      reason: request.reason || null,
+      sourceRevision: request.sourceRevision || null,
+      candidateIds,
+      candidateTerminals: related
+        .filter(record => record.kind === RUNTIME_OBSERVER_RECORD_KINDS.CANDIDATE_TERMINAL)
+        .map(record => ({ candidateId: record.candidateId || null, terminal: record.terminal || null })),
+      generations: related
+        .filter(record => record.kind === RUNTIME_OBSERVER_RECORD_KINDS.GENERATION)
+        .map(record => ({ before: record.beforeGeneration || null, after: record.afterGeneration || null,
+          candidateId: record.candidateId || null })),
+      activeIdentities: related
+        .filter(record => record.kind === RUNTIME_OBSERVER_RECORD_KINDS.ACTIVE_IDENTITY)
+        .map(record => ({ candidateId: record.candidateId || null, generation: record.generation || null,
+          documentId: record.documentId || null })),
+      runtimeTerminals: related
+        .filter(record => record.kind === RUNTIME_OBSERVER_RECORD_KINDS.RUNTIME_TERMINAL)
+        .map(record => ({ phase: record.phase || null, outcome: record.outcome || null,
+          candidateId: record.candidateId || null, generation: record.generation || null })),
+    };
+  });
+}
+
+export function setRuntimeLifecycleObservationContext(_element, context) {
+  const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
+  const state = globalThis[key];
+  if (!state) throw new Error("Runtime lifecycle observer is not active.");
+  const valid = context && /^H\d{2}$/u.test(context.fileId)
+    && Number.isInteger(context.round) && context.round > 0
+    && Number.isInteger(context.targetIndex) && context.targetIndex >= 0
+    && /^pr1_[a-f0-9]{32}$/u.test(context.targetId)
+    && typeof context.behavior === "string" && context.behavior.length > 0
+    && typeof context.operation === "string" && context.operation.length > 0;
+  if (!valid) throw new Error("Runtime lifecycle execution context is invalid.");
+  state.execution = { ...context };
+  return state.execution;
+}
+
 export function startRuntimeCandidateObservation(element, options = {}) {
   const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
   globalThis[key]?.observer?.disconnect();
@@ -91,7 +140,28 @@ export function startRuntimeCandidateObservation(element, options = {}) {
     'iframe[data-runtime-slot-role="active"]',
   )?.getAttribute("data-frame-generation") || null;
   const recorded = new Set();
+  const frameCandidates = new WeakMap();
+  let requestOrdinal = 0;
+  let observationOrdinal = 0;
   const observer = new MutationObserver((mutations) => {
+    if (mutations.some(m => m.type === "attributes" && m.target === element
+      && m.attributeName === "data-runtime-refresh-pending" && m.oldValue === null)) requestOrdinal++;
+    // Promotion removes the iframe's Candidate attribute. Preserve that exact
+    // object's binding across batches (or read its removal record in this batch).
+    // Root last-known-good metadata is committed later and cannot identify it.
+    const frameCandidateId = (frame) => {
+      if (!frame) return null;
+      const candidateId = frame.getAttribute("data-runtime-candidate-id")
+        || mutations.findLast((entry) => entry.target === frame
+          && entry.attributeName === "data-runtime-candidate-id" && entry.oldValue)?.oldValue;
+      const generation = frame.getAttribute("data-frame-generation");
+      if (candidateId) frameCandidates.set(frame, { candidateId, generation });
+      const binding = frameCandidates.get(frame);
+      return binding?.generation === generation ? binding.candidateId : null;
+    };
+    const activeCandidateId = () => frameCandidateId(
+      element.querySelector('iframe[data-runtime-slot-role="active"]'),
+    );
     const recordCandidate = (evidence, candidateValue, generation = null) => {
       if (typeof candidateValue !== "string" || candidateValue.trim() === "") return;
       const recordKey = `${evidence}:${candidateValue}:${generation || "unknown"}`;
@@ -111,27 +181,38 @@ export function startRuntimeCandidateObservation(element, options = {}) {
             && entry.oldValue.trim() !== ""
           ))?.oldValue
           || null,
+        requestOrdinal,
+        observationOrdinal: ++observationOrdinal,
+        execution: globalThis[key]?.execution ? { ...globalThis[key].execution } : null,
       });
     };
     const recordLifecycle = (record) => {
       if (!includeLifecycle) return;
+      const enriched = {
+        ...record,
+        requestOrdinal: record.requestOrdinal ?? requestOrdinal,
+        observationOrdinal: ++observationOrdinal,
+        execution: globalThis[key]?.execution ? { ...globalThis[key].execution } : null,
+      };
       const recordKey = [
-        record.kind,
-        record.evidence,
-        record.candidateId || "unknown",
-        record.generation || "unknown",
-        record.beforeGeneration || "unknown",
-        record.afterGeneration || "unknown",
-        record.terminal || "unknown",
-        record.documentId || "unknown",
-        record.sourceRevision || "unknown",
-        record.reason || "unknown",
-        record.phase || "unknown",
-        record.outcome || "unknown",
+        enriched.kind,
+        enriched.evidence,
+        enriched.candidateId || "unknown",
+        enriched.generation || "unknown",
+        enriched.beforeGeneration || "unknown",
+        enriched.afterGeneration || "unknown",
+        enriched.terminal || "unknown",
+        enriched.documentId || "unknown",
+        enriched.sourceRevision || "unknown",
+        enriched.reason || "unknown",
+        enriched.phase || "unknown",
+        enriched.outcome || "unknown",
+        enriched.requestOrdinal || "unknown",
+        JSON.stringify(enriched.execution),
       ].join(":");
       if (recorded.has(`lifecycle:${recordKey}`)) return;
       recorded.add(`lifecycle:${recordKey}`);
-      lifecycleRecords.push(record);
+      lifecycleRecords.push(enriched);
     };
     for (const [index, mutation] of mutations.entries()) {
       if (
@@ -168,6 +249,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
         if (!requestWasRaised) continue;
         recordLifecycle({
           kind: "rebuild-request",
+          requestOrdinal,
           evidence: "runtime-refresh-pending",
           status: "submitted",
           sourceRevision: element.getAttribute("data-runtime-refresh-pending-source-revision")
@@ -202,7 +284,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
         && mutation.oldValue !== element.getAttribute("data-runtime-candidate-id")
       ) {
         const candidateId = mutation.oldValue;
-        const promoted = element.getAttribute("data-runtime-last-known-good-id") === candidateId;
+        const promoted = activeCandidateId() === candidateId;
         const replacementId = element.getAttribute("data-runtime-candidate-id");
         const surface = element.closest(".canvas-edit-surface");
         recordLifecycle({
@@ -214,7 +296,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
             : replacementId
               ? "superseded"
               : surface?.getAttribute("data-edit-runtime-outcome") || "failed",
-          sourceRevision: element.getAttribute("data-runtime-last-known-good-source-revision"),
+          sourceRevision: records.findLast((entry) => entry.candidateId === candidateId)?.sourceRevision || null,
         });
       }
       if (
@@ -234,7 +316,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
         if (currentRole === "runtime-candidate" || retiredLater) {
           recordCandidate(
             "candidate-frame-role-transition",
-            element.getAttribute("data-runtime-candidate-id"),
+            frameCandidateId(frame),
             frame.getAttribute("data-frame-generation"),
           );
         }
@@ -253,7 +335,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
             beforeGeneration,
             afterGeneration,
             generation: afterGeneration,
-            candidateId: element.getAttribute("data-runtime-candidate-id"),
+            candidateId: frameCandidateId(mutation.target),
           });
           if (mutation.target.getAttribute("data-runtime-slot-role") === "active") {
             lastActiveGeneration = afterGeneration;
@@ -275,7 +357,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
             beforeGeneration: lastActiveGeneration,
             afterGeneration: generation,
             generation,
-            candidateId: element.getAttribute("data-runtime-last-known-good-id"),
+            candidateId: frameCandidateId(frame),
           });
         }
         lastActiveGeneration = generation || lastActiveGeneration;
@@ -288,7 +370,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
         recordLifecycle({
           kind: "active-identity",
           evidence: "active-slot-promotion",
-          candidateId: element.getAttribute("data-runtime-last-known-good-id"),
+          candidateId: frameCandidateId(frame),
           generation,
           documentId,
         });
@@ -310,7 +392,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
             terminal: outcome || phase,
             phase,
             outcome,
-            candidateId: element.getAttribute("data-runtime-last-known-good-id"),
+            candidateId: activeCandidateId(),
             generation: element.querySelector('iframe[data-runtime-slot-role="active"]')
               ?.getAttribute("data-frame-generation") || null,
           });
@@ -324,7 +406,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
           if (frame.getAttribute("data-frame-role") === "runtime-candidate") {
             recordCandidate(
               "candidate-frame-added",
-              element.getAttribute("data-runtime-candidate-id"),
+              frameCandidateId(frame),
               frame.getAttribute("data-frame-generation"),
             );
             recordLifecycle({
@@ -333,7 +415,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
               beforeGeneration: null,
               afterGeneration: frame.getAttribute("data-frame-generation"),
               generation: frame.getAttribute("data-frame-generation"),
-              candidateId: element.getAttribute("data-runtime-candidate-id"),
+              candidateId: frameCandidateId(frame),
             });
           }
         }
@@ -366,7 +448,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
       attributeFilter: ["data-edit-runtime-phase", "data-edit-runtime-outcome"],
     });
   }
-  globalThis[key] = { observer, records, lifecycleRecords, includeLifecycle };
+  globalThis[key] = { observer, records, lifecycleRecords, includeLifecycle, execution: null };
 }
 
 // Alias the same self-contained callback so Playwright can serialize either

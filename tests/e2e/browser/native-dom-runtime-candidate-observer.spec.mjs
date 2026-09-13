@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 import { REAL_HTML_OPERATION_IDS } from "../electron/real-html/plan.mjs";
 import { runtimeOperationOutcomes } from "../electron/real-html/runtime-lifecycle.mjs";
 import {
+  attributeRuntimeObserverRequests,
+  setRuntimeLifecycleObservationContext,
   startRuntimeLifecycleObservation,
   startRuntimeCandidateObservation,
   stopRuntimeLifecycleObservation,
@@ -11,6 +13,38 @@ import {
 } from "../electron/real-html/runtime-observer.mjs";
 
 const OBSERVER_KEY = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
+
+test("repeated same-source rebuild requests remain separate without inventing missing requests", async ({ page }) => {
+  await page.setContent('<main data-runtime-root></main>');
+  const root = page.locator('[data-runtime-root]');
+  await root.evaluate(startRuntimeLifecycleObservation);
+  await root.evaluate(setRuntimeLifecycleObservationContext, {
+    fileId: "H01", round: 2, targetIndex: 3,
+    targetId: "pr1_11111111111111111111111111111111",
+    behavior: "structure-rebuild", operation: "copy-edit-delete-element",
+  });
+  for (let cycle = 1; cycle <= 2; cycle++) {
+    await root.evaluate(e => {
+      e.setAttribute('data-runtime-refresh-pending', '');
+      e.setAttribute('data-runtime-refresh-pending-source-revision', 'same-source');
+      e.setAttribute('data-runtime-refresh-pending-reason', 'history');
+    });
+    await expect.poll(() => root.evaluate((e, key) => globalThis[key].lifecycleRecords.filter(r => r.kind === 'rebuild-request').length,
+      OBSERVER_KEY)).toBe(cycle);
+    await root.evaluate(e => {
+      e.removeAttribute('data-runtime-refresh-pending');
+      e.removeAttribute('data-runtime-refresh-pending-source-revision');
+      e.removeAttribute('data-runtime-refresh-pending-reason');
+    });
+  }
+  const before = await root.evaluate((e, key) => globalThis[key].lifecycleRecords.length, OBSERVER_KEY);
+  await root.evaluate(e => e.setAttribute('data-runtime-candidate-id', 'candidate-only'));
+  const stopped = await root.evaluate(stopRuntimeLifecycleObservation);
+  const requests = stopped.records.filter(r => r.kind === 'rebuild-request');
+  expect(requests).toHaveLength(2);
+  expect(requests.map(r => r.requestOrdinal)).toEqual([1, 2]);
+  expect(summarizeRuntimeObserverRecords(stopped.lifecycleRecords.slice(before)).hasRequest).toBe(false);
+});
 
 async function startObservation(root) {
   await root.evaluate(startRuntimeCandidateObservation);
@@ -95,6 +129,11 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
   </section>`);
   const root = page.locator("[data-runtime-root]");
   await root.evaluate(startRuntimeLifecycleObservation);
+  await root.evaluate(setRuntimeLifecycleObservationContext, {
+    fileId: "H01", round: 2, targetIndex: 3,
+    targetId: "pr1_11111111111111111111111111111111",
+    behavior: "structure-rebuild", operation: "copy-edit-delete-element",
+  });
 
   await root.evaluate((element) => {
     const oldActive = element.querySelector('iframe[data-runtime-slot-role="active"]');
@@ -105,6 +144,7 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
     candidate.setAttribute("data-runtime-slot-role", "candidate");
     candidate.setAttribute("data-frame-role", "runtime-candidate");
     candidate.setAttribute("data-frame-generation", "2");
+    candidate.setAttribute("data-runtime-candidate-id", "candidate-2");
     element.setAttribute("data-runtime-candidate-id", "candidate-2");
     element.setAttribute("data-runtime-candidate-generation", "2");
     element.setAttribute("data-runtime-candidate-source-revision", "source-2");
@@ -116,6 +156,7 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
     oldActive.setAttribute("data-frame-role", "runtime-previous");
     candidate.setAttribute("data-runtime-slot-role", "active");
     candidate.removeAttribute("data-frame-role");
+    candidate.removeAttribute("data-runtime-candidate-id");
     element.removeAttribute("data-runtime-candidate-id");
     element.removeAttribute("data-runtime-refresh-pending");
     element.removeAttribute("data-runtime-refresh-pending-source-revision");
@@ -159,6 +200,69 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
     candidateId: "candidate-2",
     generation: "2",
   });
+  const attributions = attributeRuntimeObserverRequests(stopped.records);
+  expect(attributions).toHaveLength(1);
+  expect(attributions[0]).toMatchObject({
+    requestOrdinal: 1,
+    execution: { fileId: "H01", round: 2, targetIndex: 3,
+      targetId: "pr1_11111111111111111111111111111111",
+      behavior: "structure-rebuild", operation: "copy-edit-delete-element" },
+    reason: "structure-edit",
+    sourceRevision: "source-2",
+    candidateIds: ["candidate-2"],
+  });
+  expect(attributions[0].generations.some(result => result.after === "2")).toBe(true);
+  expect(attributions[0].candidateTerminals).toContainEqual({ candidateId: "candidate-2", terminal: "ready" });
+});
+
+test("promotion is bound to its iframe, not delayed last-known-good metadata", async ({ page }) => {
+  await page.setContent(`<main data-runtime-root data-runtime-last-known-good-id="candidate-old">
+    <iframe data-runtime-slot-role="active" data-frame-generation="1"></iframe>
+    <iframe data-runtime-slot-role="inactive" data-frame-generation="0"></iframe>
+  </main>`);
+  const root = page.locator("[data-runtime-root]");
+  await root.evaluate(startRuntimeLifecycleObservation);
+  // Candidate identity exists on the real product iframe before promotion.
+  await root.evaluate((element) => {
+    const frame = element.querySelector('iframe[data-runtime-slot-role="inactive"]');
+    frame.setAttribute("data-runtime-candidate-id", "candidate-new");
+    frame.setAttribute("data-frame-generation", "2");
+    frame.setAttribute("data-frame-role", "runtime-candidate");
+    element.setAttribute("data-runtime-candidate-id", "candidate-new");
+  });
+  await root.evaluate((element) => {
+    const frame = element.querySelector('iframe[data-frame-role="runtime-candidate"]');
+    element.querySelector('iframe[data-runtime-slot-role="active"]').setAttribute("data-runtime-slot-role", "previous");
+    frame.setAttribute("data-runtime-slot-role", "active");
+    frame.removeAttribute("data-runtime-candidate-id");
+    frame.removeAttribute("data-frame-role");
+    element.removeAttribute("data-runtime-candidate-id");
+    // Deliberately leave root metadata stale, as in the real H06 first failure.
+  });
+  const stopped = await root.evaluate(stopRuntimeLifecycleObservation);
+  expect(stopped.lifecycleRecords.find((record) => record.kind === "active-identity"))
+    .toMatchObject({ candidateId: "candidate-new", generation: "2" });
+  expect(stopped.lifecycleRecords.find((record) => record.kind === "candidate-terminal"))
+    .toMatchObject({ candidateId: "candidate-new", terminal: "ready" });
+  expect(stopped.lifecycleRecords.some((record) => record.candidateId === "candidate-old")).toBe(false);
+});
+
+test("an unbound promoted iframe cannot borrow a global Candidate identity", async ({ page }) => {
+  await page.setContent(`<main data-runtime-root data-runtime-last-known-good-id="candidate-wrong">
+    <iframe data-runtime-slot-role="active" data-frame-generation="1"></iframe>
+    <iframe data-runtime-slot-role="inactive" data-frame-generation="2"></iframe>
+  </main>`);
+  const root = page.locator("[data-runtime-root]");
+  await root.evaluate(startRuntimeLifecycleObservation);
+  await root.evaluate((element) => {
+    element.querySelector('iframe[data-runtime-slot-role="active"]').setAttribute("data-runtime-slot-role", "previous");
+    element.querySelector('iframe[data-runtime-slot-role="inactive"]').setAttribute("data-runtime-slot-role", "active");
+  });
+  const stopped = await root.evaluate(stopRuntimeLifecycleObservation);
+  const summary = summarizeRuntimeObserverRecords(stopped.records);
+  expect(summary.hasCandidate).toBe(false);
+  expect(summary.hasActiveIdentity).toBe(false);
+  expect(stopped.lifecycleRecords.find((record) => record.kind === "active-identity").candidateId).toBeNull();
 });
 
 test("lifecycle observer does not invent a Candidate from generation alone", {

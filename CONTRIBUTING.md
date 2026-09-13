@@ -41,6 +41,11 @@ read-only `npm run task:audit` report and an explicit
 worktree and branch. Dirty, local-only, locked or open-PR work is never retired
 implicitly.
 
+Agent collaboration uses the shared policy and bounded Worker handoff in
+`docs/CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5. The root decides which roles
+help; a fixed four-role pipeline is not required. Worker self-checks, frozen-source
+testing and independent review serve different purposes; reuse applicable evidence.
+
 ## Pull Request requirements
 
 - CI passes the required `release-gate` check.

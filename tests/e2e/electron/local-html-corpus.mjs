@@ -23,6 +23,11 @@ import {
   waitForRuntimeHandoffSettled,
 } from "./electron-native-harness.mjs";
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
+import {
+  COPY_DIAGNOSTIC_CLASSIFICATIONS,
+  classifyCopyDiagnostic,
+} from "./helpers/copy-diagnostic-classifier.mjs";
+import { buildSourceIndex } from "../../../app/lib/source-index.js";
 import { withRestoredElectronClipboard } from "./helpers/clipboard-snapshot.mjs";
 import {
   RealHtmlResultReport,
@@ -33,16 +38,19 @@ import {
   REAL_HTML_STAGE_IDS,
 } from "./real-html/plan.mjs";
 import {
+  CAPABILITY_MANIFEST_REASONS,
   CAPABILITY_MATRIX_REASONS,
   createCapabilityManifest,
   createCapabilityMatrix,
   selectCapabilityTargets,
 } from "./real-html/capability-manifest.mjs";
 import {
+  capabilityObservationSnapshot,
   collectVisibleAuthoredCandidates,
   discoverRuntimeGeneratedTargets,
   driveAuthoredTabActivation,
   majorElementType,
+  normalizeCapabilityProbeObservations,
   probeAuthoredCapability,
   resetAuthoredProbeSelection,
   runtimeGeneratedDiagnosticsIssue,
@@ -51,6 +59,15 @@ import {
 import {
   runtimeOperationOutcomes,
 } from "./real-html/runtime-lifecycle.mjs";
+import { publicDiagnosticValue } from "./real-html/diagnostic-sanitizer.mjs";
+import { assertReadOnlyCorpusMode } from "./real-html/frozen-selection.mjs";
+import {
+  attachOperationGroupsToAuthoredDenominator,
+  capabilityExpectationRows,
+  capabilityPreflightExitCode,
+  capabilityPreflightFileStatus,
+  createCapabilityManifestDraft,
+} from "./real-html/capability-manifest-draft.mjs";
 import {
   evaluateContinuityChain,
   evaluateStaleCandidateFence,
@@ -99,9 +116,28 @@ if (!corpus) {
   );
 }
 
-const files = readdirSync(corpus).filter((name) => /\.html?$/iu.test(name)).sort();
-if (!files.length) {
+const runnerMode = process.env.PAGEROOT_REAL_HTML_MODE || "qualification";
+if (!["qualification", "capability-preflight-only"].includes(runnerMode)) {
+  throw new Error(`Unsupported PAGEROOT_REAL_HTML_MODE: ${runnerMode}`);
+}
+const capabilityPreflightOnly = runnerMode === "capability-preflight-only";
+assertReadOnlyCorpusMode(runnerMode);
+
+const corpusFiles = readdirSync(corpus).filter((name) => /\.html?$/iu.test(name)).sort();
+if (!corpusFiles.length) {
   throw new Error("The local corpus contains no HTML files. Acceptance was not run.");
+}
+const requestedFileIndexes = new Set(
+  String(process.env.PAGEROOT_REAL_HTML_FILE_INDEXES || "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value >= 1),
+);
+const files = requestedFileIndexes.size
+  ? corpusFiles.filter((_name, index) => requestedFileIndexes.has(index + 1))
+  : corpusFiles;
+if (!files.length) {
+  throw new Error("The requested local corpus file indexes did not match any HTML files.");
 }
 
 const reportDir = mkdtempSync(path.join(tmpdir(), "stemmio-real-html-acceptance-"));
@@ -117,10 +153,14 @@ const REAL_HTML_LAUNCH_OPTIONS = Object.freeze({
 const sourceProvenance = workspaceSourceFingerprint();
 const report = {
   schemaVersion: 4,
+  mode: runnerMode,
   head: sourceProvenance.head,
+  tree: sourceProvenance.tree,
   workspaceSourceSha256: sourceProvenance.workspaceSourceSha256,
   untrackedSourceFileCount: sourceProvenance.untrackedFileCount,
   planned: files.length,
+  corpusFiles: corpusFiles.length,
+  selectedFileIndexes: [...requestedFileIndexes].sort((left, right) => left - right),
   minimumTextHostsPerFile: 3,
   structureCyclesWhenExpectedCopyableApplies: 2,
   minimumOrdinaryContinuityChecksPerFile: 3,
@@ -141,33 +181,11 @@ const report = {
 console.log(`Private report: ${reportDir}`);
 const saveReport = () => writeFileSync(
   path.join(reportDir, "results.json"),
-  JSON.stringify({ ...report, resultModel: resultReport.model }, null, 2),
+  JSON.stringify(capabilityPreflightOnly
+    ? report
+    : { ...report, resultModel: resultReport.model }, null, 2),
 );
 
-const PUBLIC_ERROR_STRING_KEYS = new Set([
-  "code",
-  "causeCode",
-  "exactReason",
-  "phase",
-  "reasonCode",
-  "expectedId",
-  "expectedStableId",
-  "stableId",
-  "observedId",
-  "observedTag",
-  "observedParentId",
-  "selectedId",
-  "selectedTag",
-  "hitKind",
-  "activeGeneration",
-  "hintTargetId",
-  "hintTargetKey",
-  "hintTargetDomGeneration",
-  "hintCurrentDomGeneration",
-  "hintActiveFrameGeneration",
-  "sourceId",
-  "policy",
-]);
 const PRIVATE_ERROR_KEYS = new Set([
   "afterSnippet",
   "beforeSnippet",
@@ -282,26 +300,10 @@ function publicOracleDetails(oracle) {
   };
 }
 
-function publicErrorValue(value, key = "") {
-  if (typeof value === "boolean" || typeof value === "number" || value == null) return value;
-  if (typeof value === "string") return PUBLIC_ERROR_STRING_KEYS.has(key) ? value : undefined;
-  if (Array.isArray(value)) {
-    return value.map((entry) => publicErrorValue(entry, key)).filter((entry) => entry !== undefined);
-  }
-  if (typeof value !== "object") return undefined;
-  const output = {};
-  for (const [nestedKey, nestedValue] of Object.entries(value)) {
-    if (PRIVATE_ERROR_KEYS.has(nestedKey) || nestedKey === "oracle") continue;
-    const publicValue = publicErrorValue(nestedValue, nestedKey);
-    if (publicValue !== undefined) output[nestedKey] = publicValue;
-  }
-  return output;
-}
-
 function errorDetails(error) {
   const code = error?.code || null;
   const oracle = publicOracleDetails(error?.oracle);
-  const details = publicErrorValue(error?.details);
+  const details = publicDiagnosticValue(error?.details);
   return {
     error: code === "SOURCE_SCOPE_ORACLE_FAILED"
       ? "Source scope oracle failed."
@@ -419,6 +421,130 @@ async function currentFrameIdentity(page) {
   };
 }
 
+async function copyCapabilitySnapshot({
+  page,
+  workingCopyPath,
+  plan,
+  originalSha256,
+  relocated = null,
+}) {
+  const editor = editorFor(page);
+  const frame = await currentEditorFrame(page);
+  const workingHtml = await readPublishedWorkingCopy(workingCopyPath, "utf8");
+  const workingIndex = buildSourceIndex(workingHtml, {
+    caller: "local-html-corpus-copy-diagnostic",
+  });
+  const sourceTarget = workingIndex.byPagerootId.get(plan.id) ?? null;
+  const sourceCodeUnitRange = sourceTarget?.range
+    ? {
+        start: sourceTarget.range.startOffset,
+        end: sourceTarget.range.endOffset,
+      }
+    : null;
+  const sourceUtf8ByteRange = sourceCodeUnitRange
+    ? {
+        start: Buffer.byteLength(workingHtml.slice(0, sourceCodeUnitRange.start), "utf8"),
+        end: Buffer.byteLength(workingHtml.slice(0, sourceCodeUnitRange.end), "utf8"),
+      }
+    : null;
+  const copyButton = editor.getByRole("button", { name: "复制元素", exact: true });
+  const buttonCount = await copyButton.count();
+  const candidateFrames = editor.locator('iframe[data-runtime-slot-role="candidate"]');
+  const activeFrame = editor.locator('iframe[data-runtime-slot-role="active"]');
+  const editingHosts = frame.locator("[data-html-canvas-editing]");
+  const nativeEditingCount = await editingHosts.count();
+  const focusInsideEditingHost = await frame.locator("body").evaluate(() => Boolean(
+    document.activeElement?.closest?.("[data-html-canvas-editing]"),
+  ));
+  await editor.evaluate((root) => {
+    root.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe"));
+  });
+  const workingSourceSha256 = await editor.getAttribute("data-working-source-sha256");
+  const renderedProjectionSha256 = await editor.getAttribute(
+    "data-rendered-projection-sha256",
+  );
+  const renderedProjectionStale = await editor.getAttribute(
+    "data-rendered-projection-stale",
+  );
+  const diskWorkingSha256 = sha256(Buffer.from(workingHtml));
+  const workingEqualsDisplayed = Boolean(
+    workingSourceSha256
+    && workingSourceSha256 === workingIndex.sourceSha256
+    && workingSourceSha256 === renderedProjectionSha256
+    && workingSourceSha256 === `sha256:${diskWorkingSha256}`
+    && renderedProjectionStale === "false"
+  );
+  return {
+    phase: "before-copy",
+    planned: {
+      stableId: plan.id,
+      tag: plan.tag,
+      tabId: plan.tabId,
+      sourceTarget: {
+        stableId: sourceTarget?.pagerootId ?? null,
+        tag: sourceTarget?.tagName ?? null,
+        unique: Boolean(sourceTarget),
+        codeUnitRange: sourceCodeUnitRange,
+        utf8ByteRange: sourceUtf8ByteRange,
+        workingSha256: workingIndex.sourceSha256,
+      },
+    },
+    relocated,
+    uiProjection: {
+      availability: await editor.getAttribute("data-element-copy-availability"),
+      reason: await editor.getAttribute("data-element-copy-reason"),
+      diagnostic: await editor.getAttribute("data-element-copy-diagnostic"),
+      buttonCount,
+      disabled: buttonCount === 1 ? await copyButton.isDisabled() : null,
+    },
+    commandBoundary: {
+      availability: await editor.getAttribute("data-e2e-copy-live-availability"),
+      reason: await editor.getAttribute("data-e2e-copy-live-reason"),
+      diagnostic: await editor.getAttribute("data-e2e-copy-live-diagnostic"),
+      targetStableId: await editor.getAttribute("data-e2e-copy-live-target-id"),
+      probeSequence: await editor.getAttribute("data-e2e-copy-probe-sequence"),
+    },
+    nativeTextSession: {
+      activeEditingCount: nativeEditingCount,
+      focusInsideEditingHost,
+      ended: nativeEditingCount === 0 && !focusInsideEditingHost,
+      probeEnded: await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true",
+    },
+    runtime: {
+      documentToken: await documentToken(page),
+      activeGeneration: await activeFrame.getAttribute("data-frame-generation"),
+      candidateCount: await candidateFrames.count(),
+      candidateGenerations: await candidateFrames.evaluateAll((frames) => (
+        frames.map((candidate) => candidate.getAttribute("data-frame-generation"))
+      )),
+      candidateId: await editor.getAttribute("data-runtime-candidate-id"),
+      candidatePhase: await editor.getAttribute("data-runtime-candidate-phase"),
+      handoff: await editor.getAttribute("data-runtime-handoff"),
+      renderVerified: await editor.getAttribute("data-render-verified"),
+    },
+    source: {
+      originalSha256,
+      diskWorkingSha256,
+      workingSourceSha256,
+      renderedProjectionSha256,
+      renderedProjectionStale,
+      workingEqualsDisplayed,
+    },
+    attribution: null,
+  };
+}
+
+function failWithCopyDiagnostic(message, snapshot) {
+  const code = classifyCopyDiagnostic(snapshot);
+  snapshot.attribution = {
+    code,
+    label: COPY_DIAGNOSTIC_CLASSIFICATIONS[code],
+  };
+  const error = new Error(`${message} [${snapshot.attribution.label}; ${code}]`);
+  error.copyDiagnostic = snapshot;
+  throw error;
+}
+
 async function clickAuthoredTab(page, tabId) {
   if (!tabId) return;
   const readState = async () => {
@@ -507,10 +633,12 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
-async function freezeCapabilityManifest(page, workingCopyPath) {
+async function freezeCapabilityManifest(page, workingCopyPath, { allowUnresolved = false } = {}) {
   const source = readFileSync(workingCopyPath, "utf8");
   const sourceElements = sourceElementsForCapabilityManifest(source);
   const candidates = [];
+  const authoredDenominator = [];
+  const unresolvedProbes = [];
   const runtimeGeneratedTargets = [];
   const runtimeGeneratedDiagnostics = [];
   for (const tabId of await authoredTabIds(page)) {
@@ -539,6 +667,30 @@ async function freezeCapabilityManifest(page, workingCopyPath) {
     const duplicateInOneView = visible.some((candidate) => (
       visible.filter((other) => other.tabId === candidate.tabId).length > 1
     ));
+    const candidate = visible[0] || group[0];
+    const sourceMatches = sourceElements.filter((entry) => entry.pagerootId === candidate.stableId);
+    const sourceIdentityValid = sourceMatches.length === 1
+      && sourceMatches[0].pagerootIdentityStatus === "valid";
+    if (
+      sourceIdentityValid
+      && candidate.visible
+      && candidate.isConnected
+      && !candidate.inert
+      && !duplicateInOneView
+    ) {
+      authoredDenominator.push({
+        probeStableId: candidate.stableId,
+        operationStableId: null,
+        tag: candidate.tag,
+        type: majorElementType(candidate.tag),
+        sourceOrder: sourceMatches[0].sourceOrder,
+        parentId: sourceMatches[0].parentId || null,
+        tabId: candidate.tabId,
+        region: candidate.region,
+        scrollContainer: candidate.scrollContainer,
+        sourceEditable: sourceMatches[0].sourceEditable === true,
+      });
+    }
     if (duplicateInOneView) {
       probed.push(...group.map((candidate) => ({
         ...candidate,
@@ -549,7 +701,6 @@ async function freezeCapabilityManifest(page, workingCopyPath) {
       })));
       continue;
     }
-    const candidate = visible[0] || group[0];
     if (!candidate.visible) {
       probed.push({
         ...candidate,
@@ -560,42 +711,177 @@ async function freezeCapabilityManifest(page, workingCopyPath) {
       });
       continue;
     }
-    await clickAuthoredTab(page, candidate.tabId);
-    const frame = await currentEditorFrame(page);
-    const observation = await probeAuthoredCapability({
-      page,
-      frame,
-      editor: editorFor(page),
-      candidate,
-    });
-    probed.push({ ...observation, type: majorElementType(candidate.tag) });
+    try {
+      await clickAuthoredTab(page, candidate.tabId);
+      const frame = await currentEditorFrame(page);
+      const observation = await probeAuthoredCapability({
+        page,
+        frame,
+        editor: editorFor(page),
+        candidate,
+        mode: "discover",
+        sourceElements,
+      });
+      probed.push({ ...observation, type: majorElementType(observation.tag) });
+    } catch (cause) {
+      if (!allowUnresolved) throw cause;
+      unresolvedProbes.push({
+        probeStableId: candidate.stableId,
+        operationStableId: cause?.details?.selectedId || null,
+        code: cause?.code || "CAPABILITY_PROBE_FAILED",
+        details: publicDiagnosticValue(cause?.details),
+      });
+      await page.keyboard.press("Escape").catch(() => {});
+      await waitUntilEditable(page).catch(() => {});
+    }
   }
+  const normalized = normalizeCapabilityProbeObservations(probed, {
+    allowConflicts: allowUnresolved,
+  });
   const manifest = createCapabilityManifest({
     sourceIndex: { elements: sourceElements },
-    liveDom: probed,
+    liveDom: normalized.liveDom,
   });
-  const observationsById = new Map(probed.map((entry) => [entry.stableId, entry]));
-  manifest.entries = manifest.entries.map((entry) => ({
-    ...entry,
-    capabilitySnapshot: {
-      copyAvailability: observationsById.get(entry.elementId)?.copyAvailability || null,
-      copyReason: observationsById.get(entry.elementId)?.copyReason || null,
-      probeReason: observationsById.get(entry.elementId)?.probeReason || null,
-    },
-  }));
+  const aliasByProbeId = new Map(normalized.aliases.map((entry) => [
+    entry.probeStableId,
+    entry.operationStableId,
+  ]));
+  manifest.excluded = manifest.excluded.map((entry) => (
+    aliasByProbeId.has(entry.elementId)
+      ? {
+        ...entry,
+        reasons: [CAPABILITY_MANIFEST_REASONS.CANONICALIZED_TO_OPERATION_ANCESTOR],
+        operationElementId: aliasByProbeId.get(entry.elementId),
+      }
+      : entry
+  ));
+  const observationsById = new Map(normalized.liveDom.map((entry) => [entry.stableId, entry]));
+  manifest.entries = manifest.entries.map((entry) => {
+    const observation = observationsById.get(entry.elementId);
+    if (!observation?.probeStableId) {
+      const error = new Error("An admitted capability entry is missing its frozen probe identity.");
+      error.code = "CAPABILITY_MANIFEST_PROBE_IDENTITY_MISSING";
+      error.details = { operationStableId: entry.elementId };
+      throw error;
+    }
+    return {
+      ...entry,
+      probeStableId: observation.probeStableId,
+      capabilitySnapshot: {
+        copyAvailability: observation.copyAvailability || null,
+        copyReason: observation.copyReason || null,
+        probeReason: observation.probeReason || null,
+      },
+    };
+  });
   const selection = selectCapabilityTargets(manifest);
+  if (!allowUnresolved) {
+    return deepFreeze({
+      manifest,
+      selection,
+      sourceElements,
+      runtimeGeneratedTargets,
+      runtimeGeneratedDiagnostics,
+      fingerprint: sha256(Buffer.from(JSON.stringify({
+        schemaVersion: manifest.schemaVersion,
+        entries: manifest.entries,
+        excluded: manifest.excluded,
+        aliases: normalized.aliases,
+        selected: selection.selected.map((entry) => entry.elementId),
+        runtimeGeneratedTargets,
+        runtimeGeneratedDiagnostics,
+      }))),
+    });
+  }
+  const manifestEntriesById = new Map(manifest.entries.map((entry) => [entry.elementId, entry]));
+  const canonicalObservations = probed.filter((entry) => (
+    entry.probeStableId && entry.operationStableId === entry.stableId
+  ));
+  const canonicalByOperation = new Map();
+  for (const observation of canonicalObservations) {
+    const group = canonicalByOperation.get(observation.operationStableId) || [];
+    group.push(observation);
+    canonicalByOperation.set(observation.operationStableId, group);
+  }
+  const operationGroups = [...canonicalByOperation].map(([operationStableId, observations]) => {
+    const observation = normalized.liveDom.find((entry) => entry.stableId === operationStableId)
+      || observations[0];
+    const operation = sourceElements.find((sourceEntry) => (
+      sourceEntry.pagerootId === operationStableId
+    ));
+    const admittedEntry = manifestEntriesById.get(operationStableId) || null;
+    return {
+      operationStableId,
+      probeStableId: observation.probeStableId,
+      manifestAdmission: admittedEntry ? "ADMITTED" : "NOT_ADMITTED",
+      aliases: normalized.aliases.filter((alias) => (
+        alias.operationStableId === operationStableId
+      ))
+        .map((alias) => alias.probeStableId),
+      tag: operation?.tagName || observation.tag,
+      type: admittedEntry?.type || majorElementType(operation?.tagName || observation.tag),
+      sourceOrder: operation?.sourceOrder ?? observation.sourceOrder,
+      parentId: operation?.parentId || null,
+      tabId: observation.tabId,
+      region: observation.region,
+      scrollContainer: observation.scrollContainer,
+      expectations: capabilityExpectationRows({ sourceElements, operation, observation }),
+      probes: observations.map((probeObservation) => ({
+        probeStableId: probeObservation.probeStableId,
+        liveSnapshot: capabilityObservationSnapshot(probeObservation),
+        liveCapabilityFamilies: probeObservation.capabilityFamilies,
+        liveBehaviorFamilies: probeObservation.behaviorFamilies,
+        copyAvailability: probeObservation.copyAvailability || null,
+        copyReason: probeObservation.copyReason || null,
+        expectations: capabilityExpectationRows({
+          sourceElements,
+          operation,
+          observation: probeObservation,
+        }),
+      })),
+    };
+  });
+  const denominatorWithOperations = attachOperationGroupsToAuthoredDenominator({
+    authoredDenominator,
+    operationGroups,
+    liveDom: canonicalObservations,
+    aliases: normalized.aliases,
+  });
+  for (const entry of denominatorWithOperations.filter((item) => !item.operationStableId)) {
+    const rejectedProbe = probed.find((item) => item.stableId === entry.probeStableId);
+    if (rejectedProbe && !unresolvedProbes.some((item) => item.probeStableId === entry.probeStableId)) {
+      unresolvedProbes.push({
+        probeStableId: entry.probeStableId,
+        operationStableId: null,
+        code: rejectedProbe.probeReason || "CAPABILITY_PROBE_IDENTITY_UNRESOLVED",
+        details: null,
+      });
+    }
+  }
+  const draft = createCapabilityManifestDraft({
+    authoredDenominator: denominatorWithOperations,
+    operationGroups,
+    aliases: normalized.aliases,
+    observationConflicts: normalized.conflicts,
+    unresolvedProbes,
+    exclusions: manifest.excluded,
+  });
   return deepFreeze({
     manifest,
     selection,
+    sourceElements,
     runtimeGeneratedTargets,
     runtimeGeneratedDiagnostics,
+    draft,
     fingerprint: sha256(Buffer.from(JSON.stringify({
       schemaVersion: manifest.schemaVersion,
       entries: manifest.entries,
       excluded: manifest.excluded,
+      aliases: normalized.aliases,
       selected: selection.selected.map((entry) => entry.elementId),
       runtimeGeneratedTargets,
       runtimeGeneratedDiagnostics,
+      draft,
     }))),
   });
 }
@@ -610,7 +896,8 @@ async function executeCapabilityObservations(page, frozen) {
       frame: await currentEditorFrame(page),
       editor: editorFor(page),
       candidate: {
-        stableId: entry.elementId,
+        stableId: entry.probeStableId,
+        expectedOperationStableId: entry.elementId,
         tag: entry.tag,
         sourceEditable: entry.capabilityFamilies.includes("text"),
         visible: true,
@@ -621,6 +908,8 @@ async function executeCapabilityObservations(page, frozen) {
         region: entry.region,
         scrollContainer: entry.scrollContainer,
       },
+      mode: "verify",
+      sourceElements: frozen.sourceElements,
     });
     const expectedCapabilities = [...entry.capabilityFamilies].sort();
     const observedCapabilities = [...current.capabilityFamilies].sort();
@@ -1121,40 +1410,117 @@ function directSiblingStableIds(workingCopyPath, targetId) {
     .filter(Boolean);
 }
 
-async function duplicateFixedStructureTarget({ page, workingCopyPath, plan }) {
+async function duplicateFixedStructureTarget({
+  page,
+  workingCopyPath,
+  originalSha256,
+  plan,
+}) {
   await clickAuthoredTab(page, plan.tabId);
   let frame = await currentEditorFrame(page);
   const original = frame.locator(`[data-pageroot-id="${plan.id}"]`);
   const beforeIds = directSiblingStableIds(workingCopyPath, plan.id);
   if (!beforeIds) throw new Error("The frozen copy target has no source-backed parent.");
   expect(beforeIds).toContain(plan.id);
+  const relocatedCount = await original.count();
+  let relocated = {
+    count: relocatedCount,
+    stableId: null,
+    tag: null,
+    connected: false,
+    selectedMarker: false,
+    sameAsPlanned: false,
+    liveStyleAttribute: null,
+  };
+  if (relocatedCount === 1) {
+    relocated = await original.evaluate((element, expected) => ({
+      count: 1,
+      stableId: element.getAttribute("data-pageroot-id"),
+      tag: element.tagName.toLowerCase(),
+      connected: element.isConnected,
+      selectedMarker: element.hasAttribute("data-html-canvas-selected"),
+      liveStyleAttribute: element.getAttribute("style"),
+      sameAsPlanned: (
+        element.getAttribute("data-pageroot-id") === expected.stableId
+        && element.tagName.toLowerCase() === expected.tag
+      ),
+    }), { stableId: plan.id, tag: plan.tag });
+  }
+  if (relocatedCount !== 1 || !relocated.sameAsPlanned || !relocated.connected) {
+    const diagnostic = await copyCapabilitySnapshot({
+      page,
+      workingCopyPath,
+      plan,
+      originalSha256,
+      relocated,
+    });
+    failWithCopyDiagnostic("Planned copy target could not be uniquely re-located", diagnostic);
+  }
   await original.scrollIntoViewIfNeeded();
-  await original.click({ modifiers: ["Alt"] });
+  await original.click({ modifiers: ["Alt"], timeout: 5_000 });
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
     "data-pageroot-id",
     plan.id,
   );
+  await page.waitForTimeout(0);
+  relocated.selectedMarker = await original.getAttribute("data-html-canvas-selected") !== null;
+  const diagnostic = await copyCapabilitySnapshot({
+    page,
+    workingCopyPath,
+    plan,
+    originalSha256,
+    relocated,
+  });
+  if (!relocated.selectedMarker) {
+    failWithCopyDiagnostic("Re-located copy target was not the selected operation target", diagnostic);
+  }
+  if (
+    diagnostic.uiProjection.buttonCount !== 1
+    || diagnostic.uiProjection.disabled
+    || diagnostic.uiProjection.availability !== "available"
+  ) {
+    failWithCopyDiagnostic("Copy action was unavailable immediately after exact selection", diagnostic);
+  }
+  if (
+    diagnostic.commandBoundary.availability !== "available"
+    || diagnostic.commandBoundary.reason !== "available"
+    || diagnostic.commandBoundary.targetStableId !== plan.id
+  ) {
+    failWithCopyDiagnostic("Live copy capability disagreed with the selected Stable ID", diagnostic);
+  }
+  if (!diagnostic.nativeTextSession.ended || !diagnostic.nativeTextSession.probeEnded) {
+    failWithCopyDiagnostic("Previous native text edit session did not end before copy", diagnostic);
+  }
+  if (!diagnostic.source.workingEqualsDisplayed) {
+    failWithCopyDiagnostic("Working source and displayed source diverged before copy", diagnostic);
+  }
   const editor = editorFor(page);
   const copyButton = editor.getByRole("button", { name: "复制元素", exact: true });
-  const uiAvailability = await editor.getAttribute("data-element-copy-availability");
-  const uiReason = await editor.getAttribute("data-element-copy-reason");
-  if (await copyButton.count() !== 1 || !await copyButton.isEnabled().catch(() => false)) {
-    const error = new Error("The frozen copy target is not currently copyable.");
-    error.code = "COPY_CAPABILITY_UNAVAILABLE_AT_CLICK";
-    error.details = { uiAvailability, uiReason };
-    throw error;
-  }
+  const uiAvailability = diagnostic.uiProjection.availability;
+  const uiReason = diagnostic.uiProjection.reason;
   const beforeDuplicate = await currentRevision(page);
   const beforeRuntime = await runtimeContractSnapshot(page);
   await editor.evaluate(startFullRuntimeLifecycleObservation);
   let observed;
   try {
-    await copyButton.click();
+    await copyButton.click({ timeout: 5_000 });
     await waitForRuntimeHandoffSettled(page);
     await waitUntilEditable(page);
     await expectCheckpointPersisted(page, beforeDuplicate);
   } finally {
     observed = await editorFor(page).evaluate(stopFullRuntimeLifecycleObservation);
+  }
+  diagnostic.commandBoundary.executedAvailability = await editorFor(page).getAttribute(
+    "data-element-copy-command-availability",
+  );
+  diagnostic.commandBoundary.executedReason = await editorFor(page).getAttribute(
+    "data-element-copy-command-reason",
+  );
+  if (
+    diagnostic.commandBoundary.executedAvailability !== "available"
+    || diagnostic.commandBoundary.executedReason !== "available"
+  ) {
+    failWithCopyDiagnostic("Copy command was refused at the live command boundary", diagnostic);
   }
   const runtime = summarizeRuntimeObserverRecords(observed.records);
   const afterRuntime = await runtimeContractSnapshot(page);
@@ -1181,6 +1547,7 @@ async function duplicateFixedStructureTarget({ page, workingCopyPath, plan }) {
       commandReason: await editorFor(page).getAttribute("data-element-copy-command-reason"),
     },
     runtime: { before: beforeRuntime, after: afterRuntime, summary: runtime },
+    diagnostic,
   };
 }
 
@@ -1399,7 +1766,7 @@ async function setColorControlValue(control, value) {
   }, value);
 }
 
-async function runExtendedFormatBehaviors(page, workingCopyPath, entry) {
+async function runExtendedFormatBehaviors(page, workingCopyPath, entry, sourceElements) {
   const rows = [];
   for (const [formatIndex, formatCase] of EXTENDED_FORMAT_CASES.entries()) {
     const operationId = `format-${formatCase.behaviorFamily}`;
@@ -1413,7 +1780,8 @@ async function runExtendedFormatBehaviors(page, workingCopyPath, entry) {
         frame,
         editor: editorFor(page),
         candidate: {
-          stableId: entry.elementId,
+          stableId: entry.probeStableId,
+          expectedOperationStableId: entry.elementId,
           tag: entry.tag,
           sourceEditable: true,
           visible: true,
@@ -1424,6 +1792,8 @@ async function runExtendedFormatBehaviors(page, workingCopyPath, entry) {
           region: entry.region,
           scrollContainer: entry.scrollContainer,
         },
+        mode: "verify",
+        sourceElements,
       });
       if (
         live.selectedId !== entry.elementId
@@ -1612,6 +1982,7 @@ async function runDedicatedCapabilityStage({
       activePage,
       workingCopyPath,
       formatEntry,
+      frozenCapability.sourceElements,
     ));
   }
   const runtimeBoundaries = [];
@@ -2447,11 +2818,13 @@ async function verifyViewport(page) {
   }));
 }
 
-for (const [fileIndex, filename] of files.entries()) {
+for (const filename of files) {
+  const fileIndex = corpusFiles.indexOf(filename);
   const originalPath = path.join(corpus, filename);
   const copyDir = path.join(reportDir, String(fileIndex));
   const copyPath = path.join(copyDir, filename);
   const row = {
+    fileId: `H${String(fileIndex + 1).padStart(2, "0")}`,
     filename,
     originalSha256: null,
     originalSize: null,
@@ -2499,8 +2872,13 @@ for (const [fileIndex, filename] of files.entries()) {
     await waitForProjectReady(page);
     await waitUntilEditable(page);
     workingCopyPath = await managedWorkingCopyPath(page, copyPath);
+    const preflightWorkingCopyBefore = capabilityPreflightOnly
+      ? readFileSync(workingCopyPath)
+      : null;
     try {
-      frozenCapability = await freezeCapabilityManifest(page, workingCopyPath);
+      frozenCapability = await freezeCapabilityManifest(page, workingCopyPath, {
+        allowUnresolved: capabilityPreflightOnly,
+      });
       row.capabilityManifest = {
         fingerprint: frozenCapability.fingerprint,
         denominator: frozenCapability.manifest.denominator,
@@ -2520,12 +2898,35 @@ for (const [fileIndex, filename] of files.entries()) {
           required: frozenCapability.selection.required,
           replacements: frozenCapability.selection.replacements,
         },
+        ...(capabilityPreflightOnly ? { draft: frozenCapability.draft } : {}),
       };
     } catch (cause) {
       row.capabilityError = errorDetails(cause);
       capabilityFailure = cause;
       await page.keyboard.press("Escape").catch(() => {});
       await waitUntilEditable(page).catch(() => {});
+    }
+    if (capabilityPreflightOnly) {
+      const preflightWorkingCopyAfter = readFileSync(workingCopyPath);
+      row.preflightWorkingCopy = {
+        beforeSha256: sha256(preflightWorkingCopyBefore),
+        beforeSize: preflightWorkingCopyBefore.length,
+        afterSha256: sha256(preflightWorkingCopyAfter),
+        afterSize: preflightWorkingCopyAfter.length,
+        unchanged: preflightWorkingCopyBefore.equals(preflightWorkingCopyAfter),
+      };
+      if (!row.preflightWorkingCopy.unchanged) {
+        row.capabilityError = {
+          code: "PREFLIGHT_WORKING_COPY_CHANGED",
+          exactReason: "READ_ONLY_PREFLIGHT_MUTATED_WORKING_SOURCE",
+        };
+      }
+      row.status = capabilityPreflightFileStatus({
+        discoveryFailed: Boolean(capabilityFailure),
+        workingCopyUnchanged: row.preflightWorkingCopy.unchanged,
+        draftIssues: frozenCapability?.draft?.issues || [],
+      });
+      continue;
     }
     try {
     plans = await planTextTargets(page, workingCopyPath);
@@ -2741,6 +3142,7 @@ for (const [fileIndex, filename] of files.entries()) {
           const duplicate = await duplicateFixedStructureTarget({
             page,
             workingCopyPath,
+            originalSha256: row.originalSha256,
             plan: copyablePlan,
           });
           expect(duplicate.capability).toMatchObject({
@@ -2756,6 +3158,7 @@ for (const [fileIndex, filename] of files.entries()) {
             originalId: copyable.elementId,
             duplicateId: duplicate.duplicateId,
             result: "copied",
+            diagnostic: duplicate.diagnostic,
             capability: duplicate.capability,
             runtime: duplicate.runtime,
           });
@@ -2835,7 +3238,8 @@ for (const [fileIndex, filename] of files.entries()) {
           frame: await currentEditorFrame(page),
           editor: editorFor(page),
           candidate: {
-            stableId: nonCopyable.elementId,
+            stableId: nonCopyable.probeStableId,
+            expectedOperationStableId: nonCopyable.elementId,
             tag: nonCopyable.tag,
             sourceEditable: nonCopyable.capabilityFamilies.includes("text"),
             visible: true,
@@ -2846,6 +3250,8 @@ for (const [fileIndex, filename] of files.entries()) {
             region: nonCopyable.region,
             scrollContainer: nonCopyable.scrollContainer,
           },
+          mode: "verify",
+          sourceElements: frozenCapability.sourceElements,
         });
         expect(observed.selectedId).toBe(nonCopyable.elementId);
         expect(observed.copyAvailability).toBe("unsupported");
@@ -2854,6 +3260,37 @@ for (const [fileIndex, filename] of files.entries()) {
           "button",
           { name: "复制元素", exact: true },
         ).count()).toBe(0);
+        const nonCopyablePlan = {
+          id: nonCopyable.elementId,
+          tag: nonCopyable.tag,
+          tabId: nonCopyable.tabId,
+        };
+        const nonCopyableTarget = (await currentEditorFrame(page))
+          .locator(`[data-pageroot-id=${JSON.stringify(nonCopyable.elementId)}]`);
+        const relocated = await nonCopyableTarget.evaluate((element, expected) => ({
+          count: 1,
+          stableId: element.getAttribute("data-pageroot-id"),
+          tag: element.tagName.toLowerCase(),
+          connected: element.isConnected,
+          selectedMarker: element.hasAttribute("data-html-canvas-selected"),
+          liveStyleAttribute: element.getAttribute("style"),
+          sameAsPlanned: element.getAttribute("data-pageroot-id") === expected.stableId
+            && element.tagName.toLowerCase() === expected.tag,
+        }), { stableId: nonCopyablePlan.id, tag: nonCopyablePlan.tag });
+        const diagnostic = await copyCapabilitySnapshot({
+          page,
+          workingCopyPath,
+          plan: nonCopyablePlan,
+          originalSha256: row.originalSha256,
+          relocated,
+        });
+        expect(await nonCopyableTarget.evaluate(
+          (element) => element.isContentEditable,
+        )).toBe(false);
+        expect(diagnostic.commandBoundary.availability).toBe("unsupported");
+        expect(diagnostic.commandBoundary.reason).toBeTruthy();
+        expect(diagnostic.commandBoundary.reason).not.toBe("available");
+        expect(diagnostic.commandBoundary.targetStableId).toBe(nonCopyable.elementId);
         resultReport.passOperation(
           filename,
           REAL_HTML_STAGE_IDS.ELEMENT_STRUCTURE,
@@ -2861,8 +3298,10 @@ for (const [fileIndex, filename] of files.entries()) {
           {
             sourceId: nonCopyable.elementId,
             expectedCopyable: false,
+            contentEditable: false,
             copyAvailability: observed.copyAvailability,
             capabilityReason: observed.copyReason,
+            diagnostic,
           },
         );
       } catch (cause) {
@@ -3481,11 +3920,16 @@ for (const [fileIndex, filename] of files.entries()) {
     }
   } catch (cause) {
     row.error = String(cause?.stack || cause);
-    const fileRow = resultReport.rowsForFile(filename).find(
-      (resultRow) => resultRow.level === "file",
-    );
-    if (fileRow?.state === "NOT_EXECUTED" && fileRow.reasonCode === "NOT_STARTED") {
-      resultReport.failFile(filename, errorDetails(cause));
+    if (capabilityPreflightOnly) {
+      row.status = !original || !session ? "ENVIRONMENT_BLOCKED" : "DISCOVERY_ERROR";
+      row.preflightError = errorDetails(cause);
+    } else {
+      const fileRow = resultReport.rowsForFile(filename).find(
+        (resultRow) => resultRow.level === "file",
+      );
+      if (fileRow?.state === "NOT_EXECUTED" && fileRow.reasonCode === "NOT_STARTED") {
+        resultReport.failFile(filename, errorDetails(cause));
+      }
     }
     if (session) {
       await session.page.screenshot({ path: path.join(copyDir, "failure.png"), fullPage: true })
@@ -3495,6 +3939,7 @@ for (const [fileIndex, filename] of files.entries()) {
     if (session) {
       await stopPageRoot(session.electronApp, session.isolatedUserData).catch((cause) => {
         row.cleanupError = String(cause?.stack || cause);
+        if (capabilityPreflightOnly) row.status = "DISCOVERY_ERROR";
       });
     }
     if (original && row.originalFinalSize == null) {
@@ -3508,28 +3953,56 @@ for (const [fileIndex, filename] of files.entries()) {
           observedSha256: row.originalFinalSha256,
           observedSize: row.originalFinalSize,
         }).ok;
+        if (capabilityPreflightOnly && !row.originalUnchanged) {
+          row.status = "DISCOVERY_ERROR";
+        }
       } catch (cause) {
         row.originalUnchanged = null;
         row.originalVerificationError = String(cause?.stack || cause);
+        if (capabilityPreflightOnly) row.status = "ENVIRONMENT_BLOCKED";
       }
     }
-    row.status = resultReport.rowsForFile(filename).find(
-      (resultRow) => resultRow.level === "file",
-    )?.state || row.status;
+    if (!capabilityPreflightOnly) {
+      row.status = resultReport.rowsForFile(filename).find(
+        (resultRow) => resultRow.level === "file",
+      )?.state || row.status;
+    }
     report.results.push(row);
     saveReport();
-    console.log(
-      `${fileIndex + 1}/${files.length}: ${row.status} ${filename} `
-      + `(${row.completedTargets.filter((target) => !target.rejected).length} text hosts, `
-      + `${row.structureCycles.length} structure cycles)`,
-    );
+    console.log(capabilityPreflightOnly
+      ? `${report.results.length}/${files.length}: ${row.status} capability preflight`
+      : `${report.results.length}/${files.length}: ${row.status} ${filename} `
+        + `(${row.completedTargets.filter((target) => !target.rejected).length} text hosts, `
+        + `${row.structureCycles.length} structure cycles)`);
   }
 }
 
-report.passed = report.results.filter((row) => row.status === "PASS").length;
-report.failed = report.results.filter((row) => row.status === "FAIL").length;
-report.notExecuted = report.results.filter((row) => row.status === "NOT_EXECUTED").length;
-report.notApplicable = report.results.filter((row) => row.status === "NOT_APPLICABLE").length;
-resultReport.finalize();
-saveReport();
-process.exitCode = report.failed || report.notExecuted ? 1 : 0;
+if (capabilityPreflightOnly) {
+  report.pendingReview = report.results.filter((row) => row.status === "PENDING_REVIEW").length;
+  report.discoveryErrors = report.results.filter((row) => row.status === "DISCOVERY_ERROR").length;
+  report.environmentBlocked = report.results.filter((row) => row.status === "ENVIRONMENT_BLOCKED").length;
+  report.originalsUnchanged = report.results.every((row) => row.originalUnchanged === true);
+  report.draftFingerprint = sha256(Buffer.from(JSON.stringify({
+    head: report.head,
+    tree: report.tree,
+    workspaceSourceSha256: report.workspaceSourceSha256,
+    files: report.results.map((row) => ({
+      fileId: row.fileId,
+      originalSha256: row.originalSha256,
+      originalSize: row.originalSize,
+      originalUnchanged: row.originalUnchanged,
+      manifestFingerprint: row.capabilityManifest?.fingerprint || null,
+      draft: row.capabilityManifest?.draft || null,
+    })),
+  })));
+  saveReport();
+  process.exitCode = capabilityPreflightExitCode(report.results);
+} else {
+  report.passed = report.results.filter((row) => row.status === "PASS").length;
+  report.failed = report.results.filter((row) => row.status === "FAIL").length;
+  report.notExecuted = report.results.filter((row) => row.status === "NOT_EXECUTED").length;
+  report.notApplicable = report.results.filter((row) => row.status === "NOT_APPLICABLE").length;
+  resultReport.finalize();
+  saveReport();
+  process.exitCode = report.failed || report.notExecuted ? 1 : 0;
+}

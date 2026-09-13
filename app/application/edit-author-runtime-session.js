@@ -1,8 +1,7 @@
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
-  collectEditRuntimeScripts,
-  editRuntimeProgramIdentity,
+  analyzeEditRuntimeDocument,
   isEditRuntimeDocumentBasePath,
   isEditRuntimeSourceSha256,
   unsupportedEditRuntimeProgramReason,
@@ -176,8 +175,9 @@ function normalizedGrant(value, request) {
  * The sole application owner for Edit author-runtime state. Its key is exactly
  * (sourcePath, canvasGeneration): ordinary source revisions, autosaves, and
  * comments intentionally cannot start another preparation in the same canvas.
- * A same-directory Finder rename that keeps HTML, SHA and canvas generation
- * only relocates that live key; it does not consume another prepare attempt.
+ * The Session can relocate an explicitly equivalent same-generation key, but
+ * accepted Finder/source authority changes publish a new receipt and generation
+ * and therefore rebuild the physical Canvas instead of using this capability.
  */
 export class EditAuthorRuntimeSession {
   #port;
@@ -372,8 +372,8 @@ export class EditAuthorRuntimeSession {
       });
       return this.#snapshot;
     }
-    const scriptContract = collectEditRuntimeScripts(identity.html);
-    const programIdentity = editRuntimeProgramIdentity(identity.html);
+    const scriptContract = analyzeEditRuntimeDocument(identity.html);
+    const programIdentity = scriptContract.programIdentity;
     const unsupportedProgram = scriptContract.executableScripts.some((script) => (
       unsupportedEditRuntimeProgramReason(script.inline)
     ));

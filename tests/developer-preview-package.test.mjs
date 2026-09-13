@@ -474,9 +474,14 @@ test("developer preview stays optional, manual-only and independent from release
   }
   assert.match(workflow, /^\s*workflow_dispatch:/mu);
   assert.doesNotMatch(workflow, /^\s*(?:pull_request|push|schedule):/mu);
+  assert.match(workflow, /CSC_LINK:\s*\$\{\{ secrets\.MAC_CSC_LINK \}\}/u);
+  assert.match(
+    workflow,
+    /CSC_KEY_PASSWORD:\s*\$\{\{ secrets\.MAC_CSC_KEY_PASSWORD \}\}/u,
+  );
   assert.doesNotMatch(
     workflow,
-    /(?:MAC_CSC_LINK|MAC_CSC_KEY_PASSWORD|APPLE_APP_SPECIFIC_PASSWORD|secrets\.)/u,
+    /(?:APPLE_ID|APPLE_APP_SPECIFIC_PASSWORD|PAGEROOT_POSTHOG_TOKEN|PAGEROOT_SMOKE_)/u,
   );
   assert.match(workflow, /developer-package/u);
   assert.match(workflow, /retention-days:\s*7/u);

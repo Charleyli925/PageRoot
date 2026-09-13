@@ -49,6 +49,8 @@ jobs:
         timeout-minutes: 25
         env:
           GH_TOKEN: ${{ github.token }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
         run: >-
           node scripts/ci-evidence.mjs run
           --suite developer-preview
@@ -62,7 +64,7 @@ jobs:
             echo "### PageRoot developer preview"
             echo ""
             echo "- Built only because this workflow was dispatched explicitly."
-            echo "- Requires a stable Developer ID Application identity already installed on this runner; missing or failed signing stops the job and never falls back to ad-hoc."
+            echo "- Signs with the repository's stable Developer ID Application credential (MAC_CSC_LINK/MAC_CSC_KEY_PASSWORD secrets) or an identity already installed on this runner; missing or failed signing stops the job and never falls back to ad-hoc."
             echo "- Notarization is not required for this personal test package."
             echo "- Is not eligible for a tag, GitHub Release, or updater publication."
             echo "- Uses the distinct PageRoot Developer Preview name and a stable-tag-derived test version."

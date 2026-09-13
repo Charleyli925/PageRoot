@@ -131,7 +131,18 @@ export function isTransientGitHubCommandFailure(cause) {
   const code = String(cause?.code || cause?.cause?.code || "").toUpperCase();
   if (["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "ENETUNREACH"].includes(code)) return true;
   const message = String(cause?.message || cause || "");
-  return /(?:\bEOF\b|connection reset|could not resolve host|TLS handshake timeout|temporarily unavailable|HTTP (?:502|503|504)\b)/iu.test(message);
+  if (/(?:\bEOF\b|connection reset|could not resolve host|TLS handshake timeout|temporarily unavailable|HTTP (?:429|502|503|504)\b|rate limit|gh returned invalid JSON|unexpected end of JSON input)/iu.test(message)) {
+    return true;
+  }
+  // gh exiting without any diagnostic is a transport-level failure. The
+  // delivery report only issues read-only evidence calls, so retrying is safe.
+  if (cause && typeof cause === "object") {
+    const stderrText = String(cause.stderr ?? "");
+    const stdoutText = String(cause.stdout ?? "");
+    if (cause.code !== undefined && cause.code !== 0 && !cause.killed
+      && stderrText.trim() === "" && stdoutText.trim() === "") return true;
+  }
+  return false;
 }
 
 export function retryTransientGitHubCommand(run, {
@@ -225,11 +236,18 @@ async function githubJsonAsync(arguments_, root, {
   now = Date.now,
 } = {}) {
   const output = await retryTransientGitHubCommandAsync(
-    ({ timeout }) => commandOutputAsync("gh", arguments_, {
-      cwd: root,
-      timeout,
-      signal,
-    }),
+    async ({ timeout }) => {
+      const raw = await commandOutputAsync("gh", arguments_, {
+        cwd: root,
+        timeout,
+        signal,
+      });
+      try {
+        return JSON.parse(raw);
+      } catch {
+        throw new Error(`gh returned invalid JSON for ${arguments_.join(" ")}.`);
+      }
+    },
     {
       deadlineAt,
       deadlineMs,
@@ -243,11 +261,7 @@ async function githubJsonAsync(arguments_, root, {
       },
     },
   );
-  try {
-    return JSON.parse(output);
-  } catch {
-    throw new Error(`gh returned invalid JSON for ${arguments_.join(" ")}.`);
-  }
+  return output;
 }
 
 function normalizeOneLine(value) {

@@ -806,6 +806,12 @@ test("author Script cannot add source authority after Runtime starts or save Run
 
     await page.keyboard.press("Escape");
     await frame.locator("#source-copy-safe").evaluate((button) => {
+      button.setAttribute("style", "");
+      const text = button.firstChild;
+      if (!(text instanceof Text) || text.data.length < 2) {
+        throw new Error("Copy-equivalence fixture text is missing.");
+      }
+      text.splitText(2);
       button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const safeDuplicateButton = toolbar.getByRole("button", {
@@ -856,8 +862,12 @@ test("author Script cannot add source authority after Runtime starts or save Run
       duplicateButton.click();
     });
     await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
-      "data-element-copy-availability",
+      "data-element-copy-command-availability",
       "unsupported",
+    );
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-element-copy-command-reason",
+      "runtime-subtree-diverged",
     );
     expect(readFileSync(sourcePath, "utf8")).toBe(sourceBeforeLateRuntimeChild);
     await frame.evaluate(() => window.__restoreRuntimeCopyInspection?.());
@@ -1407,7 +1417,7 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
 <html><head><title>Runtime</title></head><body>
   <div aria-hidden="true" style="height:600px"></div>
   <section>
-    <p id="first" data-native-case="runtime-first">甲</p>
+    <p id="first" data-native-case="runtime-first" data-ai-level="module">甲</p>
     <p id="second">乙</p>
     <p id="third">丙</p>
     <output id="runtime-order"></output>
@@ -1461,6 +1471,8 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
     expect(moveDownBox.y + moveDownBox.height).toBeLessThanOrEqual(viewport.height);
     // Use the already-visible toolbar coordinate. locator.click() is allowed to
     // scroll an ancestor first and would replace the user's reading position.
+    await enablePipelineCounters(page);
+    await resetPipelineCounters(page);
     await page.mouse.click(
       moveDownBox.x + moveDownBox.width / 2,
       moveDownBox.y + moveDownBox.height / 2,
@@ -1476,12 +1488,40 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
     ))).toBe(1);
     await expect(nextFrame.locator(
       `[data-pageroot-id="${stableId}"][data-html-canvas-selected]`,
-    )).toHaveCount(1);
+    )).toHaveAttribute("data-html-canvas-selected", "module");
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/id="second"[\s\S]*id="first"/u);
-    const moveRevision = await expectCheckpointPersisted(page, 0);
+    const firstMoveRevision = await expectCheckpointPersisted(page, 0);
+    expect((await readPipelineCounters(page)).fullPatchApplies).toBe(1);
+
+    // The direct semantic materialization has its own canonical subregion
+    // TargetRef. The Canvas must still retain this caller's module TargetRef,
+    // otherwise the first move marks the selection orphaned and disables a
+    // consecutive move until the user selects the element again.
+    await expect(moveDownButton).toBeEnabled();
+    const secondMoveDownBox = await moveDownButton.boundingBox();
+    expect(secondMoveDownBox).not.toBeNull();
+    await resetPipelineCounters(page);
+    await page.mouse.click(
+      secondMoveDownBox.x + secondMoveDownBox.width / 2,
+      secondMoveDownBox.y + secondMoveDownBox.height / 2,
+    );
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    const twiceMovedFrame = await currentEditorFrame(page);
+    await expect(twiceMovedFrame.locator("#runtime-order")).toHaveText("丙甲乙");
+    await expect(twiceMovedFrame.locator("section > p").first()).toHaveAttribute("id", "second");
+    await expect(twiceMovedFrame.locator("section > p").nth(1)).toHaveAttribute("id", "third");
+    await expect(twiceMovedFrame.locator("section > p").nth(2)).toHaveAttribute("id", "first");
+    await expect(twiceMovedFrame.locator(
+      `[data-pageroot-id="${stableId}"][data-html-canvas-selected]`,
+    )).toHaveAttribute("data-html-canvas-selected", "module");
+    await expect(page.getByRole("button", { name: "上移", exact: true })).toBeEnabled();
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toMatch(/id="second"[\s\S]*id="third"[\s\S]*id="first"/u);
+    const moveRevision = await expectCheckpointPersisted(page, firstMoveRevision);
+    expect((await readPipelineCounters(page)).fullPatchApplies).toBe(1);
 
     const beforeUndoDocument = await documentToken(page);
     await clickEditHistoryMenu(electronApp, page, "undo");
@@ -1491,12 +1531,12 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
       window.__PAGEROOT_RUNTIME_REORDER_EXECUTIONS__ || 0
     ))).toBe(2);
     const undoFrame = await currentEditorFrame(page);
-    await expect(undoFrame.locator("#runtime-order")).toHaveText("丙甲乙");
-    await expect(undoFrame.locator("section > p").first()).toHaveAttribute("id", "third");
-    await expect(undoFrame.locator("section > p").nth(1)).toHaveAttribute("id", "first");
-    await expect(undoFrame.locator("section > p").nth(2)).toHaveAttribute("id", "second");
+    await expect(undoFrame.locator("#runtime-order")).toHaveText("乙丙甲");
+    await expect(undoFrame.locator("section > p").first()).toHaveAttribute("id", "second");
+    await expect(undoFrame.locator("section > p").nth(1)).toHaveAttribute("id", "third");
+    await expect(undoFrame.locator("section > p").nth(2)).toHaveAttribute("id", "first");
     expect((await readPublishedWorkingCopy(workingCopyPath, "utf8")))
-      .toMatch(/id="first"[\s\S]*id="second"/u);
+      .toMatch(/id="second"[\s\S]*id="first"[\s\S]*id="third"/u);
 
     const beforeRedoDocument = await documentToken(page);
     await clickEditHistoryMenu(electronApp, page, "redo");
@@ -1511,7 +1551,7 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
     await expect(redoFrame.locator("section > p").nth(1)).toHaveAttribute("id", "third");
     await expect(redoFrame.locator("section > p").nth(2)).toHaveAttribute("id", "first");
     expect((await readPublishedWorkingCopy(workingCopyPath, "utf8")))
-      .toMatch(/id="second"[\s\S]*id="first"[\s\S]*id="third"/u);
+      .toMatch(/id="second"[\s\S]*id="third"[\s\S]*id="first"/u);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     expect((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).not.toContain("乙甲</output>");
     await reviewStage.evaluate((element) => {
@@ -1790,8 +1830,11 @@ test("overlapping edits promote only the latest Runtime without losing charts or
       "data-edit-runtime-phase",
     )).toBe("settled");
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect.poll(async () => {
+      const activeFrame = await currentEditorFrame(page);
+      return activeFrame.locator('[data-native-case="runtime-supersession"]').count();
+    }).toBe(3);
     frame = await currentEditorFrame(page);
-    await expect(frame.locator('[data-native-case="runtime-supersession"]')).toHaveCount(3);
     await expect(frame.locator("#supersession-proof")).toHaveText("运行时卡片 3");
     await expect(frame.locator("#supersession-chart canvas")).toHaveCount(1);
 
@@ -1911,12 +1954,17 @@ test("Runtime text and style edits stay in one document across selection and sav
     const toolbar = editor.getByRole("toolbar");
     await expect(toolbar).toBeVisible();
     await toolbar.getByText("样式与间距", { exact: true }).click();
+    await enablePipelineCounters(page);
+    await resetPipelineCounters(page);
     await toolbar.getByLabel("内边距（像素）").fill("20");
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/padding-top:\s*20px/u);
+    expect((await readPipelineCounters(page)).fullPatchApplies).toBe(1);
+    await resetPipelineCounters(page);
     await toolbar.getByLabel("内边距（像素）").fill("22");
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/padding-top:\s*22px/u);
+    expect((await readPipelineCounters(page)).fullPatchApplies).toBe(1);
     await expect(first).toHaveCSS("padding-top", "22px");
     await expect(forgedFirst).toHaveCSS("padding-top", "0px");
 
@@ -1949,6 +1997,9 @@ test("Runtime text and style edits stay in one document across selection and sav
 
     const styleRevision = await expectCheckpointPersisted(page, 0);
     await frame.locator('[data-native-case="runtime-style-first"]').click();
+    const historyDocument = await documentToken(page);
+    const historyGeneration = await editor.locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
     await clickEditHistoryMenu(electronApp, page, "undo");
     const undoRevision = await expectCheckpointPersisted(page, styleRevision);
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
@@ -1956,6 +2007,13 @@ test("Runtime text and style edits stay in one document across selection and sav
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="runtime-style-first"]'))
       .toHaveCSS("padding-top", "20px");
+    await expect.poll(() => documentToken(page)).toBe(historyDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      historyGeneration,
+    );
+    await expect(editor).toHaveAttribute("data-history-adopt-path", "editable-island-in-place");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
 
     await clickEditHistoryMenu(electronApp, page, "redo");
     await expectCheckpointPersisted(page, undoRevision);
@@ -1964,6 +2022,13 @@ test("Runtime text and style edits stay in one document across selection and sav
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="runtime-style-first"]'))
       .toHaveCSS("padding-top", "22px");
+    await expect.poll(() => documentToken(page)).toBe(historyDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      historyGeneration,
+    );
+    await expect(editor).toHaveAttribute("data-history-adopt-path", "editable-island-in-place");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
   });
 });
 
@@ -2008,14 +2073,91 @@ test("Runtime range styling never grants a forged clone source authority", {
     const bold = toolbar
       .getByRole("button", { name: "加粗", exact: true });
     await expect(bold).toBeEnabled();
+    await enablePipelineCounters(page);
+    await resetPipelineCounters(page);
     await bold.click();
 
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
       .toMatch(/<span[^>]*font-weight:\s*700/iu);
+    expect((await readPipelineCounters(page)).fullPatchApplies).toBe(1);
     await expect(target.locator('span[style*="font-weight"]')).toHaveCount(1);
+    await expect(target.locator('span[style*="font-weight"]'))
+      .toHaveAttribute("data-pageroot-id", /^pr1_[0-9a-f]{32}$/u);
     await expect(forged.locator('span[style*="font-weight"]')).toHaveCount(0);
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "source:requested:resumed",
+    );
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => target.evaluate((element) => (
+      element.ownerDocument.getSelection()?.toString() || ""
+    ))).toBe("甲");
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+  });
+});
+
+test("Runtime text history ignores unrelated disposable clone drift", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime text history</title></head><body>
+  <p data-native-case="runtime-history-text">甲乙</p>
+  <aside data-native-case="runtime-history-unrelated">运行时旁路</aside>
+  <script>
+    const unrelated = document.querySelector('[data-native-case="runtime-history-unrelated"]');
+    const clone = unrelated.cloneNode(true);
+    clone.removeAttribute('data-native-case');
+    clone.setAttribute('data-runtime-unrelated-clone', 'true');
+    unrelated.after(clone);
+    parent.__PAGEROOT_TEXT_HISTORY_RUNTIME_COUNT__ =
+      (parent.__PAGEROOT_TEXT_HISTORY_RUNTIME_COUNT__ || 0) + 1;
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-text-history-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ electronApp, page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const frame = (await loadedDiskFrame(page, sourcePath, "runtime-history-text")).frame;
+    await expect(frame.locator('[data-runtime-unrelated-clone="true"]')).toHaveCount(1);
+    const historyDocument = await documentToken(page);
+    const historyGeneration = await editor.locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
+
+    await activateNativeEdit(frame, "runtime-history-text");
+    await setTextSelection(frame, "runtime-history-text", 2);
+    await page.keyboard.insertText("丙");
+    await page.keyboard.press(keyShortcut("s"));
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("甲乙丙");
+    const textRevision = await expectCheckpointPersisted(page, 0);
+
+    await clickEditHistoryMenu(electronApp, page, "undo");
+    const undoRevision = await expectCheckpointPersisted(page, textRevision);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("甲乙</p>");
+    await expect.poll(() => documentToken(page)).toBe(historyDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      historyGeneration,
+    );
+    await expect(editor).toHaveAttribute("data-history-adopt-path", "editable-island-in-place");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+
+    await clickEditHistoryMenu(electronApp, page, "redo");
+    await expectCheckpointPersisted(page, undoRevision);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("甲乙丙");
+    await expect.poll(() => documentToken(page)).toBe(historyDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      historyGeneration,
+    );
+    await expect(editor).toHaveAttribute("data-history-adopt-path", "editable-island-in-place");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__PAGEROOT_TEXT_HISTORY_RUNTIME_COUNT__)).toBe(1);
   });
 });
 
@@ -2544,6 +2686,64 @@ test("long text Enter checkpoints Working HTML without replacing the Runtime doc
       .evaluate((frameElement) => (
         frameElement.contentWindow?.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ || null
       ))).toBe(beforeDocument);
+  });
+});
+
+test("an accepted Native Edit survives a live-session rebase failure", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime accepted checkpoint recovery</title></head><body>
+  <main><p data-native-case="runtime-accepted-rebase">已接受的源码</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-accepted-rebase-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-accepted-rebase");
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const revisionBefore = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await page.evaluate(() => {
+      window.__PAGEROOT_E2E_FAIL_NEXT_NATIVE_REBASE__ = true;
+    });
+    const target = await activateNativeEdit(frame, "runtime-accepted-rebase");
+    await target.press("End");
+    await page.keyboard.insertText("，恢复后仍在");
+
+    const acceptedRevision = await expectCheckpointPersisted(page, revisionBefore);
+    expect(acceptedRevision).toBe(revisionBefore + 1);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("恢复后仍在");
+    await expect(editor).toHaveAttribute(
+      "data-source-command-projection",
+      "refresh-required",
+    );
+    await expect(editor).toHaveAttribute(
+      "data-native-commit-path",
+      "v2-island-checkpoint-reload",
+    );
+    await expect(editor).not.toHaveAttribute(
+      "data-edit-block-detail",
+      /实时编辑会话无法推进到新版本/u,
+    );
+
+    frame = await currentEditorFrame(page);
+    const recovered = frame.locator('[data-native-case="runtime-accepted-rebase"]');
+    await expect(recovered).toContainText("恢复后仍在");
+    await recovered.dblclick();
+    await expect(recovered).toHaveAttribute("contenteditable", "true");
+    await recovered.press("End");
+    await page.keyboard.insertText("，可以继续编辑");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("可以继续编辑");
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
   });
 });
 
@@ -3473,6 +3673,109 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
   });
 });
 
+test("ending an unchanged Native Edit cannot publish a pending source projection", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime stale finish boundary</title></head><body>
+  <main>
+    <p data-native-case="runtime-stale-duplicate">先复制这一项。</p>
+    <p data-native-case="runtime-stale-last">最后一项保持原样。</p>
+  </main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-stale-finish-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-stale-duplicate");
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const revisionR0 = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await page.keyboard.press(keyShortcut("s"));
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "false");
+    const renderedR0 = await editor.getAttribute("data-rendered-projection-sha256");
+    expect(renderedR0).toBeTruthy();
+
+    await armRuntimeCommitHold(page);
+    await frame.locator('[data-native-case="runtime-stale-duplicate"]').click();
+    await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+    await waitForHeldRuntimeCommit(page);
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8"))
+        .split('data-native-case="runtime-stale-duplicate"').length - 1
+    )).toBe(2);
+    const revisionR1 = await expectCheckpointPersisted(page, revisionR0);
+    const sourceR1 = await readPublishedWorkingCopy(workingCopyPath, "utf8");
+    const sourceR1Hash = buildSourceIndex(sourceR1).sourceSha256;
+    expect(sourceR1Hash).not.toBe(renderedR0);
+    await expect(frame.locator('[data-native-case="runtime-stale-duplicate"]')).toHaveCount(1);
+
+    const last = await activateNativeEdit(frame, "runtime-stale-last");
+    await expect(last).toHaveAttribute("contenteditable", "true");
+    await setTextSelection(frame, "runtime-stale-last", 0, 4);
+    await editor.getByText("样式与间距", { exact: true }).click();
+    let fontSize = editor.getByLabel("字号（像素）");
+    await expect(fontSize).toBeEnabled();
+    const heldBeforeStyle = await page.evaluate(() => (
+      window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+    ));
+    await fontSize.fill("24");
+    await expectCheckpointPersisted(page, revisionR1);
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "source:requested:resumed",
+    );
+    await editor.getByText("样式与间距", { exact: true }).click();
+    fontSize = editor.getByLabel("字号（像素）");
+    await expect(fontSize).toBeEnabled();
+    await fontSize.fill("024");
+    await expect(editor).toHaveAttribute(
+      "data-native-format-resume",
+      "unchanged:requested:resumed",
+    );
+    await expect(last).toHaveAttribute("contenteditable", "true");
+    await page.keyboard.press(keyShortcut("s"));
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toMatch(/font-size:\s*24px/u);
+    const sourceR2 = await readPublishedWorkingCopy(workingCopyPath, "utf8");
+    const sourceR2Hash = buildSourceIndex(sourceR2).sourceSha256;
+    expect(sourceR2Hash).not.toBe(sourceR1Hash);
+    await expect(editor).toHaveAttribute("data-working-source-sha256", sourceR2Hash);
+    await expect(editor).toHaveAttribute("data-rendered-projection-sha256", renderedR0);
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "true");
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+
+    await page.keyboard.press("Escape");
+    await expect(last).not.toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-working-source-sha256", sourceR2Hash);
+    await expect(editor).toHaveAttribute("data-rendered-projection-sha256", renderedR0);
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "true");
+    await expect(editor).toHaveAttribute(
+      "data-runtime-candidate-source-revision",
+      sourceR1Hash,
+    );
+    expect(await page.evaluate(() => (
+      window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+    ))).toBe(heldBeforeStyle);
+    await releaseHeldRuntimeCommits(page);
+    await waitForRuntimeHandoffSettled(page);
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-source-revision",
+      sourceR2Hash,
+    );
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-stale-duplicate"]')).toHaveCount(2);
+    await expect(editor).toHaveAttribute("data-rendered-projection-sha256", sourceR2Hash);
+    await expect(editor).toHaveAttribute("data-rendered-projection-stale", "false");
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
 test("Candidate inert ownership cannot be forged or cleared by author markup", async () => {
   const markerMutationHtml = `<!doctype html>
 <html data-pageroot-runtime-candidate-inert="source-owned"><head>
@@ -4029,8 +4332,6 @@ test("a current critical surface already ready wins before an overdue wait is re
     <section id="surface-timeout-host"></section>
   </main>
   <script>
-    parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ =
-      (parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ || 0) + 1;
     const renderSurface = () => {
       const canvas = document.createElement('canvas');
       canvas.width = 120;
@@ -4039,10 +4340,10 @@ test("a current critical surface already ready wins before an overdue wait is re
       canvas.style.height = '80px';
       document.querySelector('#surface-timeout-host').append(canvas);
     };
-    if (parent.__PAGEROOT_SURFACE_TIMEOUT_RUN__ === 1) {
-      renderSurface();
-    } else {
+    if (parent.__PAGEROOT_DELAY_READY_SURFACE__) {
       parent.__PAGEROOT_RELEASE_READY_SURFACE__ = renderSurface;
+    } else {
+      renderSurface();
     }
   </script>
 </body></html>`;
@@ -4054,6 +4355,10 @@ test("a current critical surface already ready wins before an overdue wait is re
     const editor = page.getByTestId("html-canvas-editor");
     let frame = (await loadedDiskFrame(page, sourcePath, "surface-timeout-boundary")).frame;
     await expect(frame.locator("#surface-timeout-host canvas")).toHaveCount(1);
+    await page.evaluate(() => {
+      window.__PAGEROOT_DELAY_READY_SURFACE__ = true;
+      window.__PAGEROOT_RELEASE_READY_SURFACE__ = undefined;
+    });
     await frame.locator('[data-native-case="surface-timeout-boundary"]').click();
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();

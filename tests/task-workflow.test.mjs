@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -110,6 +110,27 @@ test("durable agent guidance keeps progressive disclosure and review boundaries"
   assert.doesNotMatch(codexWorkflow, /\/Users\/|[A-Za-z]:\\/u);
   assert.match(codexWorkflow, /^## Documentation impact$/mu);
   assert.match(codexWorkflow, /^## Scheduled monitoring$/mu);
+});
+
+test("project agent profiles keep built-ins and native Ultra thread selection", async () => {
+  const directory = new URL("../.codex/agents/", import.meta.url);
+  assert.deepEqual((await readdir(directory)).filter((name) => name.endsWith(".toml")).sort(),
+    ["reviewer.toml", "tester.toml"]);
+  for (const profile of [reviewerProfile, testerProfile]) {
+    assert.doesNotMatch(profile, /^\s*(?:model|model_reasoning_effort)\s*=/mu);
+  }
+  assert.match(reviewerProfile, /^sandbox_mode = "read-only"$/mu);
+  assert.match(testerProfile, /^sandbox_mode = "workspace-write"$/mu);
+  const config = await readFile(new URL("../.codex/config.toml", import.meta.url), "utf8");
+  assert.doesNotMatch(config, /^\s*(?:max_concurrent_threads_per_session|max_threads)\s*=/mu);
+  for (const source of [agentGuidance, codexWorkflow]) {
+    const references = [...source.matchAll(/CODEX_SUBAGENT_ROUTING_WORKSHEET\.md` section (5(?:\.\d+)?)/gu)];
+    assert.ok(references.length, "missing handoff read gate");
+    for (const [, section] of references) {
+      assert.ok(subagentRouting.split("\n").some((line) => line.startsWith(`${section === "5" ? "##" : "###"} ${section}.`) || line.startsWith(`### ${section} `)),
+        `missing referenced section ${section}`);
+    }
+  }
 });
 
 test("task start synchronizes clean main and creates an isolated worktree", async (t) => {

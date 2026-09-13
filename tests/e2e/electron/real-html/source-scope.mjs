@@ -1,5 +1,6 @@
 import { buildSourceIndex } from "../../../../app/lib/source-index.js";
 import { parseInlineStyle } from "../../../../app/lib/source-patch-core.js";
+import { parseFragment } from "parse5";
 import {
   compareSourceByteRegions,
   utf8ByteRange,
@@ -30,6 +31,26 @@ function sourceElementRange(sourceBytes, sourceId, side) {
       end: element.contentRange.endOffset,
     }),
   };
+}
+
+// Independent, narrow oracle: reorder raw attribute tokens only. Do not
+// serialize HTML or normalize values, quotes, whitespace, comments or text.
+function attributeOrderOnly(bytes, spans = false) {
+  const source = bytes.toString("utf8"), patches = [];
+  const visit = node => {
+    const positions = Object.values((node.tagName === "a" || (spans && node.tagName === "span")) && node.namespaceURI === "http://www.w3.org/1999/xhtml"
+      ? node.sourceCodeLocation?.attrs || {} : {})
+      .sort((a, b) => a.startOffset - b.startOffset);
+    const tokens = positions.map(p => source.slice(p.startOffset, p.endOffset)).sort();
+    positions.forEach((p, i) => patches.push({ ...p, text: tokens[i] }));
+    for (const child of node.childNodes || []) visit(child);
+    if (node.content) visit(node.content);
+  };
+  visit(parseFragment(source, { sourceCodeLocationInfo: true }));
+  let result = source;
+  for (const p of patches.sort((a, b) => b.startOffset - a.startOffset))
+    result = result.slice(0, p.startOffset) + p.text + result.slice(p.endOffset);
+  return Buffer.from(result);
 }
 
 function requiredRange(value, label) {
@@ -175,6 +196,9 @@ export function compareElementScopedMutation({
   expectedAfterExcludes = [],
   expectedBeforeExcludes = expectedAfterContains,
   expectedAppendedPattern,
+  expectedFreshStableIdCount,
+  allowAttributeOrderOnly = false,
+  allowSpanAttributeOrder = false,
 } = {}) {
   assertPolicy(normalizationPolicy);
   if (!(expectedAppendedPattern instanceof RegExp)) {
@@ -199,17 +223,38 @@ export function compareElementScopedMutation({
     afterElement.contentByteRange.end,
   );
   const beforeElementText = beforeElementBytes.toString("utf8");
-  const relative = relativeChangedRange(beforeElementBytes, afterElementBytes);
-  const appendedBytes = afterElementBytes.subarray(relative.after.start, relative.after.end);
+  const rawRelative = relativeChangedRange(beforeElementBytes, afterElementBytes);
+  const checkedBefore = allowAttributeOrderOnly || allowSpanAttributeOrder ? attributeOrderOnly(beforeElementBytes, allowSpanAttributeOrder) : beforeElementBytes;
+  const checkedAfter = allowAttributeOrderOnly || allowSpanAttributeOrder ? attributeOrderOnly(afterElementBytes, allowSpanAttributeOrder) : afterElementBytes;
+  let relative = relativeChangedRange(checkedBefore, checkedAfter);
+  if (relative.before.start === relative.before.end) {
+    // Shared delimiter bytes can rotate a minimal insertion: inserting <br>
+    // before </span> otherwise looks like "br>...<". Align only to a unique
+    // declared insertion whose removal restores every baseline byte.
+    const text = checkedAfter.toString("utf8");
+    const pattern = new RegExp(expectedAppendedPattern.source,
+      expectedAppendedPattern.flags.replace(/[gy]/gu, "") + "g");
+    const candidates = [];
+    for (const match of text.matchAll(pattern)) {
+      if (!match[0].length) continue;
+      const start = Buffer.byteLength(text.slice(0, match.index));
+      const end = start + Buffer.byteLength(match[0]);
+      if (Buffer.concat([checkedAfter.subarray(0, start), checkedAfter.subarray(end)]).equals(checkedBefore))
+        candidates.push({ before: { start, end: start }, after: { start, end } });
+    }
+    if (candidates.length === 1) relative = candidates[0];
+  }
+  const appendedBytes = checkedAfter.subarray(relative.after.start, relative.after.end);
   const appendedText = appendedBytes.toString("utf8");
   const appendedStableIds = [...appendedText.matchAll(
     /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
   )].map((match) => match[1]);
-  const expectedFreshStableIdCount = [
+  const resolvedFreshStableIdCount = Number.isInteger(expectedFreshStableIdCount)
+    && expectedFreshStableIdCount >= 0 ? expectedFreshStableIdCount : [
     SOURCE_SCOPE_POLICIES.TEXT_NEWLINE,
     SOURCE_SCOPE_POLICIES.TEXT_FORMAT,
   ].includes(normalizationPolicy) ? 1 : 0;
-  const freshStableIdsValid = appendedStableIds.length === expectedFreshStableIdCount
+  const freshStableIdsValid = appendedStableIds.length === resolvedFreshStableIdCount
     && new Set(appendedStableIds).size === appendedStableIds.length
     && appendedStableIds.every((id) => !beforeElement.sourceIndex.byPagerootId.has(id));
   const sourceIdentityValid = beforeElement.sourceIndex.pagerootIdentity?.valid === true
@@ -239,7 +284,7 @@ export function compareElementScopedMutation({
     appendedShapeValid,
     sourceIdentityValid,
     freshStableIdsValid,
-    expectedFreshStableIdCount,
+    expectedFreshStableIdCount: resolvedFreshStableIdCount,
     appendedStableIds,
     identityIssueCodes: [
       ...(beforeElement.sourceIndex.pagerootIdentity?.issues || []),
@@ -247,6 +292,8 @@ export function compareElementScopedMutation({
     ].map((issue) => issue.code),
     expectedAppendedPattern: expectedAppendedPattern.source,
     normalizationPolicy,
+    attributeOrderOnly: allowAttributeOrderOnly,
+    spanAttributeOrder: allowSpanAttributeOrder,
     sourceId,
     unexpectedBefore,
     missingExpected,
@@ -257,12 +304,12 @@ export function compareElementScopedMutation({
     },
     changedRanges: {
       before: {
-        start: beforeElement.contentByteRange.start + relative.before.start,
-        end: beforeElement.contentByteRange.start + relative.before.end,
+        start: beforeElement.contentByteRange.start + rawRelative.before.start,
+        end: beforeElement.contentByteRange.start + rawRelative.before.end,
       },
       after: {
-        start: afterElement.contentByteRange.start + relative.after.start,
-        end: afterElement.contentByteRange.start + relative.after.end,
+        start: afterElement.contentByteRange.start + rawRelative.after.start,
+        end: afterElement.contentByteRange.start + rawRelative.after.end,
       },
     },
     elementRanges: {

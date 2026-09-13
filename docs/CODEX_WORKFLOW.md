@@ -28,11 +28,17 @@ HTTPS endpoint with a session Token and never grants the model filesystem access
 
 ## Validation handoff and instruction scope
 
+Worker handoffs use `CODEX_SUBAGENT_ROUTING_WORKSHEET.md` section 5.3: settle key
+assumptions before delegation and pass the execution agreement in the request.
+Workers handle local details without an approval round trip; the root resolves
+reported blockers within existing authorization and completes agreed acceptance.
+
 The implementing agent runs short edit-time checks and returns the tested source,
 commands and results. The assigned tester owns task-level gates and version-bound
 reports. The root agent reviews the diff, coverage and underlying evidence; it
-requests additional execution only for changed source, missing coverage, failure
-or a specific unresolved risk. Follow the applicable session's tester routing.
+reuses evidence when source, configuration, environment and validation scope still
+apply, and repeats only affected checks for relevant changes, missing coverage,
+failure or a specific unresolved risk. Follow the applicable session's tester routing.
 `task:finish` already runs `gate:task`; do not run both as separate completion gates.
 Required local, Draft, Ready and release boundaries remain distinct and mandatory.
 
@@ -43,8 +49,10 @@ local workspace may expose convenience symlinks to these exact paths, but must
 not keep editable copies or become a source fallback. This keeps the primary
 checkout, isolated worktrees, CI and fresh clones on the same configuration.
 
-When handing off to a fresh agent, include the applicable user constraints and
-routing explicitly with the checkout, scope and acceptance criteria. Preserve
+When handing off to a fresh agent, pass the applicable user constraints, checkout,
+source identity including relevant uncommitted changes, scope and acceptance.
+The root associates routing evidence with the task; children do not prove their
+own model. Preserve
 the user's root model; missing local configuration does not authorize
 substitution. Do not copy the whole parent conversation.
 
