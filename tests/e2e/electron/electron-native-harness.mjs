@@ -615,6 +615,17 @@ export async function readRuntimeHandoffSnapshot(page) {
   }
 }
 
+/**
+ * Keep Candidate-lifecycle fixtures on the rebuild path. Proven structural
+ * copy/delete/insert/move stay in-place by default (ADR 0074); tests that
+ * still need a Candidate must opt out explicitly.
+ */
+export async function disableStructuralInPlace(page) {
+  await page.evaluate(() => {
+    window.__PAGEROOT_DISABLE_STRUCTURAL_IN_PLACE__ = true;
+  });
+}
+
 export async function waitForRuntimeHandoffSettled(page, options = {}) {
   const normalizedOptions = normalizeRuntimeHandoffWaitOptions(options);
   let latestSnapshot = emptyRuntimeHandoffSnapshot();

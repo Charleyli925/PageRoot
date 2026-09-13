@@ -12,6 +12,7 @@ import path from "node:path";
 
 import {
   currentEditorFrame,
+  disableStructuralInPlace,
   documentToken,
   expect,
   expectCheckpointPersisted,
@@ -2453,6 +2454,7 @@ async function runStaleCandidateFence({
   );
   const copyButton = editorFor(page).getByRole("button", { name: "复制元素", exact: true });
   await expect(copyButton).toBeEnabled();
+  await disableStructuralInPlace(page);
   const beforeIds = directSiblingStableIds(workingCopyPath, copyEntry.elementId);
   const beforeRevision = await currentRevision(page);
   await armRuntimeCommitHold(page);

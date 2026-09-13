@@ -10,6 +10,7 @@ import { expect } from "@playwright/test";
 import {
   closePageRootGracefully,
   currentEditorFrame,
+  disableStructuralInPlace,
   launchPageRoot,
   managedWorkingCopyPath,
   removeIsolatedUserData,
@@ -249,6 +250,7 @@ async function race() {
     behavior: "structure-rebuild", operation: "rapid-copy-copy",
   });
   await selectFixedTarget();
+  await disableStructuralInPlace(session.page);
   const button = editor.getByRole("button", { name: "复制元素", exact: true });
   fail(await button.count() === 1 && await button.isEnabled(), "SPECIALIZED_COPY_BUTTON_UNAVAILABLE");
   await button.evaluate(element => { element.click(); element.click(); });

@@ -82,6 +82,20 @@ export function bindFrozenCopy(beforeBytes, afterBytes, target) {
 }
 
 export function verifyFrozenStructureLifecycle({ path, before, after, sourceHash, records }) {
+  if (path === "in-place") {
+    const conditions = {
+      knownPath: true,
+      documentUnchanged: Boolean(before.documentId && after.documentId && before.documentId === after.documentId),
+      generationUnchanged: Number(before.generation) > 0 && Number(after.generation) === Number(before.generation),
+      sourceMatches: after.working === sourceHash && after.displayed === sourceHash,
+      candidateAbsent: !records.some(row => row.kind === "candidate-created" || row.kind === "candidate-terminal"),
+      terminalReady: after.phase === "settled" || after.phase === "static",
+    };
+    failUnless(Object.values(conditions).every(Boolean), "FROZEN_STRUCTURE_IN_PLACE_INVALID", {
+      conditions, before, after,
+    });
+    return { conditions, generation: after.generation, runtime: "in-place" };
+  }
   if (path === "runtime-candidate") {
     const lifecycle = verifyFrozenHistory({ expectedPath: path, before,
       after: { ...after, path }, sourceHash, records });
@@ -308,8 +322,17 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
     await expect.poll(async () => !(await readSource()).equals(currentBytes), { timeout: 5_000 }).toBe(true);
     const afterBytes = await readSource(), source = verifySource(afterBytes);
     const sourceHash = `sha256:${frozenDigest(afterBytes)}`;
-    const settled = await waitForRuntimeHandoffSettled(page, { timeout: 7_000, expectedSourceRevision: sourceHash,
-      priorGeneration: Number(generation), requireGenerationAdvance: true });
+    await expect.poll(async () => editor.getAttribute("data-structural-projection-kind"), {
+      timeout: 5_000,
+    }).not.toBeNull();
+    const projectionKind = await editor.getAttribute("data-structural-projection-kind");
+    const inPlace = projectionKind === "in-place";
+    const settled = await waitForRuntimeHandoffSettled(page, {
+      timeout: 7_000,
+      expectedSourceRevision: sourceHash,
+      priorGeneration: Number(generation),
+      requireGenerationAdvance: !inPlace,
+    });
     const active = editor.locator('iframe[data-runtime-slot-role="active"]');
     failUnless(await active.count() === 1, "FROZEN_ACTIVE_FRAME_NOT_UNIQUE");
     frame = await (await active.elementHandle()).contentFrame();
@@ -317,10 +340,20 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
       const state = globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__;
       return [...state.records.slice(cursor.candidate), ...state.lifecycleRecords.slice(cursor.lifecycle)];
     }, cursor);
-    const runtime = verifyFrozenStructureLifecycle({ path: target.rebuildPath, before, sourceHash, records,
-      after: { documentId: await documentId(), generation: settled.activeFrameGeneration,
-        working: settled.workingProjectionSha256, displayed: settled.renderedProjectionSha256,
-        phase: settled.runtimeSurfacePhase, outcome: settled.runtimeSurfaceOutcome } });
+    const runtime = verifyFrozenStructureLifecycle({
+      path: inPlace ? "in-place" : target.rebuildPath,
+      before,
+      sourceHash,
+      records,
+      after: {
+        documentId: await documentId(),
+        generation: settled.activeFrameGeneration,
+        working: settled.workingProjectionSha256,
+        displayed: settled.renderedProjectionSha256,
+        phase: settled.runtimeSurfacePhase,
+        outcome: settled.runtimeSurfaceOutcome,
+      },
+    });
     currentBytes = afterBytes; generation = settled.activeFrameGeneration;
     return { source, runtime };
   };

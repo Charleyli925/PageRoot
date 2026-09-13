@@ -11,6 +11,7 @@ import {
   clickEditHistoryMenu,
   chooseClipboardDelivery,
   currentEditorFrame,
+  disableStructuralInPlace,
   existsSync,
   documentToken,
   expectCheckpointPersisted,
@@ -116,6 +117,7 @@ async function duplicateQueuedStaticWorkingHtml(page, sourcePath) {
   const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   await expect(editor).toHaveAttribute("data-render-verified", "true");
+  await disableStructuralInPlace(page);
   const frame = await currentEditorFrame(page);
   const target = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`).first();
   await target.click();
@@ -1648,6 +1650,7 @@ test("runtime handoff refreshes the Presentation Anchor after candidate-time scr
       sourcePath,
       "runtime-presentation-anchor",
     );
+    await disableStructuralInPlace(page);
     const reviewStage = page.locator(".review-scroll-stage");
     await frame.locator('[data-native-case="runtime-presentation-anchor"]').click();
     await reviewStage.evaluate((element) => {
@@ -1689,7 +1692,7 @@ test("runtime handoff refreshes the Presentation Anchor after candidate-time scr
   });
 });
 
-test("long-page element duplication uses the same visible runtime handoff", {
+test("long-page element duplication stays in the current Runtime document", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -1717,6 +1720,7 @@ test("long-page element duplication uses the same visible runtime handoff", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let frame = (await loadedDiskFrame(page, sourcePath, "runtime-duplicate")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
     await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 1");
     const reviewStage = page.locator(".review-scroll-stage");
     await frame.locator('[data-native-case="runtime-duplicate"]').click();
@@ -1726,20 +1730,18 @@ test("long-page element duplication uses the same visible runtime handoff", {
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
-    const duplicateBox = await duplicateButton.boundingBox();
-    expect(duplicateBox).not.toBeNull();
-    await armRuntimeHandoffSamples(page);
-    await page.mouse.click(
-      duplicateBox.x + duplicateBox.width / 2,
-      duplicateBox.y + duplicateBox.height / 2,
-    );
-    await assertRuntimeHandoff(page, {
-      requireActiveChrome: true,
-      assertVisualContinuity: true,
-    });
+    const beforeGeneration = await editor
+      .locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
+    await duplicateButton.click();
+    await expect.poll(() => editor.getAttribute("data-structural-projection-kind"))
+      .toBe("in-place");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="runtime-duplicate"]')).toHaveCount(2);
-    await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 2");
+    await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 1");
     const duplicateIds = await frame.locator('[data-native-case="runtime-duplicate"]')
       .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id")));
     expect(new Set(duplicateIds).size).toBe(2);
@@ -1748,20 +1750,14 @@ test("long-page element duplication uses the same visible runtime handoff", {
 
     const secondDuplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(secondDuplicateButton).toBeVisible();
-    const secondDuplicateBox = await secondDuplicateButton.boundingBox();
-    expect(secondDuplicateBox).not.toBeNull();
-    await armRuntimeHandoffSamples(page);
-    await page.mouse.click(
-      secondDuplicateBox.x + secondDuplicateBox.width / 2,
-      secondDuplicateBox.y + secondDuplicateBox.height / 2,
-    );
-    await assertRuntimeHandoff(page, {
-      requireActiveChrome: true,
-      assertVisualContinuity: true,
-    });
+    await secondDuplicateButton.click();
+    await expect.poll(() => editor.getAttribute("data-structural-projection-reason"))
+      .toBe("verified-insert");
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="runtime-duplicate"]')).toHaveCount(3);
-    await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 3");
+    await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 1");
     const secondDuplicateIds = await frame.locator('[data-native-case="runtime-duplicate"]')
       .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id")));
     expect(new Set(secondDuplicateIds).size).toBe(3);
@@ -1811,6 +1807,7 @@ test("overlapping edits promote only the latest Runtime without losing charts or
     "slow-module.js": "await new Promise((resolve) => setTimeout(resolve, 500));",
   }, async ({ page, sourcePath }) => {
     let frame = (await loadedDiskFrame(page, sourcePath, "runtime-supersession")).frame;
+    await disableStructuralInPlace(page);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     await expect(frame.locator("#supersession-chart canvas")).toHaveCount(1);
     await frame.locator('[data-native-case="runtime-supersession"]').click({
@@ -2210,6 +2207,7 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     const reviewStage = page.locator(".review-scroll-stage");
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     let frame = (await loadedDiskFrame(page, sourcePath, "runtime-latest-wins")).frame;
+    await disableStructuralInPlace(page);
     await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
     await reviewStage.evaluate((element) => {
       element.scrollTop = 480;
@@ -2818,6 +2816,7 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
       sourcePath,
       "runtime-candidate-failure",
     );
+    await disableStructuralInPlace(page);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     const lastKnownGoodSource = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     await frame.locator('[data-native-case="runtime-candidate-failure"]').click();
@@ -3080,6 +3079,7 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
     "runtime-report.html": html,
   }, async ({ page, sourcePath, sourceDirectory, electronApp }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-double-failure");
+    await disableStructuralInPlace(page);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     const oldSourceHash = buildSourceIndex((await readPublishedWorkingCopy(workingCopyPath, "utf8"))).sourceSha256;
     await frame.locator('[data-native-case="runtime-double-failure"]').click();
@@ -3227,6 +3227,7 @@ test("a failed structural candidate after in-place text editing promotes static 
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]'))
       .toHaveCount(0);
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+    await disableStructuralInPlace(page);
     frame = await currentEditorFrame(page);
     await frame.locator('[data-native-case="runtime-text-candidate-trigger"]').click();
     const duplicateButton = editor.getByRole("button", { name: "复制元素", exact: true });
@@ -3363,6 +3364,7 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
     const editor = page.getByTestId("html-canvas-editor");
     const surface = page.locator(".canvas-edit-surface");
     let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-commit-hold-edit");
+    await disableStructuralInPlace(page);
     await expect(editor).toHaveAttribute("data-render-verified", "true");
     await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
       .toBeTruthy();
@@ -3547,6 +3549,7 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
       sourcePath,
       "runtime-latest-intent-first",
     );
+    await disableStructuralInPlace(page);
     await expect(editor).toHaveAttribute("data-render-verified", "true");
     const lastKnownGoodBefore = await editor.getAttribute(
       "data-runtime-last-known-good-id",
@@ -3689,6 +3692,7 @@ test("ending an unchanged Native Edit cannot publish a pending source projection
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-stale-duplicate");
+    await disableStructuralInPlace(page);
     const editor = page.getByTestId("html-canvas-editor");
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     const revisionR0 = Number(await page.locator("[data-persist-state]").first()
@@ -3846,6 +3850,7 @@ test("a Candidate commit verification failure restores the visible Active", {
   }, async ({ page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
     let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-commit-verify-failure");
+    await disableStructuralInPlace(page);
     await expect(editor).toHaveAttribute("data-render-verified", "true");
     await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
       .toBeTruthy();
@@ -4354,6 +4359,7 @@ test("a current critical surface already ready wins before an overdue wait is re
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     const editor = page.getByTestId("html-canvas-editor");
     let frame = (await loadedDiskFrame(page, sourcePath, "surface-timeout-boundary")).frame;
+    await disableStructuralInPlace(page);
     await expect(frame.locator("#surface-timeout-host canvas")).toHaveCount(1);
     await page.evaluate(() => {
       window.__PAGEROOT_DELAY_READY_SURFACE__ = true;
