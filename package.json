@@ -121,7 +121,7 @@
     "tailwindcss": "4.3.3",
     "temp-file": "3.4.0",
     "typescript": "5.9.3",
-    "vinext": "0.2.1",
+    "vinext": "0.0.45",
     "vite": "8.2.2",
     "wrangler": "4.130.0"
   },
