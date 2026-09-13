@@ -202,7 +202,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
         () => window.htmlAIProjects?.getActiveProject(),
       ))?.sourcePath,
       { timeout: 30_000 },
-    ).toMatch(/\/qoder-startup-V1\.html$/u);
+    ).toMatch(/\/qoder-startup\.html$/u);
     const startupManagedSourcePath = await page.evaluate(async () => (
       await window.htmlAIProjects?.getActiveProject()
     )?.sourcePath || "");
@@ -219,7 +219,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
         () => window.htmlAIProjects?.getActiveProject(),
       ))?.sourcePath,
       { timeout: 30_000 },
-    ).toMatch(/\/qoder-live-V1\.htm$/u);
+    ).toMatch(/\/qoder-live\.htm$/u);
     const liveManagedSourcePath = await page.evaluate(async () => (
       await window.htmlAIProjects?.getActiveProject()
     )?.sourcePath || "");
@@ -254,7 +254,10 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
       }
       writeFileSync(file, JSON.stringify(staleManifest));
     }
-    expect(migratedMembers).toHaveLength(3);
+    // Current-draft projects keep one Working Copy per registered project;
+    // promoting the startup candidate replaces its current Working Copy
+    // instead of creating an additional historical member.
+    expect(migratedMembers).toHaveLength(2);
     electronApp = await electron.launch({
       executablePath: packagedApp.executable,
       cwd: productRoot,

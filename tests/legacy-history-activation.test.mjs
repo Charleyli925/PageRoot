@@ -3,7 +3,7 @@ import { readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
-import { fixture, html, importSource, promoteNextVersion } from "./project-file-repository-harness.mjs";
+import { fixture, html, importLegacySource, promoteNextVersion } from "./project-file-repository-harness.mjs";
 import { seedLegacyHistoryActivation } from "./helpers/legacy-history-activation.mjs";
 
 async function diskBytes(root, relative = "") {
@@ -18,7 +18,7 @@ async function diskBytes(root, relative = "") {
 
 test("retired history commands reject before source reconciliation or registered-root repair", async (t) => {
   const value = await fixture(t);
-  const { target } = await importSource(value);
+  const { target } = await importLegacySource(value, "legacy.html", html("V1"));
   const active = await promoteNextVersion(value.repository, target, "legacy_v2");
   await writeFile(active.exactSourcePath, html("external predecessor edit"));
   const replay = { target: active, versionId: "ver_0001", operationId: "retired_history_0001", expectedActiveWorkingCopyId: "work_ver_0002" };
@@ -39,7 +39,7 @@ test("retired history commands reject before source reconciliation or registered
 
 test("legacy receipt replays across restart and rejects mismatched identity without changing disk", async (t) => {
   const value = await fixture(t);
-  const { target } = await importSource(value);
+  const { target } = await importLegacySource(value, "legacy.html", html("V1"));
   const active = await promoteNextVersion(value.repository, target, "legacy_v2");
   const replay = await seedLegacyHistoryActivation({ target: active, versionId: "ver_0001", operationId: "legacy_replay_0001", expectedActiveWorkingCopyId: "work_ver_0002" });
   const repository = new ProjectFileRepository({ projectsRoot: value.projects });
@@ -91,7 +91,7 @@ test("legacy receipt replays across restart and rejects mismatched identity with
 
 test("legacy replay still rejects tampered immutable snapshots and missing Working Copies", async (t) => {
   const value = await fixture(t);
-  const { target } = await importSource(value);
+  const { target } = await importLegacySource(value, "legacy.html", html("V1"));
   const active = await promoteNextVersion(value.repository, target, "legacy_v2");
   const replay = await seedLegacyHistoryActivation({ target: active, versionId: "ver_0001", operationId: "legacy_integrity_0001", expectedActiveWorkingCopyId: "work_ver_0002" });
   const snapshotPath = path.join(active.projectRootPath, ".pageroot/versions/ver_0001/index.html");

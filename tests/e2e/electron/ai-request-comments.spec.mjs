@@ -53,7 +53,7 @@ test("opening a pre-v4 project imports its HTML as a new v4 V1", async () => {
         ? active
         : null;
     }, { timeout: 45_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/supplement-ai-loop-V1\.html$/u),
+      sourcePath: expect.stringMatching(/\/supplement-ai-loop\.html$/u),
     });
     const active = await launched.page.evaluate(
       async () => await window.htmlAIProjects?.getActiveProject(),

@@ -15,6 +15,8 @@ import {
   normalizeWorkspacePatch,
   readUiPreferences,
   recordUiWorkspacePreferences,
+  readLastExportDirectory,
+  recordLastExportDirectory,
 } from "../desktop/ui-preferences.mjs";
 
 const DEFAULT_WORKSPACE = {
@@ -36,6 +38,24 @@ async function temporaryUserData(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
+
+test("native export directory shares atomic preference writes without renderer path access", async (t) => {
+  const userDataPath = await temporaryUserData(t);
+  const directoryPath = path.join(userDataPath, "Exports");
+  await Promise.all([
+    recordLastExportDirectory({ userDataPath, directoryPath }),
+    recordUiWorkspacePreferences({ userDataPath, workspace: { sidebarWidth: 320 } }),
+  ]);
+  assert.equal(await readLastExportDirectory({ userDataPath }), directoryPath);
+  const snapshot = await readUiPreferences({ userDataPath });
+  assert.equal(snapshot.workspace.sidebarWidth, 320);
+  assert.equal("desktop" in snapshot, false);
+  assert.throws(() => normalizeWorkspacePatch({ lastExportDirectory: directoryPath }), /未知字段/);
+  await recordUiWorkspacePreferences({ userDataPath, workspace: { motion: "reduced" } });
+  assert.equal(await readLastExportDirectory({ userDataPath }), directoryPath);
+  const persisted = JSON.parse(await readFile(path.join(userDataPath, "ui-preferences.json"), "utf8"));
+  assert.deepEqual(persisted.desktop, { lastExportDirectory: directoryPath });
+});
 
 test("missing, damaged, and oversized UI preferences use safe workspace defaults", async (t) => {
   const userDataPath = await temporaryUserData(t);

@@ -746,13 +746,17 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeVisible();
     await expect(moreMenu.getByRole("menuitem", { name: "在默认浏览器中打开" })).toBeVisible();
     await expect(moreMenu.getByRole("menuitem", { name: "导出当前 HTML…" })).toBeVisible();
-    await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeFocused();
+    const saveVersionItem = moreMenu.getByRole("menuitem", { name: "保存为新版本", exact: true });
+    await expect(saveVersionItem).toBeVisible();
+    await expect(saveVersionItem).toBeFocused();
     await launched.page.keyboard.press("Tab");
     await expect(moreMenu).toHaveCount(0);
     await expect(moreButton).toBeFocused();
 
     await moreButton.click();
     await expect(moreMenu).toBeVisible();
+    await expect(saveVersionItem).toBeFocused();
+    await launched.page.keyboard.press("ArrowDown");
     await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeFocused();
     await launched.page.keyboard.press("ArrowDown");
     await expect(moreMenu.getByRole("menuitem", { name: "在默认浏览器中打开" })).toBeFocused();

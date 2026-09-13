@@ -85,7 +85,7 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
       },
       { timeout: 20_000 },
     ).toBe(true);
-    expect(path.basename(managedWelcomePath)).toBe("欢迎来到源页-V1.html");
+    expect(path.basename(managedWelcomePath)).toBe("欢迎来到源页.html");
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
     const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true });
@@ -108,7 +108,7 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     expect(manifest.workingCopies).toEqual(expect.arrayContaining([
       expect.objectContaining({
         workingCopyId: "work_ver_0001",
-        sourceRelativePath: "欢迎来到源页-V1.html",
+        sourceRelativePath: "欢迎来到源页.html",
       }),
     ]));
     const originalWelcome = readFileSync(welcomePath);
@@ -249,6 +249,8 @@ test("Electron retries a managed Working Copy activation after the first respons
       }
     }, {
       ...payload,
+      versionId: workspace.target.versionId,
+      expectedSha256: workspace.sourceSha256,
       operationId: "e2e_managed_activation_stale_0001",
     });
     const stateAfterStaleAttempt = JSON.parse(readFileSync(
@@ -257,7 +259,7 @@ test("Electron retries a managed Working Copy activation after the first respons
     ));
     expect(staleOperation).toMatchObject({
       inputOperationId: "e2e_managed_activation_stale_0001",
-      message: "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+      message: "项目记录无法确认这个托管工作文件，当前文件没有切换。",
     });
     expect(stateAfterStaleAttempt.lastManagedActivation?.operationId).toBe(payload.operationId);
   } finally {
@@ -529,7 +531,11 @@ test("Electron rejects managed and generated pending activations after productio
     const beforeRename = JSON.parse(readFileSync(statePath, "utf8"));
     const predecessorGeneration = Number(beforeRename.activeEffectGeneration || 0);
     const predecessorEffect = beforeRename.activeEffect || null;
-    const pathB = realpathSync(targetB.exactSourcePath);
+    // Current-draft adoption keeps the managed file at A. Keep a durable
+    // decoy destination for the pending receipt so the later A-C-A rename can
+    // prove that the stale operation is rejected before Bridge lookup.
+    const pathB = path.join(path.dirname(pathA), "rename-activation-aba-pending.html");
+    writeFileSync(pathB, readFileSync(targetB.exactSourcePath), "utf8");
     const managedOperationId = "e2e_rename_managed_pending_0001";
     const generatedOperationId = "e2e_rename_generated_pending_0001";
     const managedReceipt = {
@@ -589,7 +595,7 @@ test("Electron rejects managed and generated pending activations after productio
         stem: "rename-activation-aba-C",
         expectedSha256,
       })
-    ), { sourcePath: pathA, expectedSha256: workspaceA.sourceSha256 });
+    ), { sourcePath: pathA, expectedSha256: targetB.sourceSha256 });
     const renamedA = await launched.page.evaluate(async ({ sourcePath, expectedSha256 }) => (
       window.htmlAIProjects.renameHtml({
         operationId: "e2e_rename_activation_c_to_a_0001",
@@ -597,14 +603,17 @@ test("Electron rejects managed and generated pending activations after productio
         stem: "rename-activation-aba-V1",
         expectedSha256,
       })
-    ), { sourcePath: renamedC.sourcePath, expectedSha256: workspaceA.sourceSha256 });
-    expect(sameDesktopSourcePath(renamedA.sourcePath, pathA)).toBe(true);
+    ), { sourcePath: renamedC.sourcePath, expectedSha256: targetB.sourceSha256 });
+    expect(path.basename(renamedA.sourcePath)).toBe("rename-activation-aba-V1.html");
+    // Keep the receipt's old predecessor path resolvable while ensuring it is
+    // no longer the active path after the second rename.
+    writeFileSync(pathA, readFileSync(renamedA.sourcePath), "utf8");
 
     await stopPageRoot(launched.electronApp, launched.isolatedUserData, { cleanup: false });
     if (existsSync(workbenchTabsPath)) unlinkSync(workbenchTabsPath);
     launched = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
     await waitForProjectReady(launched.page);
-    await waitForActiveSourcePath(launched.page, pathA);
+    await waitForActiveSourcePath(launched.page, renamedA.sourcePath);
     const retry = await launched.page.evaluate(async ({ managed, generated }) => {
       const attempt = async (run) => {
         try {
@@ -642,7 +651,7 @@ test("Electron rejects managed and generated pending activations after productio
     expect(retry.managed).toEqual({ ok: false, code: "ACTIVATION_OPERATION_NOT_COMMITTED" });
     expect(retry.generated).toEqual({ ok: false, code: "ACTIVATION_OPERATION_NOT_COMMITTED" });
     const after = JSON.parse(readFileSync(statePath, "utf8"));
-    expect(sameDesktopSourcePath(after.activePath, pathA)).toBe(true);
+    expect(sameDesktopSourcePath(after.activePath, renamedA.sourcePath)).toBe(true);
     expect(after.activeEffect).toBeNull();
     expect(after.activeEffectGeneration).toBe(predecessorGeneration + 2);
     expect(after.activationReceipts).toEqual(expect.arrayContaining([
@@ -677,18 +686,6 @@ test("Electron replays a completed activation only while its exact destination r
       candidateId: candidateB.candidate.candidateId,
       decisionOperationId: `promote_${candidateB.candidate.candidateId}`,
     })).target;
-    const candidateC = await repository.createCandidate({
-      target: targetB,
-      requestId: "req_e2e_active_receipt_c",
-      candidateId: "candidate_e2e_active_receipt_c_0001",
-      html: identityPreservingCandidateHtml(targetB, "Active receipt C"),
-      expectedSourceSha256: targetB.sourceSha256,
-    });
-    const targetC = (await repository.promoteCandidate({
-      target: targetB,
-      candidateId: candidateC.candidate.candidateId,
-      decisionOperationId: `promote_${candidateC.candidate.candidateId}`,
-    })).target;
     const payloadFor = (previousTarget, nextTarget, operationId) => ({
       previousSourcePath: previousTarget.exactSourcePath,
       nextSourcePath: nextTarget.exactSourcePath,
@@ -701,11 +698,28 @@ test("Electron replays a completed activation only while its exact destination r
       operationId,
     });
     const x = payloadFor(firstWorkspace.target, targetB, "e2e_active_receipt_x_0001");
-    const y = payloadFor(targetB, targetC, "e2e_active_receipt_y_0001");
     const first = await launched.page.evaluate((input) => (
       window.htmlAIProjects.activateManagedWorkingCopy(input)
     ), x);
     expect(sameDesktopSourcePath(first.sourcePath, targetB.exactSourcePath)).toBe(true);
+
+    // Current-draft adoption keeps one editable Working Copy and advances its
+    // Version identity in place. Create the newer active effect only after X
+    // has committed so replaying X exercises the same receipt fence without
+    // pretending historical Working Copies are still activation targets.
+    const candidateC = await repository.createCandidate({
+      target: targetB,
+      requestId: "req_e2e_active_receipt_c",
+      candidateId: "candidate_e2e_active_receipt_c_0001",
+      html: identityPreservingCandidateHtml(targetB, "Active receipt C"),
+      expectedSourceSha256: targetB.sourceSha256,
+    });
+    const targetC = (await repository.promoteCandidate({
+      target: targetB,
+      candidateId: candidateC.candidate.candidateId,
+      decisionOperationId: `promote_${candidateC.candidate.candidateId}`,
+    })).target;
+    const y = payloadFor(targetB, targetC, "e2e_active_receipt_y_0001");
     await launched.page.evaluate((input) => (
       window.htmlAIProjects.activateManagedWorkingCopy(input)
     ), y);
@@ -780,7 +794,7 @@ test("Electron replays a completed activation only while its exact destination r
   }
 });
 
-test("Electron Finder reveals verified project, visible Version Working Copy and derived AI task", async () => {
+test("Electron Finder reveals the current draft and derived AI task while history stays immutable", async () => {
   test.setTimeout(120_000);
   const source = createSourceFixture("finder-derived-projections.html");
   const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
@@ -793,7 +807,7 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
     const projectsRoot = path.dirname(path.dirname(initialWorkingCopyPath));
     const repository = new ProjectFileRepository({ projectsRoot });
     let active = (await repository.workspace({ sourcePath: initialWorkingCopyPath })).target;
-    let v2Target = null;
+    const initialIdentity = { projectId: active.projectId, documentId: active.documentId, workingCopyId: active.workingCopyId, exactSourcePath: active.exactSourcePath };
     for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
       const candidate = await repository.createCandidate({
         target: active,
@@ -807,16 +821,17 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
         candidateId: candidate.candidate.candidateId,
         decisionOperationId: `promote_${candidate.candidate.candidateId}`,
       })).target;
-      if (ordinal === 2) v2Target = active;
+      expect(active).toMatchObject(initialIdentity);
     }
-    expect(v2Target?.workingCopyId).toBe("work_ver_0002");
-    const continued = await repository.replayHistoryVersionActivation(await seedLegacyHistoryActivation({
-      target: active,
-      versionId: "ver_0002",
-      operationId: "e2e_finder_continue_v2_0001",
-      expectedActiveWorkingCopyId: "work_ver_0006",
-    }));
-    const desktopV2 = await launched.page.evaluate((payload) => (
+    const historicalV2 = await repository.readVersionFile({ target: active, versionId: "ver_0002" });
+    const created = await repository.createVersionFromHistory({
+      target: active, versionId: "ver_0002", operationId: "e2e_finder_from_v2_0001",
+      expectedSourceSha256: active.sourceSha256, expectedSnapshotSha256: historicalV2.sha256,
+    });
+    expect(created).toMatchObject({ versionId: "ver_0007", basedOnVersionId: "ver_0002", previousVersionId: "ver_0006" });
+    const continued = await repository.workspace({ sourcePath: created.sourcePath });
+    expect(continued.target).toMatchObject(initialIdentity);
+    const desktopCurrent = await launched.page.evaluate((payload) => (
       window.htmlAIProjects.activateManagedWorkingCopy(payload)
     ), {
       previousSourcePath: initialWorkingCopyPath,
@@ -827,25 +842,17 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
       workingCopyId: continued.target.workingCopyId,
       versionId: continued.target.versionId,
       projectRootPath: continued.target.projectRootPath,
-      operationId: continued.historyActivation.operationId,
+      operationId: created.operationId,
     });
-    expect(desktopV2.sourcePath).toBe(realpathSync(continued.target.exactSourcePath));
-    await repository.confirmVersionWorkingCopyActivation({
-      target: active,
-      operationId: continued.historyActivation.operationId,
-      previousWorkingCopyId: "work_ver_0006",
-      activatedWorkingCopyId: "work_ver_0002",
-      versionId: "ver_0002",
-    });
-
-    const revealedVersion = await launched.page.evaluate((sourcePath) => (
-      window.htmlAIProjects.revealVersionFile({ sourcePath, versionId: "ver_0002" })
-    ), desktopV2.sourcePath);
-    expect(revealedVersion.versionPath).toBe(realpathSync(v2Target.exactSourcePath));
-    expect(revealedVersion.versionPath.includes(`${path.sep}.pageroot${path.sep}`)).toBe(false);
+    expect(desktopCurrent.sourcePath).toBe(realpathSync(initialWorkingCopyPath));
+    const shownCurrent = await launched.page.evaluate((sourcePath) => (
+      window.htmlAIProjects.showInFolder(sourcePath)
+    ), desktopCurrent.sourcePath);
+    expect(shownCurrent.sourcePath).toBe(realpathSync(initialWorkingCopyPath));
+    expect((await repository.readVersionFile({ target: continued.target, versionId: "ver_0002" })).content).toBe(historicalV2.content);
     const openedRoot = await bridgeJson(launched.page, "/open-folder", {
       method: "POST",
-      body: { sourcePath: desktopV2.sourcePath },
+      body: { sourcePath: desktopCurrent.sourcePath },
     });
     expect(openedRoot.status).toBe(200);
     expect(openedRoot.body.path).toBe(continued.target.projectRootPath);
@@ -858,10 +865,10 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
       expectedSourceSha256: continued.target.sourceSha256,
       request: {
         freezeCutoffRevision: 0,
-        summary: "从历史 Version 2 生成待审阅的 Version 7",
+        summary: "从历史 Version 2 生成待审阅的 Version 8",
         comments: [{
           commentId: "comment_e2e_history_candidate",
-          text: "从历史 Version 2 生成待审阅的 Version 7",
+          text: "从历史 Version 2 生成待审阅的 Version 8",
           target: { targetId: "target_e2e_history_candidate" },
           attachments: [],
         }],
@@ -872,15 +879,15 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
     });
     const processingTask = await launched.page.evaluate((sourcePath) => (
       window.htmlAIProjects.revealAiTask({ sourcePath })
-    ), desktopV2.sourcePath);
-    expect(processingTask.aiTaskPath).toMatch(/\/AI任务\/\d{4}-\d{2}-\d{2}-候选版本7$/u);
+    ), desktopCurrent.sourcePath);
+    expect(processingTask.aiTaskPath).toMatch(/\/AI任务\/\d{4}-\d{2}-\d{2}-候选版本8$/u);
     expect(processingTask.aiTaskPath.includes(`${path.sep}.pageroot${path.sep}`)).toBe(false);
     expect(readFileSync(path.join(processingTask.aiTaskPath, "PROMPT.md"), "utf8"))
       .toBe("# E2E AI task\n\n只生成候选 HTML。\n");
 
     const candidateHtml = identityPreservingCandidateHtml(
       continued.target,
-      "Finder V7 Candidate",
+      "Finder V8 Candidate",
     );
     const completed = await repository.completeRequest({
       target: continued.target,
@@ -891,7 +898,7 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
     expect(completed.status).toBe("candidate-ready");
     const readyTask = await launched.page.evaluate((sourcePath) => (
       window.htmlAIProjects.revealAiTask({ sourcePath })
-    ), desktopV2.sourcePath);
+    ), desktopCurrent.sourcePath);
     const readyProjection = await repository.materializeAiTaskProjection({
       target: continued.target,
       requestId,
@@ -904,7 +911,7 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
     writeFileSync(readyProjection.candidatePath, "<!doctype html><html><head><title>tampered</title></head><body><p>tampered</p></body></html>", "utf8");
     const rebuiltTask = await launched.page.evaluate((sourcePath) => (
       window.htmlAIProjects.revealAiTask({ sourcePath })
-    ), desktopV2.sourcePath);
+    ), desktopCurrent.sourcePath);
     expect(rebuiltTask.aiTaskPath).not.toBe(realpathSync(readyProjection.taskPath));
     const hiddenCandidate = await repository.readCandidate({
       target: continued.target,
@@ -917,9 +924,9 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
       decisionOperationId: `promote_${request.candidateId}`,
     });
     expect(promoted.version).toMatchObject({
-      versionId: "ver_0007",
-      basedOnVersionId: "ver_0002",
-      previousVersionId: "ver_0006",
+      versionId: "ver_0008",
+      basedOnVersionId: "ver_0007",
+      previousVersionId: "ver_0007",
     });
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
@@ -1082,7 +1089,9 @@ test("Electron v4 registry recovers Finder rename and isolates duplicate project
       candidateId: candidate.candidate.candidateId,
       decisionOperationId: `promote_${candidate.candidate.candidateId}`,
     });
-    expect(path.basename(promoted.target.exactSourcePath)).toBe("Finder-B-V2-V2-V2-V2.html");
+    expect(promoted.target.exactSourcePath).toBe(workspace.target.exactSourcePath);
+    expect(promoted.target.workingCopyId).toBe(workspace.target.workingCopyId);
+    expect(promoted.target.versionId).toBe("ver_0002");
     expect(readFileSync(userFile, "utf8")).toBe("user file must not be overwritten");
     expect(readdirSync(userDirectory)).toEqual([]);
     expect(readFileSync(userSymlinkTarget, "utf8")).toBe("user symlink target");
@@ -1096,7 +1105,7 @@ test("Electron v4 registry recovers Finder rename and isolates duplicate project
   }
 });
 
-test("Electron keeps managed V1 identity in the selected tab and retires title-bar rename", {
+test("Electron keeps managed current draft identity in the selected tab and retires title-bar rename", {
   tag: ["@gate-smoke","@smoke-project-lifecycle"],
 }, async () => {
   const launched = await launchPageRoot();
@@ -1119,7 +1128,7 @@ test("Electron keeps managed V1 identity in the selected tab and retires title-b
       },
       { timeout: 20_000 },
     ).toBe(true);
-    expect(path.basename(managedOriginalPath)).toBe("欢迎来到源页-V1.html");
+    expect(path.basename(managedOriginalPath)).toBe("欢迎来到源页.html");
     const projectRoot = path.dirname(managedOriginalPath);
     const originalBytes = readFileSync(externalOriginalPath);
     const originalManifest = JSON.parse(readFileSync(
@@ -1128,7 +1137,7 @@ test("Electron keeps managed V1 identity in the selected tab and retires title-b
     ));
     const projectId = originalManifest.projectId;
 
-    await expect(titleStemLocator(launched.page)).toHaveText("欢迎来到源页-V1.html");
+    await expect(titleStemLocator(launched.page)).toHaveText("欢迎来到源页.html");
     await expect(launched.page.getByRole("button", { name: /重命名文件/u }))
       .toHaveCount(0);
     await expect(launched.page.getByRole("textbox", { name: "文件名（不含后缀）" }))
@@ -1167,7 +1176,7 @@ test("Electron keeps managed V1 identity in the selected tab and retires title-b
     expect(currentManifest.workingCopies).toEqual(expect.arrayContaining([
       expect.objectContaining({
         workingCopyId: "work_ver_0001",
-        sourceRelativePath: "欢迎来到源页-V1.html",
+        sourceRelativePath: "欢迎来到源页.html",
         preferredFileStem: "欢迎来到源页",
         preferredExtension: ".html",
       }),

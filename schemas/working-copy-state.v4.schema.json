@@ -28,6 +28,7 @@
     "workingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
     "basedOnVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
     "baseSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "snapshotBaselineSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "currentSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "differsFromBase": { "type": "boolean" },
     "draftId": { "type": "string", "minLength": 1 },

@@ -168,11 +168,13 @@ for (const adopt of [true, false]) {
       await expect.poll(() => JSON.parse(readFileSync(manifestPath, "utf8")).versions.length)
         .toBe(adopt ? 2 : 1);
       const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-      expect(manifest.workingCopies).toHaveLength(adopt ? 2 : 1);
+      // Adoption creates the next immutable Version while keeping the one
+      // project-scoped current draft and its Working Copy in place.
+      expect(manifest.workingCopies).toHaveLength(1);
       expect(readFileSync(request.sourcePath).equals(frozenInput)).toBe(true);
       expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
       await expect.poll(() => launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject()))
-        .toMatchObject({ sourcePath: adopt ? expect.stringMatching(/-V2\.html$/u) : request.sourcePath });
+        .toMatchObject({ sourcePath: request.sourcePath });
       const active = await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
       expect(readFileSync(active.sourcePath).equals(frozenInput)).toBe(true);
       if (adopt) await expect(launched.page.locator(".comment-card")).toHaveCount(0);

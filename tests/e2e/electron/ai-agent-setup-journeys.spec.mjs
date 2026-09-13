@@ -290,7 +290,7 @@ test("Codex authenticated component failure repairs in Settings, then reviews an
     await sidebar.getByRole("button", { name: "查看修改" }).click();
     await adoptReadyResult(launched.page);
     await expect.poll(async () => (await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject()))?.sourcePath)
-      .toMatch(/-V2\.html$/u);
+      .toMatch(/\/codex-recovery-journey\.html$/u);
     const first = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
     await loadedDiskFrame(launched.page, first.sourcePath);
     await addComment(launched.page, first.sourcePath, "继续调整标题。");

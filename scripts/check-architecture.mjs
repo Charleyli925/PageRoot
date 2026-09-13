@@ -161,6 +161,7 @@ const APPROVED_PERSISTENCE_OWNERS = new Set([
   "bridge/ai-task-projection.mjs",
   "bridge/lifecycle-core.mjs",
   "bridge/project-file-repository.mjs",
+  "bridge/project-file-repository/current-draft.mjs",
   "bridge/project-file-repository/request-attachments.mjs",
   "bridge/project-file-repository/path-safety.mjs",
   "bridge/project-file-repository/source-binding.mjs",

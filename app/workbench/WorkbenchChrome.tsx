@@ -405,11 +405,13 @@ export function WorkbenchGlobalSidebar({
   currentProjectSourcePath,
   currentProjectVersions,
   activeVersionId,
+  currentDraftActive,
+  currentProjectBusy = false,
   projectRulesActive,
   onToggle,
   onOpenLocal,
-  onOpenCurrentVersion,
-  onOpenRegisteredVersion,
+  onOpenCurrentProject,
+  onOpenHistoryVersion,
   loadProjectVersions,
   versionStates,
   onRestoreWorkingCopy,
@@ -437,11 +439,13 @@ export function WorkbenchGlobalSidebar({
   currentProjectSourcePath: string | null;
   currentProjectVersions: readonly ProjectVersionSummary[];
   activeVersionId: string | null;
+  currentDraftActive: boolean;
+  currentProjectBusy?: boolean;
   projectRulesActive: boolean;
   onToggle: () => void;
   onOpenLocal: () => void;
-  onOpenCurrentVersion: (version: ProjectVersionSummary) => void;
-  onOpenRegisteredVersion: (
+  onOpenCurrentProject: (project: RegisteredProject) => void;
+  onOpenHistoryVersion: (
     project: RegisteredProject,
     version: ProjectVersionSummary,
   ) => void;
@@ -454,7 +458,7 @@ export function WorkbenchGlobalSidebar({
   updateBadgeLabel: string;
   onOpenAbout: () => void;
   onOpenSettings: () => void;
-  onOpenProjectRules: () => void;
+  onOpenProjectRules: (project: RegisteredProject) => void;
   onDownloadOrRestartUpdate: () => void;
   onResizeCommit?: (width: number) => void;
   openHtmlError?: string | null;
@@ -462,6 +466,7 @@ export function WorkbenchGlobalSidebar({
   const [storedExpansionState, setProjectExpansionState] = useState<ProjectExpansionState>(
     () => createProjectExpansionState(currentProjectId),
   );
+  const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
   const fallbackProjectLastUpdatedAt = useMemo(() => {
     const timestamps = currentProjectVersions
       .map((version) => Date.parse(String(version.modifiedAt || "")))
@@ -484,7 +489,7 @@ export function WorkbenchGlobalSidebar({
         registeredProjectRootPath: "",
         activeWorkingCopyId: null,
         activeSourcePath: currentProjectSourcePath,
-        currentBasedOnVersionId: activeVersionId,
+        currentBasedOnVersionId: null,
         latestOfficialVersionId: null,
         hasPendingCandidate: false,
         availability: currentProjectDocumentId && currentProjectSourcePath
@@ -497,7 +502,6 @@ export function WorkbenchGlobalSidebar({
     }
     return sortSidebarProjects([...byId.values()]);
   }, [
-    activeVersionId,
     currentProjectDocumentId,
     currentProjectId,
     currentProjectName,
@@ -535,6 +539,7 @@ export function WorkbenchGlobalSidebar({
     for (const project of otherProjects) {
       if (
         projectExpansionState.expandedProjectIds[project.projectId] === true
+        && expandedHistory[project.projectId] === true
         && !versionStates[project.projectId]
       ) {
         void loadImportedProject(project);
@@ -542,16 +547,11 @@ export function WorkbenchGlobalSidebar({
     }
   }, [
     otherProjects,
+    expandedHistory,
     loadImportedProject,
     projectExpansionState.expandedProjectIds,
     versionStates,
   ]);
-
-  const toggleOtherProject = useCallback((project: RegisteredProject) => {
-    const expanded = projectExpansionState.expandedProjectIds[project.projectId] === true;
-    setProjectExpansionState((state) => toggleProjectExpansion(state, project.projectId));
-    if (!expanded) void loadImportedProject(project);
-  }, [loadImportedProject, projectExpansionState]);
 
   const toggleProject = useCallback((projectId: string) => {
     setProjectExpansionState((state) => toggleProjectExpansion(state, projectId));
@@ -601,6 +601,11 @@ export function WorkbenchGlobalSidebar({
                 const isCurrentProject = project.projectId === currentProjectId;
                 const expanded = projectExpansionState.expandedProjectIds[project.projectId] === true;
                 const state = versionStates[project.projectId];
+                const historyExpanded = expandedHistory[project.projectId]
+                  ?? (isCurrentProject && Boolean(activeVersionId));
+                const currentSelected = isCurrentProject && currentDraftActive && !projectRulesActive;
+                const canOpenProject = isCurrentProject || project.availability === "ready";
+                const historyId = `sidebar-history-${project.projectId}`;
                 return (
                   <div className="sidebar-project-item" key={project.projectId}>
                     <button
@@ -608,65 +613,87 @@ export function WorkbenchGlobalSidebar({
                       type="button"
                       aria-expanded={expanded}
                       data-availability={project.availability}
-                      onClick={() => {
-                        if (isCurrentProject) toggleProject(project.projectId);
-                        else toggleOtherProject(project);
-                      }}
+                      onClick={() => toggleProject(project.projectId)}
                     >
                       <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={16} weight="regular" />
                       <span className="sidebar-project-name">{project.projectName}</span>
                     </button>
-                    {isCurrentProject ? (
-                      <button
-                        className="sidebar-project-rules-row"
-                        type="button"
-                        aria-current={projectRulesActive ? "page" : undefined}
-                        data-selected={projectRulesActive ? "true" : undefined}
-                        onClick={onOpenProjectRules}
-                      >
-                        <PencilSimpleIcon aria-hidden="true" size={16} weight="regular" />
-                        <span className="sidebar-project-rules-name">长期规则</span>
-                      </button>
-                    ) : null}
-                    {expanded && project.availabilityReason && !(project.availability === "ready" && project.sourceStatus === "unknown") ? (
-                      <div className="sidebar-project-load-error" role="status">
-                        <span>{project.availabilityReason}</span>
-                        {project.canRestoreWorkingCopy ? (
-                          <button type="button" onClick={() => void onRestoreWorkingCopy?.(project.projectId)}>恢复工作文件</button>
-                        ) : project.sourceStatus !== "external-change" ? (
-                          <button type="button" onClick={onRecheckProjects}>重新检查文件</button>
+                    {expanded ? (
+                      <div className="sidebar-project-contents">
+                        <button
+                          className="sidebar-project-rules-row"
+                          type="button"
+                          aria-current={isCurrentProject && projectRulesActive ? "page" : undefined}
+                          data-selected={isCurrentProject && projectRulesActive ? "true" : undefined}
+                          disabled={!canOpenProject}
+                          onClick={() => onOpenProjectRules(project)}
+                        >
+                          <PencilSimpleIcon aria-hidden="true" size={16} weight="regular" />
+                          <span className="sidebar-project-rules-name">长期规则</span>
+                        </button>
+                        <button
+                          className="sidebar-project-current-row"
+                          type="button"
+                          aria-current={currentSelected ? "page" : undefined}
+                          data-selected={currentSelected ? "true" : undefined}
+                          disabled={!canOpenProject}
+                          onClick={() => onOpenCurrentProject(project)}
+                        >
+                          <FileHtmlIcon aria-hidden="true" size={16} weight="regular" />
+                          <span>当前稿</span>
+                        </button>
+                        {project.availabilityReason && !(project.availability === "ready" && project.sourceStatus === "unknown") ? (
+                          <div className="sidebar-project-load-error" role="status">
+                            <span>{project.availabilityReason}</span>
+                            {project.canRestoreWorkingCopy ? (
+                              <button type="button" onClick={() => void onRestoreWorkingCopy?.(project.projectId)}>恢复工作文件</button>
+                            ) : project.sourceStatus !== "external-change" ? (
+                              <button type="button" onClick={onRecheckProjects}>重新检查文件</button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        <button
+                          className="sidebar-project-history-toggle"
+                          type="button"
+                          aria-expanded={historyExpanded}
+                          aria-controls={historyId}
+                          onClick={() => {
+                            setExpandedHistory((previous) => ({
+                              ...previous,
+                              [project.projectId]: !historyExpanded,
+                            }));
+                            if (!historyExpanded) void loadImportedProject(project);
+                          }}
+                        >
+                          <CaretRightIcon aria-hidden="true" size={14} weight="regular" />
+                          <span>历史版本</span>
+                        </button>
+                        {historyExpanded ? (
+                          <div id={historyId} className="sidebar-project-history">
+                            {state?.reason ? (
+                              <div className="sidebar-project-load-error" role="status">
+                                <span>{state.reason}{state.versions.length ? "（显示上次结果）" : ""}</span>
+                                <button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button>
+                              </div>
+                            ) : null}
+                            {!isCurrentProject && (!state || (state.status === "loading" && !state.versions.length)) ? (
+                              <ProjectVersionTreeSkeleton />
+                            ) : !isCurrentProject && state?.status === "error" && !state.versions.length ? (
+                              !state.reason ? <div className="sidebar-project-load-error" role="status">
+                                <span>项目版本摘要暂时无法读取。</span>
+                                <button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button>
+                              </div> : null
+                            ) : (
+                              <ProjectVersionTree
+                                disabled={isCurrentProject && currentProjectBusy}
+                                versions={isCurrentProject ? currentProjectVersions : state?.versions || []}
+                                activeVersionId={isCurrentProject && !currentDraftActive && !projectRulesActive ? activeVersionId : null}
+                                onOpenVersion={(version) => onOpenHistoryVersion(project, version)}
+                              />
+                            )}
+                          </div>
                         ) : null}
                       </div>
-                    ) : null}
-                    {expanded && isCurrentProject && state?.reason ? <div className="sidebar-project-load-error" role="status">{state.reason}（显示上次结果）<button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button></div> : null}
-                    {expanded ? (
-                      isCurrentProject ? (
-                        <ProjectVersionTree
-                          key={currentProjectId}
-                          versions={currentProjectVersions}
-                          isCurrentProject
-                          activeVersionId={activeVersionId}
-                          onOpenVersion={onOpenCurrentVersion}
-                        />
-                      ) : !state || (state.status === "loading" && !state.versions.length) ? (
-                        <ProjectVersionTreeSkeleton />
-                      ) : state.status === "error" && !state.versions.length ? (
-                        <div className="sidebar-project-load-error" role="status">
-                          <span>{state.reason || "项目版本摘要暂时无法读取。"}</span>
-                          <button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button>
-                        </div>
-                      ) : (
-                        <>
-                        {state.reason ? <div className="sidebar-project-load-error" role="status">{state.reason}（显示上次结果）<button type="button" onClick={() => void loadImportedProject(project, true)}>重新读取版本</button></div> : null}
-                        {state.status === "loading" ? <span role="status">正在更新版本…</span> : null}
-                        <ProjectVersionTree
-                          versions={state.versions}
-                          isCurrentProject={false}
-                          activeVersionId={null}
-                          onOpenVersion={(version) => onOpenRegisteredVersion(project, version)}
-                        />
-                        </>
-                      )
                     ) : null}
                   </div>
                 );

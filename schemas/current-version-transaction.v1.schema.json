@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "$comment": "Forward compatible transaction records preserve unknown members. Structural schema checks are supplemented by Repository lineage, content and filesystem authority checks.",
+  "$id": "https://pageroot.local/schemas/current-version-transaction.v1.schema.json",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "state",
+    "operationId",
+    "projectId",
+    "documentId",
+    "sourceType",
+    "expectedSourceSha256",
+    "afterSha256",
+    "beforeMember",
+    "beforeState",
+    "beforeDraft",
+    "afterMember",
+    "afterState",
+    "afterDraft",
+    "version",
+    "createdAt",
+    "openedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "kind": {
+      "const": "current-version"
+    },
+    "state": {
+      "enum": [
+        "prepared",
+        "source-written",
+        "completed",
+        "aborting",
+        "aborted"
+      ]
+    },
+    "operationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{8,160}$"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[a-f0-9]{16,64}$"
+    },
+    "documentId": {
+      "type": "string",
+      "pattern": "^doc_[a-f0-9]{16,64}$"
+    },
+    "sourceType": {
+      "enum": [
+        "local-save",
+        "history-copy",
+        "recovery-copy",
+        "internal-ai"
+      ]
+    },
+    "expectedSourceSha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "afterSha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "beforeMember": {
+      "type": "object"
+    },
+    "afterMember": {
+      "type": "object"
+    },
+    "beforeState": {
+      "type": "object"
+    },
+    "afterState": {
+      "type": "object"
+    },
+    "beforeDraft": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "afterDraft": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "object",
+      "required": [
+        "versionId",
+        "ordinal",
+        "sourceType",
+        "sourceOperationId",
+        "contentSha256"
+      ],
+      "properties": {
+        "sourceOperationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,160}$"
+        },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "openedAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

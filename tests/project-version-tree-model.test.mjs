@@ -25,6 +25,7 @@ const {
   formatSidebarVersionDateTime,
   formatSidebarVersionTime,
   projectVersionSummariesFromVersions,
+  orderedProjectVersions,
   versionInheritanceDescription,
 } = await loadModel();
 
@@ -104,11 +105,11 @@ test("summary projection keeps real filenames and gives old records a determinis
   });
   assert.equal(versions[0].displayFileName, "真实名称-V1.html");
   assert.equal(versions[1].displayFileName, "真实名称-V2.html");
-  assert.equal(versions[1].modifiedAt, "2026-08-03T09:10:00.000Z");
+  assert.equal(versions[1].modifiedAt, "2026-08-02T08:00:00.000Z");
   assert.equal(fallbackVersionFileName("真实名称-V2.html", 7), "真实名称-V7.html");
 });
 
-test("inheritance copy identifies sequential, branch, initial, and active files", () => {
+test("history descriptions identify the snapshot origin without implying it is editable", () => {
   const parent = {
     projectId: "project_0123456789abcdef",
     documentId: "doc_0123456789abcdef",
@@ -123,18 +124,46 @@ test("inheritance copy identifies sequential, branch, initial, and active files"
   };
   assert.equal(
     versionInheritanceDescription({ ...parent, versionId: "ver_0003", ordinal: 3, basedOnVersionId: "ver_0002", previousVersionId: "ver_0002", displayFileName: "项目-V3.html" }, parent),
-    "基于 项目-V2.html 修改生成 · 最新版本",
+    "基于 V2 · 只读",
   );
   assert.equal(
     versionInheritanceDescription({ ...parent, versionId: "ver_0004", ordinal: 4, basedOnVersionId: "ver_0002", previousVersionId: "ver_0003", displayFileName: "项目-V4.html" }, parent),
-    "基于 项目-V2.html 修改生成 · 独立分支 · 最新版本",
+    "基于 V2 · 只读",
   );
   assert.equal(
     versionInheritanceDescription({ ...parent, versionId: "ver_0001", ordinal: 1, basedOnVersionId: null, previousVersionId: null, displayFileName: "项目-V1.html" }, null),
-    "项目初始导入版本 · 最新版本",
+    "初始导入 · 只读",
   );
   assert.equal(
     versionInheritanceDescription({ ...parent, isActiveWorkingCopy: true }, parent),
-    "基于 项目-V2.html 修改生成 · 当前编辑文件 · 最新版本",
+    "基于 V2 · 只读",
   );
+});
+
+
+test("current draft rename and save do not rewrite an existing snapshot summary", () => {
+  const version = {
+    id: "ver_0003", ordinal: 3, displayFileName: "导入名称-V3.html",
+    generatedAt: "2026-08-02T08:00:00.000Z",
+    modifiedAt: "2026-08-03T08:00:00.000Z",
+  };
+  const [summary] = projectVersionSummariesFromVersions(
+    [version], "project-a", "document-a", "改过名的当前稿.html",
+    { activeVersionId: version.id, latestVersionId: version.id, activeModifiedAt: "2026-08-04T08:00:00.000Z" },
+  );
+  assert.equal(summary.displayFileName, "导入名称-V3.html");
+  assert.equal(summary.modifiedAt, version.generatedAt);
+  assert.equal(versionInheritanceDescription(summary, null), "历史版本 · 只读");
+});
+
+test("history order follows immutable ordinal and retains the latest version", () => {
+  const input = [
+    { versionId: "ver_0003", ordinal: 3, isActiveWorkingCopy: true, isLatestOfficial: true },
+    { versionId: "ver_0001", ordinal: 1 },
+    { versionId: "ver_0002", ordinal: 2 },
+  ];
+  const ordered = orderedProjectVersions(input);
+  assert.deepEqual(ordered.map((row) => row.ordinal), [1, 2, 3]);
+  assert.equal(ordered[2], input[0]);
+  assert.deepEqual(input.map((row) => row.ordinal), [3, 1, 2]);
 });

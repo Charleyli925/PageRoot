@@ -381,7 +381,19 @@ export async function openAgentSettingsPage(page) {
   await sidebar.getByRole("button", { name: "设置", exact: true }).press("Enter");
   const settings = page.locator(".workbench-settings-page");
   await expect(settings).toBeVisible();
-  await page.getByRole("button", { name: "AI 服务", exact: true }).click();
+  const aiNavigation = page.getByRole("button", { name: "AI 服务", exact: true });
+  const aiHeading = settings.getByRole("heading", { name: "AI 服务", level: 1 });
+  await expect(aiNavigation).toBeVisible();
+  // The settings shell can be mounted one frame before the sidebar navigation
+  // handler is ready after a fresh external-project launch. Verify the
+  // category transition, then retry the same idempotent click once instead of
+  // letting a stale "常规" page turn into a misleading missing-agent-row
+  // timeout later in the helper.
+  await aiNavigation.click();
+  if (!(await aiHeading.isVisible().catch(() => false))) {
+    await aiNavigation.click();
+  }
+  await expect(aiHeading).toBeVisible({ timeout: 20_000 });
   return settings;
 }
 
@@ -628,7 +640,7 @@ export async function openRecentProject(page, sourcePath, options) {
   if (await projectRow.getAttribute("aria-expanded") !== "true") {
     await projectRow.click();
   }
-  await projectRow.locator("xpath=..").locator(".sidebar-version-file").first().click();
+  await projectRow.locator("xpath=..").locator(".sidebar-project-current-row").click();
   await waitForProjectReady(page);
   await expect.poll(async () => {
     const active = await page.evaluate(
@@ -895,7 +907,8 @@ export function candidateHtmlFiles(workspace, projectId) {
 
 export async function adoptReadyResult(page) {
   const review = page.getByRole("button", { name: "查看修改", exact: true });
-  if (!await page.getByTestId("ai-review-workspace").isVisible()) await review.click();
+  const reviewWorkspace = page.getByTestId("ai-review-workspace");
+  if (!await reviewWorkspace.isVisible() && await review.count() > 0) await review.click();
   await page.getByRole("button", { name: "采用修改", exact: true }).click();
   const confirmation = page.getByRole("dialog", {
     name: /采纳 AI 修改后（.+）？/u,
@@ -1075,25 +1088,53 @@ export async function assertReviewHasNoRuntimeVisualSupplement(
   }
 }
 
-export async function assertReviewAcceptPersistence({
-  page,
-  sourcePath,
-  original,
-  expectedText,
-  versionPathPattern,
-}) {
+export async function captureReviewAcceptPersistence(page) {
+  const opened = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+  const repository = new ProjectFileRepository({
+    projectsRoot: path.dirname(path.dirname(opened.sourcePath)),
+  });
+  const { target } = await repository.workspace({ sourcePath: opened.sourcePath });
+  const snapshot = await repository.readVersionFile({ target, versionId: target.versionId });
+  expect(snapshot.kind).toBe("version");
+  return {
+    repository, target, sourcePath: opened.sourcePath,
+    snapshot, snapshotBytes: readFileSync(snapshot.path),
+  };
+}
+
+export async function assertReviewAcceptPersistence({ page, beforeAdoption, expectedText }) {
+  const { repository, target: previousTarget, snapshot, snapshotBytes } = beforeAdoption;
   await expect.poll(async () => page.evaluate(async () => {
     const project = await window.htmlAIProjects?.getActiveProject();
     const reviewVisible = Boolean(document.querySelector('[data-testid="ai-review-workspace"]'));
     return { sourcePath: project?.sourcePath || "", reviewVisible };
   }), { timeout: 30_000 }).toMatchObject({
-    sourcePath: expect.stringMatching(versionPathPattern),
+    sourcePath: beforeAdoption.sourcePath,
     reviewVisible: false,
   });
   const opened = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
-  expect(opened.sourcePath).not.toBe(sourcePath);
-  expect(opened.sourcePath).toMatch(versionPathPattern);
-  expect(readFileSync(sourcePath).equals(original)).toBe(true);
-  expect(readFileSync(opened.sourcePath, "utf8")).toContain(expectedText);
+  const { target } = await repository.workspace({ sourcePath: opened.sourcePath });
+  expect(target).toMatchObject({
+    projectId: previousTarget.projectId,
+    documentId: previousTarget.documentId,
+    workingCopyId: previousTarget.workingCopyId,
+    exactSourcePath: previousTarget.exactSourcePath,
+  });
+  expect(target.versionId).not.toBe(previousTarget.versionId);
+  const adopted = await repository.readVersionFile({ target, versionId: target.versionId });
+  expect(adopted.kind).toBe("version");
+  expect(adopted.version.ordinal).toBe(snapshot.version.ordinal + 1);
+  expect(adopted.version.basedOnVersionId).toBe(previousTarget.versionId);
+  const currentBytes = readFileSync(opened.sourcePath);
+  expect(currentBytes.toString("utf8")).toContain(expectedText);
+  expect(readFileSync(adopted.path).equals(currentBytes)).toBe(true);
+  expect(adopted.sha256).toBe(sha256(currentBytes));
+  const historical = await repository.readVersionFile({
+    target, versionId: previousTarget.versionId,
+  });
+  expect(historical.kind).toBe("version");
+  expect(historical.content).toBe(snapshot.content);
+  expect(historical.sha256).toBe(snapshot.sha256);
+  expect(readFileSync(historical.path).equals(snapshotBytes)).toBe(true);
   return opened;
 }
