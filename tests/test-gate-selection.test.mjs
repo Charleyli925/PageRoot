@@ -112,6 +112,7 @@ const TASK_OWNER_CASES = [
     file: "app/workbench/review-document.ts",
     nodeTests: [
       "tests/review-analysis-session.test.mjs",
+      "tests/review-annotation-fallback.test.mjs",
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-projection-facts.test.mjs",
     ],
@@ -128,6 +129,7 @@ const TASK_OWNER_CASES = [
       "tests/review-analysis-session.test.mjs",
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-projection-facts.test.mjs",
+      "tests/review-annotation-fallback.test.mjs",
     ],
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
@@ -139,6 +141,7 @@ const TASK_OWNER_CASES = [
   {
     file: "app/workbench/review/parse.ts",
     nodeTests: [
+      "tests/review-annotation-fallback.test.mjs",
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-projection-facts.test.mjs",
     ],
@@ -151,7 +154,7 @@ const TASK_OWNER_CASES = [
       "build-desktop",
       "ai-review-smoke",
     ],
-    directOwners: ["tests/review-badge-aggregation.test.mjs", "tests/review-projection-facts.test.mjs"],
+    directOwners: ["tests/review-badge-aggregation.test.mjs", "tests/review-projection-facts.test.mjs", "tests/review-annotation-fallback.test.mjs"],
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
       "tests/desktop-preload-ipc.test.mjs",
@@ -230,6 +233,7 @@ const TASK_OWNER_CASES = [
     nodeTests: [
       "tests/durable-working-copy-binding.test.mjs",
       "tests/history-creation.test.mjs",
+      "tests/legacy-history-activation.test.mjs",
       "tests/project-ai-task-projection.test.mjs",
       "tests/project-candidate-promotion.test.mjs",
       "tests/project-catalog-readonly.test.mjs",
@@ -241,6 +245,7 @@ const TASK_OWNER_CASES = [
       "tests/project-registry-and-open.test.mjs",
       "tests/project-request-authority.test.mjs",
       "tests/project-working-copy-save.test.mjs",
+      "tests/save-retirement.test.mjs",
       "tests/source-element-identity-migration.test.mjs",
       "tests/workspace-performance-timing.test.mjs",
     ],
@@ -851,6 +856,19 @@ test("Qoder ACP transport changes select Qoder and ACP owners without the packag
     "tests/qoder-acp-spike-client.test.mjs",
   ]);
   assert.equal(plan.selectedNodeTests.includes("tests/desktop-package.test.mjs"), false);
+});
+
+test("native HTTP provider imports retain the packaged Bridge resource closure", () => {
+  for (const file of [
+    "shared/agent-input-policy.mjs",
+    "bridge/agent/providers/openai-compatible-provider.mjs",
+  ]) {
+    const plan = selectGatePlan({ map, lane: "task", changedFiles: [file] });
+    assert.ok(
+      plan.selectedNodeTests.includes("tests/desktop-package.test.mjs"),
+      file,
+    );
+  }
 });
 
 test("notification, comment, and presentation Browser owners select their smoke lane", () => {

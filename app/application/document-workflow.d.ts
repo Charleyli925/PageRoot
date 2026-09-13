@@ -1,6 +1,11 @@
 import type { BridgeClient } from "./bridge-client.js";
 import type { CommentSession } from "./comment-session.js";
-import type { DocumentSession, PersistedBoundaryResult } from "./document-session.js";
+import type {
+  DocumentSession,
+  DocumentCanvasRenderObservation,
+  DocumentSourceReceipt,
+  PersistedBoundaryResult,
+} from "./document-session.js";
 import type { ProjectContext, ProjectSession } from "./project-session.js";
 import type {
   OpenDocumentMemoryHistory,
@@ -36,7 +41,8 @@ export type DocumentWorkflowCanvasPort = Readonly<{
     html: string,
     sourceSha256: string,
     context?: ProjectContext,
-  ): Promise<void>;
+    receipt?: DocumentSourceReceipt | null,
+  ): Promise<DocumentCanvasRenderObservation>;
   freeze?(reason: string): Promise<{ ok: boolean; reason?: string }> | { ok: boolean; reason?: string };
   adoptHistorySource?(
     html: string,
@@ -56,6 +62,7 @@ export type DocumentWorkflowConstruction = Readonly<{
     expectedSourceSha256?: string | null;
     adoptCanonicalSource?: boolean;
   }): Promise<DocumentWorkflowOutcome<ProjectContext>>;
+  registrationPending?(): boolean;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
   commentSession: CommentSession;
@@ -74,6 +81,13 @@ export type DocumentWorkflowConstruction = Readonly<{
   clock: Readonly<{ now(): number }>;
 }>;
 
+export type DocumentLeaveBoundary = Readonly<{
+  context: ProjectContext | null;
+  epoch: number;
+  revision: number;
+  html: string;
+}>;
+
 export class DocumentWorkflow {
   constructor(options: DocumentWorkflowConstruction);
   subscribeEvents(listener: (event: Readonly<Record<string, unknown>>) => void): () => void;
@@ -83,6 +97,16 @@ export class DocumentWorkflow {
   readonly recoveryCheckpoint: Readonly<Record<string, unknown>> | null;
   readonly pendingAuditEvents: unknown[];
   replaceRecoveryIdentity(identity: unknown): unknown;
+  inspectLeaveReadiness(input?: { hasPendingNativeEdit?: boolean }): Readonly<{
+    kind: "ready";
+    action: "reuse-verified" | "full-check";
+    sourceSha256: string;
+  }>;
+  captureLeaveBoundary(): DocumentLeaveBoundary;
+  verifyLeaveBoundary(boundary: DocumentLeaveBoundary, input?: {
+    needsSourceProtection?: boolean;
+    committedSourceSha256?: string;
+  }): import("./document/save-plan.js").DocumentPlan;
   canProtectForDetach(context?: ProjectContext | null): boolean;
   hasVerifiedRecoveryCheckpoint(input?: {
     context?: ProjectContext | null;
@@ -137,7 +161,11 @@ export class DocumentWorkflow {
     mutation?: unknown;
     sourceTransaction?: unknown;
     context?: Partial<ProjectContext>;
-  }): DocumentWorkflowOutcome<{ revision: number; queued: boolean }>;
+  }): DocumentWorkflowOutcome<{
+    revision: number;
+    queued: boolean;
+    receipt: DocumentSourceReceipt | null;
+  }>;
   flush(input?: { throughRevision?: number }): Promise<DocumentWorkflowOutcome<{ revision: number; idle?: boolean }>>;
   performHistoryAction(input: {
     direction: "undo" | "redo";
@@ -160,6 +188,7 @@ export class DocumentWorkflow {
   ensureCurrentCanvas(input?: {
     context?: ProjectContext;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  confirmCanvas(observation: DocumentCanvasRenderObservation): boolean;
   reconcileBoundary(input: {
     frozenHtml: string;
     reportedSourceSha256?: string | null;
