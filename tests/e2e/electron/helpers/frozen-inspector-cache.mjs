@@ -9,7 +9,7 @@ export const FROZEN_NETWORK_LIMITS = Object.freeze({
 // This version-pinned test-only adapter preserves Network events, but not bodies.
 // Never substitute a new CDP session: it would leave the owner's cache intact.
 export async function boundFrozenInspectorCache(page, version = require('playwright-core/package.json').version) {
-  assert.equal(version, '1.62.1', 'FROZEN_INSPECTOR_ADAPTER_VERSION');
+  assert.equal(version, '1.63.0', 'FROZEN_INSPECTOR_ADAPTER_VERSION');
   assert.equal(typeof page?._connection?.toImpl, 'function', 'FROZEN_INSPECTOR_ADAPTER_UNAVAILABLE');
   const manager = page._connection.toImpl(page)?.delegate?._networkManager;
   assert.ok(manager?._sessions instanceof Map, 'FROZEN_INSPECTOR_SESSION_MAP');
