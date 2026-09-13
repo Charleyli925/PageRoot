@@ -48,7 +48,12 @@ export type DocumentWorkflowCanvasPort = Readonly<{
     html: string,
     target: unknown,
     selection: unknown,
-    operation: Readonly<{ kind: SourceHistoryEntry["kind"]; property?: string }>,
+    operation: Readonly<{
+      kind: SourceHistoryEntry["kind"];
+      property?: string;
+      identityDelta?: SourceHistoryEntry["identityDelta"];
+      semanticOperation?: SourceHistoryEntry["semanticOperation"];
+    }>,
   ): void;
 }>;
 

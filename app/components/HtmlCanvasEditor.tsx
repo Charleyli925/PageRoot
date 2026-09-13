@@ -114,8 +114,13 @@ import {
   uniqueSourceElement,
 } from "./html-canvas-source-element";
 import {
+  decideStructuralProjection,
+  executeVerifiedStructuralProjection,
+} from "./html-canvas-structural-projection.js";
+import {
   insertStructureCommand,
   selectedStructureCommand,
+  sourceSelectionForElementId,
   type SelectedStructureAction,
   type StructureDestination,
 } from "./html-canvas-structure-commands";
@@ -3908,14 +3913,42 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       const currentRuntimeAnalysis = runtimeDocumentAnalysis(currentSource);
       const nextRuntimeAnalysis = analyzeEditRuntimeDocument(result.html);
+      const programIdentityChanged = (
+        currentRuntimeAnalysis.programIdentity
+        !== nextRuntimeAnalysis.programIdentity
+      );
+      const structuralDecision = mutation.kind === "structure"
+        ? decideStructuralProjection({
+          operationId: semanticOperation.operationId,
+          operationType: semanticOperation.type,
+          mutationProperty: mutation.property,
+          beforeSourceSha256: sourceIndex.sourceSha256,
+          afterSourceSha256: result.sourceSha256,
+          beforeIndex: sourceIndex,
+          afterIndex: result.sourceIndex,
+          identityDelta: semanticResult.identityDelta,
+          frameGeneration: frameLoadGenerationRef.current,
+          executionId: currentRuntime?.grant.executionId ?? null,
+          programIdentityChanged,
+        })
+        : null;
       const refreshDecision = decideEditRuntimeRefresh({
         hasRuntime: runtimeIsCurrent,
         mutationKind: mutation.kind,
-        programIdentityChanged: (
-          currentRuntimeAnalysis.programIdentity
-          !== nextRuntimeAnalysis.programIdentity
-        ),
+        programIdentityChanged,
+        structuralProjection: structuralDecision,
       });
+      recordRuntimeContinuityEvent("structuralProjection", {
+        reason: `${structuralDecision?.kind || mutation.kind}:${structuralDecision?.reason || refreshDecision.reason}`,
+      });
+      containerRef.current?.setAttribute(
+        "data-structural-projection-kind",
+        structuralDecision?.kind || mutation.kind,
+      );
+      containerRef.current?.setAttribute(
+        "data-structural-projection-reason",
+        structuralDecision?.reason || refreshDecision.reason,
+      );
       const targetUpdates = deterministicTargetUpdates(result, originalTargets);
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
@@ -4125,15 +4158,78 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           "V2 文字会话只能提交当前受控文字命令。",
         );
       }
+      const applyStructuralInPlace = () => {
+        if (
+          mutation.kind !== "structure"
+          || structuralDecision?.kind !== "in-place"
+          || !iframeRef.current?.contentDocument
+        ) return false;
+        const documentNode = iframeRef.current.contentDocument;
+        const executed = executeVerifiedStructuralProjection({
+          plan: structuralDecision.plan,
+          nextHtml: result.html,
+          afterIndex: result.sourceIndex,
+          live: {
+            documentNode,
+            frameGeneration: frameLoadGenerationRef.current,
+            executionId: runtimeFrameRef.current?.grant.executionId ?? null,
+            authority: runtimeSourceElementsRef.current,
+            markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+            isProvenSourceElement: currentRuntimeSourceProof(),
+          },
+        });
+        if (!executed.ok) {
+          throw new Error(`结构原地投影失败：${executed.reason}`);
+        }
+        if (executed.selectedElementId) {
+          const nextSelection = sourceSelectionForElementId(
+            result.sourceIndex,
+            executed.selectedElementId,
+            mutation.property === "delete" ? null : appliedMutation.target,
+          );
+          const liveSelected = uniqueSourceElement(
+            documentNode,
+            executed.selectedElementId,
+          );
+          selectedSourceSelectionRef.current = nextSelection;
+          pendingSelectionRef.current = nextSelection;
+          pendingToolbarVisibleRef.current = true;
+          setSelection(nextSelection);
+          onSelectRef.current?.(nextSelection);
+          if (liveSelected) {
+            selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+            selectedElementRef.current = liveSelected;
+            liveSelected.setAttribute("data-html-canvas-selected", "true");
+          }
+          setMoveAvailability(
+            sourceMoveAvailability(result.sourceIndex, nextSelection),
+          );
+        } else {
+          pendingSelectionRef.current = null;
+          pendingToolbarVisibleRef.current = false;
+          selectedSourceSelectionRef.current = null;
+          selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+          selectedElementRef.current = null;
+          setSelection(null);
+          onSelectRef.current?.(null);
+          setMoveAvailability({ up: false, down: false });
+        }
+        publishRenderedProjectionIdentity(result.html, result.sourceIndex.sourceSha256);
+        requestAnimationFrame(() => updateOverlayPosition());
+        return true;
+      };
       const previewStayedMounted = renderedProjectionWasCurrent
         && refreshDecision.synchronizeCurrentFrame
-        && synchronizeStablePreview(
-          sourceIndex,
-          result,
-          forwardPlan,
-          mutation,
-          appliedMutation,
-          provedRuntimeMutationElement,
+        && (
+          applyStructuralInPlace()
+          || synchronizeStablePreview(
+            sourceIndex,
+            result,
+            forwardPlan,
+            mutation,
+            appliedMutation,
+            provedRuntimeMutationElement,
+          )
         );
       const staleCandidate = runtimeCandidateRef.current;
       if (
@@ -4251,6 +4347,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     requestDynamicRuntimeRefresh,
     runtimeDocumentAnalysis,
     synchronizeStablePreview,
+    updateOverlayPosition,
   ]);
 
   const clearNativeEditCheckpointTimer = useCallback(() => {
@@ -5780,7 +5877,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         operation,
       }, mutation);
       if (!result) return false;
-      if (action === "delete") clearSelection();
+      if (action === "delete" && result.projection !== "current") clearSelection();
       return true;
     } catch (cause) {
       reportBlockedEdit(cause);
@@ -6620,6 +6717,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     operation?: Readonly<{
       kind: HtmlCanvasMutation["kind"];
       property?: string;
+      identityDelta?: import("../lib/semantic-operation-kernel.js").SemanticIdentityDelta;
+      semanticOperation?: import("../lib/semantic-operation-kernel.js").SemanticOperation;
     }>,
   ): boolean => {
     if (activeNativeEditRef.current) detachNativeEditForFence();
@@ -6648,6 +6747,102 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       operation?.kind === "style"
       && adoptElementStyleHistoryInPlace(source, resumeTarget)
     ) return true;
+    if (
+      operation?.kind === "structure"
+      && operation.identityDelta
+      && iframeRef.current?.contentDocument
+    ) {
+      try {
+        const previousIndex = sourceIndexRef.current;
+        const previousSource = frameSourceHtmlRef.current;
+        if (
+          previousIndex
+          && previousIndex.source === previousSource
+          && renderedSourceHtmlRef.current === previousSource
+        ) {
+          const nextIndex = buildSourceIndex(source);
+          const decision = decideStructuralProjection({
+            operationId: operation.identityDelta.operationId,
+            operationType: operation.semanticOperation?.type,
+            mutationProperty: operation.property,
+            beforeSourceSha256: previousIndex.sourceSha256,
+            afterSourceSha256: nextIndex.sourceSha256,
+            beforeIndex: previousIndex,
+            afterIndex: nextIndex,
+            identityDelta: operation.identityDelta,
+            frameGeneration: frameLoadGenerationRef.current,
+            executionId: runtimeFrameRef.current?.grant.executionId ?? null,
+          });
+          if (decision.kind === "in-place") {
+            const documentNode = iframeRef.current.contentDocument;
+            const executed = executeVerifiedStructuralProjection({
+              plan: decision.plan,
+              nextHtml: source,
+              afterIndex: nextIndex,
+              live: {
+                documentNode,
+                frameGeneration: frameLoadGenerationRef.current,
+                executionId: runtimeFrameRef.current?.grant.executionId ?? null,
+                authority: runtimeSourceElementsRef.current,
+                markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+                isProvenSourceElement: currentRuntimeSourceProof(),
+              },
+            });
+            if (executed.ok) {
+              sourceIndexRef.current = nextIndex;
+              frameSourceHtmlRef.current = source;
+              latestSourceProjectionRef.current = { source, sourceIndex: nextIndex };
+              const nextSelection = executed.selectedElementId
+                ? sourceSelectionForElementId(
+                  nextIndex,
+                  executed.selectedElementId,
+                  resumeTarget,
+                )
+                : null;
+              selectedSourceSelectionRef.current = nextSelection;
+              setSelection(nextSelection);
+              onSelectRef.current?.(nextSelection);
+              pendingSelectionRef.current = nextSelection;
+              pendingToolbarVisibleRef.current = Boolean(nextSelection);
+              if (executed.selectedElementId) {
+                const liveSelected = uniqueSourceElement(
+                  documentNode,
+                  executed.selectedElementId,
+                );
+                selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+                selectedElementRef.current = liveSelected;
+                liveSelected?.setAttribute("data-html-canvas-selected", "true");
+                setMoveAvailability(
+                  sourceMoveAvailability(nextIndex, nextSelection),
+                );
+              } else {
+                selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+                selectedElementRef.current = null;
+                setMoveAvailability({ up: false, down: false });
+              }
+              containerRef.current?.setAttribute(
+                "data-history-adopt-path",
+                "structural-in-place",
+              );
+              containerRef.current?.setAttribute(
+                "data-structural-projection-kind",
+                decision.kind,
+              );
+              containerRef.current?.setAttribute(
+                "data-structural-projection-reason",
+                decision.reason,
+              );
+              publishRenderedProjectionIdentity(source, nextIndex.sourceSha256);
+              supersedeRuntimeRefreshPending();
+              requestAnimationFrame(() => updateOverlayPosition());
+              return true;
+            }
+          }
+        }
+      } catch {
+        // Fall through to island in-place or Candidate recovery.
+      }
+    }
     if (adoptEditableIslandHistoryInPlace(
       source,
       bookmark,
@@ -6691,10 +6886,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     advanceLastKnownGoodRuntimeProjection,
     adoptEditableIslandHistoryInPlace,
     adoptElementStyleHistoryInPlace,
+    currentRuntimeSourceProof,
     detachNativeEditForFence,
     loadFrameSource,
+    publishRenderedProjectionIdentity,
     queueNativeFenceReload,
     requestDynamicRuntimeRefresh,
+    supersedeRuntimeRefreshPending,
+    updateOverlayPosition,
   ]);
 
   const cancelHistoryAction = useCallback((
