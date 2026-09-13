@@ -70,9 +70,11 @@ downloads or reuses dry-run bytes.
 ## Optional developer preview
 
 When the developer explicitly asks for an installable test package, manually
-dispatch `Developer Preview` on a runner that has the stable Developer ID
-Application identity, or run `npm run package:developer` on a clean committed
-tree with that identity available in the local macOS keychain. The preview
+dispatch `Developer Preview` — its signing credential is the repository's
+stable Developer ID pair (`MAC_CSC_LINK`/`MAC_CSC_KEY_PASSWORD` secrets) or a
+Developer ID Application identity installed on the runner — or run
+`npm run package:developer` on a clean committed tree with that identity
+available in the local macOS keychain. The preview
 requires that signature and stops if the certificate is missing or signing
 fails; it never falls back to ad-hoc. Notarization remains optional for this
 personal test package. It verifies packaged contents and performs one isolated

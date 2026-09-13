@@ -64,7 +64,7 @@ npm run package:developer
 
 electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID Application 身份；也可以通过本机环境中的 `CSC_NAME` 指定证书名称。证书私钥不进入仓库或安装包。证书缺失、签名失败或身份不符合要求时命令直接失败，不会退回 ad-hoc。
 
-如需在具备同一签名身份的专用 macOS runner 上运行，也可以手动使用 GitHub Actions：
+本机没有签名身份时，也可以手动触发 GitHub Actions：工作流通过仓库 secrets（`MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD`，与正式候选同源）在 runner 上完成同样的稳定 Developer ID 签名；证书私钥只注入签名进程，不进入仓库或安装包：
 
 1. 打开 `Developer Preview` 工作流。
 2. 选择需要验证的提交所在分支。
@@ -107,7 +107,7 @@ electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID 
 2. 构建最新 Electron renderer。
 3. 只生成一个对应架构的 DMG，不生成 updater ZIP、blockmap 或发布元数据。
 4. 校验 `app.asar` 文件闭包、源文件、Bridge、Schema、法律资源、测试应用名、测试版本、独立 Bundle ID、架构、DMG 完整性和只读挂载内容，并确认没有私有 Codex/App Server 资源或预埋 native Codex。
-5. 要求稳定的 Developer ID Application 签名；不读取 Apple 公证、发布或遥测凭据。签名失败直接停止，不生成可安装的 ad-hoc 替代包。
+5. 要求稳定的 Developer ID Application 签名；签名凭据来自本机钥匙串或仓库 secrets，且仅读取签名证书凭据，不读取 Apple 公证、发布或遥测凭据。签名失败直接停止，不生成可安装的 ad-hoc 替代包。
 6. 关闭 Preview 的自动更新检查、下载和安装；新包继续手动安装。
 7. 使用上述新根目录启动真实 `.app`，确认首个窗口、版本、Bridge、Workbench 就绪状态和正常退出。
 8. 写入 `developer-preview.json`，包括 DMG SHA-256，并固定：
