@@ -253,7 +253,10 @@ Recovery removal must be durably synchronized before journal unlink. Unsupported
 sync or cleanup failure retains the journal whenever unlink has not happened;
 failure after unlink is an unconfirmed cleanup outcome, with recovery absence
 already durable. This optional collection never broadens save authority and does
-not collect identity migration, history or Promotion receipts.
+not collect identity migration, history or Promotion receipts. Recovery scans
+use cached current Working Copy state only to shortlist candidates; at most 16
+candidates enter the complete identity, source Hash and durability proof, while
+stale targets remain retained without consuming that expensive-work budget.
 
 After pending transaction recovery, valid registered members gain anchors
 without changing HTML or Version records. Atomic anchor publication is the

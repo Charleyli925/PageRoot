@@ -184,6 +184,43 @@ test("stock cleanup is bounded and preserves legacy, rollback and stale-target j
   assert.equal((await json(path.join(control, "working-copies", `${record.workingCopyId}.json`))).currentSha256, record.targetSourceSha256);
 });
 
+test("stale stock ahead of an eligible journal does not consume the bounded verification budget", async (t) => {
+  const value = await projectFixture(t);
+  const imported = await importSource(value, "stale-stock-prefix.html");
+  const repository = new ProjectFileRepository({ projectsRoot: value.projects,
+    failpoint: async (name) => name === "save-committed" });
+  await assert.rejects(repository.saveWorkingCopy({ target: imported.target, html: html("current"),
+    expectedSourceSha256: imported.target.sourceSha256, editRevision: 1 }), { code: "INJECTED_FAILPOINT" });
+  const control = path.join(imported.target.projectRootPath, ".pageroot");
+  const transactions = path.join(control, "transactions");
+  const [original] = (await fs.readdir(transactions)).filter((name) => name.startsWith("save_"));
+  const record = await json(path.join(transactions, original));
+  await fs.rm(path.join(control, "recovery", record.recoveryId), { recursive: true });
+  await fs.unlink(path.join(transactions, original));
+
+  for (let index = 0; index < 32; index += 1) {
+    const recoveryId = `save_${record.workingCopyId}_1_${index.toString(16).padStart(32, "0")}`;
+    await fs.writeFile(path.join(transactions, `${recoveryId}.json`), JSON.stringify({
+      ...record,
+      recoveryId,
+      targetSourceSha256: imported.target.sourceSha256,
+    }));
+  }
+  const eligibleRecoveryId = `save_${record.workingCopyId}_1_${"f".repeat(32)}`;
+  await fs.writeFile(path.join(transactions, `${eligibleRecoveryId}.json`), JSON.stringify({
+    ...record,
+    recoveryId: eligibleRecoveryId,
+  }));
+
+  await new ProjectFileRepository({ projectsRoot: value.projects })
+    .recoverProject({ projectRootPath: imported.target.projectRootPath });
+
+  const remaining = (await fs.readdir(transactions)).filter((name) => name.startsWith("save_"));
+  assert.equal(remaining.length, 32);
+  assert.equal(remaining.includes(`${eligibleRecoveryId}.json`), false);
+  assert.equal(await fs.readFile(imported.target.exactSourcePath, "utf8"), html("current"));
+});
+
 test("persistent unsupported directory sync permits two saves and reopening latest bytes", async (t) => {
   const value = await projectFixture(t);
   const imported = await importSource(value, "persistent-sync.html");

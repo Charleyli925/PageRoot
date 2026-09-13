@@ -186,6 +186,7 @@ export { ProjectFileRepositoryError } from "./project-file-repository/errors.mjs
 const LEGACY_PROMOTION_WORKING_COPY_HASH = Symbol(
   "legacy-promotion-working-copy-hash",
 );
+const SAVE_RETIREMENT_ATTEMPT_LIMIT = 16;
 
 export const DEFAULT_PROJECT_RULES_TEMPLATE = `# 项目长期规则
 
@@ -5656,6 +5657,56 @@ export class ProjectFileRepository {
     });
   }
 
+  async #retireCommittedSaveStock(loaded, candidates) {
+    const stateByWorkingCopyId = new Map();
+    let attempts = 0;
+    for (const { transactionPath, transaction } of candidates) {
+      if (attempts >= SAVE_RETIREMENT_ATTEMPT_LIMIT) break;
+      if (transaction?.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+        || transaction.kind !== "save" || transaction.state !== "committed"
+        || transaction.recovery || !transaction.recoveryId
+        || transaction.projectId !== loaded.project.projectId
+        || transaction.documentId !== loaded.project.documentId
+        || !SHA256.test(transaction.expectedSourceSha256)
+        || !SHA256.test(transaction.targetSourceSha256)
+        || !Number.isSafeInteger(transaction.editRevision) || transaction.editRevision < 0) continue;
+      const workingCopy = loaded.manifest.workingCopies.find(
+        (entry) => entry.workingCopyId === transaction.workingCopyId,
+      );
+      if (!workingCopy || workingCopy.sourceRelativePath !== transaction.sourceRelativePath) continue;
+      if (transactionPath !== path.join(
+        loaded.paths.transactionsRoot,
+        `${transaction.recoveryId}.json`,
+      )) continue;
+
+      let state = stateByWorkingCopyId.get(workingCopy.workingCopyId);
+      if (state === undefined) {
+        try {
+          state = await readJsonFile(
+            workingCopyStatePath(loaded.paths, workingCopy),
+            "Working Copy state",
+            { projectRootPath: loaded.paths.projectRootPath },
+          );
+          assertWorkingCopyState(state, loaded, workingCopy);
+        } catch {
+          state = null;
+        }
+        stateByWorkingCopyId.set(workingCopy.workingCopyId, state);
+      }
+      if (!state
+        || state.currentSha256 !== transaction.targetSourceSha256
+        || state.saveState !== "saved"
+        || Number(state.lastPersistedRevision) < transaction.editRevision) continue;
+
+      attempts += 1;
+      try {
+        await this.#retireCommittedSave(loaded, transactionPath, transaction);
+      } catch {
+        // Optional stock cleanup never turns project recovery into failure.
+      }
+    }
+  }
+
   async #finalizeSaveTransaction(projectRootPath, transactionPath, transaction, extra) {
     const current = await readJsonFile(transactionPath, "save transaction", {
       projectRootPath,
@@ -7637,7 +7688,7 @@ export class ProjectFileRepository {
       loaded.paths.transactionsRoot,
       "transactions",
     );
-    let saveRetirementAttempts = 0;
+    const saveRetirementCandidates = [];
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
       if (
@@ -7699,17 +7750,8 @@ export class ProjectFileRepository {
             transactionPath,
             transaction,
           ));
-        } else if (saveRetirementAttempts < 16 && transaction?.recoveryId && !transaction.recovery) {
-          // Bounded opportunistic collection only. A later save, legacy shape,
-          // uncertain identity or failed durability proof leaves this journal
-          // alone; it must never roll current metadata back to an old target.
-          try {
-            await this.#retireCommittedSave(loaded, transactionPath, transaction);
-            saveRetirementAttempts += 1;
-          } catch {
-            // A stale target does not consume the useful-cleanup budget or
-            // turn an otherwise readable committed legacy record into failure.
-          }
+        } else if (transaction?.recoveryId && !transaction.recovery) {
+          saveRetirementCandidates.push({ transactionPath, transaction });
         }
         continue;
       }
@@ -7741,6 +7783,9 @@ export class ProjectFileRepository {
         transaction,
       ));
     }
+    // Scan every cheap journal record so stale entries cannot permanently hide
+    // a later eligible one, then cap the identity/Hash/durability work itself.
+    await this.#retireCommittedSaveStock(loaded, saveRetirementCandidates);
     const requestFreezes = await this.#recoverRequestFreezes(loaded);
     recovered.push(...requestFreezes);
     // A crash after candidate.json becomes promoted but before request.json

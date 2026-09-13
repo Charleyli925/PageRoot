@@ -1375,15 +1375,29 @@ test("lost adoption reply reconciles the same Candidate decision without a new o
   assert.equal(harness.calls.commit.length, 1);
 });
 
-test("adoption preserves the Candidate decision when managed transition outcome is unknown", async () => {
+test("adoption preserves and reconciles the Candidate decision when managed transition outcome is unknown", async (t) => {
   const candidateId = "candidate_transition_unknown";
+  let transitions = 0;
   const harness = createHarness({
-    prepareTransition: async () => {
-      throw Object.assign(new Error("managed transition response lost"), {
-        projectOutcome: "unknown",
+    prepareTransition: async (input) => {
+      transitions += 1;
+      if (transitions === 1) {
+        throw Object.assign(new Error("managed transition response lost"), {
+          projectOutcome: "unknown",
+        });
+      }
+      return Object.freeze({
+        previousSourcePath: input.previousSourcePath,
+        nextSourcePath: input.nextSourcePath,
+        projectId: input.nextProjectId,
+        documentId: input.nextDocumentId,
+        openTarget: input.openTarget || null,
+        updatesCurrentProject: true,
+        activatedProject: null,
       });
     },
   });
+  t.after(() => harness.workflow.dispose());
   const run = readyRun({ candidateId });
   harness.runSession.trackRun(run, { activate: "always" });
 
@@ -1399,6 +1413,20 @@ test("adoption preserves the Candidate decision when managed transition outcome 
   assert.equal(harness.calls.prepare.length, 1);
   assert.equal(harness.calls.prepare[0].operationId, `promote_${candidateId}`);
   assert.equal(harness.calls.commit.length, 0);
+  assert.equal(harness.runSession.activeRun.adoptionPhase, "unknown");
+  assert.equal(harness.runSession.isOperationBusy("activate", operationKey(run)), true);
+  assert.equal((await harness.workflow.activateReadyVersion({ run })).code, "VERSION_ACTIVATION_BUSY");
+
+  await new Promise((resolve) => setTimeout(resolve, 1150));
+
+  assert.equal(harness.runSession.activeRun.status, "complete");
+  assert.equal(harness.runSession.activeRun.adoptionPhase, undefined);
+  assert.equal(harness.calls.activate, 2);
+  assert.deepEqual(harness.calls.activateInputs[0], harness.calls.activateInputs[1]);
+  assert.equal(harness.calls.prepare.length, 2);
+  assert.equal(harness.calls.prepare[1].operationId, `promote_${candidateId}`);
+  assert.equal(harness.calls.commit.length, 1);
+  assert.equal(harness.runSession.isOperationBusy("activate", operationKey(run)), false);
 });
 
 test("adoption becomes same-decision unknown when navigation retires after host activation", async () => {

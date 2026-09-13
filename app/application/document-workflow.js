@@ -2888,6 +2888,10 @@ export class DocumentWorkflow {
       canonicalHtml,
       historyTarget,
       this.#codecs.historyTextSelectionFromRecord(applied.selection),
+      {
+        kind: applied.kind,
+        ...(applied.property ? { property: applied.property } : {}),
+      },
     );
     if (this.#documentSession.beginEdit(canonicalHtml, {
       origin: "history",

@@ -557,7 +557,10 @@ export class VersionWorkflow {
       this.#emitEvent({ type: "version-activated", ...value });
       return succeeded(value);
     } catch (cause) {
-      if (isBridgeRequestError(cause) && cause.outcome === "unknown") {
+      if (
+        (isBridgeRequestError(cause) && cause.outcome === "unknown")
+        || cause?.projectOutcome === "unknown"
+      ) {
         return unknown(durableActivationOperationId, "采用结果待确认，正在自动核对。请勿重复采用或结束本轮。");
       }
       this.#clearPendingActivation(operationKey);
