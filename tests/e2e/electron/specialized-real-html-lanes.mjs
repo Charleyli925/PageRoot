@@ -66,7 +66,10 @@ fail(file, "SPECIALIZED_FILE_NOT_FROZEN", { fileId });
 const TARGET_INDEX = Object.freeze({
   "external-paste": Object.fromEntries(plan.files.map(item => [item.fileId, 0])),
   IME: { H01: 7, H02: 5, H03: 5, H04: 7, H05: 6, H06: 5, H07: 5, H08: 6 },
-  "race/rapid-actions": Object.fromEntries(plan.files.map(item => [item.fileId, 9])),
+  // These are fixed, pre-reviewed structure targets from the manifest. H04
+  // and H07 do not have a structure target at index 9, so keep their explicit
+  // manifest indices instead of falling back to discovery or substitution.
+  "race/rapid-actions": { H01: 9, H02: 9, H03: 9, H04: 2, H05: 9, H06: 9, H07: 6, H08: 9 },
   "long-session": { H01: 5, H02: 5, H03: 5, H04: 7, H05: 5, H06: 5, H07: 5, H08: 6 },
 });
 
@@ -114,6 +117,15 @@ async function activeFrame() {
   // Reuse the existing settled-frame helper so the first operation never
   // races initial Candidate/Runtime mounting.
   return currentEditorFrame(session.page);
+}
+
+async function waitForSpecializedRuntimeTerminal() {
+  if (file.runtime !== "runtime") return;
+  const surface = session.page.getByTestId("workbench-active-document-canvas").filter({ visible: true });
+  await expect.poll(async () => ({
+    phase: await surface.getAttribute("data-edit-runtime-phase"),
+    outcome: await surface.getAttribute("data-edit-runtime-outcome"),
+  }), { timeout: 10_000 }).toEqual({ phase: "settled", outcome: "ready" });
 }
 
 async function selectFixedTarget() {
@@ -230,6 +242,7 @@ async function race() {
     timeout: 7_000,
     expectedSourceRevision: `sha256:${file.seed.sha256}`,
   });
+  await waitForSpecializedRuntimeTerminal();
   await editor.evaluate(startRuntimeLifecycleObservation); observing = true;
   await editor.evaluate(setRuntimeLifecycleObservationContext, {
     fileId, round: 1, targetIndex, targetId: target.selectedId,
@@ -239,11 +252,48 @@ async function race() {
   const button = editor.getByRole("button", { name: "复制元素", exact: true });
   fail(await button.count() === 1 && await button.isEnabled(), "SPECIALIZED_COPY_BUTTON_UNAVAILABLE");
   await button.evaluate(element => { element.click(); element.click(); });
-  await waitForRuntimeHandoffSettled(session.page, { timeout: 10_000 });
+  // A structural command publishes the new source before the Candidate has
+  // necessarily reached its terminal Runtime state. Do not let the generic
+  // "no pending" snapshot end this lane early; bind the wait to the changed
+  // source revision and then require the explicit Runtime terminal.
+  await expect.poll(async () => !(await readPublishedWorkingCopy(workingPath, null)).equals(before), {
+    timeout: 5_000,
+  }).toBe(true);
+  const rebuiltSource = await readPublishedWorkingCopy(workingPath, null);
+  await waitForRuntimeHandoffSettled(session.page, {
+    timeout: 10_000,
+    expectedSourceRevision: `sha256:${frozenDigest(rebuiltSource)}`,
+  });
+  const surface = session.page.getByTestId("workbench-active-document-canvas").filter({ visible: true });
+  await expect.poll(async () => ({
+    phase: await surface.getAttribute("data-edit-runtime-phase"),
+    outcome: await surface.getAttribute("data-edit-runtime-outcome"),
+  }), { timeout: 10_000 }).toEqual({ phase: "settled", outcome: "ready" });
   const frame = await currentEditorFrame(session.page);
   const records = await editor.evaluate(stopRuntimeLifecycleObservation); observing = false;
   const attributed = attributeRuntimeObserverRequests(records.records || []);
-  fail(attributed.length >= 1, "SPECIALIZED_RACE_REBUILD_NOT_OBSERVED", { records });
+  const candidateRecords = records.candidateRecords || [];
+  const lifecycleRecords = records.lifecycleRecords || [];
+  const readyCandidateId = lifecycleRecords.find(record => record.kind === "candidate-terminal"
+    && record.terminal === "ready" && typeof record.candidateId === "string"
+    && record.candidateId.length > 0)?.candidateId;
+  const candidate = candidateRecords.find(record => record.candidateId === readyCandidateId)
+    || candidateRecords.find(record => typeof record.candidateId === "string"
+      && record.candidateId.length > 0);
+  const generation = lifecycleRecords.find(record => record.kind === "generation"
+    && record.beforeGeneration && record.afterGeneration
+    && record.beforeGeneration !== record.afterGeneration);
+  const activeIdentity = lifecycleRecords.find(record => record.kind === "active-identity"
+    && record.candidateId === candidate?.candidateId);
+  const candidateTerminal = lifecycleRecords.find(record => record.kind === "candidate-terminal"
+    && record.candidateId === candidate?.candidateId && record.terminal === "ready");
+  const runtimeTerminal = lifecycleRecords.find(record => record.kind === "runtime-terminal"
+    && record.phase === "settled" && record.outcome === "ready");
+  fail(Boolean(candidate), "SPECIALIZED_RACE_CANDIDATE_NOT_OBSERVED", { records });
+  fail(Boolean(generation), "SPECIALIZED_RACE_GENERATION_NOT_OBSERVED", { records });
+  fail(Boolean(activeIdentity), "SPECIALIZED_RACE_ACTIVE_IDENTITY_NOT_OBSERVED", { records });
+  fail(Boolean(candidateTerminal), "SPECIALIZED_RACE_CANDIDATE_TERMINAL_NOT_READY", { records });
+  fail(Boolean(runtimeTerminal), "SPECIALIZED_RACE_RUNTIME_TERMINAL_NOT_READY", { records });
   const marker = `RACE_${fileId}`;
   const calls = [];
   const freshTarget = frame.locator(`[data-pageroot-id="${target.selectedId}"]`);
@@ -254,38 +304,33 @@ async function race() {
   await session.page.keyboard.insertText(marker);
   const after = await saveAndWait(before);
   fail(after.toString("utf8").includes(marker), "SPECIALIZED_RACE_CONTINUATION_MISSING", { marker });
-  report.lifecycle = attributed;
+  report.lifecycle = { requestAttributions: attributed, candidateRecords, lifecycleRecords,
+    rebuildEvidence: { candidateId: candidate.candidateId, generation: generation.generation,
+      activeCandidateId: activeIdentity.candidateId, candidateTerminal: candidateTerminal.terminal,
+      runtimeTerminal: runtimeTerminal.outcome, requestObserved: attributed.length > 0 } };
   report.operations.push({ operation: "race/rapid-actions", state: "PASS", marker,
-    rebuildRequests: attributed.length, resumedTargetId: target.selectedId, calls });
+    rebuildRequests: attributed.length, candidateId: candidate.candidateId,
+    resumedTargetId: target.selectedId, calls });
 }
 
 async function longSession() {
   const markers = [];
-  for (let round = 1; round <= requestedRounds; round += 1) {
-    const before = await readPublishedWorkingCopy(workingPath, null);
-    const marker = `LONG_${fileId}_R${round}`; markers.push(marker);
-    let locator;
-    let handle;
-    if (round === 1) {
-      const frame = await selectFixedTarget();
-      ({ locator, handle } = await activateFixedText(frame));
-    } else {
-      // Cumulative text intentionally invalidates the original character
-      // hash. Re-enter only by the frozen Stable ID; never infer a new point
-      // or substitute another element.
-      const frame = await currentEditorFrame(session.page);
-      locator = frame.locator(`[data-pageroot-id="${target.selectedId}"]`);
+  const frame = await selectFixedTarget();
+  const { locator, handle } = await activateFixedText(frame);
+  try {
+    for (let round = 1; round <= requestedRounds; round += 1) {
+      const before = await readPublishedWorkingCopy(workingPath, null);
+      const marker = `LONG_${fileId}_R${round}`; markers.push(marker);
+      // Keep the native editing session alive across rounds. Re-dblclicking a
+      // cumulative text target would select an existing word and make the next
+      // input replace it, which is not a long-session append operation.
       fail(await locator.count() === 1, "SPECIALIZED_LONG_SESSION_TARGET_MISSING");
       fail(await locator.evaluate(element => element.localName) === target.selectedTag,
         "SPECIALIZED_LONG_SESSION_TARGET_TAG_DRIFT");
-      handle = await locator.elementHandle();
-      await handle.dblclick({ timeout: 3_000 });
-      await expect(locator).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u, { timeout: 2_000 });
-      await session.page.keyboard.press("End");
-    }
-    try {
+      if (round > 1) await session.page.keyboard.press("End");
       await session.page.keyboard.insertText(marker);
       await expect(locator).toContainText(marker);
+      const liveTextAfterInput = await locator.textContent();
       const after = await saveAndWait(before);
       const sourceContainsMarker = after.toString("utf8").includes(marker);
       fail(sourceContainsMarker, "SPECIALIZED_LONG_SESSION_SOURCE_MISSING", {
@@ -293,6 +338,25 @@ async function longSession() {
       });
       const requiredMarkers = markers.slice();
       let cumulative = await readPublishedWorkingCopy(workingPath, null);
+      const settledFrame = await currentEditorFrame(session.page);
+      const frameTextAfterSave = await settledFrame.locator(
+        `[data-pageroot-id="${target.selectedId}"]`,
+      ).textContent().catch(() => null);
+      const editorStateAfterSave = await editor.evaluate((node) => ({
+        workingProjection: node.getAttribute("data-working-source-sha256"),
+        renderedProjection: node.getAttribute("data-rendered-projection-sha256"),
+        renderVerified: node.getAttribute("data-render-verified"),
+        handoff: node.getAttribute("data-runtime-handoff"),
+        refreshPending: node.getAttribute("data-runtime-refresh-pending"),
+        refreshPendingRevision: node.getAttribute("data-runtime-refresh-pending-source-revision"),
+        nativeCommitPath: node.getAttribute("data-native-commit-path"),
+      }));
+      report.operations.push({ operation: "long-session-observation", round, marker,
+        liveTextAfterInput,
+        frameTextAfterSave,
+        editorStateAfterSave,
+        sourceSha256: frozenDigest(cumulative),
+        markerPresence: requiredMarkers.map(value => cumulative.toString("utf8").includes(value)) });
       const cumulativeDeadline = Date.now() + 2_000;
       while (Date.now() < cumulativeDeadline
         && !requiredMarkers.every(value => cumulative.toString("utf8").includes(value))) {
@@ -311,9 +375,14 @@ async function longSession() {
           })),
         });
       report.operations.push({ operation: "long-session", round, state: "PASS", marker,
-        sourceContainsMarker, cumulativeMarkers: requiredMarkers });
-    } finally { await handle.dispose(); }
-  }
+        sourceContainsMarker, cumulativeMarkers: requiredMarkers,
+        liveTextAfterInput,
+        sourceContext: after.toString("utf8").slice(
+          Math.max(0, after.toString("utf8").indexOf(marker) - 120),
+          after.toString("utf8").indexOf(marker) + marker.length + 180,
+        ) });
+    }
+  } finally { await handle.dispose(); }
   const beforeReopen = await readPublishedWorkingCopy(workingPath, null);
   report.operations.push({ operation: "long-session-before-reopen", sourceSha256: frozenDigest(beforeReopen),
     markerPresence: markers.map(marker => beforeReopen.toString("utf8").includes(marker)) });
@@ -322,9 +391,14 @@ async function longSession() {
   session = await launchPageRoot({ isolatedUserData: session.isolatedUserData });
   await waitForProjectReady(session.page);
   workingPath = await managedWorkingCopyPath(session.page, importPath);
+  await waitForRuntimeHandoffSettled(session.page, {
+    timeout: 7_000,
+    expectedSourceRevision: `sha256:${frozenDigest(beforeReopen)}`,
+  });
+  await waitForSpecializedRuntimeTerminal();
   const reopened = await currentEditorFrame(session.page);
-  const locator = reopened.locator(`[data-pageroot-id="${target.selectedId}"]`);
-  fail(await locator.count() === 1, "SPECIALIZED_LONG_SESSION_REOPEN_IDENTITY_MISSING");
+  const reopenedLocator = reopened.locator(`[data-pageroot-id="${target.selectedId}"]`);
+  fail(await reopenedLocator.count() === 1, "SPECIALIZED_LONG_SESSION_REOPEN_IDENTITY_MISSING");
   const source = await readPublishedWorkingCopy(workingPath, null);
   report.operations.push({ operation: "long-session-after-reopen", sourceSha256: frozenDigest(source),
     pathBasename: path.basename(workingPath), markerPresence: markers.map(marker => source.toString("utf8").includes(marker)) });
@@ -343,6 +417,7 @@ try {
     timeout: 7_000,
     expectedSourceRevision: `sha256:${file.seed.sha256}`,
   });
+  await waitForSpecializedRuntimeTerminal();
   if (lane === "external-paste") await externalPaste();
   else if (lane === "IME") await ime();
   else if (lane === "race/rapid-actions") await race();
