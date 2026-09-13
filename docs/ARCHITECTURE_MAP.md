@@ -105,7 +105,7 @@ comment/event models produced by the same ingress. Current and latest markers
 are derived independently from their respective authoritative IDs; absent IDs
 remain unknown. A malformed receipt after a possible disk commit remains an
 unknown outcome, not a claim that the operation never happened. This does not
-alter the verified Canvas publication boundary. Single-current migration and version commands follow ADR 0072.
+alter the verified Canvas publication boundary. Single-current migration and version commands follow ADR 0073.
 
 ## Current edit contract
 

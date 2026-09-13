@@ -614,7 +614,7 @@ DocumentWorkflow 只在项目、文档、当前稿、事务及日志证据一致
 凭据通过 Main 的 CAS 删除重复日志；否则保留原恢复流程或阻止交接，不自动回灌已退休稿件。
 Workbench 的跨项目历史意图只对过时会话做有界重试；确定性拒绝消费该次意图，等待新的用户点击。
 Main 独占成功导出目录偏好；导出回执与版本保存回执分开，普通 HTML 不携带评论。
-完整合同见 ADR 0072。
+完整合同见 ADR 0073。
 
 ## Durable Working Copy file binding
 

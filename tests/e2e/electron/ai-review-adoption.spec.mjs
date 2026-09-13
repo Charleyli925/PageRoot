@@ -2388,7 +2388,6 @@ test("a committed version with unreadable current bytes stays blocked and retrie
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
       .filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     expect(failedReads).toBeGreaterThan(0);
-    await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
     const active = await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
     expect(active.sourcePath).toBe(beforeAdoption.sourcePath);
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
@@ -2399,7 +2398,21 @@ test("a committed version with unreadable current bytes stays blocked and retrie
 
     await launched.page.unroute("**/source?*", unreadableCurrent);
     await launched.page.unroute("**/ready-version/activate", withoutInlineHtml);
-    await adoptReadyResult(launched.page);
+    // A failed read may briefly enter the durable adoption-unknown state while
+    // the controller reconciles the same decision. Wait for either automatic
+    // settlement or a visible decision action before attempting a retry.
+    await expect.poll(async () => {
+      const reviewVisible = await launched.page.getByTestId("ai-review-workspace").isVisible();
+      const adoptCount = await launched.page.getByRole("button", { name: "采用修改", exact: true }).count();
+      const reviewCount = await launched.page.getByRole("button", { name: "查看修改", exact: true }).count();
+      return !reviewVisible || adoptCount > 0 || reviewCount > 0;
+    }, { timeout: 30_000 }).toBe(true);
+    if (
+      await launched.page.getByRole("button", { name: "采用修改", exact: true }).count() > 0
+      || await launched.page.getByRole("button", { name: "查看修改", exact: true }).count() > 0
+    ) {
+      await adoptReadyResult(launched.page);
+    }
     await assertReviewAcceptPersistence({ page: launched.page, beforeAdoption, expectedText: UPDATED_TEXT });
     expect((await beforeAdoption.repository.listRegisteredProjectVersionSummaries({ projectId: committed.target.projectId })).versions).toHaveLength(2);
   } finally {
@@ -2996,8 +3009,9 @@ function emptyReviewScenario(scenario) {
       await launched.page.getByRole("button", { name: "待决定", exact: true }).click();
       await expect(launched.page.getByRole("button", { name: "采用修改", exact: true })).toBeVisible();
       if (scenario.adopt) {
+        const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
         await adoptReadyResult(launched.page);
-        await assertReviewAcceptPersistence({ page: launched.page, sourcePath: fixture.sourcePath,
+        await assertReviewAcceptPersistence({ page: launched.page, beforeAdoption,
           original, expectedText: "source-only QA", versionPathPattern: /\.html$/u });
       } else {
         await launched.page.getByRole("button", { name: "不用这次", exact: true }).click();
@@ -3601,8 +3615,9 @@ for (const adopt of [true, false]) {
       await expect(launched.page.getByRole("button", { name: "采用修改", exact: true })).toBeEnabled();
       await launched.page.screenshot({ path: testInfo.outputPath("annotation-fallback.png"), animations: "disabled" });
       if (adopt) {
+        const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
         await adoptReadyResult(launched.page);
-        await assertReviewAcceptPersistence({ page: launched.page, sourcePath: fixture.sourcePath,
+        await assertReviewAcceptPersistence({ page: launched.page, beforeAdoption,
           original, expectedText: UPDATED_TEXT, versionPathPattern: /\.html$/u });
       } else {
         await launched.page.getByRole("button", { name: "不用这次", exact: true }).click();

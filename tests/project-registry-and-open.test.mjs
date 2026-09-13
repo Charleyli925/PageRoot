@@ -1189,7 +1189,7 @@ for (const recovery of ["none", "missing-save-source", "promotion"]) {
         requestId: "req_catalog_recovery", candidateId: "candidate_catalog_recovery",
         expectedSourceSha256: imported.target.sourceSha256, html: changed });
       const interrupted = new ProjectFileRepository({ projectsRoot: value.projects,
-        failpoint: (name) => name === "promotion-working-copy-created" });
+        failpoint: (name) => name === "current-version-manifest-written" });
       await assert.rejects(interrupted.promoteCandidate({ target: imported.target,
         candidateId: candidate.candidate.candidateId,
         decisionOperationId: `promote_${candidate.candidate.candidateId}` }), { code: "INJECTED_FAILPOINT" });
@@ -1199,7 +1199,7 @@ for (const recovery of ["none", "missing-save-source", "promotion"]) {
     assert.equal(observed.workspace.target.projectId, imported.target.projectId);
     assert.equal(observed.workspace.target.documentId, imported.target.documentId);
     assert.equal(observed.workspace.manifest.versions.length, recovery === "promotion" ? 2 : 1);
-    assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), recovery === "missing-save-source" ? changed : html("V1"));
+    assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), recovery === "none" ? html("V1") : changed);
     if (recovery === "promotion") {
       const latest = observed.workspace.manifest.workingCopies.find((workingCopy) => workingCopy.versionId === "ver_0002");
       assert.equal(await readFile(path.join(imported.target.projectRootPath, latest.sourceRelativePath), "utf8"), changed);

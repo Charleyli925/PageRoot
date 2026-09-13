@@ -200,7 +200,7 @@ test('manual save rejects active Candidate and legacy migration waits without re
  const restarted=new ProjectFileRepository({projectsRoot:v.projects});await restarted.initialize();
  assert.equal((await json(file)).currentDraftSchemaVersion,undefined);assert.deepEqual((await json(runtimePath)).activeRequest,runtime.activeRequest);
  await assert.rejects(restarted.createVersionFromCurrent({target,operationId:'manual_pending_0001',expectedSourceSha256:target.sourceSha256}),{code:'HISTORY_CREATION_RUN_LOCKED'});
- const adopted=await restarted.promoteCandidate({target,candidateId});const current=await restarted.resolveRegisteredProjectOpenTarget({projectId:target.projectId});
+ const adopted=await restarted.promoteCandidate({target,candidateId,decisionOperationId:`promote_${candidateId}`});const current=await restarted.resolveRegisteredProjectOpenTarget({projectId:target.projectId});
  assert.equal(current.target.workingCopyId,adopted.target.workingCopyId);assert.equal((await json(file)).workingCopies.length,1);
 });
 
@@ -273,7 +273,7 @@ for(const [field,mutate] of [
  ['prior current identity',(transaction)=>{transaction.beforeMember.workingCopyId='work_ver_0999';transaction.afterMember.workingCopyId='work_ver_0999';}],
 ])test('current adoption recovery revalidates sealed '+field,async(t)=>{
  const v=await fixture(t);const {target}=await importSource(v);const candidateId='candidate_current_authority_0001';await v.repository.createCandidate({target,requestId:'req_current_authority_01',candidateId,html:html('next'),expectedSourceSha256:target.sourceSha256});
- const writer=new ProjectFileRepository({projectsRoot:v.projects,failpoint:(name)=>name==='current-version-prepared'});await assert.rejects(writer.promoteCandidate({target,candidateId}));
+ const writer=new ProjectFileRepository({projectsRoot:v.projects,failpoint:(name)=>name==='current-version-prepared'});await assert.rejects(writer.promoteCandidate({target,candidateId,decisionOperationId:`promote_${candidateId}`}));
  const transactionFile=path.join(target.projectRootPath,'.pageroot/transactions','current_promote_'+candidateId,'transaction.json');const transaction=await json(transactionFile);mutate(transaction);await writeFile(transactionFile,JSON.stringify(transaction));
  const restarted=new ProjectFileRepository({projectsRoot:v.projects});await assert.rejects(restarted.recoverProject({projectRootPath:target.projectRootPath}));assert.equal(await readFile(target.exactSourcePath,'utf8'),html('V1'));assert.equal((await json(manifestPath(target))).versions.length,1);
 });
@@ -317,7 +317,8 @@ test('completed adoption replay preserves a newer real Request and Candidate thr
   await restarted.promoteCandidate(firstInput);
   assert.deepEqual(await readFile(runtimeFile), pending);
   const next = await restarted.promoteCandidate({ target: adopted.target, candidateId: second.candidate.candidateId,
-    expectedSourceSha256: adopted.target.sourceSha256 });
+    expectedSourceSha256: adopted.target.sourceSha256,
+    decisionOperationId: `promote_${second.candidate.candidateId}` });
   assert.equal(next.version.versionId, 'ver_0003');
   const completed = await readFile(runtimeFile);
   const older = await restarted.promoteCandidate(firstInput);

@@ -691,7 +691,7 @@
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
         "docs/VERSION_AND_PROJECT_FILES_PRD.md",
-        "docs/decisions/0072-single-current-draft.md",
+        "docs/decisions/0073-single-current-draft.md",
         "docs/SECURITY_MODEL.md",
         "docs/STATE_OWNERSHIP.md"
       ]

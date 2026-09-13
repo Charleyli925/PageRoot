@@ -3898,11 +3898,12 @@ export class ProjectFileRepository {
       );
     }
     const receiptOperationId = loaded.runtime.historyActivation.operationId;
-    loaded = await this.#resolveMutationTarget({
-      ...target,
-      projectRootPath: loaded.paths.projectRootPath,
-      workingCopyId: sourceWorkingCopy.workingCopyId,
-    });
+    await this.#resolveWorkingCopyPath(
+      loaded,
+      sourceWorkingCopy,
+      "Version Working Copy",
+      { readOnly: true, persistLocator: false },
+    );
     if (!matchesReceipt(loaded) || loaded.runtime.historyActivation.operationId !== receiptOperationId) {
       throw new ProjectFileRepositoryError(
         "HISTORY_ACTIVATION_RECEIPT_MISMATCH",
@@ -4022,11 +4023,12 @@ export class ProjectFileRepository {
         "The history activation confirmation does not match the durable activation receipt.",
       );
     }
-    loaded = await this.#resolveMutationTarget({
-      ...target,
-      projectRootPath: loaded.paths.projectRootPath,
-      workingCopyId: sourceWorkingCopy.workingCopyId,
-    });
+    await this.#resolveWorkingCopyPath(
+      loaded,
+      sourceWorkingCopy,
+      "Version Working Copy",
+      { readOnly: true, persistLocator: false },
+    );
     if (!matchesReceipt(loaded)) {
       throw new ProjectFileRepositoryError(
         "HISTORY_ACTIVATION_RECEIPT_MISMATCH",
@@ -4963,6 +4965,7 @@ export class ProjectFileRepository {
 
   async #registeredRootCensus() {
     const pathsByProjectId = new Map();
+    const incompletePathsByProjectId = new Map();
     let entries;
     try {
       entries = await readdir(this.#projectsRoot, { withFileTypes: true });
@@ -4975,18 +4978,28 @@ export class ProjectFileRepository {
       if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith(".")) continue;
       const candidatePath = path.join(this.#projectsRoot, entry.name);
       try {
-        const project = assertProjectIdentity(await readJsonFile(
-          path.join(candidatePath, ".pageroot", "project.json"), "project.json",
-          { projectRootPath: candidatePath },
-        ));
+        const project = (await this.#loadProject(candidatePath)).project;
         const paths = pathsByProjectId.get(project.projectId) || [];
         paths.push(candidatePath);
         pathsByProjectId.set(project.projectId, paths);
       } catch {
-        // Unrelated malformed folders cannot prevent a registered project opening.
+        // Keep a valid project identity even when the remaining control files
+        // are damaged, so a matching but incomplete copy stays visible as an
+        // invalid/unavailable project rather than being mistaken for absence.
+        try {
+          const project = assertProjectIdentity(await readJsonFile(
+            path.join(candidatePath, ".pageroot", "project.json"), "project.json",
+            { projectRootPath: candidatePath },
+          ));
+          const paths = incompletePathsByProjectId.get(project.projectId) || [];
+          paths.push(candidatePath);
+          incompletePathsByProjectId.set(project.projectId, paths);
+        } catch {
+          // Unrelated malformed folders cannot prevent a registered project opening.
+        }
       }
     }
-    return { pathsByProjectId, error: null };
+    return { pathsByProjectId, incompletePathsByProjectId, error: null };
   }
 
   async #discoverRegisteredRoot(projectId, record, { documentId = null, rootCensus = null } = {}) {
@@ -5014,7 +5027,14 @@ export class ProjectFileRepository {
     }
     const chosen = candidates[0];
     if (!chosen) {
-      if (matchingIncomplete) throw matchingIncomplete;
+      const incomplete = census.incompletePathsByProjectId?.get(projectId) || [];
+      if (incomplete.length > 0) {
+        throw new ProjectFileRepositoryError(
+          "INVALID_MANIFEST",
+          "登记项目文件夹存在但合同不完整，暂时不可用。",
+          { projectId, projectRootPath: incomplete[0], confirmedAbsent: false },
+        );
+      }
       return null;
     }
     if (documentId && chosen.project.documentId !== documentId) {

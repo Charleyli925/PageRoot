@@ -31,7 +31,7 @@ v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧�
 
 ## v4 当前稿与手动建版
 
-当前合同见 [ADR 0072](decisions/0072-single-current-draft.md) 和
+当前合同见 [ADR 0073](decisions/0073-single-current-draft.md) 和
 [版本与项目文件需求](VERSION_AND_PROJECT_FILES_PRD.md)。下文 v3 旧工作文件规则
 不是当前 v4 的写入合同，也不是本次迁移的来源。
 

@@ -1,4 +1,4 @@
-# ADR 0072: One editable current draft and immutable history
+# ADR 0073: One editable current draft and immutable history
 
 Status: Accepted.
 

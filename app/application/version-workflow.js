@@ -1648,7 +1648,6 @@ export class VersionWorkflow {
       projectId: run?.projectId,
       documentId: run?.documentId,
       sourcePath: responseSourcePath || null,
-      sourceSha256: candidateHash,
       sameSourcePath: this.#codecs.sameSourcePath,
       targetKind: "working-copy",
     });
@@ -1657,10 +1656,12 @@ export class VersionWorkflow {
       || !SHA256.test(candidateHash)
       || !responseVersionId
       || responseVersionId !== String(run?.candidateVersionId || "")
-      || target.versionId !== responseVersionId
+      || !/^ver_\d{4,}$/u.test(String(target.versionId || ""))
       || String(payload?.projectId || "") !== String(run?.projectId || "")
       || String(payload?.documentId || "") !== String(run?.documentId || "")
       || (responseSourcePath && !this.#codecs.sameSourcePath(target.exactSourcePath, responseSourcePath))
+      || (String(target?.versionId || "") === responseVersionId
+        && target.sourceSha256 !== candidateHash)
     ) {
       throw new Error("Candidate Promotion 返回的工作文件 OpenTarget 不完整或身份不一致。");
     }

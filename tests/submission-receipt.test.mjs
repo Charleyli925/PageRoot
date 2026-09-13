@@ -196,7 +196,7 @@ test(`adoption consumes only unchanged submitted comments and replays once (same
   assert.equal(replayed.version.versionId, result.version.versionId);
   assert.equal(replayed.target.workingCopyId, result.target.workingCopyId);
   assert.equal(await readFile(result.target.exactSourcePath, "utf8"), html);
-  assert.equal(await readFile(value.target.exactSourcePath, "utf8"), sourceHtml);
+  assert.equal(await readFile(value.target.exactSourcePath, "utf8"), html);
   const workspace = await value.repository.workspace({ sourcePath: result.target.exactSourcePath });
   assert.deepEqual(workspace.draft.comments.map((comment) => comment.commentId), [edited.commentId, added.commentId]);
   const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
@@ -206,7 +206,7 @@ test(`adoption consumes only unchanged submitted comments and replays once (same
   const restored = await restarted.workspace({ sourcePath: result.target.exactSourcePath });
   assert.deepEqual(restored.draft.comments, workspace.draft.comments);
   assert.equal(restored.manifest.versions.length, 2);
-  assert.equal(restored.manifest.workingCopies.length, 2);
+  assert.equal(restored.manifest.workingCopies.length, 1);
   assert.equal((await restarted.promoteCandidate(input)).version.versionId, result.version.versionId);
 });
 }

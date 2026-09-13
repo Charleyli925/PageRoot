@@ -531,7 +531,11 @@ test("Electron rejects managed and generated pending activations after productio
     const beforeRename = JSON.parse(readFileSync(statePath, "utf8"));
     const predecessorGeneration = Number(beforeRename.activeEffectGeneration || 0);
     const predecessorEffect = beforeRename.activeEffect || null;
-    const pathB = realpathSync(targetB.exactSourcePath);
+    // Current-draft adoption keeps the managed file at A. Keep a durable
+    // decoy destination for the pending receipt so the later A-C-A rename can
+    // prove that the stale operation is rejected before Bridge lookup.
+    const pathB = path.join(path.dirname(pathA), "rename-activation-aba-pending.html");
+    writeFileSync(pathB, readFileSync(targetB.exactSourcePath), "utf8");
     const managedOperationId = "e2e_rename_managed_pending_0001";
     const generatedOperationId = "e2e_rename_generated_pending_0001";
     const managedReceipt = {
@@ -591,7 +595,7 @@ test("Electron rejects managed and generated pending activations after productio
         stem: "rename-activation-aba-C",
         expectedSha256,
       })
-    ), { sourcePath: pathA, expectedSha256: workspaceA.sourceSha256 });
+    ), { sourcePath: pathA, expectedSha256: targetB.sourceSha256 });
     const renamedA = await launched.page.evaluate(async ({ sourcePath, expectedSha256 }) => (
       window.htmlAIProjects.renameHtml({
         operationId: "e2e_rename_activation_c_to_a_0001",
@@ -599,14 +603,17 @@ test("Electron rejects managed and generated pending activations after productio
         stem: "rename-activation-aba-V1",
         expectedSha256,
       })
-    ), { sourcePath: renamedC.sourcePath, expectedSha256: workspaceA.sourceSha256 });
-    expect(sameDesktopSourcePath(renamedA.sourcePath, pathA)).toBe(true);
+    ), { sourcePath: renamedC.sourcePath, expectedSha256: targetB.sourceSha256 });
+    expect(path.basename(renamedA.sourcePath)).toBe("rename-activation-aba-V1.html");
+    // Keep the receipt's old predecessor path resolvable while ensuring it is
+    // no longer the active path after the second rename.
+    writeFileSync(pathA, readFileSync(renamedA.sourcePath), "utf8");
 
     await stopPageRoot(launched.electronApp, launched.isolatedUserData, { cleanup: false });
     if (existsSync(workbenchTabsPath)) unlinkSync(workbenchTabsPath);
     launched = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
     await waitForProjectReady(launched.page);
-    await waitForActiveSourcePath(launched.page, pathA);
+    await waitForActiveSourcePath(launched.page, renamedA.sourcePath);
     const retry = await launched.page.evaluate(async ({ managed, generated }) => {
       const attempt = async (run) => {
         try {
@@ -644,7 +651,7 @@ test("Electron rejects managed and generated pending activations after productio
     expect(retry.managed).toEqual({ ok: false, code: "ACTIVATION_OPERATION_NOT_COMMITTED" });
     expect(retry.generated).toEqual({ ok: false, code: "ACTIVATION_OPERATION_NOT_COMMITTED" });
     const after = JSON.parse(readFileSync(statePath, "utf8"));
-    expect(sameDesktopSourcePath(after.activePath, pathA)).toBe(true);
+    expect(sameDesktopSourcePath(after.activePath, renamedA.sourcePath)).toBe(true);
     expect(after.activeEffect).toBeNull();
     expect(after.activeEffectGeneration).toBe(predecessorGeneration + 2);
     expect(after.activationReceipts).toEqual(expect.arrayContaining([
@@ -679,18 +686,6 @@ test("Electron replays a completed activation only while its exact destination r
       candidateId: candidateB.candidate.candidateId,
       decisionOperationId: `promote_${candidateB.candidate.candidateId}`,
     })).target;
-    const candidateC = await repository.createCandidate({
-      target: targetB,
-      requestId: "req_e2e_active_receipt_c",
-      candidateId: "candidate_e2e_active_receipt_c_0001",
-      html: identityPreservingCandidateHtml(targetB, "Active receipt C"),
-      expectedSourceSha256: targetB.sourceSha256,
-    });
-    const targetC = (await repository.promoteCandidate({
-      target: targetB,
-      candidateId: candidateC.candidate.candidateId,
-      decisionOperationId: `promote_${candidateC.candidate.candidateId}`,
-    })).target;
     const payloadFor = (previousTarget, nextTarget, operationId) => ({
       previousSourcePath: previousTarget.exactSourcePath,
       nextSourcePath: nextTarget.exactSourcePath,
@@ -703,11 +698,28 @@ test("Electron replays a completed activation only while its exact destination r
       operationId,
     });
     const x = payloadFor(firstWorkspace.target, targetB, "e2e_active_receipt_x_0001");
-    const y = payloadFor(targetB, targetC, "e2e_active_receipt_y_0001");
     const first = await launched.page.evaluate((input) => (
       window.htmlAIProjects.activateManagedWorkingCopy(input)
     ), x);
     expect(sameDesktopSourcePath(first.sourcePath, targetB.exactSourcePath)).toBe(true);
+
+    // Current-draft adoption keeps one editable Working Copy and advances its
+    // Version identity in place. Create the newer active effect only after X
+    // has committed so replaying X exercises the same receipt fence without
+    // pretending historical Working Copies are still activation targets.
+    const candidateC = await repository.createCandidate({
+      target: targetB,
+      requestId: "req_e2e_active_receipt_c",
+      candidateId: "candidate_e2e_active_receipt_c_0001",
+      html: identityPreservingCandidateHtml(targetB, "Active receipt C"),
+      expectedSourceSha256: targetB.sourceSha256,
+    });
+    const targetC = (await repository.promoteCandidate({
+      target: targetB,
+      candidateId: candidateC.candidate.candidateId,
+      decisionOperationId: `promote_${candidateC.candidate.candidateId}`,
+    })).target;
+    const y = payloadFor(targetB, targetC, "e2e_active_receipt_y_0001");
     await launched.page.evaluate((input) => (
       window.htmlAIProjects.activateManagedWorkingCopy(input)
     ), y);

@@ -550,6 +550,10 @@ export default function Workbench() {
     workspaceController?.shell.getSnapshot ?? emptyShellSnapshot,
     emptyShellSnapshot,
   );
+  // The shell snapshot is the reactive workspace-controller projection used by
+  // the workbench; keep a named alias for version/status surfaces that consume
+  // the controller snapshot shape.
+  const workspaceControllerSnapshot = shellSnapshot;
   const runCapability = workspaceController
     ? workspaceController.runs as RunControllerCapability
     : null;

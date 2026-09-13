@@ -147,7 +147,7 @@ function promotedOpenTarget(input, {
   sourceSha256 = sha256(CANDIDATE_HTML),
   documentId = input.documentId,
   targetKind = "working-copy",
-  versionId = input.versionId,
+  versionId = input.versionId || input.candidateVersionId,
 } = {}) {
   return {
     projectId: input.projectId,
@@ -1107,7 +1107,10 @@ test("openCommittedVersion rejects incomplete or mismatched OpenTarget before cu
       },
     });
 
-    assert.equal(outcome.status, "rejected", label);
+    // A valid target for a later Version is an explicit supersession result;
+    // incomplete or cross-document identity remains a rejection.
+    assert.equal(outcome.status, label === "wrong version target" ? "blocked" : "rejected", label);
+    if (label === "wrong version target") assert.equal(outcome.code, "VERSION_ACTIVATION_SUPERSEDED", label);
     assert.equal(harness.calls.freeze, 0, label);
     assert.equal(harness.calls.clearRecovery, 0, label);
     assert.equal(harness.calls.prepare.length, 0, label);

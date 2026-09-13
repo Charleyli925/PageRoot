@@ -110,7 +110,7 @@ test("Candidate adoption requires its own decision receipt and retries one lost 
   const interrupted = new ProjectFileRepository({
     projectsRoot: value.projects,
     failpoint: async (name) => {
-      if (name === "promotion-manifest-committed" && lostResponse) {
+      if (name === "current-version-manifest-written" && lostResponse) {
         lostResponse = false;
         return true;
       }

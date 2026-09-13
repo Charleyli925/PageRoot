@@ -2,7 +2,7 @@
 
 ## 2026-09-12 — 一份当前稿与不可变历史
 
-- Truth: 用户确认的当前稿模型及 `docs/VERSION_AND_PROJECT_FILES_PRD.md`、ADR 0072。
+- Truth: 用户确认的当前稿模型及 `docs/VERSION_AND_PROJECT_FILES_PRD.md`、ADR 0073。
   沿用工作台视觉语言，项目规则和当前稿在前，历史默认折叠、按 V1/V2 顺序展示；
   保存版本与恢复放在更多菜单，导出的保存版本选项每次默认关闭。
 - Evidence: 真实 Electron 的合成 HTML 流程，1440 × 960 CSS px / 2880 × 1920 截图。

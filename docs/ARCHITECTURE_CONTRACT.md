@@ -1144,7 +1144,7 @@ Plain export copies complete current HTML or the verified viewed snapshot.
 Only an explicitly selected option saves an additional Version, after successful
 verified export and with the same exported hash. Autosave, Undo/Redo and plain
 export create no Version. The optional export step uses the same local-version
-command and operation reconciliation. See ADR 0072.
+command and operation reconciliation. See ADR 0073.
 
 Autosave then enters `ProjectFileRepository`. It is the only live Bridge-side
 owner of the current-source write for a registered v4 Project File. The retired
