@@ -6513,6 +6513,7 @@ export default function Workbench() {
       /> : null}
       <WorkbenchDocumentSurfaceCache
         snapshot={documentSurfaceCacheSnapshot}
+        activeTabId={activeWorkbenchTab?.kind === "document" ? activeWorkbenchTab.tabId : null}
         visibleTabId={visibleCachedSurface?.tabId || null}
         visibleSourceSha256={visibleCachedSurface?.sourceSha256 || null}
         candidateTabId={candidateCachedSurface?.tabId || null}
