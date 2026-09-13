@@ -221,8 +221,11 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `PAGEROOT_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
 - 交互预览与 Edit 可丢弃 Script 页：Electron 用四类真实用例证明普通脚本
-  持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及语义
-  结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。运行时后代必须
+  持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及无法
+  证明原地条件的语义结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。
+  已证明的普通源码复制、删除、插入和受支持移动必须保持当前 Document 身份，
+  并为本次事务创建或恢复的节点授予合法编辑权限；撤销/重做走同一证明。
+  运行时后代必须
   映射到最近源码宿主，只保留评论能力，不暴露文字/样式/结构编辑。元素复制要同时
   证明整个选中子树：运行生成内容及包含它的外层容器隐藏复制入口，保留评论和
   其他结构动作，并且旧的按钮引用或其他调用者也必须在公共命令边界被拒绝；同页独立的

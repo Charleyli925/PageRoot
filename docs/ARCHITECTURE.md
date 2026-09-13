@@ -541,7 +541,9 @@ subtree; a generated descendant, opaque runtime surface or authored program make
 the parent selection unsupported. Known-unsupported copy is absent from the
 toolbar and rejected again at the common command boundary, while independent
 source-backed siblings, delete/move, text copy and complete-HTML save/export keep
-their existing contracts. The visible toolbar keeps this deliberately small:
+their existing contracts. After the kernel accepts complete HTML, Canvas may keep
+the current iframe when ADR 0074 proves source identity, live node identity and
+the local update; missing proof uses the existing Candidate rebuild. The visible toolbar keeps this deliberately small:
 duplicate, delete and sibling up/down; the Canvas port exposes raw insertion and
 cross-parent move for product workflows without adding a component or layout
 system. See ADR 0064 and ADR 0065.

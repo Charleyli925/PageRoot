@@ -108,7 +108,10 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
 
 - Structure editing and comments share stable authored identity; deleting a
   target makes its comment orphaned instead of heuristically rebinding it.
-- Structural changes normally rebuild the disposable preview from complete
-  source. Runtime DOM is never serialized back to HTML.
+- In-place Canvas projection is a display strategy over an already accepted
+  semantic result, not a second source channel. Proven insert, duplicate,
+  delete and supported moves may keep the current iframe; source-legal
+  operations that cannot prove a local update still rebuild from complete
+  source. Runtime DOM is never serialized back to HTML. See ADR 0074.
 - Runtime simplification, Review pairing and AI Candidate validation remain in
   PR7, PR8 and PR9 respectively.
