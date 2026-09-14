@@ -199,6 +199,47 @@ test("a final drain verifies an unchanged acknowledged draft without a write", a
   assert.equal(session.revision, 106);
 });
 
+test("a server-authored provenance never re-opens an acknowledged aggregate", async () => {
+  let writes = 0;
+  const client = {
+    async saveDraft() {
+      writes += 1;
+      return {};
+    },
+    async workspace() {
+      return {};
+    },
+  };
+  const serverProvenance = {
+    actor: { kind: "human", id: "local" },
+    device: "device_1",
+  };
+  const session = new DraftSession({ bridgeClient: client });
+  // The Bridge stamps provenance onto every stored record and never accepts it
+  // from the caller, so the acknowledged aggregate always carries a field the
+  // renderer cannot reproduce.
+  session.activate(context, 12, authoritative(12, {
+    comments: [{
+      commentId: "comment_1",
+      text: "same",
+      provenance: serverProvenance,
+    }],
+    changeEvents: [{
+      eventId: "edit_1",
+      kind: "text",
+      provenance: serverProvenance,
+    }],
+  }));
+  const snapshot = session.createSnapshot({
+    comments: [{ commentId: "comment_1", text: "same" }],
+    changeEvents: [{ eventId: "edit_1", kind: "text" }],
+  });
+
+  assert.equal(await session.drain(snapshot), true);
+  assert.equal(writes, 0);
+  assert.equal(session.revision, 12);
+});
+
 test("an acknowledged deletion does not create a second no-op revision", async () => {
   const writes = [];
   const client = {

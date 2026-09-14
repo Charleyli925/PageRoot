@@ -3862,7 +3862,14 @@ export default function Workbench() {
       );
       return;
     }
-    void flushAutosave();
+    void flushAutosave().then(
+      () => {
+        editorRef.current?.restoreNativeEditFocus();
+      },
+      () => {
+        editorRef.current?.restoreNativeEditFocus();
+      },
+    );
   }, [
     deferEditorCommand,
     flushAutosave,

@@ -18,6 +18,7 @@ import {
   createInsertElementOperation,
   createMoveElementOperation,
 } from "../app/lib/source-structure-edit.js";
+import { createTargetRef } from "../app/lib/source-patch-core.js";
 
 const ids = {
   html: "sm1_00000000000040008000000000000001",
@@ -132,6 +133,53 @@ test("insert, delete and cross-parent move classify as proven in-place", () => {
   assert.equal(moveDecision.reason, "verified-cross-parent-move");
   assert.equal(moveDecision.plan.sourceParentElementId, ids.left);
   assert.equal(moveDecision.plan.parentElementId, ids.right);
+});
+
+test("structural output selection keeps copy comments isolated and follows delete landing", () => {
+  const duplicated = applySemanticOperation(
+    createSemanticDocumentState(html),
+    createDuplicateElementOperation(html, {
+      baseRevision: 0,
+      operationId: "op_duplicate_target_handoff",
+      elementId: ids.second,
+    }),
+    { randomUUID: uuidFactory("31000000-0000-4000-8000-000000000001") },
+  );
+  const afterCopy = buildSourceIndex(duplicated.html);
+  const copyId = duplicated.identityDelta.addedElementIds[0];
+  assert.ok(copyId);
+  const originalComment = createTargetRef(afterCopy, afterCopy.byStemmioId.get(ids.second), {
+    targetId: "comment-original",
+    label: "原元素",
+    level: "subregion",
+  });
+  const copyComment = createTargetRef(afterCopy, afterCopy.byStemmioId.get(copyId), {
+    targetId: "comment-copy",
+    label: "副本",
+    level: "subregion",
+  });
+  assert.equal(originalComment.elementId, ids.second);
+  assert.equal(copyComment.elementId, copyId);
+  assert.notEqual(originalComment.elementId, copyComment.elementId);
+
+  const deleted = applySemanticOperation(
+    createSemanticDocumentState(duplicated.html),
+    createDeleteElementOperation(duplicated.html, {
+      baseRevision: 0,
+      operationId: "op_delete_target_handoff",
+      elementId: copyId,
+    }),
+  );
+  const landingId = resolveDeleteSelectionLanding(afterCopy, copyId);
+  assert.equal(landingId, ids.second);
+  const afterDelete = buildSourceIndex(deleted.html);
+  const landingComment = createTargetRef(afterDelete, afterDelete.byStemmioId.get(landingId), {
+    targetId: "comment-landing",
+    label: "删除落点",
+    level: "subregion",
+  });
+  assert.equal(landingComment.elementId, landingId);
+  assert.equal(afterDelete.byStemmioId.has(copyId), false);
 });
 
 test("customized builtins, mixed content and body-as-parent keep distinct projection classes", () => {
