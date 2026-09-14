@@ -95,16 +95,27 @@ async function verifySyntheticAppBundle(fixture, { allowUnsigned = true } = {}) 
     packageJson: fixture.packageJson,
     verifySignature: !allowUnsigned,
     requirePackagedAgentBridgeSmoke: false,
+    syntheticRuntimeModules: fixture.packagedRuntimeModules,
   });
 }
 
 test("release commands use one automated artifact lane with full tests and packaged runtime verification", async () => {
-  const [packageText, verifier, impactMapText, gateRunner, packageBuilder] = await Promise.all([
+  const [
+    packageText,
+    verifier,
+    impactMapText,
+    gateRunner,
+    packageBuilder,
+    packagedRuntime,
+    packagedStartup,
+  ] = await Promise.all([
     readFile(path.join(productRoot, "package.json"), "utf8"),
     readFile(path.join(productRoot, "scripts/verify-packaged-artifact.mjs"), "utf8"),
     readFile(path.join(productRoot, "tests/test-impact-map.json"), "utf8"),
     readFile(path.join(productRoot, "scripts/test-gate.mjs"), "utf8"),
     readFile(path.join(productRoot, "scripts/build-package.mjs"), "utf8"),
+    readFile(path.join(productRoot, "tests/e2e/electron/packaged-runtime-smoke.spec.mjs"), "utf8"),
+    readFile(path.join(productRoot, "tests/e2e/electron/packaged-startup-smoke.spec.mjs"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
   const impactMap = JSON.parse(impactMapText);
@@ -160,6 +171,12 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(verifier, /codesign/);
   assert.match(verifier, /hdiutil/);
   assert.match(verifier, /app\.asar/);
+  assert.match(verifier, /evaluatePackagedSourceRuntimeClosure/u);
+  assert.doesNotMatch(verifier, /REQUIRED_BASE_PACKAGED_MODULES/u);
+  for (const packagedLaunchTest of [packagedRuntime, packagedStartup]) {
+    assert.match(packagedLaunchTest, /stagePackagedApplicationForLaunch/u);
+    assert.doesNotMatch(packagedLaunchTest, /cwd:\s*productRoot/u);
+  }
   assert.match(verifier, /finalize-attempt\.mjs/);
   assert.match(verifier, /lifecycle-core\.mjs/);
   assert.match(verifier, /project-file-repository\.mjs/);
@@ -417,6 +434,7 @@ test("real app verification requires the Electron Helper ACP smoke even when uns
       appPath: fixture.appPath,
       packageJson: fixture.packageJson,
       verifySignature: false,
+      syntheticRuntimeModules: fixture.packagedRuntimeModules,
     }),
     /packaged Electron Helper is missing/u,
   );

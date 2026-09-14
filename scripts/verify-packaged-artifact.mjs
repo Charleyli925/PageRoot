@@ -38,6 +38,7 @@ import {
   expectedPackagedAppIdentity,
   readPackagedPlistIdentity,
 } from "./packaged-app-identity.mjs";
+import { evaluatePackagedSourceRuntimeClosure } from "./packaged-runtime-closure.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
 import { AGENT_FEATURE_GATES } from "../shared/agent-feature-gates.mjs";
 import { parseRuntimeEnvironmentMarker } from "../desktop/runtime-environment.mjs";
@@ -111,32 +112,6 @@ const REQUIRED_BRIDGE_FILES = [
   "draft-command-decoder.mjs",
   "conversation-repository.mjs",
 ];
-const REQUIRED_BASE_PACKAGED_MODULES = [
-  "@agentclientprotocol/sdk",
-  "argparse",
-  "builder-util-runtime",
-  "debug",
-  "electron-updater",
-  "entities",
-  "fs-extra",
-  "graceful-fs",
-  "js-yaml",
-  "jsonfile",
-  "lazy-val",
-  "lodash.escaperegexp",
-  "lodash.isequal",
-  "ms",
-  "parse5",
-  "sax",
-  "semver",
-  "tiny-typed-emitter",
-  "universalify",
-  "zod",
-];
-
-function requiredPackagedModules() {
-  return [...REQUIRED_BASE_PACKAGED_MODULES].sort();
-}
 export const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "draft-aggregate.mjs",
@@ -417,6 +392,27 @@ async function assertSourceDependencyClosureIsClean(productRoot, packageJson) {
   assert.equal(sourceManifest.version, packageJson.version, "source package version drifted");
   assertNoRetiredEditorArtifacts(manifestText, "source package.json");
   assertNoRetiredEditorArtifacts(lockText, "source package-lock.json");
+  const runtimeClosure = evaluatePackagedSourceRuntimeClosure(
+    productRoot,
+    sourceManifest,
+    JSON.parse(lockText),
+  );
+  assert.deepEqual(
+    {
+      undeclaredDirectModules: runtimeClosure.undeclaredDirectModules,
+      missingPackages: runtimeClosure.missingPackages,
+      missingResources: runtimeClosure.missingResources,
+      unexpectedResources: runtimeClosure.unexpectedResources,
+    },
+    {
+      undeclaredDirectModules: [],
+      missingPackages: [],
+      missingResources: [],
+      unexpectedResources: [],
+    },
+    "packaged runtime resources do not match the source-derived import closure",
+  );
+  return runtimeClosure;
 }
 
 async function assertFilesEqual(sourcePath, packagedPath, label) {
@@ -715,6 +711,7 @@ export async function verifyAppBundle({
   signaturePolicy,
   expectedProvenance,
   requirePackagedAgentBridgeSmoke = true,
+  syntheticRuntimeModules = null,
 }) {
   const effectiveSignaturePolicy = signaturePolicy
     ?? (verifySignature ? "developer-id" : "none");
@@ -725,7 +722,7 @@ export async function verifyAppBundle({
   );
   const resourcesPath = path.join(appPath, "Contents", "Resources");
   const asarPath = path.join(resourcesPath, "app.asar");
-  await Promise.all([
+  const [, , sourceRuntimeClosure] = await Promise.all([
     access(appPath),
     access(asarPath),
     assertSourceDependencyClosureIsClean(productRoot, sourcePackageJson),
@@ -840,7 +837,9 @@ export async function verifyAppBundle({
   const packagedModuleDirectories = await listPackagedModuleNames(
     path.join(resourcesPath, "node_modules"),
   );
-  const requiredModules = requiredPackagedModules();
+  const requiredModules = syntheticRuntimeModules === null
+    ? sourceRuntimeClosure.requiredModules
+    : [...syntheticRuntimeModules].sort();
   assert.deepEqual(
     packagedModuleDirectories,
     requiredModules,
