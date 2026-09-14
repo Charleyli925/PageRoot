@@ -436,10 +436,19 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
     const attempts = [];
     for (let index = 0; index < 12 && !(await readSource()).equals(expectedBytes); index += 1) {
       const prior = await readSource();
+      const persist = page.locator("[data-persist-state]").first();
+      await expect(persist).toHaveAttribute("data-persist-state", "idle", { timeout: 30_000 });
+      const beforeRevision = Number(await persist.getAttribute("data-persisted-revision"));
       await clickEditHistoryMenu(electronApp, page, direction);
-      await expect.poll(async () => !(await readSource()).equals(prior), { timeout: 5_000 }).toBe(true);
+      await expect.poll(async () => !(await readSource()).equals(prior), { timeout: 15_000 }).toBe(true);
       const current = await readSource();
       attempts.push(frozenDigest(current));
+      await expect.poll(async () => {
+        const state = await persist.getAttribute("data-persist-state");
+        const edit = await persist.getAttribute("data-edit-revision");
+        const persisted = await persist.getAttribute("data-persisted-revision");
+        return state === "idle" && edit === persisted && Number(edit) >= beforeRevision;
+      }, { timeout: 30_000 }).toBe(true);
       await waitForRuntimeHandoffSettled(page, {
         timeout: 7_000,
         expectedSourceRevision: `sha256:${frozenDigest(current)}`,
@@ -602,12 +611,19 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
         await sameDocument(); return { appended: restoredMarker, id: copyTarget.selectedId };
       });
       await record("save-restored", { sourceContains: restoredMarker }, async () => {
+        const persist = page.locator("[data-persist-state]").first();
+        const beforeRevision = Number(await persist.getAttribute("data-persisted-revision"));
         await page.keyboard.press(keyShortcut("s"));
         await expect.poll(async () => (await readSource()).includes(restoredMarker), { timeout: 5_000 }).toBe(true);
+        await expect(persist).toHaveAttribute("data-persist-state", "idle", { timeout: 30_000 });
+        const persistedRevision = Number(await persist.getAttribute("data-persisted-revision"));
+        const editRevision = Number(await persist.getAttribute("data-edit-revision"));
+        failUnless(editRevision === persistedRevision && persistedRevision >= beforeRevision,
+          "RESTORED_SAVE_NOT_ACKNOWLEDGED", { beforeRevision, editRevision, persistedRevision });
         restoredBytes = await readSource();
         failUnless(restoredBytes.toString().includes(marker), "RESTORED_COPY_LOST_FIRST_EDIT");
         currentBytes = restoredBytes;
-        return { restoredSha256: frozenDigest(restoredBytes) };
+        return { restoredSha256: frozenDigest(restoredBytes), persistedRevision };
       });
       await record("restore-baseline", { sourceRestored: frozenDigest(baseline) }, async () => {
         await page.keyboard.press("Escape");
