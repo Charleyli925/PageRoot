@@ -15,6 +15,7 @@ function cacheTokenKey(token: DocumentSurfaceCacheToken | null): string | null {
 
 export default function WorkbenchDocumentSurfaceCache({
   snapshot,
+  activeTabId = null,
   visibleTabId,
   visibleSourceSha256,
   candidateTabId = null,
@@ -26,6 +27,7 @@ export default function WorkbenchDocumentSurfaceCache({
   height,
 }: {
   snapshot: DocumentSurfaceCacheSnapshot;
+  activeTabId?: string | null;
   visibleTabId: string | null;
   visibleSourceSha256: string | null;
   candidateTabId?: string | null;
@@ -43,7 +45,19 @@ export default function WorkbenchDocumentSurfaceCache({
   // can settle without exposing an unready frame.
   const [presentedToken, setPresentedToken] = useState<DocumentSurfaceCacheToken | null>(null);
   const readyTokenKeyRef = useRef<string | null>(null);
-  const hotEntries = snapshot.entries.filter((entry) => entry.tier === "hot");
+  // The cache retains the active document's exact source projection for tab
+  // navigation, but an Edit tab must not also own a hidden full-page display
+  // iframe. Keep an active entry only while it is the explicit handoff
+  // candidate/cover for a tab switch; normal editing stays on HtmlCanvasEditor.
+  const isExplicitHandoffSurface = (entry: DocumentSurfaceCacheSnapshot["entries"][number]) => (
+    (entry.tabId === candidateTabId && entry.sourceSha256 === candidateSourceSha256)
+    || (entry.tabId === visibleTabId && entry.sourceSha256 === visibleSourceSha256)
+  );
+  const hotEntries = snapshot.entries.filter((entry) => (
+    entry.tier === "hot"
+    && (entry.tabId !== activeTabId
+      || isExplicitHandoffSurface(entry))
+  ));
   const visibleToken = visibleTabId && visibleSourceSha256
     ? Object.freeze({ tabId: visibleTabId, sourceSha256: visibleSourceSha256 })
     : null;

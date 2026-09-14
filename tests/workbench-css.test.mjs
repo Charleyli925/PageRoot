@@ -172,8 +172,12 @@ test("cache handoff waits for static display readiness and uses live canvas geom
   assert.match(moduleCss, /\.cache\s*\{[\s\S]*?grid-column:\s*2/u);
   assert.match(moduleCss, /\.cache\[data-visible="true"\]\s*\{[\s\S]*?padding:\s*0/u);
   assert.match(cacheComponent, /data-display-ready/u);
+  assert.match(cacheComponent, /activeTabId/u);
   assert.match(cacheComponent, /candidateTabId/u);
   assert.match(cacheComponent, /presentedToken/u);
+  assert.match(cacheComponent, /entry\.tabId !== activeTabId/u);
+  assert.match(cacheComponent, /entry\.tabId === candidateTabId && entry\.sourceSha256 === candidateSourceSha256/u);
+  assert.match(cacheComponent, /entry\.tabId === visibleTabId && entry\.sourceSha256 === visibleSourceSha256/u);
   assert.match(cacheComponent, /data-source-sha256=\{entry\.sourceSha256\}/u);
   assert.match(cacheComponent, /hidden=\{entry\.tabId !== renderedPresentedToken\?\.tabId[\s\S]*?entry\.sourceSha256 !== renderedPresentedToken\?\.sourceSha256/u);
 });
