@@ -1421,3 +1421,62 @@ test("editing a published Undo projection remains available while its save recei
     }
   });
 });
+
+test("a completed Save does not reclaim an external comment textbox", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = '<!doctype html><html><head><title>Save focus guard</title></head><body>'
+    + '<p data-native-case="save-focus-guard">可编辑文字</p></body></html>';
+  await withRuntimeProject("stemmio-save-focus-guard-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { editor, frame } = await loadedDiskFrame(page, sourcePath, "save-focus-guard");
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    const target = frame.locator('[data-native-case="save-focus-guard"]');
+    await target.dblclick();
+    await expect(target).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
+    await target.press("End");
+    await page.keyboard.insertText(" 继续编辑");
+
+    let release;
+    const barrier = new Promise(resolve => { release = resolve; });
+    let started;
+    const saving = new Promise(resolve => { started = resolve; });
+    const routePattern = /\/autosave(?:\?|$)/u;
+    let finishRoute;
+    const routeDone = new Promise(resolve => { finishRoute = resolve; });
+    let routeStarted = false;
+    const routeHandler = async route => {
+      routeStarted = true;
+      started();
+      try {
+        await barrier;
+        await route.continue();
+      } finally {
+        finishRoute();
+      }
+    };
+    await page.route(routePattern, routeHandler);
+    try {
+      await page.keyboard.press(keyShortcut("s"));
+      await saving;
+
+      await editor.getByRole("button", { name: /留评论/u }).click();
+      const composer = page.getByRole("region", { name: "添加评论" });
+      const input = composer.getByRole("textbox", { name: "评论内容" });
+      await input.click();
+      await input.fill("保存等待期间的外部焦点");
+      await expect.poll(() => input.evaluate(element => document.activeElement === element)).toBe(true);
+
+      release();
+      await routeDone;
+      await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+        .toContain("继续编辑");
+      await expect.poll(() => input.evaluate(element => document.activeElement === element)).toBe(true);
+    } finally {
+      release();
+      if (routeStarted) await routeDone;
+      await page.unroute(routePattern, routeHandler);
+    }
+  });
+});

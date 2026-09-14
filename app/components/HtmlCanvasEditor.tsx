@@ -4564,6 +4564,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const restoreNativeEditFocus = useCallback((): boolean => {
     const active = activeNativeEditRef.current;
     if (!active || !nativeEditAuthorityIsCurrent(active)) return false;
+    // Save resolves in the host document, while the live edit target belongs
+    // to the iframe document. Reclaim focus only while the outer document has
+    // no deliberate destination of its own: body/null are browser transition
+    // states and the current editor iframe still owns the native session.
+    // A comment input, toolbar control, sidebar field, or any other focused
+    // host element is the user's explicit destination and must win.
+    const ownerDocument = containerRef.current?.ownerDocument;
+    if (!ownerDocument) return false;
+    const outerActive = ownerDocument?.activeElement;
+    const explicitExternalFocus = Boolean(
+      outerActive
+      && outerActive !== ownerDocument.body
+      && outerActive !== iframeRef.current,
+    );
+    if (explicitExternalFocus) return false;
     // Restore the last owned caret, not the session's initial baseline. This
     // is used after host-owned async work such as Save.
     active.rootElement.focus({ preventScroll: true });
