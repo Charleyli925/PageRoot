@@ -1436,7 +1436,6 @@ test("a completed Save does not reclaim an external comment textbox", {
     await target.dblclick();
     await expect(target).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
     await target.press("End");
-    await page.keyboard.insertText(" 继续编辑");
 
     let release;
     const barrier = new Promise(resolve => { release = resolve; });
@@ -1458,6 +1457,7 @@ test("a completed Save does not reclaim an external comment textbox", {
     };
     await page.route(routePattern, routeHandler);
     try {
+      await page.keyboard.insertText(" 继续编辑");
       await page.keyboard.press(keyShortcut("s"));
       await saving;
 

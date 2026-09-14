@@ -18,6 +18,7 @@
 - 增加受同一 lease 约束的焦点恢复入口。保存等宿主异步工作结束后只恢复当前 Native Edit 目标；短暂的 iframe/body blur 只在同一 session 仍有效时有限重试，明确的外部焦点仍由用户拥有。
 - 删除后的选择不再被无条件清空；Harness 也从删除前冻结源码推导并核验新落点，随后把已核验的落点传给继续编辑步骤。
 - 增加一个合成 Electron 回归：复制后不重新点击直接评论、格式化，再删除并不重新点击直接评论删除落点。
+- 增加 Save/flush 外部焦点回归：Native Edit 中触发 Cmd/Ctrl+S，在保存未完成时把焦点交给评论输入框，保存完成后输入框仍保持焦点。
 - 增加测试专用的 `STEMMIO_DISABLE_STRUCTURAL_IN_PLACE=1` 回退入口，仅用于冻结测试 C 组；产品没有新增设置或开关。
 
 现有交互契约仍由 `docs/INTERACTION_FLOW.md` 第 5 节负责，本次没有改变用户可见的产品边界。
@@ -35,9 +36,10 @@
 | `npm run desktop:renderer` | 通过 | Vite renderer build 成功；保留既有大 chunk warning |
 | 变更文件定向 ESLint | 通过 | 0 errors；8 warnings，均为既有规则/代码风格提示 |
 | 新增合成 Electron 回归 | 通过 | 1 passed；覆盖 copy → direct comment → direct format → delete landing → direct comment |
+| Save/flush 外部焦点 Electron 回归 | 通过 | 1 passed；覆盖 Native Edit → Cmd/Ctrl+S 等待 → 评论 textbox → flush 完成后焦点保持 |
 | 既有 Electron 定向回归 | 通过 | 14 passed；覆盖复制、删除、混合内容 Undo、跨父移动、Runtime 编辑、Native Edit rebase、Candidate commit failure 等 |
 | 收尾门禁第一轮 | 发现并修正测试契约 | `task:finish` 的 74 个 Electron 用例中 72 passed、2 failed；失败都集中在 Candidate handoff 后仍按旧元素断言选择。定向复验这 2 个用例在新提交上 2/2 passed，随后重新执行完整收尾门禁。 |
-| 收尾门禁第二轮（最终） | 通过 | `npm run task:finish`：465 Node、66 Browser、83 Electron、15 AI 全部通过，0 failed、0 skipped、0 not executed。 |
+| 收尾门禁第二轮（最终） | 通过 | `npm run task:finish`：465 Node、66 Browser、84 Electron、15 AI 全部通过，0 failed、0 skipped、0 not executed。 |
 
 关键门禁的机器可读结果位于 worktree 的 `output/test-runs/`（生成目录不提交）。
 
@@ -72,7 +74,7 @@ npm run test:real-html:electron
 2. 删除后不重新点击，评论必须落到源代码推导的新落点，不能继续使用被删除元素的引用。
 3. 原元素、副本和删除落点的评论锚点分别解析到各自元素；结构操作输出选择与评论锚点同步。
 4. Native Edit 重新进入时必须验证 session lease、目标元素、`activeElement`、`contenteditable` 与 Selection；无法证明时不报告成功。
-5. Save/flush 的异步完成只可恢复当前 lease 的 Native Edit 目标，不能把旧 session 的焦点拉回另一个 Stable ID。
+5. Save/flush 的异步完成只可恢复当前 lease 的 Native Edit 目标，不能把旧 session 的焦点拉回另一个 Stable ID；用户已经主动聚焦的评论输入框、工具栏或侧栏控件保持焦点。
 6. C 组开关只改变结构原地路径选择，不改变目标身份、源码校验、保存和恢复语义。
 
 ## 重建比例的报告口径
