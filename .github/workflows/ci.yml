@@ -882,6 +882,9 @@ jobs:
         with:
           name: PageRoot-dependency-audit-${{ github.run_id }}
           path: output/ci-evidence
+      - name: Install baseline verification runtime
+        timeout-minutes: 10
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
       - name: Verify dependency and packaged-runtime baseline is unchanged
         timeout-minutes: 2
         run: >-
