@@ -673,12 +673,17 @@ export async function executeFrozenStructurePathRace({ plan, page, editor, readS
     failUnless(await active.count() === 1, "FROZEN_ACTIVE_FRAME_NOT_UNIQUE");
     const frame = await (await active.elementHandle()).contentFrame();
     failUnless(frame, "FROZEN_ACTIVE_FRAME_MISSING");
+    const selected = frame.locator("[data-html-canvas-selected]");
+    const count = await selected.count();
+    failUnless(count <= 1, "FROZEN_SELECTION_NOT_UNIQUE", { count });
+    const prior = count === 1 ? await selected.getAttribute("data-pageroot-id") : null;
     await executeFrozenSelection({
       access: frozenFrameAccess(frame, target, calls),
       keyboard: page.keyboard,
       mouse: page.mouse,
       target,
       calls,
+      priorSelectionId: prior,
     });
     const result = await executeFrozenStructure({
       frame, target, page, editor, fileId: plan.fileId, readSource, rows, calls,
