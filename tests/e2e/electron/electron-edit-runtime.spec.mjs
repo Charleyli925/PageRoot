@@ -31,6 +31,11 @@ import {
   writeFileSync,
 } from "./electron-native-harness.mjs";
 import { queuedStaticFallbackOracle } from "./queued-static-fallback-oracle.mjs";
+import {
+  activeFrameGeneration,
+  invokeStructureCommand,
+  waitForIndependentProjection,
+} from "./structural-projection-acceptance.mjs";
 
 async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), prefix));
@@ -1945,6 +1950,286 @@ test("customized builtin hosts never claim a proven in-place structural projecti
     } else {
       await expect(duplicate).toHaveCount(0);
     }
+  });
+});
+
+test("independent projection groups refuse, recover and keep ordinary copies in-place", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime projection groups</title></head><body>
+  <main data-native-case="group-main">
+    <p data-native-case="group-plain">普通段落</p>
+    <div data-native-case="group-mixed">前<p data-native-case="group-mixed-child">中</p>后</div>
+  </main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-projection-groups-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "group-plain")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const beforeGeneration = await activeFrameGeneration(editor);
+
+    await frame.locator('[data-native-case="group-plain"]').click();
+    await page.getByRole("button", { name: "复制元素", exact: true }).click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+
+    frame = await currentEditorFrame(page);
+    await frame.locator('[data-native-case="group-mixed-child"]').click();
+    await page.getByRole("button", { name: "复制元素", exact: true }).click();
+    await waitForIndependentProjection(editor, "candidate", { reason: "insert-mixed-content" });
+    await waitForRuntimeHandoffSettled(page, { timeout: 8_000 });
+
+    frame = await currentEditorFrame(page);
+    await frame.locator('[data-native-case="group-main"]').click();
+    const beforeRefuse = await readPublishedWorkingCopy(
+      await managedWorkingCopyPath(page, sourcePath),
+      "utf8",
+    );
+    const refused = await invokeStructureCommand(page, "moveSelectedTo", {
+      parentElementId: await frame.locator('[data-native-case="group-plain"]').first()
+        .getAttribute("data-pageroot-id"),
+    });
+    expect(refused).toBe(false);
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    expect(await readPublishedWorkingCopy(workingCopyPath, "utf8")).toBe(beforeRefuse);
+
+    await page.evaluate(() => {
+      window.__PAGEROOT_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = true;
+    });
+    frame = await currentEditorFrame(page);
+    await frame.locator('[data-native-case="group-plain"]').first().click();
+    await page.getByRole("button", { name: "复制元素", exact: true }).click();
+    await waitForIndependentProjection(editor, "recovered");
+    await waitForRuntimeHandoffSettled(page, { timeout: 8_000 });
+    frame = await currentEditorFrame(page);
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8"))
+        .split('data-native-case="group-plain"').length - 1
+    )).toBe(3);
+    await expect(frame.locator('[data-native-case="group-plain"]')).toHaveCount(3);
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
+test("command-port insert and cross-parent move keep a closed structural loop", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime structure loop</title></head><body>
+  <main data-native-case="loop-main">
+    <p data-native-case="loop-p">普通段落</p>
+  </main>
+  <aside data-native-case="loop-aside"></aside>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-runtime-structure-loop-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "runtime-report.html");
+  writeFileSync(sourcePath, html, "utf8");
+  const reopenPath = path.join(sourceDirectory, "reopened.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { page } = launched;
+    let frame = (await loadedDiskFrame(page, sourcePath, "loop-p")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const beforeGeneration = await activeFrameGeneration(editor);
+    await frame.locator('[data-native-case="loop-p"]').click();
+    await page.getByRole("button", { name: "复制元素", exact: true }).click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+    frame = await currentEditorFrame(page);
+    const copies = frame.locator('[data-native-case="loop-p"]');
+    await expect(copies).toHaveCount(2);
+    const copyId = await copies.nth(1).getAttribute("data-pageroot-id");
+    await copies.nth(1).dblclick();
+    await expect(copies.nth(1)).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
+    await page.keyboard.press("End");
+    await page.keyboard.type(" 副本");
+    await page.keyboard.press(keyShortcut("a"));
+    await editor.getByRole("button", { name: "加粗", exact: true }).click();
+    await page.keyboard.press("Escape");
+    const asideId = await frame.locator('[data-native-case="loop-aside"]').getAttribute("data-pageroot-id");
+    await copies.nth(1).click();
+    expect(await invokeStructureCommand(page, "moveSelectedTo", { parentElementId: asideId })).toBe(true);
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-cross-parent-move" });
+    frame = await currentEditorFrame(page);
+    const moved = frame.locator(`[data-pageroot-id="${copyId}"]`);
+    await expect(moved).toHaveCount(1);
+    expect(await moved.evaluate((element) => element.parentElement?.getAttribute("data-native-case")))
+      .toBe("loop-aside");
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "删除元素", exact: true }).click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-delete" });
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator(`[data-pageroot-id="${copyId}"]`)).toHaveCount(0);
+    await clickEditHistoryMenu(launched.electronApp, page, "undo");
+    await expect.poll(async () => (
+      await (await currentEditorFrame(page)).locator(`[data-pageroot-id="${copyId}"]`).count()
+    )).toBe(1);
+    await clickEditHistoryMenu(launched.electronApp, page, "redo");
+    await expect.poll(async () => (
+      await (await currentEditorFrame(page)).locator(`[data-pageroot-id="${copyId}"]`).count()
+    )).toBe(0);
+    await clickEditHistoryMenu(launched.electronApp, page, "undo");
+    frame = await currentEditorFrame(page);
+    const restored = frame.locator(`[data-pageroot-id="${copyId}"]`);
+    await restored.dblclick();
+    await expect(restored).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
+    await page.keyboard.press("End");
+    await page.keyboard.type(" 可编辑");
+    await page.keyboard.press("Escape");
+    const mainId = await frame.locator('[data-native-case="loop-main"]').getAttribute("data-pageroot-id");
+    expect(await invokeStructureCommand(page, "insertElement", {
+      parentElementId: mainId,
+      html: "<p data-native-case=\"loop-inserted\">插入段</p>",
+    })).toBe(true);
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+    await page.keyboard.press(keyShortcut("s"));
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8")).includes("可编辑")
+    )).toBe(true);
+    const saved = await readPublishedWorkingCopy(workingCopyPath);
+    writeFileSync(reopenPath, saved);
+    await stopPageRoot(electronApp, isolatedUserData);
+    electronApp = null;
+    isolatedUserData = null;
+    const reopened = await launchPageRoot({ activeSourcePath: reopenPath });
+    electronApp = reopened.electronApp;
+    isolatedUserData = reopened.isolatedUserData;
+    const reopenedFrame = (await loadedDiskFrame(reopened.page, reopenPath, "loop-inserted")).frame;
+    await expect(reopenedFrame.locator(`[data-pageroot-id="${copyId}"]`)).toContainText("可编辑");
+    expect(await reopenedFrame.locator(`[data-pageroot-id="${copyId}"]`).evaluate((element) => (
+      element.ownerDocument.defaultView.getComputedStyle(element).fontWeight
+    ))).toBe("700");
+    await expect(reopenedFrame.locator('[data-native-case="loop-inserted"]')).toHaveCount(1);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-runtime-structure-loop-e2e-");
+  }
+});
+
+test("an in-place copy is not overwritten by a slower Candidate rebuild", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime in-place candidate race</title></head><body>
+  <main>
+    <p data-native-case="race-plain">普通段落</p>
+    <div data-native-case="race-mixed">前<p data-native-case="race-mixed-child">中</p>后</div>
+  </main>
+  <output id="race-proof"></output>
+  <script src="slow-module.js"></script>
+  <script>
+    document.querySelector("#race-proof").textContent =
+      "段落 " + document.querySelectorAll("[data-native-case=race-plain]").length;
+    document.body.dataset.runtimeReady = "true";
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-inplace-candidate-race-e2e-", {
+    "runtime-report.html": html,
+    "slow-module.js": "await new Promise((resolve) => setTimeout(resolve, 500));",
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "race-mixed-child")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    await frame.locator('[data-native-case="race-mixed-child"]').click();
+    await page.getByRole("button", { name: "复制元素", exact: true }).click();
+    await expect.poll(() => editor.getAttribute("data-structural-projection-kind"))
+      .toBe("candidate");
+    frame = await currentEditorFrame(page);
+    await frame.locator('[data-native-case="race-plain"]').click();
+    await page.getByRole("button", { name: "复制元素", exact: true }).click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+    await waitForRuntimeHandoffSettled(page, { timeout: 10_000 });
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    await expect.poll(async () => {
+      const saved = await readPublishedWorkingCopy(workingCopyPath, "utf8");
+      return {
+        plains: saved.split('data-native-case="race-plain"').length - 1,
+        mixed: saved.split('data-native-case="race-mixed-child"').length - 1,
+      };
+    }).toEqual({ plains: 2, mixed: 2 });
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="race-plain"]')).toHaveCount(2);
+    await expect(frame.locator('[data-native-case="race-mixed-child"]')).toHaveCount(2);
+  });
+});
+
+test("in-place copies keep one document while the fallback switch rebuilds", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime in-place AB</title></head><body>
+  <main><p data-native-case="ab-plain">普通段落</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  const runCopies = async (page, sourcePath, { disableInPlace, count }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "ab-plain")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    if (disableInPlace) await disableStructuralInPlace(page);
+    const beforeDocument = await documentToken(page);
+    const beforeGeneration = await activeFrameGeneration(editor);
+    let rebuilds = 0;
+    let token = beforeDocument;
+    for (let index = 0; index < count; index += 1) {
+      frame = await currentEditorFrame(page);
+      await frame.locator('[data-native-case="ab-plain"]').first().click();
+      await page.getByRole("button", { name: "复制元素", exact: true }).click();
+      if (!disableInPlace) {
+        await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+      } else {
+        await expect.poll(() => editor.getAttribute("data-structural-projection-kind"))
+          .toBe("candidate");
+        await waitForRuntimeHandoffSettled(page, { timeout: 8_000 });
+      }
+      const next = await documentToken(page);
+      if (next !== token) {
+        rebuilds += 1;
+        token = next;
+      }
+    }
+    frame = await currentEditorFrame(page);
+    return {
+      rebuilds,
+      generationUnchanged: await activeFrameGeneration(editor) === beforeGeneration,
+      copies: await frame.locator('[data-native-case="ab-plain"]').count(),
+      ids: await frame.locator('[data-native-case="ab-plain"]')
+        .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id"))),
+    };
+  };
+
+  await withRuntimeProject("pageroot-runtime-inplace-ab-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const inPlace = await runCopies(page, sourcePath, { disableInPlace: false, count: 8 });
+    expect(inPlace.rebuilds).toBe(0);
+    expect(inPlace.generationUnchanged).toBe(true);
+    expect(inPlace.copies).toBe(9);
+    expect(new Set(inPlace.ids).size).toBe(9);
+  });
+
+  await withRuntimeProject("pageroot-runtime-fallback-ab-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const fallback = await runCopies(page, sourcePath, { disableInPlace: true, count: 3 });
+    expect(fallback.rebuilds).toBeGreaterThan(0);
+    expect(fallback.copies).toBe(4);
   });
 });
 

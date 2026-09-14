@@ -550,6 +550,10 @@ generation、提升身份、Runtime ready 和源码一致性后重新定位同�
 复制、选中副本、激活、输入、保存、重新选中副本、确认删除逐项记账；静态重建与动态 Candidate
 采用分别判断，文字修改不得重建。保存只允许副本区域变化，删除后原始种子字节必须恢复，
 重开核验原件身份和副本不存在。这是 B 的可复制部分证据。
+结构 Harness 预先冻结 `expectedProjection`：`in-place`、`candidate`、`recovered` 或 `refuse`。
+必须原地的普通源码操作不得因为产品改标 Candidate 而放宽；必须重建、必须拒绝和接受后恢复
+同样按冻结组核对。计划属性 `data-structural-projection-kind` 不能代替结果
+`data-structural-projection-outcome`，重建次数只计实际 Document 替换。
 独立 `core-copy-denied` 只消费已核对的 Runtime 额外属性及源码缺失依据，验证同一冻结目标的
 UI/实时能力与精确原因、新鲜 probe 回执、复制按钮不存在、Document/generation/源码不变。
 不强行调用隐藏命令，不把拒绝验证记为复制成功；其他未冻结的拒绝样本仍不算覆盖完成。

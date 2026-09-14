@@ -4189,6 +4189,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           || !iframeRef.current?.contentDocument
         ) return false;
         const documentNode = iframeRef.current.contentDocument;
+        if (
+          window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true
+          && window.__PAGEROOT_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ === true
+        ) {
+          window.__PAGEROOT_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = false;
+          throw new Error("结构原地投影失败：injected-projection-failure");
+        }
         const executed = executeVerifiedStructuralProjection({
           plan: structuralDecision.plan,
           nextHtml: result.html,
@@ -5982,6 +5989,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return false;
     }
   }, [applySourceCommand, finishNativeEditing, reportBlockedEdit]);
+
+  const canvasCommandsRef = useRef({
+    insertElement,
+    moveSelectedTo,
+    duplicateSelected,
+    deleteSelected,
+  });
+  canvasCommandsRef.current = {
+    insertElement,
+    moveSelectedTo,
+    duplicateSelected,
+    deleteSelected,
+  };
 
   const selectInsertionPoint = useCallback(
     (
@@ -8968,8 +8988,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         activeNativeEditRef.current ? "false" : "true",
       );
     };
+    (root as HTMLElement & {
+      __PAGEROOT_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
+    }).__PAGEROOT_E2E_STRUCTURE_COMMANDS__ = {
+      insertElement: (options) => canvasCommandsRef.current.insertElement(options),
+      moveSelectedTo: (options) => canvasCommandsRef.current.moveSelectedTo(options),
+      duplicateSelected: () => canvasCommandsRef.current.duplicateSelected(),
+      deleteSelected: () => canvasCommandsRef.current.deleteSelected(),
+    };
     root.addEventListener("pageroot:e2e-copy-capability-probe", probe);
-    return () => root.removeEventListener("pageroot:e2e-copy-capability-probe", probe);
+    return () => {
+      delete (root as HTMLElement & {
+        __PAGEROOT_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
+      }).__PAGEROOT_E2E_STRUCTURE_COMMANDS__;
+      root.removeEventListener("pageroot:e2e-copy-capability-probe", probe);
+    };
   }, [currentRuntimeShadowProof, currentRuntimeSourceProof]);
   const selectionCapability = selection && !interactionLocked
     ? canvasPointerCapabilityFromProof({

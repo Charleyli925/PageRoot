@@ -320,3 +320,114 @@ test("disabled in-place and program identity changes stay on Candidate", () => {
     "program-identity-changed",
   );
 });
+
+test("frozen support matrix classifies ordinary parents, body parents and conservative hosts independently", () => {
+  const paragraph = "pr1_00000000000040008000000000000013";
+  const host = "pr1_00000000000040008000000000000010";
+  const first = "pr1_00000000000040008000000000000011";
+  const card = "pr1_0000000000004000800000000000000f";
+  const matrix = [
+    {
+      name: "section-child-duplicate",
+      expected: { kind: "in-place", reason: "verified-insert" },
+      run: () => decideFromResult(html, applySemanticOperation(
+        createSemanticDocumentState(html),
+        createDuplicateElementOperation(html, {
+          baseRevision: 0,
+          operationId: "op_matrix_section_dup",
+          elementId: ids.second,
+        }),
+        { randomUUID: uuidFactory("70000000-0000-4000-8000-000000000001") },
+      ), { operationType: "insertElement" }),
+    },
+    {
+      name: "section-child-delete",
+      expected: { kind: "in-place", reason: "verified-delete" },
+      run: () => decideFromResult(html, applySemanticOperation(
+        createSemanticDocumentState(html),
+        createDeleteElementOperation(html, {
+          baseRevision: 0,
+          operationId: "op_matrix_section_del",
+          elementId: ids.second,
+        }),
+      ), { operationType: "deleteElement" }),
+    },
+    {
+      name: "cross-parent-move",
+      expected: { kind: "in-place", reason: "verified-cross-parent-move" },
+      run: () => decideFromResult(html, applySemanticOperation(
+        createSemanticDocumentState(html),
+        createMoveElementOperation(html, {
+          baseRevision: 0,
+          operationId: "op_matrix_move",
+          elementId: ids.second,
+          parentElementId: ids.right,
+        }),
+      ), { operationType: "moveElement" }),
+    },
+    {
+      name: "body-parent-duplicate",
+      expected: { kind: "in-place", reason: "verified-insert" },
+      run: () => {
+        const bodyHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><p data-pageroot-id="${paragraph}">普通段落</p></body></html>`;
+        return decideFromResult(bodyHtml, applySemanticOperation(
+          createSemanticDocumentState(bodyHtml),
+          createDuplicateElementOperation(bodyHtml, {
+            baseRevision: 0,
+            operationId: "op_matrix_body_dup",
+            elementId: paragraph,
+          }),
+          { randomUUID: uuidFactory("71000000-0000-4000-8000-000000000001") },
+        ), { operationType: "insertElement" });
+      },
+    },
+    {
+      name: "mixed-insert",
+      expected: { kind: "candidate", reason: "insert-mixed-content" },
+      run: () => {
+        const mixedHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><div data-pageroot-id="${host}">前<span data-pageroot-id="${first}">中</span></div></body></html>`;
+        return decideFromResult(mixedHtml, applySemanticOperation(
+          createSemanticDocumentState(mixedHtml),
+          createDuplicateElementOperation(mixedHtml, {
+            baseRevision: 0,
+            operationId: "op_matrix_mixed",
+            elementId: first,
+          }),
+          { randomUUID: uuidFactory("72000000-0000-4000-8000-000000000001") },
+        ), { operationType: "insertElement" });
+      },
+    },
+    {
+      name: "customized-builtin-delete",
+      expected: { kind: "candidate", reason: "delete-host-unsupported" },
+      run: () => {
+        const builtinHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><div is="review-card" data-pageroot-id="${card}">正文</div></body></html>`;
+        return decideFromResult(builtinHtml, applySemanticOperation(
+          createSemanticDocumentState(builtinHtml),
+          createDeleteElementOperation(builtinHtml, {
+            baseRevision: 0,
+            operationId: "op_matrix_builtin",
+            elementId: card,
+          }),
+        ), { operationType: "deleteElement" });
+      },
+    },
+    {
+      name: "program-identity-changed",
+      expected: { kind: "candidate", reason: "program-identity-changed" },
+      run: () => decideFromResult(html, applySemanticOperation(
+        createSemanticDocumentState(html),
+        createDeleteElementOperation(html, {
+          baseRevision: 0,
+          operationId: "op_matrix_program",
+          elementId: ids.second,
+        }),
+      ), { operationType: "deleteElement", programIdentityChanged: true }),
+    },
+  ];
+  for (const row of matrix) {
+    const decision = row.run();
+    assert.equal(decision.kind, row.expected.kind, `${row.name}:${decision.reason}`);
+    assert.equal(decision.reason, row.expected.reason, row.name);
+  }
+});

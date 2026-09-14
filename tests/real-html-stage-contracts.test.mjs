@@ -54,7 +54,7 @@ test("cumulative Undo binds only a previously verified exact-target bookmark", (
     { ...b, actual: { ...b.actual, collapsed: false } }])
     assert.throws(() => verifiedUndoTail(bad, "fixed"), { code: "FROZEN_PRIOR_BOOKMARK_INVALID" });
 });
-import { verifyFrozenCopyCapability, verifyFrozenDenialWitness, verifyFrozenEndedContinuation, verifyFrozenStructureLifecycle } from "./e2e/electron/real-html/frozen-structure.mjs";
+import { requireIndependentProjectionExpectation, verifyFrozenCopyCapability, verifyFrozenDenialWitness, verifyFrozenEndedContinuation, verifyFrozenStructureLifecycle } from "./e2e/electron/real-html/frozen-structure.mjs";
 import { publicDiagnosticValue } from "./e2e/electron/real-html/diagnostic-sanitizer.mjs";
 import { verifyMixedMarkers, bindMixedSource, verifyFrozenComment, mixedCycleRows, mixedCheckpointOperations, verifyFreshCommentStorage } from "./e2e/electron/real-html/frozen-mixed.mjs";
 
@@ -1249,6 +1249,33 @@ test("frozen history accepts a reviewed fallback but rejects missing and mismatc
     after: { ...proof.after, path: "editable-island-in-place", documentId: "old", generation: "1" } };
   assert.doesNotThrow(() => verifyFrozenHistory(inPlace));
   assert.throws(() => verifyFrozenHistory({ ...inPlace, records }), { code: "FROZEN_HISTORY_ADOPTION_INVALID" });
+});
+
+test("independent projection expectations cannot follow a product Candidate label", () => {
+  assert.deepEqual(
+    requireIndependentProjectionExpectation({ expectedProjection: "in-place" }, "in-place", "in-place"),
+    { expected: "in-place", planned: "in-place", outcome: "in-place" },
+  );
+  assert.throws(
+    () => requireIndependentProjectionExpectation({ expectedProjection: "in-place" }, "candidate", "candidate"),
+    { code: "EXPECTED_IN_PLACE_DID_NOT_HOLD" },
+  );
+  assert.throws(
+    () => requireIndependentProjectionExpectation({}, "in-place", "recovered"),
+    { code: "PLANNED_IN_PLACE_DID_NOT_HOLD" },
+  );
+  assert.throws(
+    () => requireIndependentProjectionExpectation({ expectedProjection: "candidate" }, "in-place", "in-place"),
+    { code: "EXPECTED_CANDIDATE_DID_NOT_HOLD" },
+  );
+  assert.throws(
+    () => requireIndependentProjectionExpectation({ expectedProjection: "recovered" }, "in-place", "in-place"),
+    { code: "EXPECTED_RECOVERY_DID_NOT_HOLD" },
+  );
+  assert.throws(
+    () => requireIndependentProjectionExpectation({ expectedProjection: "refuse" }, "candidate", "candidate"),
+    { code: "FROZEN_REFUSE_PATH_EXECUTED" },
+  );
 });
 
 test("static structure rebuild requires a new current document and explicit non-Runtime terminal", () => {

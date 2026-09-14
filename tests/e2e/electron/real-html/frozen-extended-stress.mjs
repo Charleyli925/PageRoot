@@ -128,6 +128,11 @@ function validateTarget(target, file, targetIndex) {
       : target.rebuildPath === "runtime-candidate", "EXTENDED_REBUILD_PATH_INVALID", {
       fileId, targetId: target.selectedId, runtime: file.runtime, rebuildPath: target.rebuildPath,
     });
+    fail(!target.expectedProjection
+      || ["in-place", "candidate", "recovered", "refuse"].includes(target.expectedProjection),
+    "EXTENDED_PROJECTION_EXPECTATION_INVALID", {
+      fileId, targetId: target.selectedId, expectedProjection: target.expectedProjection,
+    });
     const continuation = target.continuationTarget;
     fail(continuation && ID.test(continuation.clickId || "") && continuation.clickId === continuation.selectedId
       && continuation.mapping === "self" && TAG.test(continuation.clickTag || "")

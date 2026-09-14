@@ -68,6 +68,16 @@ cannot prove the text/comment boundary. `html`/`head`/`body` remain
 non-targets for delete/move of themselves; `body` may be a proven destination
 parent for ordinary source children. `html` and `head` may not.
 
+Frozen support matrix for this round:
+
+| Host / parent | Copy / insert / move | Delete |
+| --- | --- | --- |
+| Ordinary `main` / `section` / `div` with element children | In-place | In-place |
+| `body` as destination parent | In-place | n/a for `body` itself |
+| Mixed text/comment parent | Candidate | In-place |
+| `is="…"` or autonomous custom element | Candidate | Candidate |
+| Table/SVG/script and other unsupported tags | Candidate | Candidate |
+
 Pre-mutation proof binds the current Document, current Runtime authority and
 the *before* SourceIndex. Post-mutation proof binds the accepted after-index,
 the actual local result and any new grant. The live `sourceIndexRef` is not a
@@ -138,6 +148,17 @@ rules.
 - Proven structural local-edit and history receipts may reuse the physical
   frame; authority receipts do not.
 - Tests must distinguish reject (no source/history/DOM change), accepted
-  Candidate rebuild, and accepted-then-recover. Every rebuild has a recorded
-  reason. #502's remaining 140 rebuilds are a baseline, not a requirement to
-  zero every structural rebuild a priori.
+Candidate rebuild, and accepted-then-recover. Harness expected groups are
+frozen independently of the product's plan label:
+
+| Group | Requirement |
+| --- | --- |
+| Must in-place | Ordinary supported source copy/delete/insert/move. Candidate labelling cannot lower the bar. |
+| Must rebuild | Authority replace, program-identity change, and currently unprovable hosts. |
+| Must refuse | Illegal targets, wrong identity, cyclic moves. Source and history stay unchanged. |
+| Recover after accept | Injected local projection failure keeps accepted source and history. |
+
+`data-structural-projection-kind` is the plan;
+`data-structural-projection-outcome` is the result. Rebuild counts use actual
+Document replacement, not plan events. #502's remaining 140 rebuilds are a
+baseline, not a requirement to zero every structural rebuild a priori.

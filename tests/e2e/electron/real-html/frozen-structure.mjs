@@ -10,6 +10,37 @@ const ID = /^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u;
 const failUnless = (condition, code, details) => {
   if (!condition) throw Object.assign(new Error(code), { code, details });
 };
+const PROJECTION_EXPECTATIONS = new Set(["in-place", "candidate", "recovered", "refuse"]);
+
+export function requireIndependentProjectionExpectation(target, planned, outcome) {
+  const expected = target?.expectedProjection || null;
+  if (!expected) {
+    failUnless(
+      planned !== "in-place" || outcome === "in-place",
+      "PLANNED_IN_PLACE_DID_NOT_HOLD",
+      { planned, outcome },
+    );
+    return { expected: null, planned, outcome };
+  }
+  failUnless(PROJECTION_EXPECTATIONS.has(expected), "FROZEN_PROJECTION_EXPECTATION_INVALID", {
+    expected, planned, outcome,
+  });
+  failUnless(expected !== "refuse", "FROZEN_REFUSE_PATH_EXECUTED", { expected, planned, outcome });
+  if (expected === "in-place") {
+    failUnless(planned === "in-place" && outcome === "in-place", "EXPECTED_IN_PLACE_DID_NOT_HOLD", {
+      expected, planned, outcome,
+    });
+  } else if (expected === "candidate") {
+    failUnless(outcome === "candidate", "EXPECTED_CANDIDATE_DID_NOT_HOLD", {
+      expected, planned, outcome,
+    });
+  } else {
+    failUnless(outcome === "recovered", "EXPECTED_RECOVERY_DID_NOT_HOLD", {
+      expected, planned, outcome,
+    });
+  }
+  return { expected, planned, outcome };
+}
 const idOf = node => node?.attrs?.find(attribute => attribute.name === "data-pageroot-id")?.value;
 function byteChanges(before, after) {
   let start = 0, suffix = 0;
@@ -330,11 +361,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
     }).not.toBe("pending");
     const planned = await editor.getAttribute("data-structural-projection-kind");
     const outcome = await editor.getAttribute("data-structural-projection-outcome");
-    failUnless(
-      planned !== "in-place" || outcome === "in-place",
-      "PLANNED_IN_PLACE_DID_NOT_HOLD",
-      { planned, outcome },
-    );
+    requireIndependentProjectionExpectation(target, planned, outcome);
     const inPlace = outcome === "in-place";
     const settled = await waitForRuntimeHandoffSettled(page, {
       timeout: 7_000,
