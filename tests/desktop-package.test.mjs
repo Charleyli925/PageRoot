@@ -64,10 +64,9 @@ const APP_FILE_ALLOWLIST = [
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/agent-login-url.mjs",
+  "desktop/runtime-project-storage-contract.mjs",
   "shared/agent-vendor-key-url.mjs",
   "shared/agent-configuration-preferences.mjs",
-  "shared/project-storage-contract.mjs",
-  "shared/product-identity.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/**/*",
@@ -211,15 +210,6 @@ const LEGAL_RESOURCE_FILES = [
   "THIRD_PARTY_NOTICES.md",
 ];
 
-// The desktop main process imports this shared contract (and its identity
-// dependency) from app.asar, while the Bridge imports the same bytes from
-// Resources/shared. Keep the deliberate dual placement explicit so a new
-// overlap still fails closed below.
-const INTENTIONAL_APP_ASAR_RESOURCE_OVERLAPS = new Set([
-  "shared/project-storage-contract.mjs",
-  "shared/product-identity.mjs",
-]);
-
 function sorted(values) {
   return [...values].sort();
 }
@@ -323,12 +313,9 @@ test("desktop package manifest owns the exact application and Bridge resource cl
     && !/[?*{}[\]]/u.test(entry)
   ));
   assert.deepEqual(
-    exactPackagedAppTargets.filter((entry) => (
-      resourceTargets.includes(entry)
-      && !INTENTIONAL_APP_ASAR_RESOURCE_OVERLAPS.has(entry)
-    )),
+    exactPackagedAppTargets.filter((entry) => resourceTargets.includes(entry)),
     [],
-    "a path listed in both build.files and extraResources must be an explicit runtime overlap",
+    "a path listed in both build.files and extraResources is copied only as a resource",
   );
   const packagedRuntimeTargets = new Set([
     ...resourceTargets,

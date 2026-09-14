@@ -9,7 +9,7 @@ import {
   rm,
 } from "node:fs/promises";
 import path from "node:path";
-import { nonReplaceTemporaryName } from "../shared/project-storage-contract.mjs";
+import { nonReplaceTemporaryName } from "./runtime-project-storage-contract.mjs";
 
 import { PRODUCT_MAX_HTML_BYTES } from "./product-contract.mjs";
 

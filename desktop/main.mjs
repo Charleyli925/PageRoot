@@ -38,7 +38,7 @@ import {
   readHtmlFile,
 } from "./project-files.mjs";
 import { WELCOME_LOGO_RELATIVE_PATH } from "./welcome-project-content.mjs";
-import { PROJECT_CONTROL_DIRECTORY_NAME } from "../shared/project-storage-contract.mjs";
+import { PROJECT_CONTROL_DIRECTORY_NAME } from "./runtime-project-storage-contract.mjs";
 import {
   exportHtmlCopyToFile,
   createExportRevealAccess,
