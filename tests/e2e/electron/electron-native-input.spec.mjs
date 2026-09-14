@@ -35,9 +35,47 @@ import {
   stopStemmio,
   tmpdir,
   waitForRuntimeHandoffSettled,
+  waitForProjectReady,
   withBomAndCrLf,
   writeFileSync,
 } from "./electron-native-harness.mjs";
+
+test("public frozen-entry sample launches visibly without focus and reopens the same target", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const fixture = createSourceFixture("public-frozen-entry-sample.html");
+  let launched = null;
+  let isolatedUserData = null;
+  const injectedEnv = { STEMMIO_E2E_WINDOW_MODE: "visible-background" };
+  try {
+    launched = await launchStemmio({ activeSourcePath: fixture.sourcePath, injectedEnv });
+    isolatedUserData = launched.isolatedUserData;
+    await waitForProjectReady(launched.page);
+    const initialWindow = await launched.electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      return { visible: window?.isVisible(), focused: window?.isFocused() };
+    });
+    expect(initialWindow).toEqual({ visible: true, focused: false });
+    const initialFrame = await currentEditorFrame(launched.page);
+    await expect(initialFrame.locator(caseSelector("list-item"))).toHaveCount(1);
+
+    await closeStemmioGracefully(launched.electronApp, launched.page);
+    launched = null;
+    launched = await launchStemmio({ isolatedUserData, injectedEnv });
+    await waitForProjectReady(launched.page);
+    const reopenedWindow = await launched.electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      return { visible: window?.isVisible(), focused: window?.isFocused() };
+    });
+    expect(reopenedWindow).toEqual({ visible: true, focused: false });
+    const reopenedFrame = await currentEditorFrame(launched.page);
+    await expect(reopenedFrame.locator(caseSelector("list-item"))).toHaveCount(1);
+  } finally {
+    if (launched) await stopStemmio(launched.electronApp, launched.isolatedUserData);
+    else if (isolatedUserData) removeIsolatedUserData(isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
 
 function sourceFidelityExpected(managedSource, replacement) {
   const managedText = managedSource.toString("utf8");

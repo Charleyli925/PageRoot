@@ -758,9 +758,11 @@ test("frozen real-HTML entry changes stay on their focused contract tests", () =
   for (const changedFile of [
     "tests/e2e/electron/frozen-html-scenarios.mjs",
     "tests/e2e/electron/real-html/frozen-entry-contract.mjs",
+    "tests/e2e/electron/real-html/expected-delete-dialog.mjs",
   ]) {
     const plan = selectGatePlan({ map, lane: "edit", changedFiles: [changedFile] });
     assert.deepEqual(plan.selectedNodeTests, [
+      "tests/frozen-delete-dialog.test.mjs",
       "tests/frozen-entry-contract.test.mjs",
       "tests/frozen-html-scenarios-entry.test.mjs",
     ]);

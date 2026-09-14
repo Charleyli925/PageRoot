@@ -17,6 +17,8 @@ import {
   readFrozenScenarioPlan,
   recordFrozenScenarioOutcome,
   summarizeFrozenScenarioLedger,
+  summarizeFrozenScenarioReport,
+  validateFrozenNestedScenarioShape,
 } from "./e2e/electron/real-html/frozen-entry-contract.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -120,4 +122,57 @@ test("a valid plan can be written and read with the same digest", async () => {
   await writeFile(file, bytes);
   assert.equal(digestFrozenEntry(bytes), sha256(bytes));
   assert.ok(file.startsWith("/"));
+});
+
+test("C rejects copy-only or descriptive-only rebuild plans", () => {
+  const scenario = { id: "C", runner: "frozen-html-operation", scope: "core-structure-closed-loop" };
+  const target = {
+    rebuildPath: "runtime-candidate",
+    operations: ["copy"],
+    projectionByOperation: {},
+  };
+  assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
+    scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true, targets: [target],
+  }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
+  assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
+    scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
+    targets: [{ ...target, operations: ["copy", "input-restored", "save-restored"], projectionByOperation: {} }],
+  }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
+  assert.doesNotThrow(() => validateFrozenNestedScenarioShape(scenario, {
+    scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
+    targets: [{ ...target, operations: ["copy", "input-restored", "save-restored"],
+      projectionByOperation: { "move-copy": "candidate" } }],
+  }));
+});
+
+test("child PASS requires report evidence beyond a zero exit code", () => {
+  const scenario = envelope().scenarios[0];
+  const nestedPlan = { reopen: true };
+  const base = {
+    schemaVersion: 1,
+    kind: "stemmio-frozen-html-operation-result",
+    scenarioId: "A",
+    scope: scenario.scope,
+    manifestDigest: scenario.manifestSha256,
+    version,
+    state: "PASS",
+    cleanup: "PASS",
+    calls: [],
+    source: { sha256: "a".repeat(64) },
+    display: { working: "sha256:a", displayed: "sha256:a" },
+    finalSource: { sha256: "a".repeat(64) },
+    lifecycle: { records: [] },
+    reopen: { state: "PASS" },
+    operation: { operation: "select", state: "PASS" },
+  };
+  assert.equal(summarizeFrozenScenarioReport(base, scenario, nestedPlan, version).operationCount, 1);
+  assert.throws(() => summarizeFrozenScenarioReport({ ...base, operation: undefined }, scenario, nestedPlan, version), {
+    code: "FROZEN_ENTRY_CHILD_REPORT_INCOMPLETE",
+  });
+  assert.throws(() => summarizeFrozenScenarioReport({ ...base, lifecycle: undefined }, scenario, nestedPlan, version), {
+    code: "FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_MISSING",
+  });
+  assert.throws(() => summarizeFrozenScenarioReport({ ...base, state: "FAIL", firstFailure: undefined }, scenario, nestedPlan, version), {
+    code: "FROZEN_ENTRY_CHILD_FAILURE_EVIDENCE_MISSING",
+  });
 });

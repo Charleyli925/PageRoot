@@ -38,7 +38,7 @@ task worktree.
 | --- | --- | --- |
 | A: ordinary edit, format and history continuity | `frozen-html-operation.mjs` with `native-text` / `core-text-format`; `frozen-text.mjs` contracts | Frozen dispatcher scenario `A`, one reviewed text/format manifest |
 | B: edit → history → copy → comment → continue | `frozen-html-operation.mjs` with `mixed`; `frozen-mixed.mjs` and comment persistence contracts | Frozen dispatcher scenario `B`, three-cycle mixed manifest |
-| C: required rebuild → takeover → continue → reopen | Mixed/structure frozen lifecycle and extended stress contracts | Frozen dispatcher scenario `C`, a mixed pressure or structure-rebuild manifest with explicit continuation and reopen facts |
+| C: required rebuild → takeover → continue → reopen | Mixed/structure frozen lifecycle and extended stress contracts | Frozen dispatcher scenario `C`, the small `core-structure-closed-loop` manifest with forced `move-copy`, post-rebuild input/save and reopen; path-race and pressure remain specialized |
 
 The existing result model already creates file, stage and operation rows before
 execution and permits only `PASS`, `FAIL`, `NOT_APPLICABLE` and

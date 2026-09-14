@@ -1040,7 +1040,7 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
         scope: "element",
         basis: "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER",
       },
-      projectionByOperation: { copy: "candidate" },
+      projectionByOperation: { copy: "candidate", "move-copy": "candidate" },
     }],
   };
   const closedLoopBytes = Buffer.from(JSON.stringify(closedLoopPlan));

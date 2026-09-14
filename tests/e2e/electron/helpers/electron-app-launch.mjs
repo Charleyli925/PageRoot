@@ -739,12 +739,20 @@ export async function launchStemmio({
     }
     throw failure;
   }
-  const foreground = (
+  const explicitWindowModeValue = injectedEnv.STEMMIO_E2E_WINDOW_MODE
+    ?? process.env.STEMMIO_E2E_WINDOW_MODE;
+  const explicitWindowMode = String(explicitWindowModeValue || "").trim().toLowerCase() || null;
+  const legacyForeground = (
     injectedEnv.STEMMIO_E2E_FOREGROUND
     ?? process.env.STEMMIO_E2E_FOREGROUND
   ) === "1";
-  expect(nativeWindow.visible).toBe(foreground);
-  if (!foreground) expect(nativeWindow.focused).toBe(false);
+  if (legacyForeground && explicitWindowMode && explicitWindowMode !== "foreground") {
+    throw new Error("STEMMIO_E2E_FOREGROUND=1 conflicts with a non-foreground E2E window mode.");
+  }
+  const windowMode = explicitWindowMode || (legacyForeground ? "foreground" : "hidden");
+  expect(["hidden", "visible-background", "foreground"]).toContain(windowMode);
+  expect(nativeWindow.visible).toBe(windowMode !== "hidden");
+  if (windowMode !== "foreground") expect(nativeWindow.focused).toBe(false);
   return {
     electronApp,
     page,

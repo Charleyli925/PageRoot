@@ -219,7 +219,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Workflow 源码扫描只证明凭证、exact Tree、权限和阶段顺序等 release architecture 边界；普通步骤文案和已由 verifier/owner 覆盖的行为不得作为第二个字符串 oracle。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。裸文本片段结束会话后必须仍能把工具条/快捷键格式写入源码，不能把已拆除的 fragment 宿主当成失连而阻断。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
-- Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `STEMMIO_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
+- Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化。冻结 real-HTML 入口的本地运行默认使用 `STEMMIO_E2E_WINDOW_MODE=visible-background`，通过 `showInactive()` 可见但不激活，且该策略贯穿首次启动、重开和错误处理；`hidden` 用于 CI，`foreground` 仅用于明确的前台调试，`STEMMIO_E2E_FOREGROUND=1` 是兼容别名。自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志；预期删除确认由用例助手逐次核对并处理，未预期弹窗使场景失败。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
 - 交互预览与 Edit 可丢弃 Script 页：Electron 用四类真实用例证明普通脚本
   持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及无法
   证明原地条件的语义结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。
@@ -509,6 +509,11 @@ A/B/C 场景合同，`--plan` 只校验复合冻结清单，执行模式按 A→
 source Hash，包含三个不同的嵌套清单，并在启动 Electron 前完成摘要、scope、runner 和
 周期校验。A 对应普通文字/格式/历史原位连续性，B 对应编辑→历史→复制→评论→继续编辑，
 C 对应必要重建→接管→继续编辑→重开。场景失败保留首个失败，但不阻止独立后续场景取证。
+父报告必须关联每个子 `result.json`，核对场景/清单摘要、源码版本、操作行、重开和生命周期
+证据；子进程退出 0 但报告缺失、身份不符或关键步骤未完成时不得记为 PASS。C 只接受
+`core-structure-closed-loop`：必须实际执行预期为 candidate/recovered 的 `move-copy`，
+随后完成 `input-restored` 与 `save-restored` 并重开；`core-structure-path-race` 和压力场景
+仍保留为独立专项证据，不能冒充完整 C。
 `local-html-corpus.mjs` 只通过入口的 `--preflight` 以 `capability-preflight-only` 模式运行；
 旧的现场发现资格入口以 `AUTOMATIC_DISCOVERY_EXECUTION_RETIRED` 终止，尚未迁移的行为不会
 假算为完成。

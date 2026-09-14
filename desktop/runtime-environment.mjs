@@ -21,6 +21,7 @@ const PRODUCT_ENV = Object.freeze({
   E2E: "STEMMIO_E2E",
   E2E_USER_DATA_DIR: "STEMMIO_E2E_USER_DATA_DIR",
   E2E_FOREGROUND: "STEMMIO_E2E_FOREGROUND",
+  E2E_WINDOW_MODE: "STEMMIO_E2E_WINDOW_MODE",
   E2E_ROOT: "STEMMIO_E2E_ROOT",
   WORKSPACE: "STEMMIO_WORKSPACE",
   PROJECT_FILES_ROOT: "STEMMIO_PROJECT_FILES_ROOT",
@@ -67,6 +68,30 @@ export class RuntimeEnvironmentError extends Error {
     this.code = code;
     this.details = details;
   }
+}
+
+export const E2E_WINDOW_MODES = Object.freeze(["hidden", "visible-background", "foreground"]);
+
+export function resolveE2EWindowMode({ environment = process.env, e2eUserDataPath = null } = {}) {
+  if (!e2eUserDataPath) return "foreground";
+  const explicit = String(environment?.[PRODUCT_ENV.E2E_WINDOW_MODE] || "").trim().toLowerCase();
+  const legacyForeground = environment?.[PRODUCT_ENV.E2E_FOREGROUND] === "1";
+  const mode = explicit || (legacyForeground ? "foreground" : "hidden");
+  if (!E2E_WINDOW_MODES.includes(mode)) {
+    throw new RuntimeEnvironmentError(
+      "E2E_WINDOW_MODE_INVALID",
+      `Unsupported E2E window mode: ${mode}.`,
+      { mode, allowed: E2E_WINDOW_MODES },
+    );
+  }
+  if (legacyForeground && explicit && mode !== "foreground") {
+    throw new RuntimeEnvironmentError(
+      "E2E_WINDOW_MODE_CONFLICT",
+      "STEMMIO_E2E_FOREGROUND=1 conflicts with a non-foreground E2E window mode.",
+      { mode },
+    );
+  }
+  return mode;
 }
 
 function assertAbsolute(value, label) {

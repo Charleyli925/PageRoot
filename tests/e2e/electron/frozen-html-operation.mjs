@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
 import { tmpdir } from "node:os";
@@ -45,10 +45,18 @@ expect(version.workspaceSourceSha256, "FROZEN_SOURCE_VERSION_MISMATCH")
   .toBe(plan.workspaceSourceSha256);
 verifyFrozenBytes(readFileSync(plan.original.path), plan.original, "ORIGINAL_CHANGED");
 verifyFrozenBytes(readFileSync(plan.seed.path), plan.seed, "FROZEN_SEED_CHANGED");
-const output = mkdtempSync(path.join(tmpdir(), "stemmio-frozen-operation-"));
+const output = process.env.STEMMIO_FROZEN_REPORT_DIRECTORY
+  ? path.resolve(process.env.STEMMIO_FROZEN_REPORT_DIRECTORY)
+  : mkdtempSync(path.join(tmpdir(), "stemmio-frozen-operation-"));
+mkdirSync(output, { recursive: true });
+const reportPath = process.env.STEMMIO_FROZEN_REPORT_PATH
+  ? path.resolve(process.env.STEMMIO_FROZEN_REPORT_PATH)
+  : path.join(output, "result.json");
 const importPath = path.join(output, "source.html");
 copyFileSync(plan.seed.path, importPath);
-const report = { scope: plan.scope, qualification: false, fileId: plan.fileId,
+const report = { schemaVersion: 1, kind: "stemmio-frozen-html-operation-result",
+  scenarioId: process.env.STEMMIO_FROZEN_SCENARIO_ID || null,
+  reportPath, reportDirectory: output, scope: plan.scope, qualification: false, fileId: plan.fileId,
   version, manifestDigest, state: "NOT_EXECUTED", calls: [],
   operation: { operation: "select", targetId: plan.targets[0].selectedId,
     state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null },
@@ -240,7 +248,7 @@ try {
     expect(frozenDigest(readFileSync(manifestPath))).toBe(manifestDigest);
     expect(workspaceSourceFingerprint().workspaceSourceSha256).toBe(version.workspaceSourceSha256);
   } catch (error) { report.state = "FAIL"; report.finalIntegrityError = error.code || error.message; }
-  writeFileSync(path.join(output, "result.json"), JSON.stringify(report, null, 2));
+  writeFileSync(reportPath, JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ fileId: report.fileId, scope: report.scope, state: report.state,
     qualification: false, reportDirectory: output }));
   process.exitCode = report.state === "PASS" ? 0 : 1;

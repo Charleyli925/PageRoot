@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { resolveE2EWindowMode } from "../desktop/runtime-environment.mjs";
+
 const sourceUrl = (relativePath) => new URL(relativePath, import.meta.url);
 
 test("Electron automation stays backgrounded unless foreground debugging is explicit", async () => {
@@ -34,13 +36,14 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   const nativeAndAiSuites = productSuites.slice(0, -2);
 
   const desktopSource = `${mainProcess}\n${appLifecycle}`;
-  assert.match(mainProcess, /STEMMIO_E2E_FOREGROUND === "1"/u);
+  assert.match(mainProcess, /resolveE2EWindowMode/u);
   // 后台 E2E 不再使用 accessory 激活策略彻底隐藏应用：Dock 图标保留，
   // 窗口仍默认不显示，只有用户主动点击 Dock 图标才调到前台。
   assert.doesNotMatch(desktopSource, /setActivationPolicy\("accessory"\)/u);
   assert.match(mainProcess, /app\.on\("activate"/u);
   assert.match(mainProcess, /presentMainWindow\(\{ userInitiated: true \}\)/u);
-  assert.match(appLifecycle, /show:\s*e2eWindowForeground/u);
+  assert.match(appLifecycle, /show:\s*e2eWindowMode\s*===\s*"foreground"/u);
+  assert.match(appLifecycle, /showInactive\(\)/u);
   assert.match(
     mainProcess,
     /const e2eNativeDialogsSuppressed = Boolean\(e2eUserDataPath\);/u,
@@ -55,7 +58,7 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   );
   assert.match(
     appLifecycle,
-    /function presentMainWindow\(\{ userInitiated = false \} = \{\}\)[\s\S]*?e2eWindowRunsInBackground[\s\S]*?return false;/u,
+    /function presentMainWindow\(\{ userInitiated = false \} = \{\}\)[\s\S]*?e2eWindowMode === "hidden"[\s\S]*?return false;/u,
   );
   // 即使显式前台观察 E2E，自动触发的原生弹窗也必须走日志拦截，
   // 不能弹在屏幕中央。
@@ -90,6 +93,23 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
     assert.doesNotMatch(preflightSource, /app\.focus\(/u);
     assert.doesNotMatch(preflightSource, /\.focus\(\)/u);
   }
+});
+
+test("E2E window mode separates hidden, visible-background and foreground behavior", () => {
+  assert.equal(resolveE2EWindowMode({ e2eUserDataPath: "/tmp/stemmio-native-e2e-test", environment: {} }), "hidden");
+  assert.equal(resolveE2EWindowMode({ e2eUserDataPath: "/tmp/stemmio-native-e2e-test", environment: {
+    STEMMIO_E2E_WINDOW_MODE: "visible-background",
+  } }), "visible-background");
+  assert.equal(resolveE2EWindowMode({ e2eUserDataPath: "/tmp/stemmio-native-e2e-test", environment: {
+    STEMMIO_E2E_FOREGROUND: "1",
+  } }), "foreground");
+  assert.throws(() => resolveE2EWindowMode({ e2eUserDataPath: "/tmp/stemmio-native-e2e-test", environment: {
+    STEMMIO_E2E_WINDOW_MODE: "unknown",
+  } }), { code: "E2E_WINDOW_MODE_INVALID" });
+  assert.throws(() => resolveE2EWindowMode({ e2eUserDataPath: "/tmp/stemmio-native-e2e-test", environment: {
+    STEMMIO_E2E_FOREGROUND: "1",
+    STEMMIO_E2E_WINDOW_MODE: "hidden",
+  } }), { code: "E2E_WINDOW_MODE_CONFLICT" });
 });
 
 test("window loads the real renderer shell before Bridge readiness", async () => {

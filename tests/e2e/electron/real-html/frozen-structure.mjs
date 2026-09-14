@@ -5,6 +5,7 @@ import { executeFrozenSelection, frozenDigest, frozenFrameAccess } from "./froze
 import { readFrozenActiveGeneration, requireCurrentTextDocument, requireFrozenTextFocus,
   requireTextOperationLedger, verifyFrozenHistory } from "./frozen-text.mjs";
 import { compareElementScopedMutation, compareElementStyleMutation, SOURCE_SCOPE_POLICIES } from "./source-scope.mjs";
+import { withExpectedDeleteConfirmation } from "./expected-delete-dialog.mjs";
 
 const ID = /^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u;
 const failUnless = (condition, code, details) => {
@@ -590,10 +591,9 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       return selectCopy(await currentKnownPrior([copyTarget.selectedId]));
     });
     await record("delete-copy", { sourceRestored: frozenDigest(baseline) }, async () => {
-      const result = await rebuild(async () => {
-        page.once("dialog", dialog => dialog.accept());
+      const result = await rebuild(() => withExpectedDeleteConfirmation(page, async () => {
         await editor.getByRole("button", { name: "删除元素", exact: true }).click({ timeout: 2_000 });
-      }, after => {
+      }), after => {
         const restored = after.equals(baseline);
         failUnless(restored, "DELETE_COPY_SOURCE_NOT_RESTORED", { restored,
           expectedSha256: frozenDigest(baseline), actualSha256: frozenDigest(after),

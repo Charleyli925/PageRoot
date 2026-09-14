@@ -53,15 +53,15 @@ export const FROZEN_SCENARIO_DEFINITIONS = Object.freeze([
     purpose: "rebuild-takeover-continuation-reopen",
     runner: "frozen-html-operation",
     allowedRunners: Object.freeze(["frozen-html-operation"]),
-    allowedScopes: Object.freeze([
-      "core-structure-path-race",
-      "core-pressure-20",
-      "core-pressure-50",
-      "core-pressure-100",
-    ]),
+    // The public C contract is deliberately the small complete loop. The
+    // path-race and pressure scopes remain available to their specialized
+    // low-level lanes, but neither one proves post-rebuild editing by itself.
+    allowedScopes: Object.freeze(["core-structure-closed-loop"]),
     requiredFacts: Object.freeze([
       "request/candidate/generation lifecycle",
       "active takeover",
+      "forced rebuild operation",
+      "post-rebuild input and save",
       "continued edit",
       "reopen",
     ]),
@@ -272,7 +272,7 @@ export function readFrozenScenarioPlanFile(manifestPath, expectedSha256, current
   return readFrozenScenarioPlan(bytes, expectedSha256, currentVersion);
 }
 
-function assertNestedScenarioShape(scenario, nestedPlan) {
+export function validateFrozenNestedScenarioShape(scenario, nestedPlan) {
   if (!nestedPlan || typeof nestedPlan !== "object") {
     contractError("FROZEN_ENTRY_NESTED_PLAN_INVALID", `Scenario ${scenario.id} nested plan is invalid.`);
   }
@@ -299,10 +299,21 @@ function assertNestedScenarioShape(scenario, nestedPlan) {
       contractError("FROZEN_ENTRY_MIXED_CYCLE_CONTRACT_INVALID", "Scenario B must be the reviewed three-cycle mixed flow.");
     }
     if (scenario.id === "C") {
-      const targets = Array.isArray(nestedPlan.targets) ? nestedPlan.targets : [];
-      const hasRebuild = targets.some((target) => ["runtime-candidate", "static-rebuild"].includes(target?.rebuildPath));
-      if (!hasRebuild || nestedPlan.reopen !== true) {
-        contractError("FROZEN_ENTRY_REBUILD_CONTRACT_INVALID", "Scenario C must freeze rebuild and reopen facts.");
+      const target = Array.isArray(nestedPlan.targets) ? nestedPlan.targets[0] : null;
+      const operations = Array.isArray(target?.operations) ? target.operations : [];
+      const forcedRebuild = target?.projectionByOperation?.["move-copy"];
+      if (nestedPlan.scope !== "core-structure-closed-loop"
+        || nestedPlan.operation !== "structure"
+        || !["runtime", "static"].includes(nestedPlan.initialRuntime)
+        || nestedPlan.reopen !== true
+        || !operations.includes("input-restored")
+        || !operations.includes("save-restored")
+        || !["candidate", "recovered"].includes(forcedRebuild)
+        || !["runtime-candidate", "static-rebuild"].includes(target?.rebuildPath)) {
+        contractError(
+          "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID",
+          "Scenario C must freeze a runtime rebuild, post-rebuild input/save, and reopen facts.",
+        );
       }
     }
   }
@@ -312,7 +323,6 @@ function assertNestedScenarioShape(scenario, nestedPlan) {
 /** Validate executor-specific manifests using their existing frozen contracts. */
 export async function validateNestedFrozenScenarioPlans(plan, currentVersion = null) {
   const selection = await import("./frozen-selection.mjs");
-  const extended = await import("./frozen-extended-stress.mjs");
   const nested = [];
   for (const scenario of plan.scenarios) {
     let bytes;
@@ -332,8 +342,6 @@ export async function validateNestedFrozenScenarioPlans(plan, currentVersion = n
     let nestedPlan;
     if (scenario.runner === "frozen-html-operation") {
       nestedPlan = selection.readFrozenSelection(bytes, scenario.manifestSha256);
-    } else if (scenario.runner === "frozen-html-extended-stress") {
-      nestedPlan = extended.readFrozenExtendedManifest(bytes, scenario.manifestSha256);
     } else {
       contractError("FROZEN_ENTRY_SCENARIO_RUNNER_INVALID", `Unsupported runner ${scenario.runner}.`);
     }
@@ -344,9 +352,111 @@ export async function validateNestedFrozenScenarioPlans(plan, currentVersion = n
       && nestedPlan.version.workspaceSourceSha256 !== currentVersion.workspaceSourceSha256) {
       contractError("FROZEN_ENTRY_NESTED_SOURCE_VERSION_MISMATCH", `Scenario ${scenario.id} nested source differs from the current source.`);
     }
-    nested.push(assertNestedScenarioShape(scenario, nestedPlan));
+    nested.push(validateFrozenNestedScenarioShape(scenario, nestedPlan));
   }
   return Object.freeze(nested);
+}
+
+function operationRows(value, rows = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) operationRows(item, rows);
+    return rows;
+  }
+  if (!value || typeof value !== "object") return rows;
+  if (typeof value.operation === "string" && typeof value.state === "string") rows.push(value);
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== "calls" && key !== "version" && key !== "source" && key !== "display") operationRows(child, rows);
+  }
+  return rows;
+}
+
+function reportVersionMatches(version, currentVersion) {
+  return Boolean(version && currentVersion
+    && ["head", "tree", "workspaceSourceSha256", "untrackedFileCount"]
+      .every((field) => version[field] === currentVersion[field]));
+}
+
+/**
+ * Validate the child result protocol before a parent scenario may become PASS.
+ * This keeps exit code as a necessary signal, not the result oracle.
+ */
+export function summarizeFrozenScenarioReport(report, scenario, nestedPlan, currentVersion) {
+  if (!report || typeof report !== "object") {
+    contractError("FROZEN_ENTRY_CHILD_REPORT_INVALID", `Scenario ${scenario.id} child report is not an object.`);
+  }
+  if (report.schemaVersion !== 1 || report.kind !== "stemmio-frozen-html-operation-result"
+    || report.scenarioId !== scenario.id || report.scope !== scenario.scope
+    || report.manifestDigest !== scenario.manifestSha256
+    || !reportVersionMatches(report.version, currentVersion)) {
+    contractError("FROZEN_ENTRY_CHILD_REPORT_IDENTITY_INVALID", `Scenario ${scenario.id} child report is not bound to this plan.`, {
+      scenarioId: report.scenarioId,
+      scope: report.scope,
+      manifestDigest: report.manifestDigest,
+    });
+  }
+  if (!FROZEN_ENTRY_STATES.includes(report.state)) {
+    contractError("FROZEN_ENTRY_CHILD_REPORT_STATE_INVALID", `Scenario ${scenario.id} child report has an invalid state.`);
+  }
+  const rows = operationRows(report);
+  const failures = rows.filter((row) => row.state !== "PASS");
+  if (report.state === "PASS") {
+    if (rows.length === 0 || failures.length > 0 || report.cleanup !== "PASS") {
+      contractError("FROZEN_ENTRY_CHILD_REPORT_INCOMPLETE", `Scenario ${scenario.id} PASS report has incomplete operation evidence.`, {
+        operationCount: rows.length,
+        incomplete: failures.map((row) => ({ operation: row.operation, state: row.state, reason: row.reason })),
+        cleanup: report.cleanup,
+      });
+    }
+    if (nestedPlan.reopen === true && report.reopen?.state !== "PASS") {
+      contractError("FROZEN_ENTRY_CHILD_REOPEN_MISSING", `Scenario ${scenario.id} PASS report is missing a successful reopen fact.`);
+    }
+    if (scenario.id === "B"
+      && (!Array.isArray(report.mixed?.cycles) || report.mixed.cycles.length !== nestedPlan.cycles)) {
+      contractError("FROZEN_ENTRY_CHILD_MIXED_CYCLES_MISSING", "Scenario B PASS report is missing one report group per frozen cycle.");
+    }
+    if (!report.source || !report.display || !report.finalSource) {
+      contractError("FROZEN_ENTRY_CHILD_SOURCE_EVIDENCE_MISSING", `Scenario ${scenario.id} PASS report is missing source/display evidence.`);
+    }
+    if (!report.lifecycle || typeof report.lifecycle !== "object") {
+      contractError("FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_MISSING", `Scenario ${scenario.id} PASS report is missing lifecycle evidence.`);
+    }
+    if (scenario.id === "C") {
+      const requiredOperation = "move-copy";
+      const row = rows.find((candidate) => candidate.operation === requiredOperation);
+      const expected = nestedPlan.targets?.[0]?.projectionByOperation?.[requiredOperation];
+      const runtime = row?.actual?.runtime;
+      if (!row || row.state !== "PASS" || !["candidate", "recovered"].includes(expected)
+        || !["candidate", "recovered"].includes(row.actual?.outcome)
+        || !runtime || runtime.runtime === "in-place"
+        || !rows.some((candidate) => candidate.operation === "input-restored" && candidate.state === "PASS")
+        || !rows.some((candidate) => candidate.operation === "save-restored" && candidate.state === "PASS")) {
+        contractError("FROZEN_ENTRY_CHILD_REBUILD_EVIDENCE_MISSING", "Scenario C PASS report is missing the forced rebuild continuation evidence.");
+      }
+    }
+  } else if (report.state === "FAIL" && !report.firstFailure) {
+    contractError("FROZEN_ENTRY_CHILD_FAILURE_EVIDENCE_MISSING", `Scenario ${scenario.id} FAIL report is missing firstFailure.`);
+  }
+  const lifecycleRecords = Array.isArray(report.lifecycle)
+    ? report.lifecycle.length
+    : Array.isArray(report.lifecycle?.lifecycleRecords)
+      ? report.lifecycle.lifecycleRecords.length
+      : Array.isArray(report.lifecycle?.records)
+        ? report.lifecycle.records.length
+        : 0;
+  return Object.freeze({
+    state: report.state,
+    operationCount: rows.length,
+    completedOperations: rows.filter((row) => row.state === "PASS").length,
+    failedOperations: failures.length,
+    firstFailure: report.firstFailure || null,
+    reopen: report.reopen ? { state: report.reopen.state, reason: report.reopen.reason || null } : null,
+    lifecycle: { records: lifecycleRecords, reportPath: report.reportPath || null },
+    requiredRebuild: scenario.id === "C" ? {
+      operation: "move-copy",
+      expected: nestedPlan.targets?.[0]?.projectionByOperation?.["move-copy"] || null,
+      actual: rows.find((row) => row.operation === "move-copy")?.actual || null,
+    } : null,
+  });
 }
 
 export function listFrozenScenarioDefinitions() {

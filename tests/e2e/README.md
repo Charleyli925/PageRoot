@@ -66,14 +66,24 @@ only when `STEMMIO_E2E=1` and the path is an isolated
 `stemmio-native-e2e-*` directory under the system temporary directory. They
 run the native window hidden by default, keep its renderer unthrottled, place
 the bridge workspace inside that directory, remove only validated test
-directories, and never change `HOME` or open the user's real HTML project. Set
-`STEMMIO_E2E_FOREGROUND=1` only for deliberate visual debugging. Background
-mode keeps the macOS Dock icon (click it to inspect or minimize the window)
-and all E2E modes suppress automatically triggered native dialogs, logging
-them instead. The real-file case checkpoints and autosaves a temporary disk
+directories, and never change `HOME` or open the user's real HTML project. The
+frozen real-HTML dispatcher sets `STEMMIO_E2E_WINDOW_MODE=visible-background`
+for local runs, which displays the window through `showInactive()` without
+activating it; use `hidden` for CI and `foreground` only for deliberate visual
+debugging. `STEMMIO_E2E_FOREGROUND=1` remains a compatibility alias for
+`foreground`. The mode is preserved through close/reopen. All E2E modes
+suppress automatically triggered native dialogs, while expected delete
+confirmations are explicitly accepted or cancelled by the scenario helper and
+unexpected dialogs fail the scenario. The real-file case checkpoints and autosaves a temporary disk
 HTML, proves that
 only the authorized bytes changed, and then closes and reopens the app against
 the same forward result.
+
+The native Electron suite includes a public `public frozen-entry sample` smoke
+that launches a synthetic fixture in `visible-background`, verifies the window
+does not take focus, then closes and reopens the same isolated project. This
+checks the shared build/environment/startup/reopen plumbing used by the entry
+without claiming private-corpus acceptance.
 
 ## Coverage and release interpretation
 
