@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -280,24 +281,42 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     await page.getByRole("button", { name: "评论", exact: true }).click();
 
     const expectedRevision = staleRendererRevision + 2;
+    const savedSourceSha256 = `sha256:${createHash("sha256")
+      .update(readFileSync(sourcePath))
+      .digest("hex")}`;
     await expect.poll(async () => {
       const workspace = await bridgeJson(page, "/workspace", { sourcePath });
+      const draft = workspace.runtimeState.draft;
       return {
-        revision: workspace.runtimeState.draft.draftRevision,
-        comments: workspace.runtimeState.draft.comments.map(
+        // Every applied draft operation advances the revision exactly once. The
+        // scenario legitimately performs more than the external delete and the
+        // comment: the created comment is re-anchored to the post-edit source, and
+        // that correction is its own durable operation.
+        oneRevisionPerAppliedOperation: draft.draftRevision === draft.appliedOperationIds.length,
+        revisionAdvancedByBothWrites: draft.draftRevision >= expectedRevision,
+        comments: draft.comments.map(
           (comment) => comment.text,
         ),
-        changeEventCount: workspace.runtimeState.draft.changeEvents.length,
-        changeEventsUseCanonicalIdentity: workspace.runtimeState.draft.changeEvents
+        commentAnchorUsesSavedSource: draft.comments.map(
+          (comment) => comment.target?.expectedSourceSha256 ?? comment.sourceAnchor?.expectedSourceSha256 ?? null,
+        ),
+        commentAnchorQuote: draft.comments.map(
+          (comment) => comment.target?.textQuote ?? comment.sourceAnchor?.textQuote ?? null,
+        ),
+        changeEventCount: draft.changeEvents.length,
+        changeEventsUseCanonicalIdentity: draft.changeEvents
           .every((event) => (
             Object.hasOwn(event, "basedOnVersionId")
             && !Object.hasOwn(event, "baseVersionId")
           )),
-        deletedCommentIds: workspace.runtimeState.draft.deletedCommentIds,
+        deletedCommentIds: draft.deletedCommentIds,
       };
     }, { timeout: 30_000 }).toEqual({
-      revision: expectedRevision,
+      oneRevisionPerAppliedOperation: true,
+      revisionAdvancedByBothWrites: true,
       comments: ["打包环境 Revision 自动合并"],
+      commentAnchorUsesSavedSource: [savedSourceSha256],
+      commentAnchorQuote: [replacement],
       changeEventCount: 1,
       changeEventsUseCanonicalIdentity: true,
       deletedCommentIds: ["comment_packaged_external_deleted"],
