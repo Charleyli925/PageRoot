@@ -68,25 +68,15 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           STEMMIO_POSTHOG_TOKEN: ${{ secrets.STEMMIO_POSTHOG_TOKEN }}
-          STEMMIO_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.STEMMIO_SMOKE_DEEPSEEK_API_KEY }}
-          STEMMIO_SMOKE_ZHIPU_API_KEY: ${{ secrets.STEMMIO_SMOKE_ZHIPU_API_KEY }}
-          STEMMIO_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.STEMMIO_SMOKE_DASHSCOPE_API_KEY }}
-          STEMMIO_SMOKE_OPENAI_API_KEY: ${{ secrets.STEMMIO_SMOKE_OPENAI_API_KEY }}
         run: |
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD STEMMIO_POSTHOG_TOKEN STEMMIO_SMOKE_DEEPSEEK_API_KEY STEMMIO_SMOKE_ZHIPU_API_KEY STEMMIO_SMOKE_DASHSCOPE_API_KEY STEMMIO_SMOKE_OPENAI_API_KEY; do
+          # Vendor smoke keys belong to the developer and are never a release gate.
+          # Real-protocol acceptance stays opt-in via the Agent Vendor Smoke workflow.
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD STEMMIO_POSTHOG_TOKEN; do
             test -n "${!name}" || {
               echo "Required release credential is not configured: $name" >&2
               exit 1
             }
           done
-      - name: Verify fixed Agent models through the production chain
-        timeout-minutes: 45
-        env:
-          STEMMIO_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.STEMMIO_SMOKE_DEEPSEEK_API_KEY }}
-          STEMMIO_SMOKE_ZHIPU_API_KEY: ${{ secrets.STEMMIO_SMOKE_ZHIPU_API_KEY }}
-          STEMMIO_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.STEMMIO_SMOKE_DASHSCOPE_API_KEY }}
-          STEMMIO_SMOKE_OPENAI_API_KEY: ${{ secrets.STEMMIO_SMOKE_OPENAI_API_KEY }}
-        run: npm run smoke:agent-vendors:real
       - name: Prove hosted Electron scheduling before product checks
         timeout-minutes: 5
         run: >-
