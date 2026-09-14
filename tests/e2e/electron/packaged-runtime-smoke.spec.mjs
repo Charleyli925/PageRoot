@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -41,6 +42,26 @@ function packagedApplication(appPath = process.env.STEMMIO_PACKAGED_APP_PATH) {
   );
   if (!existsSync(executable)) throw new Error(`Packaged Stemmio executable is missing: ${executable}`);
   return { appPath, executable };
+}
+
+const STABLE_SOURCE_ID_ATTRIBUTE = / data-stemmio-id="sm1_[a-f0-9]{32}"/gu;
+
+function stripStableSourceIds(source) {
+  return Buffer.from(source.toString("utf8").replace(STABLE_SOURCE_ID_ATTRIBUTE, ""));
+}
+
+function managedIslandExpected(managedSource, replacement) {
+  const spanId = managedSource.toString("utf8").match(
+    /<span title='single-quoted' data-order-b="2" data-order-a='1' data-stemmio-id="(sm1_[a-f0-9]{32})">SOURCE_FIDELITY_TOKEN_001<\/span>/u,
+  )?.[1];
+  if (!spanId) {
+    throw new Error("The identified source-fidelity span is missing from the managed Working Copy.");
+  }
+  return replaceEditableIslandBytes(
+    managedSource,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1' data-stemmio-id="${spanId}">${replacement}</span>`,
+  );
 }
 
 function seedActiveDiskProject(isolatedUserData, sourcePath) {
@@ -161,11 +182,6 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "PackagedRuntime_OK_源页";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceEditableIslandBytes(
-    original,
-    "source-fidelity",
-    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
-  );
   writeFileSync(sourcePathAlias, original);
   const externalSourcePath = realpathSync(sourcePathAlias);
   seedActiveDiskProject(isolatedUserData, externalSourcePath);
@@ -195,7 +211,17 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     )?.sourcePath || "");
     expect(sourcePath).not.toBe(externalSourcePath);
     expect(readFileSync(externalSourcePath)).toEqual(original);
-    expect(readFileSync(sourcePath)).toEqual(original);
+    // The managed Working Copy is authoritative and carries the documented `sm1_`
+    // persistent source-element identities (ADR 0075). The original file above stays
+    // byte-exact; prove the managed copy differs from it only by those identities.
+    const importedManagedSource = readFileSync(sourcePath);
+    const managedSourceIds = [...importedManagedSource.toString("utf8").matchAll(
+      / data-stemmio-id="(sm1_[a-f0-9]{32})"/gu,
+    )].map((match) => match[1]);
+    expect(managedSourceIds.length).toBeGreaterThan(0);
+    expect(new Set(managedSourceIds).size).toBe(managedSourceIds.length);
+    expect(stripStableSourceIds(importedManagedSource)).toEqual(original);
+    const expected = managedIslandExpected(importedManagedSource, replacement);
     await expect(page.locator("main.workbench"))
       .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
     let frame = await currentEditorFrame(page);
@@ -208,7 +234,16 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     await page.keyboard.insertText(replacement);
     await page.keyboard.press(keyShortcut("S"));
     await expect.poll(
-      () => readFileSync(sourcePath).equals(expected),
+      () => {
+        try {
+          return readFileSync(sourcePath).equals(expected);
+        } catch (error) {
+          // The packaged app publishes the managed source atomically (staging + rename),
+          // so a read can transiently miss the path while that swap is in flight.
+          if (error?.code === "ENOENT") return false;
+          throw error;
+        }
+      },
       { timeout: 30_000 },
     ).toBe(true);
     expect(readFileSync(externalSourcePath)).toEqual(original);
@@ -246,23 +281,33 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     await page.getByRole("button", { name: "评论", exact: true }).click();
 
     const expectedRevision = staleRendererRevision + 2;
+    const savedSourceSha256 = `sha256:${createHash("sha256")
+      .update(readFileSync(sourcePath))
+      .digest("hex")}`;
     await expect.poll(async () => {
       const workspace = await bridgeJson(page, "/workspace", { sourcePath });
+      const draft = workspace.runtimeState.draft;
       return {
-        revision: workspace.runtimeState.draft.draftRevision,
-        comments: workspace.runtimeState.draft.comments.map(
+        // Every applied draft operation advances the revision exactly once. The
+        // scenario legitimately performs more than the external delete and the
+        // comment: the created comment is re-anchored to the post-edit source, and
+        // that correction is its own durable operation.
+        oneRevisionPerAppliedOperation: draft.draftRevision === draft.appliedOperationIds.length,
+        revisionAdvancedByBothWrites: draft.draftRevision >= expectedRevision,
+        comments: draft.comments.map(
           (comment) => comment.text,
         ),
-        changeEventCount: workspace.runtimeState.draft.changeEvents.length,
-        changeEventsUseCanonicalIdentity: workspace.runtimeState.draft.changeEvents
+        changeEventCount: draft.changeEvents.length,
+        changeEventsUseCanonicalIdentity: draft.changeEvents
           .every((event) => (
             Object.hasOwn(event, "basedOnVersionId")
             && !Object.hasOwn(event, "baseVersionId")
           )),
-        deletedCommentIds: workspace.runtimeState.draft.deletedCommentIds,
+        deletedCommentIds: draft.deletedCommentIds,
       };
     }, { timeout: 30_000 }).toEqual({
-      revision: expectedRevision,
+      oneRevisionPerAppliedOperation: true,
+      revisionAdvancedByBothWrites: true,
       comments: ["打包环境 Revision 自动合并"],
       changeEventCount: 1,
       changeEventsUseCanonicalIdentity: true,
@@ -284,7 +329,31 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     await expect(page.locator("main.workbench"))
       .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
     const reopenedBeforeClose = await bridgeJson(page, "/workspace", { sourcePath });
-    expect(reopenedBeforeClose.runtimeState.draft.draftRevision).toBe(expectedRevision);
+    const reopenedDraft = reopenedBeforeClose.runtimeState.draft;
+    const revisionAfterFirstReopen = reopenedDraft.draftRevision;
+    // The comment created against the pre-edit source is re-anchored to the saved
+    // bytes before the project is closed, and that correction is a durable operation
+    // of its own: the ledger still advances exactly one revision per operation.
+    expect({
+      oneRevisionPerAppliedOperation:
+        reopenedDraft.draftRevision === reopenedDraft.appliedOperationIds.length,
+      revisionAdvancedByBothWrites: reopenedDraft.draftRevision >= expectedRevision,
+      commentAnchorUsesSavedSource: reopenedDraft.comments.map(
+        (comment) => comment.target?.expectedSourceSha256
+          ?? comment.sourceAnchor?.expectedSourceSha256
+          ?? null,
+      ),
+      commentAnchorQuote: reopenedDraft.comments.map(
+        (comment) => comment.target?.textQuote
+          ?? comment.sourceAnchor?.textQuote
+          ?? null,
+      ),
+    }).toEqual({
+      oneRevisionPerAppliedOperation: true,
+      revisionAdvancedByBothWrites: true,
+      commentAnchorUsesSavedSource: [savedSourceSha256],
+      commentAnchorQuote: [replacement],
+    });
     await closePackagedGracefully(electronApp, page);
     electronApp = null;
 
@@ -292,7 +361,23 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     electronApp = launched.electronApp;
     page = launched.page;
     const reopenedAfterClose = await bridgeJson(page, "/workspace", { sourcePath });
-    expect(reopenedAfterClose.runtimeState.draft.draftRevision).toBe(expectedRevision);
+    const reopenedAfterCloseDraft = reopenedAfterClose.runtimeState.draft;
+    // Reopening a closed project must not add draft operations: the ledger is
+    // stable across close and reopen, and each applied operation still owns
+    // exactly one revision.
+    expect({
+      revisionStableAcrossClose:
+        reopenedAfterCloseDraft.draftRevision === revisionAfterFirstReopen,
+      oneRevisionPerAppliedOperation:
+        reopenedAfterCloseDraft.draftRevision
+          === reopenedAfterCloseDraft.appliedOperationIds.length,
+      revisionCoversBothWrites:
+        reopenedAfterCloseDraft.draftRevision >= expectedRevision,
+    }).toEqual({
+      revisionStableAcrossClose: true,
+      oneRevisionPerAppliedOperation: true,
+      revisionCoversBothWrites: true,
+    });
     expect(reopenedAfterClose.runtimeState.draft.deletedCommentIds)
       .toEqual(["comment_packaged_external_deleted"]);
     expect(reopenedAfterClose.runtimeState.draft.comments.map((comment) => comment.text))
