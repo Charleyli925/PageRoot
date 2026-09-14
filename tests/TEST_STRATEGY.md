@@ -513,7 +513,13 @@ C 对应必要重建→接管→继续编辑→重开。场景失败保留首个
 证据；子进程退出 0 但报告缺失、身份不符或关键步骤未完成时不得记为 PASS。C 只接受
 `core-structure-closed-loop`：必须实际执行预期为 candidate/recovered 的 `move-copy`，
 随后完成 `input-restored` 与 `save-restored` 并重开；`core-structure-path-race` 和压力场景
-仍保留为独立专项证据，不能冒充完整 C。
+仍保留为独立专项证据，不能冒充完整 C。复制行还必须携带独立源码证明（含单一 source
+leaf）和本次事务产生的 fresh Stable ID；C 使用测试专用结构回退时，`copy` 与 `move-copy`
+的重建预期都必须事先冻结，不能让全局开关悄悄改变前置操作。B 的每轮副本摘要、C 的续写/保存/重开目标都必须与该 ID 对账。生命周期
+`records` 必须逐项等于有序的 Candidate 与 lifecycle 子数组，并把 candidate、generation、
+Active 和 Runtime terminal 绑定到同一候选；只有计数相等不能通过。真实语料验收前先完成
+固定组合、物料校准和 Harness 正反例自证（P0--P3），没有用户指定语料时只报告基础设施
+资格，不能把合成 fixture 或压力结果写成真实文件通过。
 `local-html-corpus.mjs` 只通过入口的 `--preflight` 以 `capability-preflight-only` 模式运行；
 旧的现场发现资格入口以 `AUTOMATIC_DISCOVERY_EXECUTION_RETIRED` 终止，尚未迁移的行为不会
 假算为完成。
