@@ -8,12 +8,12 @@ import {
   chooseClipboardDelivery,
   chooseModifyIntent,
   closeQoderAvailability,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture,
   createQoderAcpE2ECommand,
   existsSync,
   loadedDiskFrame,
-  launchPageRoot,
+  launchStemmio,
   openQoderAvailability,
   openRecentProject,
   path,
@@ -22,7 +22,7 @@ import {
   removeSourceFixture,
   requestDirectoryCount,
   runOfficialFinalizer,
-  stopPageRoot,
+  stopStemmio,
   waitForProjectReady,
   workingHtmlFiles,
   writeAiOutput,
@@ -36,11 +36,11 @@ test("a managed Agent failure immediately replaces processing with retry or end"
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
     runtimeFailure: true,
   });
-  const launched = await launchPageRoot({
+  const launched = await launchStemmio({
     activeSourcePath: fixture.sourcePath,
     injectedEnv: {
-      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
-      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+      STEMMIO_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      STEMMIO_QODER_ACP_COMMAND: qoderCommand,
     },
   });
   try {
@@ -85,7 +85,7 @@ test("a managed Agent failure immediately replaces processing with retry or end"
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
     expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -94,12 +94,12 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", {
   tag: ["@smoke-run-lifecycle"],
 }, async () => {
   const fixture = createSourceFixture();
-  const launched = await launchPageRoot({
+  const launched = await launchStemmio({
     activeSourcePath: fixture.sourcePath,
-    injectedEnv: { PAGEROOT_E2E_QODER_HANDOFF_FAILURE: "1" },
+    injectedEnv: { STEMMIO_E2E_QODER_HANDOFF_FAILURE: "1" },
   });
   try {
-    const clipboardSentinel = "PAGEROOT_QODER_HANDOFF_FAILURE_SENTINEL";
+    const clipboardSentinel = "STEMMIO_QODER_HANDOFF_FAILURE_SENTINEL";
     await launched.electronApp.evaluate(
       ({ clipboard }, value) => clipboard.writeText(value),
       clipboardSentinel,
@@ -133,7 +133,7 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", {
       .toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -142,10 +142,10 @@ test("a failed handoff in project A does not block project B or replace its stat
   test.setTimeout(180_000);
   const projectA = createSourceFixture("project-a.html");
   const projectB = createSourceFixture("project-b.html");
-  const launched = await launchPageRoot({
+  const launched = await launchStemmio({
     activeSourcePath: projectA.sourcePath,
     recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
-    injectedEnv: { PAGEROOT_E2E_QODER_HANDOFF_FAILURE: "1" },
+    injectedEnv: { STEMMIO_E2E_QODER_HANDOFF_FAILURE: "1" },
   });
   try {
     const projectAWorkingCopyPath = await addComment(
@@ -209,7 +209,7 @@ test("a failed handoff in project A does not block project B or replace its stat
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
     expect(readFileSync(projectB.sourcePath).equals(projectB.original)).toBe(true);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(projectA.sourceDirectory);
     removeSourceFixture(projectB.sourceDirectory);
   }
@@ -220,7 +220,7 @@ test("a rapid double click creates exactly one durable Request", {
 }, async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("double-submit.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
     await addComment(launched.page, fixture.sourcePath);
@@ -244,7 +244,7 @@ test("a rapid double click creates exactly one durable Request", {
     expect(copied).toMatch(/请执行\s+.+?\/PROMPT\.md\s+中的单轮任务/u);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -252,15 +252,15 @@ test("a rapid double click creates exactly one durable Request", {
 test("ending a copied run still warns after restart and blocks late finalization", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("cancel-copied-run.html");
-  let launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
       launched.electronApp,
       fixture.sourcePath,
     );
-    await closePageRootGracefully(launched.electronApp, launched.page);
-    launched = await launchPageRoot({
+    await closeStemmioGracefully(launched.electronApp, launched.page);
+    launched = await launchStemmio({
       isolatedUserData: launched.isolatedUserData,
     });
     await waitForProjectReady(launched.page);
@@ -346,7 +346,7 @@ test("ending a copied run still warns after restart and blocks late finalization
     ).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -356,7 +356,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
 }, async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("unknown-request-outcome.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     await addComment(launched.page, fixture.sourcePath);
     let requestDispatched = false;
@@ -422,7 +422,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     expect(requestDirectoryCount(launched.workspace)).toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });

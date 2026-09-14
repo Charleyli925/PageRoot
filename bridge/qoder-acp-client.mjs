@@ -16,15 +16,16 @@ import {
   runAcpTask as runGenericAcpTask,
 } from "./agent/runtimes/acp-protocol.mjs";
 import { runAcpProcessTask } from "./agent/runtimes/acp-process.mjs";
+import { projectControlPath } from "../shared/project-storage-contract.mjs";
 import {
   prepareVerifiedJavaScriptExecution,
   runVerifiedJavaScript,
 } from "./agent/runtimes/acp-verified-javascript.mjs";
 
 const LEGACY_COMMON_MESSAGES = Object.freeze({
-  RUNTIME_AUTHORITY_DRIFT: "PageRoot no longer authorizes mutations for this ACP Attempt.",
+  RUNTIME_AUTHORITY_DRIFT: "Stemmio no longer authorizes mutations for this ACP Attempt.",
   INPUT_MANIFEST_SHAPE_MISMATCH:
-    "The Qoder ACP driver only accepts PageRoot's exact current frozen input manifest shape.",
+    "The Qoder ACP driver only accepts Stemmio's exact current frozen input manifest shape.",
   OUTPUT_PREEXISTS: "The Qoder ACP driver requires a fresh Attempt output path.",
   COMPLETION_PREEXISTS: "The Qoder ACP driver requires a fresh Attempt completion path.",
   READ_NOT_AUTHORIZED_EXECUTION: "Qoder requested a file outside the frozen read set.",
@@ -68,8 +69,8 @@ function adaptLegacyCommonError(cause) {
     cause.message = String(cause.message)
       .replace(/^Agent execution policy options/u, "ACP task policy options")
       .replace(
-        /^Restricted execution host requires a verified PageRoot task policy\.$/u,
-        "Restricted ACP host requires a verified PageRoot task policy.",
+        /^Restricted execution host requires a verified Stemmio task policy\.$/u,
+        "Restricted ACP host requires a verified Stemmio task policy.",
       )
       .replace(
         /^Restricted execution host dependencies are invalid\.$/u,
@@ -170,7 +171,7 @@ export async function captureQoderAcpReviewBoundary({
       "The Working Copy evidence workspace could not be loaded.",
     );
   }
-  const controlRoot = path.join(verifiedProjectRoot, ".pageroot");
+  const controlRoot = projectControlPath(verifiedProjectRoot);
   const manifestFile = await readVerifiedRegularFile(
     path.join(controlRoot, "manifest.json"),
     verifiedProjectRoot,

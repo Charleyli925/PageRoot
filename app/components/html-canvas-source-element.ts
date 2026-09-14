@@ -6,7 +6,7 @@ import {
 
 export {
   SOURCE_ELEMENT_ATTRIBUTE,
-  escapedPagerootElementId,
+  escapedStemmioElementId,
   sourceElementSelector,
   sourceElementId,
   uniqueSourceElement,
@@ -36,7 +36,7 @@ export function sourceElementFromDom(
 ): SourceElementValue | null {
   const elementId = sourceElementId(element);
   if (!elementId || !sourceIndex) return null;
-  const sourceElement = sourceIndex.byPagerootId.get(elementId);
+  const sourceElement = sourceIndex.byStemmioId.get(elementId);
   return sourceElement?.type === "element" ? sourceElement : null;
 }
 
@@ -45,7 +45,7 @@ export function registerProvedStableSourceElements(options: {
   documentNode: Document | null;
   sourceIndex: SourceIndexValue | null | undefined;
   elements: WeakSet<HTMLElement>;
-  pagerootIds: WeakMap<HTMLElement, string>;
+  stemmioIds: WeakMap<HTMLElement, string>;
   claimed: Map<string, HTMLElement>;
   conflicted: Set<string>;
   markerAttribute?: string;
@@ -55,7 +55,7 @@ export function registerProvedStableSourceElements(options: {
     documentNode,
     sourceIndex,
     elements,
-    pagerootIds,
+    stemmioIds,
     claimed,
     conflicted,
     markerAttribute,
@@ -68,27 +68,27 @@ export function registerProvedStableSourceElements(options: {
       || typeof element.getAttribute !== "function"
       || element.ownerDocument !== documentNode
     ) continue;
-    const pagerootId = sourceElementId(element);
-    const sourceEntry = pagerootId ? sourceIndex?.byPagerootId.get(pagerootId) : null;
+    const stemmioId = sourceElementId(element);
+    const sourceEntry = stemmioId ? sourceIndex?.byStemmioId.get(stemmioId) : null;
     if (
-      !pagerootId
+      !stemmioId
       || sourceEntry?.type !== "element"
       || sourceEntry.tagName !== element.localName
       || (
         markerAttribute
-        && element.getAttribute(markerAttribute) !== pagerootId
+        && element.getAttribute(markerAttribute) !== stemmioId
       )
     ) continue;
-    if (conflicted.has(pagerootId)) continue;
-    const existing = claimed.get(pagerootId);
+    if (conflicted.has(stemmioId)) continue;
+    const existing = claimed.get(stemmioId);
     if (existing && existing !== element) {
       elements.delete(existing);
-      claimed.delete(pagerootId);
-      conflicted.add(pagerootId);
+      claimed.delete(stemmioId);
+      conflicted.add(stemmioId);
       continue;
     }
-    claimed.set(pagerootId, element);
-    pagerootIds.set(element, pagerootId);
+    claimed.set(stemmioId, element);
+    stemmioIds.set(element, stemmioId);
     elements.add(element);
   }
   return true;

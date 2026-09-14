@@ -6,7 +6,7 @@ import aiConfig from "./playwright.ai-closed-loop.config.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
-const smokeId = process.env.PAGEROOT_SMOKE_SUITE || "ai-smoke";
+const smokeId = process.env.STEMMIO_SMOKE_SUITE || "ai-smoke";
 
 export default defineConfig({
   ...aiConfig,

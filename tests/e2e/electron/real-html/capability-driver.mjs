@@ -123,7 +123,7 @@ export function sourceElementsForCapabilityManifest(source) {
   const index = buildSourceIndex(source);
   return index.elements.map((element, sourceOrder) => {
     let sourceEditable = false;
-    if (element.pagerootIdentityStatus === "valid") {
+    if (element.stemmioIdentityStatus === "valid") {
       try {
         sourceEditable = isEditableIslandTarget(
           index,
@@ -135,10 +135,10 @@ export function sourceElementsForCapabilityManifest(source) {
     }
     const parent = element.parentId ? index.byNodeId.get(element.parentId) : null;
     return {
-      pagerootId: element.pagerootId,
-      pagerootIdentityStatus: element.pagerootIdentityStatus,
+      stemmioId: element.stemmioId,
+      stemmioIdentityStatus: element.stemmioIdentityStatus,
       tagName: element.tagName,
-      parentId: parent?.type === "element" ? parent.pagerootId || null : null,
+      parentId: parent?.type === "element" ? parent.stemmioId || null : null,
       sourceOrder,
       sourceEditable,
       boundarySafe: element.boundarySafe === true,
@@ -147,8 +147,8 @@ export function sourceElementsForCapabilityManifest(source) {
 }
 
 export async function collectVisibleAuthoredCandidates(frame, sourceElements, tabId = null) {
-  return frame.locator("[data-pageroot-id]").evaluateAll((elements, payload) => {
-    const sourceById = new Map(payload.sourceElements.map((entry) => [entry.pagerootId, entry]));
+  return frame.locator("[data-stemmio-id]").evaluateAll((elements, payload) => {
+    const sourceById = new Map(payload.sourceElements.map((entry) => [entry.stemmioId, entry]));
     const viewportHeight = Math.max(
       document.documentElement?.scrollHeight || 0,
       document.body?.scrollHeight || 0,
@@ -166,14 +166,14 @@ export async function collectVisibleAuthoredCandidates(frame, sourceElements, ta
         const style = getComputedStyle(ancestor);
         if (/(?:auto|scroll)/u.test(`${style.overflowY} ${style.overflow}`)
           && ancestor.scrollHeight > ancestor.clientHeight + 1) {
-          return ancestor.getAttribute("data-pageroot-id") || "nested-authored-scroller";
+          return ancestor.getAttribute("data-stemmio-id") || "nested-authored-scroller";
         }
         ancestor = ancestor.parentElement;
       }
       return "document";
     };
     return elements.map((element) => {
-      const stableId = element.getAttribute("data-pageroot-id");
+      const stableId = element.getAttribute("data-stemmio-id");
       const source = sourceById.get(stableId);
       if (!source) return null;
       const rect = element.getBoundingClientRect();
@@ -212,7 +212,7 @@ async function safeAuthoredHitPoint(target) {
         const x = rect.left + Math.max(1, rect.width * xFraction);
         const y = rect.top + Math.max(1, rect.height * yFraction);
         const hit = element.ownerDocument.elementFromPoint(x, y);
-        if (hit?.closest("[data-pageroot-id]") === element) {
+        if (hit?.closest("[data-stemmio-id]") === element) {
           return {
             targetX: x - rect.left,
             targetY: y - rect.top,
@@ -284,8 +284,8 @@ async function hostPointerSnapshot({
     const hit = document.elementFromPoint(hitPoint.pageX, hitPoint.pageY);
     if (hitPoint.topLevel) {
       return {
-        accepted: hit?.closest("[data-pageroot-id]")?.getAttribute("data-pageroot-id") === stableId,
-        hitKind: hit?.closest("[data-pageroot-id]") ? "authored-target" : hit?.localName || null,
+        accepted: hit?.closest("[data-stemmio-id]")?.getAttribute("data-stemmio-id") === stableId,
+        hitKind: hit?.closest("[data-stemmio-id]") ? "authored-target" : hit?.localName || null,
       };
     }
     const activeFrame = root.querySelector('iframe[data-runtime-slot-role="active"]');
@@ -304,12 +304,12 @@ async function hostPointerSnapshot({
     ) || null;
     const frameDocument = activeFrame?.contentDocument || null;
     const probeElement = frameDocument
-      ? Array.from(frameDocument.querySelectorAll("[data-pageroot-id]"))
-        .find((element) => element.getAttribute("data-pageroot-id") === stableId) || null
+      ? Array.from(frameDocument.querySelectorAll("[data-stemmio-id]"))
+        .find((element) => element.getAttribute("data-stemmio-id") === stableId) || null
       : null;
     const hintedOperationElement = frameDocument && hintTargetId
-      ? Array.from(frameDocument.querySelectorAll("[data-pageroot-id]"))
-        .find((element) => element.getAttribute("data-pageroot-id") === hintTargetId) || null
+      ? Array.from(frameDocument.querySelectorAll("[data-stemmio-id]"))
+        .find((element) => element.getAttribute("data-stemmio-id") === hintTargetId) || null
       : null;
     const hintMapsProbeToOperation = Boolean(
       probeElement
@@ -362,23 +362,23 @@ async function hostPointerSnapshot({
 
 export function canonicalSourceRelationship(sourceElements, probeStableId, operationStableId) {
   const elements = Array.isArray(sourceElements) ? sourceElements : [];
-  const matches = (stableId) => elements.filter((element) => element?.pagerootId === stableId);
+  const matches = (stableId) => elements.filter((element) => element?.stemmioId === stableId);
   const probeMatches = matches(probeStableId);
   const operationMatches = matches(operationStableId);
   const validProbe = CAPABILITY_STABLE_ID_PATTERN.test(probeStableId || "")
     && probeMatches.length === 1
-    && probeMatches[0].pagerootIdentityStatus === "valid";
+    && probeMatches[0].stemmioIdentityStatus === "valid";
   const validOperation = CAPABILITY_STABLE_ID_PATTERN.test(operationStableId || "")
     && operationMatches.length === 1
-    && operationMatches[0].pagerootIdentityStatus === "valid";
+    && operationMatches[0].stemmioIdentityStatus === "valid";
   let sourceAncestor = validProbe && validOperation;
   if (sourceAncestor && probeStableId !== operationStableId) {
     const byId = new Map();
     for (const element of elements) {
-      if (!element?.pagerootId) continue;
-      const group = byId.get(element.pagerootId) || [];
+      if (!element?.stemmioId) continue;
+      const group = byId.get(element.stemmioId) || [];
       group.push(element);
-      byId.set(element.pagerootId, group);
+      byId.set(element.stemmioId, group);
     }
     let parentId = probeMatches[0].parentId || null;
     sourceAncestor = false;
@@ -387,7 +387,7 @@ export function canonicalSourceRelationship(sourceElements, probeStableId, opera
       const parentMatches = byId.get(parentId) || [];
       if (
         parentMatches.length !== 1
-        || parentMatches[0].pagerootIdentityStatus !== "valid"
+        || parentMatches[0].stemmioIdentityStatus !== "valid"
       ) break;
       if (parentId === operationStableId) {
         sourceAncestor = true;
@@ -634,8 +634,8 @@ export async function discoverRuntimeGeneratedTargets({ page, frame, editor, tab
       continue;
     }
     const diagnosticMatchesCandidate = await target.evaluate((element, payload) => {
-      const anchors = [...document.querySelectorAll("[data-pageroot-id]")].filter(
-        (candidate) => candidate.getAttribute("data-pageroot-id") === payload.sourceAnchorId,
+      const anchors = [...document.querySelectorAll("[data-stemmio-id]")].filter(
+        (candidate) => candidate.getAttribute("data-stemmio-id") === payload.sourceAnchorId,
       );
       if (anchors.length !== 1) return false;
       let resolved = null;
@@ -720,7 +720,7 @@ export async function probeAuthoredCapability({
     error.details = { stableId: candidate.stableId, selectionReset };
     throw error;
   }
-  const target = frame.locator(`[data-pageroot-id=${JSON.stringify(candidate.stableId)}]`);
+  const target = frame.locator(`[data-stemmio-id=${JSON.stringify(candidate.stableId)}]`);
   const count = await target.count();
   if (count !== 1) {
     const error = new Error("The frozen Stable ID did not resolve to exactly one live element.");
@@ -734,7 +734,7 @@ export async function probeAuthoredCapability({
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   }));
   const relocated = await target.evaluate((element) => ({
-    stableId: element.getAttribute("data-pageroot-id"),
+    stableId: element.getAttribute("data-stemmio-id"),
     tag: element.localName,
     connected: element.isConnected,
   }));
@@ -779,7 +779,7 @@ export async function probeAuthoredCapability({
     if (!hostPointer.accepted) break;
     iframeHitStillExact = await target.evaluate((element, hitPoint) => (
       element.ownerDocument.elementFromPoint(hitPoint.clientX, hitPoint.clientY)
-        ?.closest("[data-pageroot-id]") === element
+        ?.closest("[data-stemmio-id]") === element
     ), point);
     if (iframeHitStillExact) break;
   }
@@ -805,8 +805,8 @@ export async function probeAuthoredCapability({
   let selectedSnapshot = null;
   const readSelectedSnapshot = selectedSnapshotReader || (async () => (
     frame.locator("[data-html-canvas-selected]").evaluateAll((selectedElements, expectedStableId) => {
-      const expectedElement = Array.from(document.querySelectorAll("[data-pageroot-id]"))
-        .find((element) => element.getAttribute("data-pageroot-id") === expectedStableId) || null;
+      const expectedElement = Array.from(document.querySelectorAll("[data-stemmio-id]"))
+        .find((element) => element.getAttribute("data-stemmio-id") === expectedStableId) || null;
       const selectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
       const rect = selectedElement?.getBoundingClientRect() || null;
       const style = selectedElement ? getComputedStyle(selectedElement) : null;
@@ -822,7 +822,7 @@ export async function probeAuthoredCapability({
         const ancestorStyle = getComputedStyle(ancestor);
         if (/(?:auto|scroll)/u.test(`${ancestorStyle.overflowY} ${ancestorStyle.overflow}`)
           && ancestor.scrollHeight > ancestor.clientHeight + 1) {
-          scrollContainer = ancestor.getAttribute("data-pageroot-id") || "nested-authored-scroller";
+          scrollContainer = ancestor.getAttribute("data-stemmio-id") || "nested-authored-scroller";
           break;
         }
         ancestor = ancestor.parentElement;
@@ -831,7 +831,7 @@ export async function probeAuthoredCapability({
         available: true,
         reasonCode: "SELECTION_SNAPSHOT_OBSERVED",
         selectedCount: selectedElements.length,
-        selectedId: selectedElement?.getAttribute("data-pageroot-id") || null,
+        selectedId: selectedElement?.getAttribute("data-stemmio-id") || null,
         selectedTag: selectedElement?.localName || null,
         selectedConnected: selectedElement?.isConnected === true,
         selectedVisible: Boolean(
@@ -923,7 +923,7 @@ export async function probeAuthoredCapability({
     ))
   );
   const selectedStableIdCount = await frame.locator(
-    `[data-pageroot-id=${JSON.stringify(selectedId)}]`,
+    `[data-stemmio-id=${JSON.stringify(selectedId)}]`,
   ).count();
   if (!canonicalMappingValid || selectedStableIdCount !== 1) {
     const error = new Error("The selected operation target was not the frozen authored target or its proven ancestor.");

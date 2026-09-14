@@ -258,10 +258,10 @@ function createHarness({
     },
     async preflightAgent(request) {
       calls.preflight.push(request);
-      if (request.selection?.providerId === "pageroot") {
+      if (request.selection?.providerId === "stemmio") {
         const resolved = request.selection.resolvedModelId
           || request.selection.requestedModelId
-          || "pageroot:deepseek-v4-pro";
+          || "stemmio:deepseek-v4-pro";
         return {
           status: "ready",
           preflightId: "preflight_test",
@@ -272,7 +272,7 @@ function createHarness({
           },
           configuration: {
             schemaVersion: "1.0.0",
-            providerId: "pageroot",
+            providerId: "stemmio",
             runtimeId: "http",
             vendorId: "deepseek",
             baseUrlOrigin: "https://api.deepseek.com",
@@ -433,7 +433,7 @@ test("源页 Agent blocks binary attachments before preflight or Request creatio
     }],
   });
   harness.workflow.selectAgent({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
     requestedModelId: null,
     resolvedModelId: null,
@@ -468,7 +468,7 @@ test("源页 Agent keeps text attachments in the ordinary frozen Request", async
     }],
   });
   harness.workflow.selectAgent({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
     requestedModelId: null,
     resolvedModelId: null,
@@ -504,7 +504,7 @@ test("源页 Agent accepts a known text filename when the browser omits its MIME
     }],
   });
   harness.workflow.selectAgent({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
     requestedModelId: null,
     resolvedModelId: null,
@@ -541,7 +541,7 @@ test("源页 Agent verifies attachment bytes and blocks disguised binary before 
     },
   });
   harness.workflow.selectAgent({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
     requestedModelId: null,
     resolvedModelId: null,
@@ -581,7 +581,7 @@ test("源页 Agent revalidates the exact comment snapshot after drain before cre
     },
   });
   harness.workflow.selectAgent({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
     requestedModelId: null,
     resolvedModelId: null,
@@ -611,7 +611,7 @@ test("源页 Agent revalidates the exact comment snapshot after drain before cre
 
 test("源页 Agent blocks an over-budget complete HTML rewrite before Request creation", async () => {
   const configurationDigest = `sha256:${"b".repeat(64)}`;
-  const modelId = "pageroot:deepseek-v4-pro";
+  const modelId = "stemmio:deepseek-v4-pro";
   const harness = createHarness({
     bridge: {
       async preflightAgent(request) {
@@ -626,7 +626,7 @@ test("源页 Agent blocks an over-budget complete HTML rewrite before Request cr
           },
           configuration: {
             schemaVersion: "1.0.0",
-            providerId: "pageroot",
+            providerId: "stemmio",
             runtimeId: "http",
             vendorId: "deepseek",
             baseUrlOrigin: "https://api.deepseek.com",
@@ -648,7 +648,7 @@ test("源页 Agent blocks an over-budget complete HTML rewrite before Request cr
     },
   });
   harness.workflow.selectAgent({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
     requestedModelId: null,
     resolvedModelId: null,
@@ -665,7 +665,7 @@ test("源页 Agent blocks an over-budget complete HTML rewrite before Request cr
 });
 
 test("Custom compatible mode still enforces the HTTP runtime hard context limit before Request", async () => {
-  const modelId = "pageroot:manual-model";
+  const modelId = "stemmio:manual-model";
   const largeHtml = `<!doctype html><html><body><main>${"x".repeat(1_900_000)}</main></body></html>`;
   const harness = createHarness({
     html: largeHtml,
@@ -678,7 +678,7 @@ test("Custom compatible mode still enforces the HTTP runtime hard context limit 
           selection: { ...request.selection, resolvedModelId: modelId },
           configuration: {
             schemaVersion: "1.0.0",
-            providerId: "pageroot",
+            providerId: "stemmio",
             runtimeId: "http",
             vendorId: "custom",
             baseUrlOrigin: "https://api.example.com",
@@ -694,7 +694,7 @@ test("Custom compatible mode still enforces the HTTP runtime hard context limit 
     },
   });
   harness.workflow.selectAgent({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
     requestedModelId: modelId,
     resolvedModelId: null,
@@ -734,9 +734,9 @@ test("submit accepts a complete working source while the visible projection is s
 });
 
 test("submit refreshes a unique text quote against the final saved HTML before creating the Request", async () => {
-  const elementId = "pr1_11111111111141118111111111111111";
-  const originalHtml = `<!doctype html><html><body><p data-pageroot-id="${elementId}">目标内容</p></body></html>`;
-  const finalHtml = `<!doctype html><html><body><p data-pageroot-id="${elementId}">新目标内容</p></body></html>`;
+  const elementId = "sm1_11111111111141118111111111111111";
+  const originalHtml = `<!doctype html><html><body><p data-stemmio-id="${elementId}">目标内容</p></body></html>`;
+  const finalHtml = `<!doctype html><html><body><p data-stemmio-id="${elementId}">新目标内容</p></body></html>`;
   const harness = createHarness({
     html: finalHtml,
     comments: [{
@@ -775,12 +775,12 @@ test("submit refreshes a unique text quote against the final saved HTML before c
 });
 
 test("submit blocks a stale or ambiguous text quote without creating a Request", async () => {
-  const elementId = "pr1_11111111111141118111111111111111";
-  const originalHtml = `<!doctype html><html><body><p data-pageroot-id="${elementId}">目标内容</p></body></html>`;
+  const elementId = "sm1_11111111111141118111111111111111";
+  const originalHtml = `<!doctype html><html><body><p data-stemmio-id="${elementId}">目标内容</p></body></html>`;
   for (const finalText of ["已改写", "新目标和目标", "目标在别的元素"]) {
     const finalHtml = finalText === "目标在别的元素"
-      ? `<!doctype html><html><body><p data-pageroot-id="${elementId}">已删除</p><aside>目标</aside></body></html>`
-      : `<!doctype html><html><body><p data-pageroot-id="${elementId}">${finalText}</p></body></html>`;
+      ? `<!doctype html><html><body><p data-stemmio-id="${elementId}">已删除</p><aside>目标</aside></body></html>`
+      : `<!doctype html><html><body><p data-stemmio-id="${elementId}">${finalText}</p></body></html>`;
     const harness = createHarness({
       html: finalHtml,
       comments: [{
@@ -1484,7 +1484,7 @@ test("a local disk refresh preserves a known authentication requirement", async 
   harness.workflow.dispose();
 });
 
-test("a changed Qoder installation asks for a PageRoot restart in shared state", async () => {
+test("a changed Qoder installation asks for a Stemmio restart in shared state", async () => {
   const mismatch = Object.assign(new Error("version changed"), {
     code: "QODER_VERSION_MISMATCH",
   });
@@ -1552,7 +1552,7 @@ test("Qoder polling waits until the managed Agent start is registered", async ()
 });
 
 test("a failed Qoder preflight creates no Request and leaves editing recoverable", async () => {
-  const message = "Qoder 账号当前没有可用模型容量。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
+  const message = "Qoder 账号当前没有可用模型容量。Stemmio 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
   const error = new Error(message);
   error.code = "QODER_CAPACITY_UNAVAILABLE";
   const harness = createHarness({
@@ -2851,7 +2851,7 @@ test("disconnecting an Agent stops every related run, not only the visible docum
 
 test("removing a remembered Key reports failure instead of succeeding after a clear error", async () => {
   const harness = createHarness();
-  const selection = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  const selection = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
   const outcome = await harness.workflow.manageAgentAccess("remove-key", selection, {
     stopRelatedRuns: false,
     credentials: {
@@ -2866,13 +2866,13 @@ test("removing a remembered Key reports failure instead of succeeding after a cl
 
 test("resend without access repair reuses the frozen Request identity", async () => {
   const harness = createHarness();
-  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
-  harness.workflow.selectAgent(pageroot);
+  const stemmio = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
+  harness.workflow.selectAgent(stemmio);
   const selection = {
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
-    requestedModelId: "pageroot:deepseek-v4-pro",
-    resolvedModelId: "pageroot:deepseek-v4-pro",
+    requestedModelId: "stemmio:deepseek-v4-pro",
+    resolvedModelId: "stemmio:deepseek-v4-pro",
     reasoning: { requested: null, applied: null, resolution: "provider-default" },
   };
   const run = runRecord({
@@ -2882,11 +2882,11 @@ test("resend without access repair reuses the frozen Request identity", async ()
       trustPolicyVersion: "trusted-local-agent-v1",
       configuration: {
         schemaVersion: "1.0.0",
-        providerId: "pageroot",
+        providerId: "stemmio",
         runtimeId: "http",
         vendorId: "deepseek",
         baseUrlOrigin: "https://api.deepseek.com",
-        modelId: "pageroot:deepseek-v4-pro",
+        modelId: "stemmio:deepseek-v4-pro",
         reasoning: "auto",
         capabilityRevision: "2026-09-03.1",
         credentialGeneration: 1,
@@ -2918,14 +2918,14 @@ test("resend after access repair freezes a new execution identity", async () => 
       },
     },
   });
-  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
-  harness.workflow.selectAgent(pageroot);
+  const stemmio = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
+  harness.workflow.selectAgent(stemmio);
   const oldDigest = `sha256:${"c".repeat(64)}`;
   const selection = {
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
-    requestedModelId: "pageroot:deepseek-v4-pro",
-    resolvedModelId: "pageroot:deepseek-v4-pro",
+    requestedModelId: "stemmio:deepseek-v4-pro",
+    resolvedModelId: "stemmio:deepseek-v4-pro",
     reasoning: { requested: null, applied: null, resolution: "provider-default" },
   };
   const run = runRecord({
@@ -2935,11 +2935,11 @@ test("resend after access repair freezes a new execution identity", async () => 
       trustPolicyVersion: "trusted-local-agent-v1",
       configuration: {
         schemaVersion: "1.0.0",
-        providerId: "pageroot",
+        providerId: "stemmio",
         runtimeId: "http",
         vendorId: "deepseek",
         baseUrlOrigin: "https://api.deepseek.com",
-        modelId: "pageroot:deepseek-v4-pro",
+        modelId: "stemmio:deepseek-v4-pro",
         reasoning: "auto",
         capabilityRevision: "2026-09-03.1",
         credentialGeneration: 1,
@@ -2984,12 +2984,12 @@ test("resend after access repair does not follow a later document switch", async
       },
     },
   });
-  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
-  harness.workflow.selectAgent(pageroot);
+  const stemmio = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
+  harness.workflow.selectAgent(stemmio);
   const run = runRecord({
     agentDelivery: {
       mode: "managed-agent",
-      selection: pageroot,
+      selection: stemmio,
       trustPolicyVersion: "trusted-local-agent-v1",
     },
   });
@@ -3014,14 +3014,14 @@ test("resend after access repair does not follow a later document switch", async
 
 test("resend after access repair does not cancel a newer round on the same document", async () => {
   const harness = createHarness();
-  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
-  harness.workflow.selectAgent(pageroot);
+  const stemmio = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
+  harness.workflow.selectAgent(stemmio);
   const first = runRecord({
     requestId: "request_one",
     attemptId: "attempt_001",
     agentDelivery: {
       mode: "managed-agent",
-      selection: pageroot,
+      selection: stemmio,
       trustPolicyVersion: "trusted-local-agent-v1",
     },
   });
@@ -3032,7 +3032,7 @@ test("resend after access repair does not cancel a newer round on the same docum
     attemptId: "attempt_001",
     agentDelivery: {
       mode: "managed-agent",
-      selection: pageroot,
+      selection: stemmio,
       trustPolicyVersion: "trusted-local-agent-v1",
     },
   });
@@ -3047,12 +3047,12 @@ test("resend after access repair does not cancel a newer round on the same docum
 
 test("a blocked cancel keeps the access-repair intent", async () => {
   const harness = createHarness();
-  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
-  harness.workflow.selectAgent(pageroot);
+  const stemmio = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
+  harness.workflow.selectAgent(stemmio);
   const run = runRecord({
     agentDelivery: {
       mode: "managed-agent",
-      selection: pageroot,
+      selection: stemmio,
       trustPolicyVersion: "trusted-local-agent-v1",
     },
   });
@@ -3081,12 +3081,12 @@ test("resend after a dismissed run still uses the stored repair intent", async (
       },
     },
   });
-  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
-  harness.workflow.selectAgent(pageroot);
+  const stemmio = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
+  harness.workflow.selectAgent(stemmio);
   const run = runRecord({
     agentDelivery: {
       mode: "managed-agent",
-      selection: pageroot,
+      selection: stemmio,
       trustPolicyVersion: "trusted-local-agent-v1",
     },
   });
@@ -3108,12 +3108,12 @@ test("a failed new request keeps the access-repair intent", async () => {
       },
     },
   });
-  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
-  harness.workflow.selectAgent(pageroot);
+  const stemmio = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
+  harness.workflow.selectAgent(stemmio);
   const run = runRecord({
     agentDelivery: {
       mode: "managed-agent",
-      selection: pageroot,
+      selection: stemmio,
       trustPolicyVersion: "trusted-local-agent-v1",
     },
   });
@@ -3129,16 +3129,16 @@ test("commitPendingDefaultAgent ignores a superseded selection after save", asyn
   const saves = [];
   const harness = createHarness();
   const catalog = harness.workflow.getSnapshot().agentCatalog;
-  const pageroot = catalog.providers.pageroot.selection;
+  const stemmio = catalog.providers.stemmio.selection;
   const qoder = catalog.providers.qoder.selection;
   harness.workflow.selectAgent(qoder);
-  await harness.workflow.checkAgentUsability(pageroot);
-  harness.workflow.queuePendingDefaultAgent(pageroot);
+  await harness.workflow.checkAgentUsability(stemmio);
+  harness.workflow.queuePendingDefaultAgent(stemmio);
   let resume;
   const pendingSave = new Promise((resolve) => {
     resume = resolve;
   });
-  const committing = harness.workflow.commitPendingDefaultAgent(pageroot, {
+  const committing = harness.workflow.commitPendingDefaultAgent(stemmio, {
     async saveDefault(providerId) {
       saves.push(providerId);
       if (saves.length === 1) await pendingSave;
@@ -3156,11 +3156,11 @@ test("commitPendingDefaultAgent ignores a superseded selection after save", asyn
 
 test("provider access impact counts running tasks on other documents", async () => {
   const harness = createHarness();
-  const pageroot = harness.workflow.getSnapshot().agentCatalog.providers.pageroot.selection;
+  const stemmio = harness.workflow.getSnapshot().agentCatalog.providers.stemmio.selection;
   const runA = runRecord({
     agentDelivery: {
       mode: "managed-agent",
-      selection: pageroot,
+      selection: stemmio,
       trustPolicyVersion: "trusted-local-agent-v1",
     },
   });
@@ -3168,13 +3168,13 @@ test("provider access impact counts running tasks on other documents", async () 
     sourcePath: SOURCE_B,
     agentDelivery: {
       mode: "managed-agent",
-      selection: pageroot,
+      selection: stemmio,
       trustPolicyVersion: "trusted-local-agent-v1",
     },
   });
   harness.runSession.trackRun(runA, { activate: "always" });
   harness.runSession.trackRun(runB, { activate: "never" });
-  const impact = harness.workflow.getSnapshot().providerAccessImpact.pageroot;
+  const impact = harness.workflow.getSnapshot().providerAccessImpact.stemmio;
   assert.equal(impact.runningCount, 2);
   assert.equal(impact.documentCount, 2);
 });

@@ -1,6 +1,7 @@
-# Contributing to PageRoot
+# Contributing to Stemmio
 
-Thank you for helping improve PageRoot.
+Thank you for helping improve Stemmio. The public source repository remains
+`Charleyli925/PageRoot`.
 
 ## Before opening a change
 

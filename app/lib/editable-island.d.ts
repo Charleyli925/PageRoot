@@ -37,10 +37,10 @@ export function materializeEditableIslandHtml(
   value: string,
   options?: {
     baselineInnerHtml?: string;
-    replayPagerootIds?: string[] | null;
+    replayStemmioIds?: string[] | null;
     randomUUID?: () => string;
   },
-): { html: string; createdPagerootIds: string[] };
+): { html: string; createdStemmioIds: string[] };
 
 export function editableIslandDraftHtml(
   value: string,

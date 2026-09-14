@@ -43,7 +43,7 @@ test("legacy receipt replays across restart and rejects mismatched identity with
   const active = await promoteNextVersion(value.repository, target, "legacy_v2");
   const replay = await seedLegacyHistoryActivation({ target: active, versionId: "ver_0001", operationId: "legacy_replay_0001", expectedActiveWorkingCopyId: "work_ver_0002" });
   const repository = new ProjectFileRepository({ projectsRoot: value.projects });
-  const runtimePath = path.join(active.projectRootPath, ".pageroot/runtime-state.json");
+  const runtimePath = path.join(active.projectRootPath, ".stemmio/runtime-state.json");
   const runtimeBefore = await readFile(runtimePath);
   const replayed = await repository.replayHistoryVersionActivation({ ...replay, operationId: "new_click_after_restart_0001" });
   assert.equal(replayed.replayed, true);
@@ -94,14 +94,14 @@ test("legacy replay still rejects tampered immutable snapshots and missing Worki
   const { target } = await importLegacySource(value, "legacy.html", html("V1"));
   const active = await promoteNextVersion(value.repository, target, "legacy_v2");
   const replay = await seedLegacyHistoryActivation({ target: active, versionId: "ver_0001", operationId: "legacy_integrity_0001", expectedActiveWorkingCopyId: "work_ver_0002" });
-  const snapshotPath = path.join(active.projectRootPath, ".pageroot/versions/ver_0001/index.html");
+  const snapshotPath = path.join(active.projectRootPath, ".stemmio/versions/ver_0001/index.html");
   const snapshot = await readFile(snapshotPath);
   await writeFile(snapshotPath, html("tampered snapshot"));
   await assert.rejects(value.repository.replayHistoryVersionActivation(replay), { code: "VERSION_SNAPSHOT_HASH_MISMATCH" });
   await writeFile(snapshotPath, snapshot);
   await rename(target.exactSourcePath, `${target.exactSourcePath}.missing`);
   await assert.rejects(value.repository.replayHistoryVersionActivation(replay), { code: "SOURCE_NOT_FOUND" });
-  const runtime = JSON.parse(await readFile(path.join(active.projectRootPath, ".pageroot/runtime-state.json"), "utf8"));
+  const runtime = JSON.parse(await readFile(path.join(active.projectRootPath, ".stemmio/runtime-state.json"), "utf8"));
   assert.equal(runtime.activeWorkingCopyId, "work_ver_0001");
   assert.equal(runtime.historyActivation.operationId, replay.operationId);
 });

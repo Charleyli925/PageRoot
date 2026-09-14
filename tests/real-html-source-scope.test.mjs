@@ -12,13 +12,13 @@ import {
   SOURCE_SCOPE_POLICIES,
 } from "./e2e/electron/real-html/source-scope.mjs";
 
-const SOURCE_ID = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+const SOURCE_ID = "sm1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
 
 test("continuing a styled span accepts only raw attribute order normalization", () => {
-  const id = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const before = `<p data-pageroot-id="${SOURCE_ID}">Text <span style="font-weight: 700" data-pageroot-id="${id}">bold</span></p><!--keep-->`;
-  const after = before.replace(`style="font-weight: 700" data-pageroot-id="${id}"`,
-    `data-pageroot-id="${id}" style="font-weight: 700"`).replace("bold</", "bold MORE</");
+  const id = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<p data-stemmio-id="${SOURCE_ID}">Text <span style="font-weight: 700" data-stemmio-id="${id}">bold</span></p><!--keep-->`;
+  const after = before.replace(`style="font-weight: 700" data-stemmio-id="${id}"`,
+    `data-stemmio-id="${id}" style="font-weight: 700"`).replace("bold</", "bold MORE</");
   const check = (value, allow = true) => compareElementScopedMutation({ before, after: value, sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE, expectedAfterContains: [" MORE"],
     expectedAppendedPattern: / MORE/u, allowSpanAttributeOrder: allow });
@@ -30,13 +30,13 @@ test("continuing a styled span accepts only raw attribute order normalization", 
 });
 
 test("nested newline insertion aligns shared delimiter bytes without allowing other changes", () => {
-  const child = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb", fresh = "pr1_cccccccccccc4ccc8ccccccccccccccc";
-  const before = `<h1 data-pageroot-id="${SOURCE_ID}"><span data-pageroot-id="${child}">文字</span></h1><!-- outside -->`;
-  const inserted = `<br data-pageroot-id="${fresh}">PRLINE_H02`;
+  const child = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb", fresh = "sm1_cccccccccccc4ccc8ccccccccccccccc";
+  const before = `<h1 data-stemmio-id="${SOURCE_ID}"><span data-stemmio-id="${child}">文字</span></h1><!-- outside -->`;
+  const inserted = `<br data-stemmio-id="${fresh}">PRLINE_H02`;
   const after = before.replace("文字", `文字${inserted}`);
   const check = value => compareElementScopedMutation({ before, after: value, sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_NEWLINE, expectedAfterContains: ["PRLINE_H02"],
-    expectedAppendedPattern: /<br data-pageroot-id="pr1_[0-9a-f]{32}">PRLINE_H02/u });
+    expectedAppendedPattern: /<br data-stemmio-id="sm1_[0-9a-f]{32}">PRLINE_H02/u });
   const proof = check(after);
   assert.equal(proof.ok, true);
   assert.equal(Buffer.from(after).subarray(proof.appendedByteRange.start, proof.appendedByteRange.end).toString(), inserted);
@@ -46,10 +46,10 @@ test("nested newline insertion aligns shared delimiter bytes without allowing ot
 });
 
 test("element text permits only link attribute order, retaining values and outside bytes", () => {
-  const linkId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const before = `<p data-pageroot-id="${SOURCE_ID}">Text <a href="#safe" data-pageroot-id="${linkId}">link</a>.\n    </p><!-- outside -->`;
-  const after = before.replace(`href="#safe" data-pageroot-id="${linkId}"`,
-    `data-pageroot-id="${linkId}" href="#safe"`).replace(".\n", ". MARK\n");
+  const linkId = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<p data-stemmio-id="${SOURCE_ID}">Text <a href="#safe" data-stemmio-id="${linkId}">link</a>.\n    </p><!-- outside -->`;
+  const after = before.replace(`href="#safe" data-stemmio-id="${linkId}"`,
+    `data-stemmio-id="${linkId}" href="#safe"`).replace(".\n", ". MARK\n");
   const check = (value, allowAttributeOrderOnly = true) => compareElementScopedMutation({
     before, after: value, sourceId: SOURCE_ID, normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
     expectedAfterContains: [" MARK"], expectedAppendedPattern: / MARK/u, allowAttributeOrderOnly });
@@ -63,7 +63,7 @@ test("element text permits only link attribute order, retaining values and outsi
 });
 
 test("each repeated bold operation compares with its verified unbold preparation, not the cycle baseline", () => {
-  const bold = `<p data-pageroot-id="${SOURCE_ID}" style="font-weight: 700">Fixed</p><!-- outside -->`;
+  const bold = `<p data-stemmio-id="${SOURCE_ID}" style="font-weight: 700">Fixed</p><!-- outside -->`;
   const plain = bold.replace("700", "normal");
   const check = (before, after, expectedValue) => compareElementStyleMutation({ before, after,
     sourceId: SOURCE_ID, expectedProperty: "font-weight", expectedValue });
@@ -76,16 +76,16 @@ test("each repeated bold operation compares with its verified unbold preparation
 });
 
 for (const tag of ["span", "p"]) test(`copy binding for ${tag} accepts only the frozen insertion with a fresh identity and unchanged outside bytes`, () => {
-  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const copyId = "pr1_cccccccccccc4ccc8ccccccccccccccc";
-  const siblingId = "pr1_dddddddddddd4ddd8ddddddddddddddd";
-  const original = `<${tag} data-pageroot-id="${SOURCE_ID}">中文 text</${tag}>`;
-  const sibling = `<aside data-pageroot-id="${siblingId}">Outside</aside>`;
-  const before = Buffer.from(`<div data-pageroot-id="${parentId}">${original}\n${sibling}</div>`);
+  const parentId = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const copyId = "sm1_cccccccccccc4ccc8ccccccccccccccc";
+  const siblingId = "sm1_dddddddddddd4ddd8ddddddddddddddd";
+  const original = `<${tag} data-stemmio-id="${SOURCE_ID}">中文 text</${tag}>`;
+  const sibling = `<aside data-stemmio-id="${siblingId}">Outside</aside>`;
+  const before = Buffer.from(`<div data-stemmio-id="${parentId}">${original}\n${sibling}</div>`);
   const byteOffset = before.indexOf(sibling);
   const target = { selectedId: SOURCE_ID, selectedTag: tag, copyBinding: {
     parentId, beforeSiblingId: siblingId, byteOffset, originalElementSha256: frozenDigest(original) } };
-  const inserted = `<${tag}  data-pageroot-id="${copyId}">中文 text</${tag}>`;
+  const inserted = `<${tag}  data-stemmio-id="${copyId}">中文 text</${tag}>`;
   const after = Buffer.concat([before.subarray(0, byteOffset), Buffer.from(inserted), before.subarray(byteOffset)]);
   assert.equal(bindFrozenCopy(before, after, target).copyId, copyId);
   for (const broken of [
@@ -109,15 +109,15 @@ for (const tag of ["span", "p"]) test(`copy binding for ${tag} accepts only the 
 });
 
 test("move binding accepts only a frozen destination parent with unchanged identity set", () => {
-  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const destId = "pr1_eeeeeeeeeeee4eee8eeeeeeeeeeeeeee";
-  const copyId = "pr1_cccccccccccc4ccc8ccccccccccccccc";
-  const siblingId = "pr1_dddddddddddd4ddd8ddddddddddddddd";
-  const copy = `<p data-pageroot-id="${copyId}">中文 text</p>`;
-  const sibling = `<aside data-pageroot-id="${siblingId}">Outside</aside>`;
-  const dest = `<section data-pageroot-id="${destId}"></section>`;
-  const before = Buffer.from(`<div data-pageroot-id="${parentId}">${copy}\n${sibling}${dest}</div>`);
-  const after = Buffer.from(`<div data-pageroot-id="${parentId}">\n${sibling}<section data-pageroot-id="${destId}">${copy}</section></div>`);
+  const parentId = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const destId = "sm1_eeeeeeeeeeee4eee8eeeeeeeeeeeeeee";
+  const copyId = "sm1_cccccccccccc4ccc8ccccccccccccccc";
+  const siblingId = "sm1_dddddddddddd4ddd8ddddddddddddddd";
+  const copy = `<p data-stemmio-id="${copyId}">中文 text</p>`;
+  const sibling = `<aside data-stemmio-id="${siblingId}">Outside</aside>`;
+  const dest = `<section data-stemmio-id="${destId}"></section>`;
+  const before = Buffer.from(`<div data-stemmio-id="${parentId}">${copy}\n${sibling}${dest}</div>`);
+  const after = Buffer.from(`<div data-stemmio-id="${parentId}">\n${sibling}<section data-stemmio-id="${destId}">${copy}</section></div>`);
   assert.ok(bindFrozenMove(before, after, {
     copyId, destinationParentId: destId, originalParentId: parentId,
   }).conditions.landedAtDestination);
@@ -130,8 +130,8 @@ test("move binding accepts only a frozen destination parent with unchanged ident
 });
 
 test("fixed bold oracle accepts the declared wrapper but rejects extra formatting and outside writes", () => {
-  const before = `<p data-pageroot-id="${SOURCE_ID}">Original</p><!-- outside -->`;
-  const formatted = ' <span style="all: unset; display: inline !important; font-weight: 700" data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">PRCORE_H03</span>';
+  const before = `<p data-stemmio-id="${SOURCE_ID}">Original</p><!-- outside -->`;
+  const formatted = ' <span style="all: unset; display: inline !important; font-weight: 700" data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">PRCORE_H03</span>';
   const after = before.replace("Original", `Original${formatted}`);
   const check = (html) => compareElementScopedMutation({ before, after: html, sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_FORMAT, expectedAfterContains: ["PRCORE_H03"],
@@ -147,8 +147,8 @@ test("fixed bold oracle accepts the declared wrapper but rejects extra formattin
 });
 
 function sourcePair() {
-  const before = Buffer.from(`<p data-pageroot-id="${SOURCE_ID}">SAFE</p>`);
-  const after = Buffer.from(`<p data-pageroot-id="${SOURCE_ID}">EVIL</p>`);
+  const before = Buffer.from(`<p data-stemmio-id="${SOURCE_ID}">SAFE</p>`);
+  const after = Buffer.from(`<p data-stemmio-id="${SOURCE_ID}">EVIL</p>`);
   const beforeStart = before.indexOf("SAFE");
   const afterStart = after.indexOf("EVIL");
   return {
@@ -166,7 +166,7 @@ test("source-scope helper rejects observed-after-derived expectations", () => {
     sourceId: SOURCE_ID,
     expectedBefore: "SAFE",
     expectedAfter: "SAFE",
-    domSelector: `[data-pageroot-id="${SOURCE_ID}"]`,
+    domSelector: `[data-stemmio-id="${SOURCE_ID}"]`,
   });
   assert.equal(report.ok, false);
   assert.equal(report.errors[0].code, "REGION_EXPECTED_AFTER_MISMATCH");
@@ -175,7 +175,7 @@ test("source-scope helper rejects observed-after-derived expectations", () => {
       ...pair,
       sourceId: SOURCE_ID,
       expectedBefore: "SAFE",
-      domSelector: `[data-pageroot-id="${SOURCE_ID}"]`,
+      domSelector: `[data-stemmio-id="${SOURCE_ID}"]`,
     }),
     (error) => error?.code === "SOURCE_SCOPE_EXPECTATION_REQUIRED",
   );
@@ -196,9 +196,9 @@ test("source-scope helper requires an explicit subrange", () => {
 });
 
 test("element-style oracle accepts exactly one independently expected declaration", () => {
-  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const before = `<main data-pageroot-id="${parentId}"><p class="sample" data-pageroot-id="${SOURCE_ID}">Original</p><aside>Sibling</aside></main>`;
-  const after = `<main data-pageroot-id="${parentId}"><p class="sample" data-pageroot-id="${SOURCE_ID}" style="font-size: 29px">Original</p><aside>Sibling</aside></main>`;
+  const parentId = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<main data-stemmio-id="${parentId}"><p class="sample" data-stemmio-id="${SOURCE_ID}">Original</p><aside>Sibling</aside></main>`;
+  const after = `<main data-stemmio-id="${parentId}"><p class="sample" data-stemmio-id="${SOURCE_ID}" style="font-size: 29px">Original</p><aside>Sibling</aside></main>`;
   const report = compareElementStyleMutation({
     before,
     after,
@@ -214,8 +214,8 @@ test("element-style oracle accepts exactly one independently expected declaratio
 });
 
 test("element-style oracle rejects an extra declaration and a wrong expected value", () => {
-  const before = `<p style="color: #111111" data-pageroot-id="${SOURCE_ID}">Original</p>`;
-  const after = `<p style="color: #123456; margin-top: 9px" data-pageroot-id="${SOURCE_ID}">Original</p>`;
+  const before = `<p style="color: #111111" data-stemmio-id="${SOURCE_ID}">Original</p>`;
+  const after = `<p style="color: #123456; margin-top: 9px" data-stemmio-id="${SOURCE_ID}">Original</p>`;
   const extra = compareElementStyleMutation({
     before,
     after,
@@ -229,7 +229,7 @@ test("element-style oracle rejects an extra declaration and a wrong expected val
 
   const wrongValue = compareElementStyleMutation({
     before,
-    after: `<p style="color: #123456" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+    after: `<p style="color: #123456" data-stemmio-id="${SOURCE_ID}">Original</p>`,
     sourceId: SOURCE_ID,
     expectedProperty: "color",
     expectedValue: "#654321",
@@ -239,11 +239,11 @@ test("element-style oracle rejects an extra declaration and a wrong expected val
 });
 
 test("element-style oracle rejects target content and outside-byte corruption", () => {
-  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const before = `<main data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}">Original</p></main>`;
+  const parentId = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<main data-stemmio-id="${parentId}"><p data-stemmio-id="${SOURCE_ID}">Original</p></main>`;
   const contentChanged = compareElementStyleMutation({
     before,
-    after: `<main data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}" style="line-height: 53px">Changed</p></main>`,
+    after: `<main data-stemmio-id="${parentId}"><p data-stemmio-id="${SOURCE_ID}" style="line-height: 53px">Changed</p></main>`,
     sourceId: SOURCE_ID,
     expectedProperty: "line-height",
     expectedValue: "53px",
@@ -253,7 +253,7 @@ test("element-style oracle rejects target content and outside-byte corruption", 
 
   const outsideChanged = compareElementStyleMutation({
     before,
-    after: `<main class="corrupt" data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}" style="line-height: 53px">Original</p></main>`,
+    after: `<main class="corrupt" data-stemmio-id="${parentId}"><p data-stemmio-id="${SOURCE_ID}" style="line-height: 53px">Original</p></main>`,
     sourceId: SOURCE_ID,
     expectedProperty: "line-height",
     expectedValue: "53px",
@@ -263,10 +263,10 @@ test("element-style oracle rejects target content and outside-byte corruption", 
 });
 
 test("element-style oracle rejects duplicate style syntax and unrelated target attributes", () => {
-  const before = `<p class="sample" data-pageroot-id="${SOURCE_ID}">Original</p>`;
+  const before = `<p class="sample" data-stemmio-id="${SOURCE_ID}">Original</p>`;
   const duplicateAttribute = compareElementStyleMutation({
     before,
-    after: `<p class="sample" style="color:#123456" style="margin-top:9px" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+    after: `<p class="sample" style="color:#123456" style="margin-top:9px" data-stemmio-id="${SOURCE_ID}">Original</p>`,
     sourceId: SOURCE_ID,
     expectedProperty: "color",
     expectedValue: "#123456",
@@ -276,7 +276,7 @@ test("element-style oracle rejects duplicate style syntax and unrelated target a
 
   const duplicateProperty = compareElementStyleMutation({
     before,
-    after: `<p class="sample" style="color:#111111;color:#123456" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+    after: `<p class="sample" style="color:#111111;color:#123456" data-stemmio-id="${SOURCE_ID}">Original</p>`,
     sourceId: SOURCE_ID,
     expectedProperty: "color",
     expectedValue: "#123456",
@@ -286,7 +286,7 @@ test("element-style oracle rejects duplicate style syntax and unrelated target a
 
   const attributeChanged = compareElementStyleMutation({
     before,
-    after: `<p class="changed" style="color:#123456" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+    after: `<p class="changed" style="color:#123456" data-stemmio-id="${SOURCE_ID}">Original</p>`,
     sourceId: SOURCE_ID,
     expectedProperty: "color",
     expectedValue: "#123456",
@@ -300,7 +300,7 @@ test("element-style oracle rejects duplicate style syntax and unrelated target a
   ]) {
     const invalidTail = compareElementStyleMutation({
       before,
-      after: `<p class="sample" style="${injected}" data-pageroot-id="${SOURCE_ID}">Original</p>`,
+      after: `<p class="sample" style="${injected}" data-stemmio-id="${SOURCE_ID}">Original</p>`,
       sourceId: SOURCE_ID,
       expectedProperty: "font-size",
       expectedValue: "29px",
@@ -312,8 +312,8 @@ test("element-style oracle rejects duplicate style syntax and unrelated target a
 });
 
 test("operation-scoped oracle rejects changes outside the Stable-ID element", () => {
-  const before = `<main data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p data-pageroot-id="${SOURCE_ID}">before</p></main>`;
-  const validAfter = `<main data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p data-pageroot-id="${SOURCE_ID}">before TOKEN</p></main>`;
+  const before = `<main data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p data-stemmio-id="${SOURCE_ID}">before</p></main>`;
+  const validAfter = `<main data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p data-stemmio-id="${SOURCE_ID}">before TOKEN</p></main>`;
   const valid = compareElementScopedMutation({
     before,
     after: validAfter,
@@ -327,7 +327,7 @@ test("operation-scoped oracle rejects changes outside the Stable-ID element", ()
 
   const outsideChanged = compareElementScopedMutation({
     before,
-    after: `<main class="changed" data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p data-pageroot-id="${SOURCE_ID}">after TOKEN</p></main>`,
+    after: `<main class="changed" data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p data-stemmio-id="${SOURCE_ID}">after TOKEN</p></main>`,
     sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
     expectedAfterContains: ["TOKEN"],
@@ -338,7 +338,7 @@ test("operation-scoped oracle rejects changes outside the Stable-ID element", ()
 
   const targetAttributeChanged = compareElementScopedMutation({
     before,
-    after: `<main data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p class="corrupt" data-pageroot-id="${SOURCE_ID}">after TOKEN</p></main>`,
+    after: `<main data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p class="corrupt" data-stemmio-id="${SOURCE_ID}">after TOKEN</p></main>`,
     sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
     expectedAfterContains: ["TOKEN"],
@@ -349,7 +349,7 @@ test("operation-scoped oracle rejects changes outside the Stable-ID element", ()
 
   const targetContentCorrupted = compareElementScopedMutation({
     before,
-    after: `<main data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p data-pageroot-id="${SOURCE_ID}">UNRELATED DAMAGE TOKEN</p></main>`,
+    after: `<main data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb"><p data-stemmio-id="${SOURCE_ID}">UNRELATED DAMAGE TOKEN</p></main>`,
     sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_PASTE,
     expectedAfterContains: ["TOKEN"],
@@ -361,8 +361,8 @@ test("operation-scoped oracle rejects changes outside the Stable-ID element", ()
 
 test("operation-scoped oracle requires a closed normalization policy", () => {
   assert.throws(() => compareElementScopedMutation({
-    before: `<p data-pageroot-id="${SOURCE_ID}">before</p>`,
-    after: `<p data-pageroot-id="${SOURCE_ID}">after</p>`,
+    before: `<p data-stemmio-id="${SOURCE_ID}">before</p>`,
+    after: `<p data-stemmio-id="${SOURCE_ID}">after</p>`,
     sourceId: SOURCE_ID,
     normalizationPolicy: "anything-goes",
     expectedAppendedPattern: /after/u,
@@ -371,8 +371,8 @@ test("operation-scoped oracle requires a closed normalization policy", () => {
 
 test("operation-scoped oracle rejects a marker that already existed before input", () => {
   const report = compareElementScopedMutation({
-    before: `<p data-pageroot-id="${SOURCE_ID}">TOKEN</p>`,
-    after: `<p data-pageroot-id="${SOURCE_ID}">TOKEN</p>`,
+    before: `<p data-stemmio-id="${SOURCE_ID}">TOKEN</p>`,
+    after: `<p data-stemmio-id="${SOURCE_ID}">TOKEN</p>`,
     sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_PASTE,
     expectedAfterContains: ["TOKEN"],
@@ -384,8 +384,8 @@ test("operation-scoped oracle rejects a marker that already existed before input
 
 test("operation-scoped oracle rejects extra appended garbage around a valid marker", () => {
   const report = compareElementScopedMutation({
-    before: `<p data-pageroot-id="${SOURCE_ID}">Original</p>`,
-    after: `<p data-pageroot-id="${SOURCE_ID}">Original<script>corruption()</script> TOKEN EXTRA</p>`,
+    before: `<p data-stemmio-id="${SOURCE_ID}">Original</p>`,
+    after: `<p data-stemmio-id="${SOURCE_ID}">Original<script>corruption()</script> TOKEN EXTRA</p>`,
     sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_PASTE,
     expectedAfterContains: ["TOKEN"],
@@ -396,8 +396,8 @@ test("operation-scoped oracle rejects extra appended garbage around a valid mark
 });
 
 test("operation-scoped oracle accepts one exact insertion before preserved trailing whitespace", () => {
-  const before = `<p data-pageroot-id="${SOURCE_ID}">Original\n  </p>`;
-  const after = `<p data-pageroot-id="${SOURCE_ID}">Original TOKEN\n  </p>`;
+  const before = `<p data-stemmio-id="${SOURCE_ID}">Original\n  </p>`;
+  const after = `<p data-stemmio-id="${SOURCE_ID}">Original TOKEN\n  </p>`;
   const report = compareElementScopedMutation({
     before,
     after,
@@ -414,9 +414,9 @@ test("operation-scoped oracle accepts one exact insertion before preserved trail
 });
 
 test("operation-scoped oracle rejects an outside byte change around an otherwise exact insertion", () => {
-  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const before = `<main data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}">Original\n  </p></main>`;
-  const after = `<main class="changed" data-pageroot-id="${parentId}"><p data-pageroot-id="${SOURCE_ID}">Original TOKEN\n  </p></main>`;
+  const parentId = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<main data-stemmio-id="${parentId}"><p data-stemmio-id="${SOURCE_ID}">Original\n  </p></main>`;
+  const after = `<main class="changed" data-stemmio-id="${parentId}"><p data-stemmio-id="${SOURCE_ID}">Original TOKEN\n  </p></main>`;
   const report = compareElementScopedMutation({
     before,
     after,
@@ -431,8 +431,8 @@ test("operation-scoped oracle rejects an outside byte change around an otherwise
 });
 
 test("operation-scoped oracle rejects replacement even when the expected marker is present", () => {
-  const before = `<p data-pageroot-id="${SOURCE_ID}">Original\n  </p>`;
-  const after = `<p data-pageroot-id="${SOURCE_ID}">Replaced TOKEN\n  </p>`;
+  const before = `<p data-stemmio-id="${SOURCE_ID}">Original\n  </p>`;
+  const after = `<p data-stemmio-id="${SOURCE_ID}">Replaced TOKEN\n  </p>`;
   const report = compareElementScopedMutation({
     before,
     after,
@@ -447,10 +447,10 @@ test("operation-scoped oracle rejects replacement even when the expected marker 
 });
 
 test("format oracle permits only the Stable ID and three requested declarations", () => {
-  const before = `<p data-pageroot-id="${SOURCE_ID}">Original</p>`;
+  const before = `<p data-stemmio-id="${SOURCE_ID}">Original</p>`;
   const marker = "PRQA_0_FORMAT";
   const pattern = formattedMarkerAppendedPattern(marker);
-  const validAfter = `<p data-pageroot-id="${SOURCE_ID}">Original <span style="all: unset; display: inline !important; font-weight: 700; font-style: italic; text-decoration-line: underline" data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">${marker}</span></p>`;
+  const validAfter = `<p data-stemmio-id="${SOURCE_ID}">Original <span style="all: unset; display: inline !important; font-weight: 700; font-style: italic; text-decoration-line: underline" data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">${marker}</span></p>`;
   assert.equal(compareElementScopedMutation({
     before,
     after: validAfter,
@@ -461,13 +461,13 @@ test("format oracle permits only the Stable ID and three requested declarations"
   }).ok, true);
 
   for (const appended of [
-    ` <span onclick="steal()" style="all:unset;display:inline!important;font-weight:700;font-style:italic;text-decoration-line:underline" data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">${marker}</span>`,
-    ` <span style="all:unset;display:inline!important;font-weight:700;font-style:italic;text-decoration-line:underline;background:url(javascript:evil)" data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">${marker}</span>`,
-    ` <span style="all:unset;display:inline!important;font-weight:700;font-style:italic;text-decoration-line:underline" class="unexpected" data-pageroot-id="pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">${marker}</span>`,
+    ` <span onclick="steal()" style="all:unset;display:inline!important;font-weight:700;font-style:italic;text-decoration-line:underline" data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">${marker}</span>`,
+    ` <span style="all:unset;display:inline!important;font-weight:700;font-style:italic;text-decoration-line:underline;background:url(javascript:evil)" data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">${marker}</span>`,
+    ` <span style="all:unset;display:inline!important;font-weight:700;font-style:italic;text-decoration-line:underline" class="unexpected" data-stemmio-id="sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb">${marker}</span>`,
   ]) {
     const rejected = compareElementScopedMutation({
       before,
-      after: `<p data-pageroot-id="${SOURCE_ID}">Original${appended}</p>`,
+      after: `<p data-stemmio-id="${SOURCE_ID}">Original${appended}</p>`,
       sourceId: SOURCE_ID,
       normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_FORMAT,
       expectedAfterContains: [marker],
@@ -479,17 +479,17 @@ test("format oracle permits only the Stable ID and three requested declarations"
 });
 
 test("newline and format oracles reject a Stable ID reused from a sibling", () => {
-  const siblingId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const before = `<main data-pageroot-id="pr1_cccccccccccc4ccc8ccccccccccccccc"><p data-pageroot-id="${SOURCE_ID}">Original</p><aside data-pageroot-id="${siblingId}">Sibling</aside></main>`;
+  const siblingId = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const before = `<main data-stemmio-id="sm1_cccccccccccc4ccc8ccccccccccccccc"><p data-stemmio-id="${SOURCE_ID}">Original</p><aside data-stemmio-id="${siblingId}">Sibling</aside></main>`;
   const newlineMarker = "PRQA_NEWLINE";
   const newline = compareElementScopedMutation({
     before,
-    after: `<main data-pageroot-id="pr1_cccccccccccc4ccc8ccccccccccccccc"><p data-pageroot-id="${SOURCE_ID}">Original BEFORE<br data-pageroot-id="${siblingId}">${newlineMarker}</p><aside data-pageroot-id="${siblingId}">Sibling</aside></main>`,
+    after: `<main data-stemmio-id="sm1_cccccccccccc4ccc8ccccccccccccccc"><p data-stemmio-id="${SOURCE_ID}">Original BEFORE<br data-stemmio-id="${siblingId}">${newlineMarker}</p><aside data-stemmio-id="${siblingId}">Sibling</aside></main>`,
     sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_NEWLINE,
     expectedAfterContains: [newlineMarker],
     expectedAppendedPattern: new RegExp(
-      ` BEFORE<br data-pageroot-id="${siblingId}">${newlineMarker}`,
+      ` BEFORE<br data-stemmio-id="${siblingId}">${newlineMarker}`,
       "u",
     ),
   });
@@ -500,7 +500,7 @@ test("newline and format oracles reject a Stable ID reused from a sibling", () =
   const formatMarker = "PRQA_FORMAT";
   const format = compareElementScopedMutation({
     before,
-    after: `<main data-pageroot-id="pr1_cccccccccccc4ccc8ccccccccccccccc"><p data-pageroot-id="${SOURCE_ID}">Original <span style="all: unset; display: inline !important; font-weight: 700; font-style: italic; text-decoration-line: underline" data-pageroot-id="${siblingId}">${formatMarker}</span></p><aside data-pageroot-id="${siblingId}">Sibling</aside></main>`,
+    after: `<main data-stemmio-id="sm1_cccccccccccc4ccc8ccccccccccccccc"><p data-stemmio-id="${SOURCE_ID}">Original <span style="all: unset; display: inline !important; font-weight: 700; font-style: italic; text-decoration-line: underline" data-stemmio-id="${siblingId}">${formatMarker}</span></p><aside data-stemmio-id="${siblingId}">Sibling</aside></main>`,
     sourceId: SOURCE_ID,
     normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_FORMAT,
     expectedAfterContains: [formatMarker],

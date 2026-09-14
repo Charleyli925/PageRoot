@@ -16,7 +16,7 @@ async function waitFor(predicate, message) {
 }
 
 test("source file watcher coalesces directory events without requiring the old basename", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-source-watch-"));
   const sourcePath = path.join(root, "page.html");
   const renamedPath = path.join(root, "page Finder.html");
   await writeFile(sourcePath, "<!doctype html><html><body>one</body></html>\n", "utf8");
@@ -46,7 +46,7 @@ test("source file watcher coalesces directory events without requiring the old b
 });
 
 test("source file watcher sees a same-parent project folder rename", async () => {
-  const parent = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-parent-"));
+  const parent = await mkdtemp(path.join(os.tmpdir(), "stemmio-source-watch-parent-"));
   const projectRoot = path.join(parent, "demo");
   const renamedRoot = path.join(parent, "Finder 项目");
   const sourcePath = path.join(projectRoot, "page.html");
@@ -69,7 +69,7 @@ test("source file watcher sees a same-parent project folder rename", async () =>
 });
 
 test("source file watcher close stops further events and advances generation on rewatch", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-close-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-source-watch-close-"));
   const sourcePath = path.join(root, "page.html");
   const nextPath = path.join(root, "next.html");
   await writeFile(sourcePath, "<!doctype html><html><body>one</body></html>\n", "utf8");
@@ -97,7 +97,7 @@ test("source file watcher close stops further events and advances generation on 
 });
 
 test("watching the same path twice keeps the live watcher", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-idempotent-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-source-watch-idempotent-"));
   const sourcePath = path.join(root, "page.html");
   await writeFile(sourcePath, "<!doctype html><html><body>one</body></html>\n", "utf8");
   const events = [];
@@ -121,7 +121,7 @@ test("watching the same path twice keeps the live watcher", async () => {
 });
 
 test("a missing project directory stays absent and its returning source is watched again", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-return-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-source-watch-return-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const project = path.join(root, "project");
   const moved = path.join(root, "moved");
@@ -145,7 +145,7 @@ test("a missing project directory stays absent and its returning source is watch
 });
 
 test("starting a watcher on an absent project retains a recovery signal without creating it", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-absent-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-source-watch-absent-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const project = path.join(root, "missing");
   const sourcePath = path.join(project, "page.html");

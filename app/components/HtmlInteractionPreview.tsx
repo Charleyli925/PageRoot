@@ -19,7 +19,7 @@ import {
   type RawPageViewSnapshot,
 } from "../lib/page-view-context.js";
 import { OPAQUE_SANDBOX_STORAGE_BOOTSTRAP } from "../lib/opaque-sandbox-storage.js";
-import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
+import { STEMMIO_ELEMENT_ID_ATTRIBUTE } from "../../shared/stemmio-element-identity.mjs";
 import { buildSourceIndex } from "../lib/source-index.js";
 import {
   MAX_PREVIEW_COMMENT_GROUPS,
@@ -75,19 +75,19 @@ type DesktopPreviewApi = {
 
 declare global {
   interface Window {
-    htmlAIPreview?: DesktopPreviewApi;
+    stemmioPreview?: DesktopPreviewApi;
   }
 }
 
-const PREVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-preview-bootstrap";
-const PREVIEW_BASE_ATTRIBUTE = "data-pageroot-preview-base";
-const PREVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
-const CAPTURE_REQUEST_TYPE = "pageroot-page-view-context-request";
-const CAPTURE_RESPONSE_TYPE = "pageroot-page-view-context-response";
-const COMMENT_MEASURE_REQUEST_TYPE = "pageroot-preview-comment-measure-request";
-const COMMENT_LAYOUT_RESPONSE_TYPE = "pageroot-preview-comment-layout";
-const SCROLL_REQUEST_TYPE = "pageroot-preview-scroll-request";
-const SCROLL_EVENT_TYPE = "pageroot-preview-scroll";
+const PREVIEW_BOOTSTRAP_ATTRIBUTE = "data-stemmio-preview-bootstrap";
+const PREVIEW_BASE_ATTRIBUTE = "data-stemmio-preview-base";
+const PREVIEW_BOOTSTRAP_PATH = "/.stemmio/preview-bootstrap.js";
+const CAPTURE_REQUEST_TYPE = "stemmio-page-view-context-request";
+const CAPTURE_RESPONSE_TYPE = "stemmio-page-view-context-response";
+const COMMENT_MEASURE_REQUEST_TYPE = "stemmio-preview-comment-measure-request";
+const COMMENT_LAYOUT_RESPONSE_TYPE = "stemmio-preview-comment-layout";
+const SCROLL_REQUEST_TYPE = "stemmio-preview-scroll-request";
+const SCROLL_EVENT_TYPE = "stemmio-preview-scroll";
 const CAPTURE_TIMEOUT_MS = 1_200;
 const MAX_CAPTURED_ELEMENTS = 512;
 const INDEPENDENT_PREVIEW_SANDBOX =
@@ -105,7 +105,7 @@ function previewBootstrapJavaScript({
   const config = JSON.stringify({
     channelToken,
     sourceSha256,
-    sourceNodeAttribute: PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+    sourceNodeAttribute: STEMMIO_ELEMENT_ID_ATTRIBUTE,
     protocol: PAGE_VIEW_CONTEXT_PROTOCOL,
     version: PAGE_VIEW_CONTEXT_VERSION,
     requestType: CAPTURE_REQUEST_TYPE,
@@ -534,7 +534,7 @@ const HtmlInteractionPreview = forwardRef<
       sessionGenerationRef.current += 1;
       return undefined;
     }
-    const previewApi = window.htmlAIPreview;
+    const previewApi = window.stemmioPreview;
     let cancelled = false;
     let createdSession: DesktopPreviewSession | null = null;
     setDesktopSession(null);

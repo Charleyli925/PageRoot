@@ -67,7 +67,7 @@ test("external HTML paths accept absolute html/htm paths and file URLs only", ()
 test("external argv parsing ignores Chromium arguments and deduplicates HTML paths", () => {
   assert.deepEqual(
     externalHtmlPathsFromArgv([
-      "/Applications/PageRoot.app/Contents/MacOS/PageRoot",
+      "/Applications/Stemmio.app/Contents/MacOS/Stemmio",
       "--original-process-start-time=123",
       "/Users/demo/report.html",
       "/Users/demo/notes.txt",
@@ -120,7 +120,7 @@ test("external-open failures wait in a mailbox until the renderer can present th
 
 test("external opens received after committed shutdown are handed to the next launch in order", () => {
   const filesystem = createMemoryFilesystem();
-  const handoffPath = "/Users/demo/Library/Application Support/PageRoot/external-open-handoff.json";
+  const handoffPath = "/Users/demo/Library/Application Support/Stemmio/external-open-handoff.json";
   const createHandoff = () => createExternalFileOpenExitHandoff({
     handoffPath,
     platform: "darwin",
@@ -148,7 +148,7 @@ test("external opens received after committed shutdown are handed to the next la
 
 test("an invalid shutdown handoff is discarded before it gains file authority", () => {
   const filesystem = createMemoryFilesystem();
-  const handoffPath = "/Users/demo/Library/Application Support/PageRoot/external-open-handoff.json";
+  const handoffPath = "/Users/demo/Library/Application Support/Stemmio/external-open-handoff.json";
   filesystem.files.set(handoffPath, JSON.stringify({
     version: 1,
     sourcePath: "/Users/demo/not-html.txt",

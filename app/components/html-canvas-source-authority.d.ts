@@ -2,7 +2,7 @@ import type { SourceIndexValue } from "./html-canvas-internal-types";
 
 export const SOURCE_ELEMENT_ATTRIBUTE: string;
 
-export function escapedPagerootElementId(elementId: string): string;
+export function escapedStemmioElementId(elementId: string): string;
 export function sourceElementSelector(elementId: string): string;
 export function sourceElementId(element: { getAttribute?(name: string): string | null } | null | undefined): string | null;
 export function uniqueSourceElement(
@@ -26,7 +26,7 @@ export type RuntimeSourceAuthority = {
   elementGeneration: number;
   executionId: string;
   elements: WeakSet<HTMLElement>;
-  pagerootIds: WeakMap<HTMLElement, string>;
+  stemmioIds: WeakMap<HTMLElement, string>;
 };
 
 export function grantEditorCreatedSourceElements(options: {

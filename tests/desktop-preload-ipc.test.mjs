@@ -48,16 +48,16 @@ async function loadPreloadApis(invoke, { env = {}, search = "" } = {}) {
   });
   return {
     worlds: Object.fromEntries(exposed),
-    projects: exposed.get("htmlAIProjects"),
-    integrations: exposed.get("htmlAIIntegrations"),
-    updates: exposed.get("htmlAIUpdates"),
-    runtime: exposed.get("htmlAIRuntime"),
-    lifecycle: exposed.get("htmlAIAppLifecycle"),
-    usage: exposed.get("htmlAIUsage"),
-    uiPreferences: exposed.get("htmlAIUiPreferences"),
-    preview: exposed.get("htmlAIPreview"),
-    editRuntime: exposed.get("htmlAIEditRuntime"),
-    edit: exposed.get("htmlAIEdit"),
+    projects: exposed.get("stemmioProjects"),
+    integrations: exposed.get("stemmioIntegrations"),
+    updates: exposed.get("stemmioUpdates"),
+    runtime: exposed.get("stemmioRuntime"),
+    lifecycle: exposed.get("stemmioAppLifecycle"),
+    usage: exposed.get("stemmioUsage"),
+    uiPreferences: exposed.get("stemmioUiPreferences"),
+    preview: exposed.get("stemmioPreview"),
+    editRuntime: exposed.get("stemmioEditRuntime"),
+    edit: exposed.get("stemmioEdit"),
     sent,
     emit(channel, payload) {
       listeners.get(channel)?.({}, payload);
@@ -101,7 +101,7 @@ test("preload publishes one validated Bridge connection without reloading the sh
   assert.equal(projectInvocations, 0);
   const received = [];
   const unsubscribe = loaded.runtime.onBridgeReady((connection) => received.push(connection));
-  loaded.emit("html-app:bridge-ready", {
+  loaded.emit("stemmio-app:bridge-ready", {
     bridgePort: "43179",
     bridgeAuthToken: "a".repeat(43),
     appVersion: "0.9.8",
@@ -121,7 +121,7 @@ test("preload publishes one validated Bridge connection without reloading the sh
   assert.equal(loaded.runtime.getStartupTiming().marks[0].stage, "bridge-ready");
   await pendingProject;
   assert.equal(projectInvocations, 1);
-  loaded.emit("html-app:bridge-ready", {
+  loaded.emit("stemmio-app:bridge-ready", {
     bridgePort: "70000",
     bridgeAuthToken: "unsafe",
   });
@@ -160,7 +160,7 @@ test("preload exposes only validated content-free startup timing", async () => {
 
 test("preload exposes no Agent executable, spawn, command, or path capability", async () => {
   const { worlds } = await loadPreloadApis(async () => success(null));
-  assert.equal("htmlAIAgent" in worlds, false);
+  assert.equal("stemmioAgent" in worlds, false);
   const visit = (value, location) => {
     if (!value || typeof value !== "object") return;
     for (const [name, nested] of Object.entries(value)) {
@@ -356,8 +356,8 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     /工作台偏好记录无效/u,
   );
   assert.equal(calls.length, 3);
-  await uiPreferences.record({ workspace: { defaultAgentProviderId: "pageroot" } });
-  assert.equal(calls[3][1].workspace.defaultAgentProviderId, "pageroot");
+  await uiPreferences.record({ workspace: { defaultAgentProviderId: "stemmio" } });
+  assert.equal(calls[3][1].workspace.defaultAgentProviderId, "stemmio");
   await assert.rejects(
     () => uiPreferences.record({ workspace: { disabledAgentProviderIds: ["gemini"] } }),
     /工作台偏好记录无效/u,
@@ -369,19 +369,19 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
 
 test("preload exposes runtime commit hooks only for explicit E2E launches", async () => {
   const ordinary = await loadPreloadApis(async () => success(null), {
-    env: { PAGEROOT_E2E: "1" },
+    env: { STEMMIO_E2E: "1" },
   });
   assert.equal(ordinary.runtime.diagnostics.e2eRuntimeCommitHooks, false);
 
   const hooked = await loadPreloadApis(async () => success(null), {
-    env: { PAGEROOT_E2E: "1", PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1" },
+    env: { STEMMIO_E2E: "1", STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1" },
   });
   assert.equal(hooked.runtime.diagnostics.e2eRuntimeCommitHooks, true);
 });
 
 test("preload exposes the UI-preferences port during E2E launches", async () => {
   const { uiPreferences } = await loadPreloadApis(async () => success({}), {
-    env: { PAGEROOT_E2E: "1" },
+    env: { STEMMIO_E2E: "1" },
   });
   assert.equal(typeof uiPreferences.get, "function");
   assert.equal(typeof uiPreferences.record, "function");
@@ -394,7 +394,7 @@ test("preload exposes only preview session creation and revocation", async () =>
     if (args[0] === "html-preview:create-session") {
       return success({
         sessionId: "0123456789abcdef0123456789abcdef",
-        url: "pageroot-preview://0123456789abcdef0123456789abcdef/index.html",
+        url: "stemmio-preview://0123456789abcdef0123456789abcdef/index.html",
       });
     }
     return success({ revoked: true });
@@ -409,7 +409,7 @@ test("preload exposes only preview session creation and revocation", async () =>
     await preview.createSession(payload),
     {
       sessionId: "0123456789abcdef0123456789abcdef",
-      url: "pageroot-preview://0123456789abcdef0123456789abcdef/index.html",
+      url: "stemmio-preview://0123456789abcdef0123456789abcdef/index.html",
     },
   );
   assert.deepEqual(calls[0], ["html-preview:create-session", payload]);
@@ -548,7 +548,7 @@ test("preload exposes Registry catalog reads and projectId-only opens", async ()
           versions: [],
         }
       : {
-        sourcePath: "/Users/demo/Documents/PageRoot/项目/报告/报告-V1.html",
+        sourcePath: "/Users/demo/Documents/Stemmio/项目/报告/报告-V1.html",
         html: "<!doctype html><html><body>报告</body></html>",
         sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       });
@@ -569,12 +569,12 @@ test("preload exposes Registry catalog reads and projectId-only opens", async ()
   );
   assert.equal(
     (await api.readRegisteredProjectProjection("project_0123456789abcdef")).sourcePath,
-    "/Users/demo/Documents/PageRoot/项目/报告/报告-V1.html",
+    "/Users/demo/Documents/Stemmio/项目/报告/报告-V1.html",
   );
   assert.deepEqual(
     await api.openRegisteredProject("project_0123456789abcdef"),
     {
-      sourcePath: "/Users/demo/Documents/PageRoot/项目/报告/报告-V1.html",
+      sourcePath: "/Users/demo/Documents/Stemmio/项目/报告/报告-V1.html",
       html: "<!doctype html><html><body>报告</body></html>",
       sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     },
@@ -604,7 +604,7 @@ test("preload exposes the structured Finder reveal operation", async () => {
   ]);
 });
 
-test("preload exposes the narrow configured PageRoot projects-root operation", async () => {
+test("preload exposes the narrow configured Stemmio projects-root operation", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {
     calls.push(args);
@@ -675,8 +675,8 @@ test("preload exposes the narrow active managed source reconcile operation", asy
     return success({
       operationId: "reconcile_demo_operation",
       status: "relocated",
-      previousSourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
-      sourcePath: "/Users/demo/Documents/PageRoot/项目/report/Finder 新名字-V1.html",
+      previousSourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
+      sourcePath: "/Users/demo/Documents/Stemmio/项目/report/Finder 新名字-V1.html",
       sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       openTarget: {
         projectId: "project_demo",
@@ -688,7 +688,7 @@ test("preload exposes the narrow active managed source reconcile operation", asy
     });
   });
   const payload = {
-    previousSourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    previousSourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
     expectedSourceSha256:
       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     projectId: "project_demo",
@@ -704,8 +704,8 @@ test("preload exposes the narrow active managed source reconcile operation", asy
     {
       operationId: "reconcile_demo_operation",
       status: "relocated",
-      previousSourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
-      sourcePath: "/Users/demo/Documents/PageRoot/项目/report/Finder 新名字-V1.html",
+      previousSourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
+      sourcePath: "/Users/demo/Documents/Stemmio/项目/report/Finder 新名字-V1.html",
       sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       openTarget: {
         projectId: "project_demo",
@@ -729,7 +729,7 @@ test("preload delivers directory-change hints without claiming a new path", asyn
     seen.push(payload);
   });
   loaded.emit("html-projects:source-file-may-have-changed", {
-    sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    sourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
     watcherGeneration: 3,
   });
   loaded.emit("html-projects:source-file-may-have-changed", {
@@ -739,18 +739,18 @@ test("preload delivers directory-change hints without claiming a new path", asyn
   assert.equal(seen.length, 1);
   assert.equal(
     seen[0].sourcePath,
-    "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
   );
   assert.equal(seen[0].watcherGeneration, 3);
   assert.equal("nextSourcePath" in seen[0], false);
   assert.equal("sourceMissing" in seen[0], false);
   loaded.emit("html-projects:source-file-may-have-changed", {
-    sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    sourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
     watcherGeneration: 5,
     sourceMissing: false,
   });
   loaded.emit("html-projects:source-file-may-have-changed", {
-    sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    sourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
     watcherGeneration: 6,
     sourceMissing: true,
   });
@@ -831,7 +831,7 @@ test("preload replays a pending external-open request and receives later request
   const calls = [];
   const preload = await loadPreloadApis(async (...args) => {
     calls.push(args);
-    if (args[0] === "html-app:external-open-ready") {
+    if (args[0] === "stemmio-app:external-open-ready") {
       return {
         requestId: "external_startup",
         sourcePath: "/Users/demo/startup.html",
@@ -844,7 +844,7 @@ test("preload replays a pending external-open request and receives later request
     requests.push(request);
   });
   await new Promise((resolve) => setImmediate(resolve));
-  preload.emit("html-app:external-open-requested", {
+  preload.emit("stemmio-app:external-open-requested", {
     requestId: "external_live",
     sourcePath: "/Users/demo/live.html",
   });
@@ -857,7 +857,7 @@ test("preload replays a pending external-open request and receives later request
       requestId: "external_live",
     },
   ]);
-  assert.deepEqual(calls, [["html-app:external-open-ready"]]);
+  assert.deepEqual(calls, [["stemmio-app:external-open-ready"]]);
   unsubscribe();
 });
 
@@ -869,7 +869,7 @@ test("preload ignores a stale external-open catch-up after a newer live delivery
   const calls = [];
   const preload = await loadPreloadApis(async (...args) => {
     calls.push(args);
-    if (args[0] === "html-app:external-open-ready") return ready;
+    if (args[0] === "stemmio-app:external-open-ready") return ready;
     return null;
   });
   const requests = [];
@@ -878,7 +878,7 @@ test("preload ignores a stale external-open catch-up after a newer live delivery
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  preload.emit("html-app:external-open-requested", {
+  preload.emit("stemmio-app:external-open-requested", {
     requestId: "external_live",
     sourcePath: "/Users/demo/live.html",
   });
@@ -891,7 +891,7 @@ test("preload ignores a stale external-open catch-up after a newer live delivery
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{
     requestId: "external_live",
   }]);
-  assert.deepEqual(calls, [["html-app:external-open-ready"]]);
+  assert.deepEqual(calls, [["stemmio-app:external-open-ready"]]);
   unsubscribe();
 });
 
@@ -899,7 +899,7 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
   const calls = [];
   const preload = await loadPreloadApis(async (...args) => {
     calls.push(args);
-    if (args[0] === "html-app:workspace-recovery-ready") {
+    if (args[0] === "stemmio-app:workspace-recovery-ready") {
       return {
         issue: {
           title: "启动期间本地项目资料不可用",
@@ -919,11 +919,11 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  preload.emit("html-app:workspace-unavailable", {
+  preload.emit("stemmio-app:workspace-unavailable", {
     title: "本地项目资料暂时不可用",
     message: "请先导出当前 HTML。",
   });
-  preload.emit("html-app:about-requested");
+  preload.emit("stemmio-app:about-requested");
   assert.equal(aboutRequests, 1);
   assert.deepEqual(
     JSON.parse(JSON.stringify(issues)),
@@ -943,8 +943,8 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
     { relaunched: false },
   );
   assert.deepEqual(calls, [
-    ["html-app:workspace-recovery-ready"],
-    ["html-app:relaunch"],
+    ["stemmio-app:workspace-recovery-ready"],
+    ["stemmio-app:relaunch"],
   ]);
   unsubscribeAbout();
   unsubscribe();
@@ -959,13 +959,13 @@ test("preload reports close blockers in-app and can request retry", async () => 
   await preload.lifecycle.reportBlocked("close-request-0001", "正在保存。");
   await preload.lifecycle.reportBlocked("close-request-0002", "正在保存。", "in-app", true);
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
-    ["html-app:close-result", {
+    ["stemmio-app:close-result", {
       requestId: "close-request-0001",
       ready: false,
       reason: "正在保存。",
       presentation: "in-app",
     }],
-    ["html-app:close-result", {
+    ["stemmio-app:close-result", {
       requestId: "close-request-0002",
       ready: false,
       reason: "正在保存。",
@@ -979,7 +979,7 @@ test("preload replays a pending external-open failure and receives later failure
   const calls = [];
   const preload = await loadPreloadApis(async (...args) => {
     calls.push(args);
-    if (args[0] === "html-app:external-open-failed-ready") {
+    if (args[0] === "stemmio-app:external-open-failed-ready") {
       return {
         title: "无法打开这个 HTML",
         message: "启动期间未能读取这个 HTML 文件。",
@@ -992,7 +992,7 @@ test("preload replays a pending external-open failure and receives later failure
     issues.push(issue);
   });
   await new Promise((resolve) => setImmediate(resolve));
-  preload.emit("html-app:external-open-failed", {
+  preload.emit("stemmio-app:external-open-failed", {
     title: "无法打开这个 HTML",
     message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
   });
@@ -1006,7 +1006,7 @@ test("preload replays a pending external-open failure and receives later failure
       message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
     },
   ]);
-  assert.deepEqual(calls, [["html-app:external-open-failed-ready"]]);
+  assert.deepEqual(calls, [["stemmio-app:external-open-failed-ready"]]);
   unsubscribe();
 });
 
@@ -1021,7 +1021,7 @@ test("preload opens only the fixed packaged user notice", async () => {
     await lifecycle.openUserNotice(),
     { opened: true },
   );
-  assert.deepEqual(calls, [["html-app:open-user-notice"]]);
+  assert.deepEqual(calls, [["stemmio-app:open-user-notice"]]);
 });
 
 test("preload exposes the narrow generated-version activation operation", async () => {
@@ -1029,7 +1029,7 @@ test("preload exposes the narrow generated-version activation operation", async 
   const api = await loadPreload(async (...args) => {
     calls.push(args);
     return success({
-      sourcePath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
+      sourcePath: "/Users/demo/Stemmio/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
       sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       previousSourcePath: "/Users/demo/report.html",
       versionId: "ver_0002",
@@ -1037,7 +1037,7 @@ test("preload exposes the narrow generated-version activation operation", async 
   });
   const payload = {
     previousSourcePath: "/Users/demo/report.html",
-    nextSourcePath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
+    nextSourcePath: "/Users/demo/Stemmio/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
     expectedSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     projectId: "project_demo",
     versionId: "ver_0002",
@@ -1046,7 +1046,7 @@ test("preload exposes the narrow generated-version activation operation", async 
   assert.deepEqual(
     await api.activateGeneratedVersion(payload),
     {
-      sourcePath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
+      sourcePath: "/Users/demo/Stemmio/项目记录/projects/report__20260728-124315__01234567/working/report-V1.1.html",
       sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       previousSourcePath: "/Users/demo/report.html",
       versionId: "ver_0002",
@@ -1063,7 +1063,7 @@ test("preload exposes the exact managed Working Copy activation operation", asyn
   const api = await loadPreload(async (...args) => {
     calls.push(args);
     return success({
-      sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+      sourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
       sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       html: "<!doctype html><html><body>V1</body></html>",
       previousSourcePath: "/Users/demo/report.html",
@@ -1071,19 +1071,19 @@ test("preload exposes the exact managed Working Copy activation operation", asyn
   });
   const payload = {
     previousSourcePath: "/Users/demo/report.html",
-    nextSourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    nextSourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
     expectedSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     projectId: "project_demo",
     documentId: "doc_demo",
     workingCopyId: "work_ver_0001",
     versionId: "ver_0001",
-    projectRootPath: "/Users/demo/Documents/PageRoot/项目/report",
+    projectRootPath: "/Users/demo/Documents/Stemmio/项目/report",
   };
 
   assert.deepEqual(
     await api.activateManagedWorkingCopy(payload),
     {
-      sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+      sourcePath: "/Users/demo/Documents/Stemmio/项目/report/report-V1.html",
       sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       html: "<!doctype html><html><body>V1</body></html>",
       previousSourcePath: "/Users/demo/report.html",
@@ -1102,7 +1102,7 @@ test("preload exposes the narrow history-version Finder operation", async () => 
     return success({
       sourcePath: "/Users/demo/report.html",
       versionId: "ver_0002",
-      versionPath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/versions/ver_0002/files/index.html",
+      versionPath: "/Users/demo/Stemmio/项目记录/projects/report__20260728-124315__01234567/versions/ver_0002/files/index.html",
     });
   });
   const payload = {
@@ -1115,7 +1115,7 @@ test("preload exposes the narrow history-version Finder operation", async () => 
     {
       sourcePath: "/Users/demo/report.html",
       versionId: "ver_0002",
-      versionPath: "/Users/demo/PageRoot/项目记录/projects/report__20260728-124315__01234567/versions/ver_0002/files/index.html",
+      versionPath: "/Users/demo/Stemmio/项目记录/projects/report__20260728-124315__01234567/versions/ver_0002/files/index.html",
     },
   );
   assert.deepEqual(calls[0], [
@@ -1130,7 +1130,7 @@ test("preload exposes the narrow AI task Finder operation", async () => {
     calls.push(args);
     return success({
       sourcePath: "/Users/demo/report.html",
-      aiTaskPath: "/Users/demo/PageRoot/项目/报告/AI任务/2026-08-15-候选版本2",
+      aiTaskPath: "/Users/demo/Stemmio/项目/报告/AI任务/2026-08-15-候选版本2",
       requestId: "req_0001",
       candidateId: "candidate_00000000000000000000000000000000",
     });
@@ -1143,7 +1143,7 @@ test("preload exposes the narrow AI task Finder operation", async () => {
     await api.revealAiTask(payload),
     {
       sourcePath: "/Users/demo/report.html",
-      aiTaskPath: "/Users/demo/PageRoot/项目/报告/AI任务/2026-08-15-候选版本2",
+      aiTaskPath: "/Users/demo/Stemmio/项目/报告/AI任务/2026-08-15-候选版本2",
       requestId: "req_0001",
       candidateId: "candidate_00000000000000000000000000000000",
     },
@@ -1229,7 +1229,7 @@ test("preload exposes the narrow QoderWork handoff integration", async () => {
   assert.equal(calls[1][0], "html-agent-access:open-login");
   assert.equal(calls[1][1].providerId, "qoder");
   await assert.rejects(
-    () => integrations.openAgentLogin({ providerId: "pageroot" }),
+    () => integrations.openAgentLogin({ providerId: "stemmio" }),
     /官方登录入口无效/u,
   );
 });

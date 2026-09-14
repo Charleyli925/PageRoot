@@ -40,7 +40,7 @@ test(`Candidate rejection consumes no ordinal and promotion is idempotent (same 
   assert.equal(firstCandidate.candidate.status, "pending-review");
   assert.equal(firstCandidate.candidate.proposedVersionId, "ver_0002");
   assert.ok(["ready", "attention"].includes(firstCandidate.candidate.assessment.status));
-  let manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
+  let manifest = await json(path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
   assert.equal(manifest.latestOfficialVersionId, "ver_0001");
 
@@ -75,7 +75,7 @@ test(`Candidate rejection consumes no ordinal and promotion is idempotent (same 
     decisionOperationId: `promote_${secondCandidate.candidate.candidateId}`,
   });
   assert.equal(repeated.version.versionId, "ver_0002");
-  manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
+  manifest = await json(path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
   assert.equal(manifest.latestOfficialVersionId, "ver_0002");
 });
@@ -128,7 +128,7 @@ test("Candidate adoption requires its own decision receipt and retries one lost 
   );
   const afterLostResponse = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(afterLostResponse.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
@@ -138,7 +138,7 @@ test("Candidate adoption requires its own decision receipt and retries one lost 
   assert.equal(replayed.version.versionId, "ver_0002");
   const finalManifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(finalManifest.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
@@ -148,7 +148,7 @@ test("promotion preserves the identity-normalized Candidate in its Version and W
   const value = await fixture(t);
   const imported = await importSource(value, "promotion-identity.html");
   const candidateSubmission = html("Candidate").replace(
-    /<h1 data-pageroot-id="[^"]+">Candidate<\/h1>/u,
+    /<h1 data-stemmio-id="[^"]+">Candidate<\/h1>/u,
     "<main>Candidate</main>",
   );
   const candidate = await value.repository.createCandidate({
@@ -163,7 +163,7 @@ test("promotion preserves the identity-normalized Candidate in its Version and W
     candidateId: candidate.candidate.candidateId,
     decisionOperationId: `promote_${candidate.candidate.candidateId}`,
   });
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const candidateHtml = await readFile(path.join(
     controlRoot,
     "requests",
@@ -225,7 +225,7 @@ test("legacy Promotion journals without a Working Copy hash remain recoverable",
         && error.code === "INJECTED_FAILPOINT",
     );
 
-    const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+    const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
     const transactionPath = path.join(
       controlRoot,
       "transactions",
@@ -306,7 +306,7 @@ test("blocked Candidate validation never reserves a Version", async (t) => {
   );
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -372,7 +372,7 @@ test("createCandidate ignores authored script changes and keeps weak continuity 
   assert.equal(unrelated.candidate.proposedVersionId, "ver_0002");
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -390,11 +390,11 @@ test("runtime authority seals Candidate record and output after review begins", 
   });
   const requestRoot = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     "req_candidate_authority",
   );
-  const runtimePath = path.join(imported.target.projectRootPath, ".pageroot", "runtime-state.json");
+  const runtimePath = path.join(imported.target.projectRootPath, ".stemmio", "runtime-state.json");
   const runtimeBefore = await json(runtimePath);
   const rewrittenHtml = html("unreviewed replacement");
   const rewrittenRecord = await json(path.join(requestRoot, "candidate.json"));
@@ -500,7 +500,7 @@ test("Promotion recovery does not bypass the runtime-sealed Candidate record", a
 
   const candidatePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     "req_sealed_promotion",
     "candidate.json",
@@ -518,7 +518,7 @@ test("Promotion recovery does not bypass the runtime-sealed Candidate record", a
   );
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -568,7 +568,7 @@ test("Promotion recovery re-derives every Candidate-backed transaction field", a
     );
     const transactionPath = path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "transactions",
       `promote_${candidate.candidate.candidateId}`,
       "transaction.json",
@@ -587,7 +587,7 @@ test("Promotion recovery re-derives every Candidate-backed transaction field", a
     );
     const manifest = await json(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "manifest.json",
     ));
     assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"], label);
@@ -619,7 +619,7 @@ test("Promotion recovery validates the recorded Working Copy against sealed auth
   );
   const transactionPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "transactions",
     `promote_${candidate.candidate.candidateId}`,
     "transaction.json",
@@ -642,7 +642,7 @@ test("Promotion recovery validates the recorded Working Copy against sealed auth
   );
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -676,13 +676,13 @@ test("a Candidate cannot be adopted after its frozen Working Copy changes", asyn
   );
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
   const persistedCandidate = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     "req_stale_candidate",
     "candidate.json",
@@ -731,13 +731,13 @@ test("promotion rechecks the Candidate base before manifest publication and reco
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
   const persistedCandidate = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     "req_promotion_boundary",
     "candidate.json",
@@ -823,7 +823,7 @@ test("promotion retries the next same-ordinal path after an OS no-replace collis
   assert.equal(await readFile(promoted.target.exactSourcePath, "utf8"), candidateHtml);
   const transaction = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "transactions",
     `promote_${candidate.candidate.candidateId}`,
     "transaction.json",
@@ -861,11 +861,11 @@ test("request finalization creates a reviewable Candidate only, and manifest pat
   });
   assert.equal(completed.status, "candidate-ready");
   assert.equal(completed.candidate.status, "pending-review");
-  const beforeAdoption = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
+  const beforeAdoption = await json(path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"));
   assert.equal(beforeAdoption.latestOfficialVersionId, "ver_0001");
   assert.equal(beforeAdoption.versions.length, 1);
 
-  const manifestPath = path.join(imported.target.projectRootPath, ".pageroot", "manifest.json");
+  const manifestPath = path.join(imported.target.projectRootPath, ".stemmio", "manifest.json");
   const tampered = await json(manifestPath);
   tampered.workingCopies[0].sourceRelativePath = "../escape.html";
   await writeFile(manifestPath, JSON.stringify(tampered), "utf8");
@@ -881,8 +881,8 @@ test("request finalization seals Candidate impact against its requested Stable I
   const imported = await importSource(value, "candidate-impact.html", html("V1"));
   const baseHtml = await readFile(imported.target.exactSourcePath, "utf8");
   const identity = inspectSourceElementIdentity(baseHtml);
-  const targetId = identity.elements.find((element) => element.tagName === "h1")?.pagerootId;
-  const outsideId = identity.elements.find((element) => element.tagName === "title")?.pagerootId;
+  const targetId = identity.elements.find((element) => element.tagName === "h1")?.stemmioId;
+  const outsideId = identity.elements.find((element) => element.tagName === "title")?.stemmioId;
   assert.ok(targetId);
   assert.ok(outsideId);
   const prepared = await value.repository.prepareRequest({
@@ -938,16 +938,16 @@ test("request finalization seals Candidate impact against its requested Stable I
 test("request finalization treats a comment root and its descendants as one allowed impact scope", async (t) => {
   const value = await fixture(t);
   const ids = {
-    html: "pr1_11111111111141118111111111111111",
-    head: "pr1_22222222222242229222222222222222",
-    title: "pr1_3333333333334333a333333333333333",
-    body: "pr1_4444444444444444b444444444444444",
-    section: "pr1_77777777777747778077777777777777",
-    heading: "pr1_88888888888848888088888888888888",
-    paragraph: "pr1_99999999999949999099999999999999",
-    outside: "pr1_aaaaaaaabbbb4ccc8ddddeeeeeeeeeee",
+    html: "sm1_11111111111141118111111111111111",
+    head: "sm1_22222222222242229222222222222222",
+    title: "sm1_3333333333334333a333333333333333",
+    body: "sm1_4444444444444444b444444444444444",
+    section: "sm1_77777777777747778077777777777777",
+    heading: "sm1_88888888888848888088888888888888",
+    paragraph: "sm1_99999999999949999099999999999999",
+    outside: "sm1_aaaaaaaabbbb4ccc8ddddeeeeeeeeeee",
   };
-  const baseHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Scope</title></head><body data-pageroot-id="${ids.body}"><section data-pageroot-id="${ids.section}"><h2 data-pageroot-id="${ids.heading}">标题</h2><p data-pageroot-id="${ids.paragraph}">正文</p></section><aside data-pageroot-id="${ids.outside}">旁支</aside></body></html>`;
+  const baseHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">Scope</title></head><body data-stemmio-id="${ids.body}"><section data-stemmio-id="${ids.section}"><h2 data-stemmio-id="${ids.heading}">标题</h2><p data-stemmio-id="${ids.paragraph}">正文</p></section><aside data-stemmio-id="${ids.outside}">旁支</aside></body></html>`;
   const imported = await importSource(value, "comment-root-scope.html", baseHtml);
   const prepared = await value.repository.prepareRequest({
     target: imported.target,
@@ -1025,7 +1025,7 @@ test("a replaced private promotion file fails recovery without deleting user byt
   );
   const transactionPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "transactions",
     `promote_${candidate.candidate.candidateId}`,
     "transaction.json",
@@ -1033,7 +1033,7 @@ test("a replaced private promotion file fails recovery without deleting user byt
   const transaction = await json(transactionPath);
   const preparedPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     ...transaction.preparedWorkingCopyRelativePath.split("/"),
   );
   const replacement = html("user replaced preparation file");
@@ -1099,7 +1099,7 @@ test("a replaced published promotion file fails recovery without deleting user b
   assert.equal(await readFile(publishedPath, "utf8"), replacement);
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -1147,7 +1147,7 @@ test(`promotion fault recovery leaves one formal Version at every commit point (
       projectRootPath: imported.target.projectRootPath,
     });
     assert.deepEqual(recovered, []);
-    const manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
+    const manifest = await json(path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"));
     assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
     assert.equal(manifest.latestOfficialVersionId, "ver_0002");
     const htmlInfo = await lstat(path.join(imported.target.projectRootPath, "原文件-V2.html"));

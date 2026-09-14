@@ -1,4 +1,4 @@
-import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
+import { STEMMIO_ELEMENT_ID_ATTRIBUTE } from "../../shared/stemmio-element-identity.mjs";
 
 export type PageTabAssociation = {
   panel: HTMLElement;
@@ -123,7 +123,7 @@ function relatedTabGroupParents(
 }
 
 function associationKey(panel: HTMLElement, fallback: string): string {
-  return panel.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)
+  return panel.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE)
     || panel.id
     || panel.getAttribute("data-page")
     || panel.getAttribute("data-panel")
@@ -152,7 +152,7 @@ function inferredIndexedTabAssociations(
       group.members.some((element) => existing.some((entry) => entry.panel === element))
       || !group.members.every((element) => (
         !isIndexedTabControl(element)
-        && (!requireSourceBackedPanels || element.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE))
+        && (!requireSourceBackedPanels || element.hasAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE))
       ))
     ) return false;
     return group.members.filter(isVisible).length === 1

@@ -17,6 +17,16 @@ import {
 const PRODUCT_ROOT = fileURLToPath(new URL("../", import.meta.url));
 export const NOTICE_LEDGER_REL = "scripts/notice-disposition-ledger.json";
 
+// A product identity cutover may update the brand token inside a frozen notice
+// without growing the surface or changing its disposition. Keep the ratchet
+// strict for every other copy change while treating the planned identity
+// migration as the same notice contract.
+const PRODUCT_BRAND_TOKEN = /(?:PageRoot|Stemmio|源页)/gu;
+
+function comparableNoticeFingerprint(value) {
+  return String(value).replace(PRODUCT_BRAND_TOKEN, "<product>");
+}
+
 const SKIP_PREFIXES = [
   "tests/",
   "scripts/",
@@ -241,7 +251,10 @@ export function noticeRatchetViolations(current, previous) {
   for (const site of current.sites || []) {
     const before = previousSites.get(site.id);
     if (!before) continue;
-    if (before.fingerprint !== site.fingerprint && before.class === site.class) {
+    const fingerprintChanged = before.fingerprint !== site.fingerprint;
+    const brandOnlyChange = comparableNoticeFingerprint(before.fingerprint)
+      === comparableNoticeFingerprint(site.fingerprint);
+    if (fingerprintChanged && !brandOnlyChange && before.class === site.class) {
       violations.push(
         `notice freeze: ${site.id} changed without a class change or deletion`,
       );

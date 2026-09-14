@@ -1,6 +1,6 @@
-# PageRoot agent guidance
+# Stemmio agent guidance
 
-This repository is the complete public source boundary for PageRoot. Keep this
+This repository is the complete public source boundary for Stemmio. Keep this
 file short: follow the rules below, then read only the task-specific documents
 listed under Progressive disclosure.
 
@@ -51,7 +51,7 @@ For any implementation or delivery task, the root reads `docs/CODEX_WORKFLOW.md`
 - Current HTML bytes are authoritative; Preview DOM is disposable. Visual edits use Stable ID semantic operations, with SourcePatch only as the internal materializer. Preserve unrelated bytes, source identity, native selection and IME behavior.
 - Source commits fail closed on ambiguous targets, stale hashes, external writes, invalid scope, identity failures and unsafe paths; presentation or preflight uncertainty must not refuse edit entry. Privileged filesystem work stays behind narrow validated Electron/Bridge IPC.
 - AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML. Weak page continuity forces review instead of failing an otherwise usable candidate.
-- QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. Authorized automatic paths are ADR 0032's Qoder ACP driver, ADR 0053's Codex ACP adapter, and ADR 0069's PageRoot native OpenAI-compatible HTTP Agent. Anthropic is not authorized.
+- QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. Authorized automatic paths are ADR 0032's Qoder ACP driver, ADR 0053's Codex ACP adapter, and ADR 0069's native OpenAI-compatible HTTP Agent. Anthropic is not authorized.
 - Committed tests and fixtures use synthetic data only. Relevant editor/runtime/recovery changes also require real Electron acceptance using the user-designated local HTML corpus, as defined in `tests/TEST_STRATEGY.md`. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
 - Implementation shape, ownership, testing and completion rules live in `docs/ENGINEERING_STANDARDS.md`; read only the sections relevant to the routed task.
 

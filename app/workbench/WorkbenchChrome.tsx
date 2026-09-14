@@ -285,7 +285,7 @@ export function WorkbenchStartPage({
         {firstProject ? (
           <section className="workbench-start-empty" aria-labelledby="workbench-start-empty-title">
             <h2 id="workbench-start-empty-title">开始你的第一个项目</h2>
-            <p>选择一份 HTML，在 PageRoot 中编辑、评论和交给 AI 修改。</p>
+            <p>选择一份 HTML，在 Stemmio 中编辑、评论和交给 AI 修改。</p>
             <button className="workbench-start-primary" type="button" onClick={onCreateProject}>
               <PlusIcon aria-hidden="true" size={14} weight="bold" />
               新建项目
@@ -575,10 +575,10 @@ export function WorkbenchGlobalSidebar({
                 type="button"
                 data-update-downloaded={updateDownloaded ? "true" : undefined}
                 aria-label={updateDownloaded
-                  ? `PageRoot ${updateResult?.latestVersion || "新版本"} 已下载，重启更新`
+                  ? `Stemmio ${updateResult?.latestVersion || "新版本"} 已下载，重启更新`
                   : updateDownloading
-                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
-                    : `发现 PageRoot ${updateResult?.latestVersion || "新版本"}，下载更新`}
+                    ? `正在下载 Stemmio ${updateResult?.latestVersion || "新版本"}`
+                    : `发现 Stemmio ${updateResult?.latestVersion || "新版本"}，下载更新`}
                 disabled={updateDownloading}
                 onClick={onDownloadOrRestartUpdate}
               >

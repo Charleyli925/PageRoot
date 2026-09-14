@@ -40,7 +40,7 @@ test("workbench tab persistence accepts many identity-only tabs", () => {
 });
 
 test("workbench tab state is atomically written and malformed state fails visibly closed", async () => {
-  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-tabs-"));
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-tabs-"));
   await writeWorkbenchTabsState({ userDataPath, state: valid });
   assert.deepEqual(await readWorkbenchTabsState({ userDataPath }), valid);
   const filePath = path.join(userDataPath, "workbench-tabs.json");
@@ -50,7 +50,7 @@ test("workbench tab state is atomically written and malformed state fails visibl
 });
 
 test("concurrent tab projections use distinct atomic temporary files", async () => {
-  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-tabs-concurrent-"));
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-tabs-concurrent-"));
   await Promise.all(Array.from({ length: 12 }, () => (
     writeWorkbenchTabsState({ userDataPath, state: valid })
   )));

@@ -1,6 +1,6 @@
 # 源页：内部 AI 对话补充与候选校验（已实现）
 
-- 实现版本：PageRoot 0.9.6
+- 实现版本：Stemmio 0.9.6
 - 日期：2026-08-02
 - 状态：已进入代码、Schema、历史记录与打包验证
 
@@ -12,7 +12,7 @@
 2. 复制模式下，用户随后在 QoderWork 或其他 Agent 对话里新增、修订或撤回的要求。
 
 本节的对话补充只适用于用户自行维护的复制/manual conversation。受管 Qoder ACP 会话
-只执行已经冻结的 Request/Attempt，PageRoot 不向会话注入后续聊天文本、图片或文件；
+只执行已经冻结的 Request/Attempt，Stemmio 不向会话注入后续聊天文本、图片或文件；
 需要改变要求时应停止本轮并建立新 Request，不能绕过冻结边界修改原 Request。
 
 第二部分不能直接改写冻结 Request。Prompt 要求内部 AI 先调用受控 helper，把用户原话写入当前 Attempt 的 `USER_SUPPLEMENT.json`，成功后才能执行。记录失败时必须停止执行该条补充。
@@ -42,8 +42,8 @@ handler、可执行 URL 和 refresh 指令都属于候选内容，不参与检�
 粗粒度启发式，不宣称逐节点证明。
 
 Stable ID 硬校验先于这个连续性分级。AI 必须保留仍存在元素的
-`data-pageroot-id`；移动保留 ID，真正新增的元素不填 ID，由
-PageRoot 验证后分配。不能确定是删除还是丢失时拒绝 Candidate，不做
+`data-stemmio-id`；移动保留 ID，真正新增的元素不填 ID，由
+Stemmio 验证后分配。不能确定是删除还是丢失时拒绝 Candidate，不做
 启发式重绑。通过后同时封存 AI 原始输出 Hash、系统补 ID 后的完整
 Candidate Hash 和 identity report；Review、Promotion 和新 Version 只读后者。
 

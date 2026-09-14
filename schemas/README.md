@@ -4,8 +4,8 @@ Only the files listed below are product contracts and package inputs.
 
 ## HTML source identity
 
-- `pageroot-element-identity.v1.schema.json` defines the value written to the
-  sole persistent PageRoot-owned HTML attribute, `data-pageroot-id`. The schema
+- `stemmio-element-identity.v1.schema.json` defines the value written to the
+  sole persistent Stemmio-owned HTML attribute, `data-stemmio-id`. The schema
   does not itself authorize writing that attribute.
 - `source-element-identity-migration.v1.schema.json` is the strict recoverable
   transaction that authorizes a registered managed Working Copy to materialize
@@ -31,7 +31,7 @@ Only the files listed below are product contracts and package inputs.
 
 A mutable record is one this product reads, edits and writes again. For those
 records every required member stays strictly validated, and a member added by a
-newer PageRoot is preserved unchanged across the round trip. A record whose
+newer Stemmio is preserved unchanged across the round trip. A record whose
 required members are missing or invalid is still an unrecognized shape and still
 fails closed. Dropping a member we do not recognize is silent data loss, and
 refusing the whole file over one added member locks the user out of data this
@@ -116,6 +116,7 @@ records.
 - `committed-marker.v1.schema.json`
 - `conversation.v1.schema.json`
 - `conversation.v2.schema.json`
+- `conversation.v3.schema.json`
 - `conversation-index.v1.schema.json`
 - `conversation-draft.v1.schema.json`
 - `conversation-draft.v2.schema.json`
@@ -134,7 +135,7 @@ records.
 The Registry is the canonical write whitelist for v4. It records only direct
 children of the configured project root, the registered root path, a root
 filesystem identity used only for same-parent rename recovery, and durable
-pending-import intent. A copied `.pageroot` directory is never registry
+pending-import intent. A copied `.stemmio` directory is never registry
 authority.
 
 The v1 suffix here is local to each auxiliary artifact and remains its current
@@ -161,8 +162,9 @@ former persistent-history schema and decoder are retired. Crash recovery may
 keep exact operations only as pending-save evidence, never as a restored undo
 cursor.
 
-`conversation.v2.schema.json` is the current writer contract for one AI
-conversation thread; v1 remains read-only compatibility. A Conversation
+`conversation.v3.schema.json` is the current writer contract for one Stemmio AI
+conversation thread. The v1 and v2 schemas remain historical, read-only
+descriptions and are not accepted by the current reader. A Conversation
 belongs to exactly one Document and its contexts, turns and messages live in the
 same record, so reading one Document's thread can never surface another's. Two
 rules are load-bearing and pinned by
@@ -188,11 +190,13 @@ Conversation, kept in its own small record so a debounced draft write never
 rewrites the message history. A draft never enters a Request, Prompt,
 `USER_SUPPLEMENT` or Candidate.
 
-Conversation v2 binds each Agent turn to a provider selection, nullable runtime
-binding, and capability-snapshot fingerprint. Stored Agent messages use the
-generic `agent` actor plus `providerId` and the actual provider-namespaced model.
-The codec projects legacy `qoder` actors and `qoder-default` reasoning without
-rewriting v1 files; new writes are v2 and preserve unknown future members.
+Conversation v2 is a historical, read-only description of the pre-cutover
+provider binding. The current v3 writer binds each Agent turn to a provider
+selection, nullable runtime binding, and capability-snapshot fingerprint.
+Stored Agent messages use the generic `agent` actor plus `providerId` and the
+actual provider-namespaced model. The codec projects legacy `qoder` actors and
+`qoder-default` reasoning only when reading the retained v1 history; it does
+not accept v2 records or emit either historical shape.
 
 Deprecated main v1/v2 schemas and `migration-report.v1.schema.json` are not
 kept in the active source tree or release package. Their evidence exists only

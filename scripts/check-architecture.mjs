@@ -109,7 +109,7 @@ const SOURCE_NODE_ID_ALLOWED_FILES = new Set([
   ["app", "components", "IslandEditingController.ts"].join("/"),
   ["shared", "editable-island.mjs"].join("/"),
 ]);
-const REVIEW_SOURCE_NODE_ID_LITERAL = ["data", "pageroot", "review", "source", "node", "id"].join("-");
+const REVIEW_SOURCE_NODE_ID_LITERAL = ["data", "stemmio", "review", "source", "node", "id"].join("-");
 const PARSE_KEY_PATTERN_SOURCE = ["element", ":\\d+", ":\\d+", ":"].join("");
 const PARSE_KEY_ALLOWED_FILES = new Set([
   ["app", "lib", "source-index.js"].join("/"),
@@ -125,7 +125,7 @@ const ACTIVE_DOCUMENT_CANVAS_FILE = [
   "workbench",
   "WorkbenchActiveDocumentCanvas.tsx",
 ].join("/");
-const TEXT_FRAGMENT_HOST_LITERAL = ["pageroot", "text", "fragment"].join("-");
+const TEXT_FRAGMENT_HOST_LITERAL = ["stemmio", "text", "fragment"].join("-");
 const PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS =
   /\bdata-p\b|\bdata-tab\b|resolveDataLinkedTabAction|resolveIndexedHandlerTabAction|SIMPLE_INDEXED_TAB_HANDLER|LEGACY_TAB_/u;
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
@@ -445,7 +445,7 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
     file === DOCUMENT_WORKFLOW_FILE
     && (
       hasIdentifier(handle, "recoveryStore")
-      || source.includes("html-ai-recovery")
+      || source.includes("stemmio-recovery")
     )
   ) {
     violations.push(

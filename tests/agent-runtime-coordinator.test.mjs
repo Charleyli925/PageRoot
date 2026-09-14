@@ -126,7 +126,7 @@ function executionAuthority(configuration = CONFIGURATION) {
     run: {
       ...IDENTITY,
       status: "processing",
-      requestPath: `/tmp/project/.pageroot/requests/${IDENTITY.requestId}`,
+      requestPath: `/tmp/project/.stemmio/requests/${IDENTITY.requestId}`,
       promptPath: "/tmp/prompt.md",
       outputPath: "/tmp/output.html",
       completionPath: "/tmp/completion.json",
@@ -261,22 +261,22 @@ test("preflight rejects removed purposes and execution tickets are one-use, TTL-
 });
 
 test("HTTP launch cannot mix an old ticket with a configuration committed during final verification", async () => {
-  const pagerootSelection = Object.freeze({
-    providerId: "pageroot",
+  const stemmioSelection = Object.freeze({
+    providerId: "stemmio",
     runtimeId: "http",
-    requestedModelId: "pageroot:deepseek-v4-pro",
-    resolvedModelId: "pageroot:deepseek-v4-pro",
+    requestedModelId: "stemmio:deepseek-v4-pro",
+    resolvedModelId: "stemmio:deepseek-v4-pro",
     reasoning: Object.freeze({ requested: null, applied: null, resolution: "provider-default" }),
   });
   const configurationFor = (environment) => {
-    const generation = Number(environment?.PAGEROOT_API_CREDENTIAL_GENERATION || 0);
+    const generation = Number(environment?.STEMMIO_API_CREDENTIAL_GENERATION || 0);
     return Object.freeze({
       schemaVersion: "1.0.0",
-      providerId: "pageroot",
+      providerId: "stemmio",
       runtimeId: "http",
-      vendorId: String(environment?.PAGEROOT_API_VENDOR || "deepseek"),
+      vendorId: String(environment?.STEMMIO_API_VENDOR || "deepseek"),
       baseUrlOrigin: "https://api.deepseek.com",
-      modelId: pagerootSelection.resolvedModelId,
+      modelId: stemmioSelection.resolvedModelId,
       reasoning: "auto",
       capabilityRevision: "test-revision",
       credentialGeneration: generation,
@@ -287,28 +287,28 @@ test("HTTP launch cannot mix an old ticket with a configuration committed during
   let verifyCount = 0;
   let runtimeCalls = 0;
   let frozenConfiguration = null;
-  const pagerootRegistry = {
+  const stemmioRegistry = {
     resolveSelection: () => ({}),
     assertCapabilityForSelection: () => true,
     preflightForSelection: async (_selection, purpose, { environment }) => ({
       purpose,
-      providerId: "pageroot",
+      providerId: "stemmio",
       runtimeId: "http",
       securityProfile: "client-mediated",
-      installation: Object.freeze({ generation: Number(environment.PAGEROOT_API_CREDENTIAL_GENERATION) }),
+      installation: Object.freeze({ generation: Number(environment.STEMMIO_API_CREDENTIAL_GENERATION) }),
       installationDigest: `sha256:${"a".repeat(64)}`,
       configuration: configurationFor(environment),
       capabilities: Object.freeze({ availability: true, preflight: true, execution: true }),
       evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
-      selection: pagerootSelection,
+      selection: stemmioSelection,
     }),
     verifyTicket: async (ticket) => {
       verifyCount += 1;
       if (verifyCount === 2) {
-        await coordinator.updateAgentConfiguration("pageroot", {
+        await coordinator.updateAgentConfiguration("stemmio", {
           apiKey: "sk-new",
           vendorId: "deepseek",
-          selection: pagerootSelection,
+          selection: stemmioSelection,
         });
       }
       return ticket;
@@ -325,12 +325,12 @@ test("HTTP launch cannot mix an old ticket with a configuration committed during
     preflightFailureMessageForSelection: (_selection, code) => `preflight:${code}`,
   };
   coordinator = new AgentRuntimeCoordinator({
-    providerRegistry: pagerootRegistry,
+    providerRegistry: stemmioRegistry,
     resolveTask: async () => ({
       ...executionAuthority(),
       request: { request: { agentDelivery: {
         mode: "managed-agent",
-        selection: pagerootSelection,
+        selection: stemmioSelection,
         configuration: frozenConfiguration,
         trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       } } },
@@ -340,10 +340,10 @@ test("HTTP launch cannot mix an old ticket with a configuration committed during
       release: async () => true,
     },
   });
-  const connected = await coordinator.updateAgentConfiguration("pageroot", {
+  const connected = await coordinator.updateAgentConfiguration("stemmio", {
     apiKey: "sk-old",
     vendorId: "deepseek",
-    selection: pagerootSelection,
+    selection: stemmioSelection,
   });
   const ticket = await coordinator.preflight({
     selection: connected.selection,

@@ -57,12 +57,12 @@ test("atomic import creates V1 facts once and ordinary saves never create a Vers
   assert.equal(imported.target.versionId, "ver_0001");
   assert.match(imported.target.exactSourcePath, /原文件\.htm$/u);
   assert.deepEqual(
-    Object.keys(await json(path.join(imported.target.projectRootPath, ".pageroot", "project.json"))).sort(),
+    Object.keys(await json(path.join(imported.target.projectRootPath, ".stemmio", "project.json"))).sort(),
     ["createdAt", "documentId", "projectId", "schemaVersion"],
   );
   const importRecovery = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "recovery",
     "import.json",
   ));
@@ -82,12 +82,12 @@ test("atomic import creates V1 facts once and ordinary saves never create a Vers
     target = result.target;
   }
 
-  const manifest = await json(path.join(target.projectRootPath, ".pageroot", "manifest.json"));
+  const manifest = await json(path.join(target.projectRootPath, ".stemmio", "manifest.json"));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
   assert.equal(manifest.latestOfficialVersionId, "ver_0001");
   assert.equal(await readFile(imported.sourcePath, "utf8"), original.toString("utf8"));
   assert.deepEqual(
-    await readdir(path.join(target.projectRootPath, ".pageroot", "recovery")),
+    await readdir(path.join(target.projectRootPath, ".stemmio", "recovery")),
     ["import.json"],
   );
 });
@@ -124,7 +124,7 @@ test("a legacy v4 Runtime without historyActivation opens as null and normalizes
   const imported = await importSource(value, "legacy-runtime.html");
   const runtimePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "runtime-state.json",
   );
   const legacyRuntime = await json(runtimePath);
@@ -187,10 +187,10 @@ test("the Registry alone determines catalog membership and secure project opens"
   assert.equal(bBeforeRename?.latestOfficialVersionId, "ver_0001");
   for (const project of [a, b]) {
     const row = initial.find((entry) => entry.projectId === project.target.projectId);
-    const manifest = await json(path.join(project.target.projectRootPath, ".pageroot", "manifest.json"));
+    const manifest = await json(path.join(project.target.projectRootPath, ".stemmio", "manifest.json"));
     const workingState = await json(path.join(
       project.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "working-copies",
       `${project.target.workingCopyId}.json`,
     ));
@@ -235,7 +235,7 @@ test("the Registry alone determines catalog membership and secure project opens"
   assert.equal(rebound.target.exactSourcePath, finderRenamedWorkingCopy);
   const reboundManifest = await json(path.join(
     renamedRoot,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.equal(
@@ -297,7 +297,7 @@ test("single-current history uses its document filename without changing immutab
   for (const label of ["summary_second", "summary_third"]) {
     target = await promoteNextVersion(value.repository, target, label);
   }
-  const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+  const manifestPath = path.join(target.projectRootPath, ".stemmio", "manifest.json");
   const manifestBytes = await readFile(manifestPath);
   const manifest = JSON.parse(manifestBytes);
   const snapshots = await Promise.all(manifest.versions.map(async (version) => {
@@ -331,7 +331,7 @@ test("single-current history uses its document filename without changing immutab
 test("legacy history summaries keep each Version's visible Working Copy filename", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "legacy summary.html");
-  const manifestPath = path.join(imported.target.projectRootPath, ".pageroot", "manifest.json");
+  const manifestPath = path.join(imported.target.projectRootPath, ".stemmio", "manifest.json");
   const manifest = await json(manifestPath);
   delete manifest.currentDraftSchemaVersion;
   await writeFile(manifestPath, JSON.stringify(manifest));
@@ -397,7 +397,7 @@ test("an unrecognized Registry shape fails closed without changing its bytes", a
   assert.deepEqual(await readFile(registryPath(value)), unknownBytes);
   assert.deepEqual(await readFile(imported.target.exactSourcePath), managedBefore);
   assert.equal(
-    (await readdir(value.projects)).some((entry) => entry.startsWith(".pageroot-registry-backups")),
+    (await readdir(value.projects)).some((entry) => entry.startsWith(".stemmio-registry-backups")),
     false,
   );
 });
@@ -444,7 +444,7 @@ test("unlisted HTML never acquires a v4 binding from equal bytes or an inode", a
   }
   const manifestBeforeImport = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(
@@ -460,7 +460,7 @@ test("unlisted HTML never acquires a v4 binding from equal bytes or an inode", a
   assert.equal(await readFile(hardLinkPath, "utf8"), html("V1"));
   const manifestAfterImport = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifestAfterImport, manifestBeforeImport);
@@ -505,7 +505,7 @@ test("a damaged v4 record is ignored and its HTML imports as a fresh V1", async 
   assert.notEqual(imported.target.projectId, damaged.target.projectId);
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -535,13 +535,13 @@ test("external import preserves original and V1 bytes while identifying every ma
     assert.deepEqual(await readFile(sourcePath), buffer, `${name} source`);
     const manifest = await json(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "manifest.json",
     ));
     assert.deepEqual(
       await readFile(path.join(
         imported.target.projectRootPath,
-        ".pageroot",
+        ".stemmio",
         manifest.versions[0].snapshotRelativePath,
       )),
       buffer,
@@ -550,7 +550,7 @@ test("external import preserves original and V1 bytes while identifying every ma
     const managed = await readFile(imported.target.exactSourcePath, "utf8");
     assert.equal(inspectSourceElementIdentity(managed).complete, true, `${name} identity`);
     assert.equal(
-      managed.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/gu, ""),
+      managed.replace(/ data-stemmio-id="sm1_[a-f0-9]{32}"/gu, ""),
       source,
       `${name} managed source outside identity attributes`,
     );
@@ -568,13 +568,13 @@ test("external import preserves original and V1 bytes while identifying every ma
   const safeManaged = await readFile(imported.target.exactSourcePath, "utf8");
   assert.equal(inspectSourceElementIdentity(safeManaged).complete, true);
   assert.equal(
-    safeManaged.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/gu, ""),
+    safeManaged.replace(/ data-stemmio-id="sm1_[a-f0-9]{32}"/gu, ""),
     safeSource,
   );
 });
 
 test("import fails before publication without registration debris, and rejects symbolic links", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-project-files-fault-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-project-files-fault-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sourcePath = path.join(root, "source.html");
   await writeFile(sourcePath, html("fault"), "utf8");
@@ -592,7 +592,7 @@ test("import fails before publication without registration debris, and rejects s
       && error.code === "INJECTED_FAILPOINT",
   );
   const entries = await readdir(projects);
-  assert.deepEqual(entries.filter((entry) => entry !== ".pageroot-registry.json"), []);
+  assert.deepEqual(entries.filter((entry) => entry !== ".stemmio-registry.json"), []);
 
   const symlinkPath = path.join(root, "linked.html");
   await symlink(sourcePath, symlinkPath);
@@ -624,7 +624,7 @@ test("import rechecks the bytes read after stat before publishing a project", as
     (error) => error instanceof ProjectFileRepositoryError && error.code === "SOURCE_TOO_LARGE",
   );
   assert.deepEqual(
-    (await readdir(value.projects)).filter((entry) => entry !== ".pageroot-registry.json"),
+    (await readdir(value.projects)).filter((entry) => entry !== ".stemmio-registry.json"),
     [],
   );
 });
@@ -693,7 +693,7 @@ test("classifyOpenPath is read-only for managed, known and new HTML", async (t) 
 });
 
 // Forward compatibility. A Registry that carries every required member plus a
-// member a newer PageRoot added is fully explainable, so it is read normally
+// member a newer Stemmio added is fully explainable, so it is read normally
 // and that member survives the next Registry write. Refusing it instead would
 // lock every project out of an older build, and dropping it would destroy the
 // newer build's data just as silently as replacing the whole file.
@@ -799,7 +799,7 @@ test("promoting V2 still returns the current V2 working copy for the original pa
 test("a historical active Working Copy is returned instead of silently jumping to latest", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "历史工作稿.html");
-  const legacyManifestPath = path.join(imported.target.projectRootPath, ".pageroot/manifest.json");
+  const legacyManifestPath = path.join(imported.target.projectRootPath, ".stemmio/manifest.json");
   const legacyManifest = await json(legacyManifestPath);
   delete legacyManifest.currentDraftSchemaVersion;
   await writeFile(legacyManifestPath, JSON.stringify(legacyManifest));
@@ -973,7 +973,7 @@ test("reconcileWorkingCopyLocator rebinds a same-directory Finder rename without
 
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   const workingCopy = manifest.workingCopies.find(
@@ -1103,7 +1103,7 @@ test("reconcileWorkingCopyLocator refuses a version mismatch and does not guess 
 test("unknown Runtime root and historyActivation members survive a confirmation", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "运行态未知成员.html");
-  const legacyManifestPath = path.join(imported.target.projectRootPath, ".pageroot/manifest.json");
+  const legacyManifestPath = path.join(imported.target.projectRootPath, ".stemmio/manifest.json");
   const legacyManifest = await json(legacyManifestPath);
   delete legacyManifest.currentDraftSchemaVersion;
   await writeFile(legacyManifestPath, JSON.stringify(legacyManifest));
@@ -1114,7 +1114,7 @@ test("unknown Runtime root and historyActivation members survive a confirmation"
   );
   const runtimeFile = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "runtime-state.json",
   );
 
@@ -1160,7 +1160,7 @@ async function observeWorkspaceRecovery(action, afterRead = null) {
   fs.readdir = async (...args) => {
     const result = await original(...args);
     const directory = String(args[0]);
-    if (directory.endsWith(`${path.sep}.pageroot${path.sep}transactions`)) {
+    if (directory.endsWith(`${path.sep}.stemmio${path.sep}transactions`)) {
       const project = await json(path.join(path.dirname(directory), "project.json"));
       recoveredProjects.push(project.projectId);
     }
@@ -1215,9 +1215,9 @@ test("workspace recovers a different resolved project after an external director
   await value.repository.initialize();
   const firstRoot = first.target.projectRootPath;
   const secondRoot = second.target.projectRootPath;
-  const firstSubmissions = path.join(firstRoot, ".pageroot", "submissions");
+  const firstSubmissions = path.join(firstRoot, ".stemmio", "submissions");
   await mkdir(firstSubmissions, { recursive: true });
-  await mkdir(path.join(secondRoot, ".pageroot", "submissions"), { recursive: true });
+  await mkdir(path.join(secondRoot, ".stemmio", "submissions"), { recursive: true });
   let exchanged = false;
   const observed = await observeWorkspaceRecovery(
     () => value.repository.workspace({ sourcePath: first.target.exactSourcePath }),

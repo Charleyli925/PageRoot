@@ -8,7 +8,7 @@ import {
   loadFixture,
   replaceEditableIslandBytes,
   setTextSelection,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 const source = Buffer.from(`<!doctype html>
 <html lang="zh-CN">

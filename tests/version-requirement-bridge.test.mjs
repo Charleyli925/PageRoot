@@ -22,7 +22,7 @@ async function registeredProject(t, prefix) {
   const environment = await createBridgeTestEnvironment(t, { prefix });
   const sourcePath = await environment.createSource("requirement.html", html("V1"));
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
@@ -60,7 +60,7 @@ async function adoptSecondVersion(bridge, ensured, summary) {
   await writeFile(
     join(
       ensured.body.projectRoot,
-      ".pageroot",
+      ".stemmio",
       ...request.body.outputRelativePath.split("/"),
     ),
     currentHtml.replaceAll("V1", "Candidate V2"),
@@ -108,7 +108,7 @@ function versionRow(body, versionId) {
 test("the imported version exposes no requirement", async (t) => {
   const { bridge, ensured } = await registeredProject(
     t,
-    "pageroot-version-requirement-initial-",
+    "stemmio-version-requirement-initial-",
   );
   const state = await workspace(bridge, ensured.body.sourcePath);
   assert.equal(state.response.status, 200);
@@ -121,7 +121,7 @@ test("the imported version exposes no requirement", async (t) => {
 test("an adopted version carries the requirement its round froze", async (t) => {
   const { bridge, ensured } = await registeredProject(
     t,
-    "pageroot-version-requirement-round-",
+    "stemmio-version-requirement-round-",
   );
   const adopted = await adoptSecondVersion(
     bridge,
@@ -141,7 +141,7 @@ test("an adopted version carries the requirement its round froze", async (t) => 
 test("a multi-line requirement is condensed to a single line", async (t) => {
   const { bridge, ensured } = await registeredProject(
     t,
-    "pageroot-version-requirement-condense-",
+    "stemmio-version-requirement-condense-",
   );
   const adopted = await adoptSecondVersion(
     bridge,
@@ -158,7 +158,7 @@ test("a multi-line requirement is condensed to a single line", async (t) => {
 test("an over-long requirement is truncated so the payload stays small", async (t) => {
   const { bridge, ensured } = await registeredProject(
     t,
-    "pageroot-version-requirement-long-",
+    "stemmio-version-requirement-long-",
   );
   const adopted = await adoptSecondVersion(bridge, ensured, "改".repeat(400));
   const state = await workspace(bridge, adopted.sourcePath);
@@ -170,7 +170,7 @@ test("an over-long requirement is truncated so the payload stays small", async (
 test("a round whose record is unreadable leaves the version usable", async (t) => {
   const { bridge, ensured, environment } = await registeredProject(
     t,
-    "pageroot-version-requirement-missing-",
+    "stemmio-version-requirement-missing-",
   );
   const adopted = await adoptSecondVersion(bridge, ensured, "会被清理的要求");
   // Restart so the read is not answered from the in-process cache, then retire
@@ -180,7 +180,7 @@ test("a round whose record is unreadable leaves the version usable", async (t) =
   await writeFile(
     join(
       ensured.body.projectRoot,
-      ".pageroot",
+      ".stemmio",
       "requests",
       adopted.requestId,
       "change-request.json",
@@ -189,7 +189,7 @@ test("a round whose record is unreadable leaves the version usable", async (t) =
     "utf8",
   );
   const restarted = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const state = await workspace(restarted, adopted.sourcePath);
   assert.equal(state.response.status, 200, JSON.stringify(state.body));
@@ -202,7 +202,7 @@ test("a round whose record is unreadable leaves the version usable", async (t) =
 test("a repeated read is served without touching the round again", async (t) => {
   const { bridge, ensured } = await registeredProject(
     t,
-    "pageroot-version-requirement-cache-",
+    "stemmio-version-requirement-cache-",
   );
   const adopted = await adoptSecondVersion(bridge, ensured, "价格表：改成两档");
   const first = await workspace(bridge, adopted.sourcePath);
@@ -215,7 +215,7 @@ test("a repeated read is served without touching the round again", async (t) => 
   await writeFile(
     join(
       ensured.body.projectRoot,
-      ".pageroot",
+      ".stemmio",
       "requests",
       adopted.requestId,
       "change-request.json",

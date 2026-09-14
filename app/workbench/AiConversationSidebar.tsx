@@ -170,7 +170,7 @@ function AgentAvatar({
 }: {
   presentation: AiConversationSidebarProps["agentPresentation"];
 }) {
-  if (presentation?.logoSrc && presentation.providerId !== "pageroot") {
+  if (presentation?.logoSrc && presentation.providerId !== "stemmio") {
     return (
       <span className={`${styles.avatar} ${styles.agentAvatar}`} aria-hidden="true">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -185,9 +185,9 @@ function AgentAvatar({
   );
 }
 
-function PageRootAvatar() {
+function StemmioAvatar() {
   return (
-    <span className={`${styles.avatar} ${styles.pageRootAvatar}`} aria-hidden="true">
+    <span className={`${styles.avatar} ${styles.stemmioAvatar}`} aria-hidden="true">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="./brand-logo.png" alt="" />
     </span>
@@ -366,7 +366,7 @@ export default function AiConversationSidebar({
   const serviceTriggerLabel = (() => {
     const name = agentServiceLabel(currentProviderId, schemeName);
     const currentCardForLabel = currentCard;
-    if (currentProviderId === "pageroot" && catalogStatus === "ready") {
+    if (currentProviderId === "stemmio" && catalogStatus === "ready") {
       const vendor = currentCardForLabel?.connection?.vendorDisplayName
         || currentCardForLabel?.connection?.vendorId
         || "兼容接口";
@@ -579,7 +579,7 @@ export default function AiConversationSidebar({
               {group.timeline.map((block) => {
             if (block.process) return (
               <article key={block.messages[0].messageId} className={`${styles.message} ${styles.turnProcess}`} data-actor={block.messages[0].actor} data-testid="ai-turn-process" aria-label={`${block.messages[0].actorLabel} 处理记录`}>
-                <>{block.messages[0].actor === "agent" ? <AgentAvatar presentation={null} /> : <PageRootAvatar />}</>
+                <>{block.messages[0].actor === "agent" ? <AgentAvatar presentation={null} /> : <StemmioAvatar />}</>
                 <span className={styles.actor}>{block.messages[0].actorLabel} <span className={styles.actorDetail}>处理记录</span></span>
                 <ol>{sidebarProcessRows(block.messages).map(({ message, count }) => (
                   <li key={message.messageId}>
@@ -602,8 +602,8 @@ export default function AiConversationSidebar({
                   data-status={message.status}
                   data-testid="ai-conversation-message"
                 >
-                  {message.actor === "pageroot" ? (
-                    <PageRootAvatar />
+                  {message.actor === "stemmio" ? (
+                    <StemmioAvatar />
                   ) : message.actor === "user" ? (
                     <span className={`${styles.avatar} ${styles.userAvatar}`} aria-hidden="true"><UserIcon size={16} weight="regular" /></span>
                   ) : <AgentAvatar presentation={null} />}
@@ -636,11 +636,11 @@ export default function AiConversationSidebar({
         {runSummary && deliveryMode !== "managed-agent" ? (
           <section
             className={`${styles.message} ${styles.runSummary}`}
-            data-actor="pageroot"
+            data-actor="stemmio"
             data-testid="ai-conversation-run-summary"
             aria-label="本轮任务摘要"
           >
-            <PageRootAvatar />
+            <StemmioAvatar />
             <span className={styles.actor}>Stemmio</span>
             <p className={styles.text}>{runSummary.title}</p>
             {runSummary.detail ? <small className={styles.runSummaryDetail}>{runSummary.detail}</small> : null}
@@ -717,23 +717,23 @@ export default function AiConversationSidebar({
 
         {/*
           * A round in flight, told inside the thread rather than a
-          * panel of its own. PageRoot states the stage from the run's durable status
+          * panel of its own. Stemmio states the stage from the run's durable status
           * (ADR 0037 §4). The selected Agent's public words follow in their
           * own stable article, so the two speakers never blur together.
           */}
         {!executionStatus && (runProgress?.liveLabel || runProgress?.headline) ? (
           <section
             className={`${styles.message} ${styles.runActivity}`}
-            data-actor="pageroot"
+            data-actor="stemmio"
             data-tone={runProgress?.tone || "quiet"}
             data-testid="ai-conversation-run-progress"
             aria-label="本轮进度"
           >
-            <PageRootAvatar />
+            <StemmioAvatar />
             {/*
-              * PageRoot states the stages from the run's durable status (ADR 0037 §4).
+              * Stemmio states the stages from the run's durable status (ADR 0037 §4).
               * Signing them with an Agent name made the Agent look like the author of
-              * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
+              * Stemmio's own bookkeeping, and put the brand mark on the wrong speaker.
             */}
             <span className={styles.actor}>Stemmio</span>
             <p
@@ -769,12 +769,12 @@ export default function AiConversationSidebar({
         {actionBar && !executionStatus ? (
           <section
             className={`${styles.message} ${styles.actionBar}`}
-            data-actor="pageroot"
+            data-actor="stemmio"
             data-kind={actionBar.kind}
             data-testid="ai-conversation-action-bar"
             aria-label="当前待决定"
           >
-            <PageRootAvatar />
+            <StemmioAvatar />
             <span className={styles.actor}>Stemmio</span>
             {actionBar.title ? (
               <strong

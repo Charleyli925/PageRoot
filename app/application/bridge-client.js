@@ -95,7 +95,7 @@ export function createBridgeClient({
     let lastError = null;
     for (let attempt = 0; attempt < attemptCount; attempt += 1) {
       const headers = new Headers(init.headers);
-      if (authToken) headers.set("x-html-ai-bridge-token", authToken);
+      if (authToken) headers.set("x-stemmio-bridge-token", authToken);
       const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
       const signal = timeoutSignal && init.signal
         ? AbortSignal.any([init.signal, timeoutSignal])
@@ -434,7 +434,7 @@ export function createBridgeClient({
 }
 
 export function createRuntimeBridgeClient() {
-  const runtime = typeof window === "undefined" ? null : window.htmlAIRuntime;
+  const runtime = typeof window === "undefined" ? null : window.stemmioRuntime;
   const connection = runtime?.getBridgeConnection?.() || null;
   const port = typeof window === "undefined"
     ? "4317"

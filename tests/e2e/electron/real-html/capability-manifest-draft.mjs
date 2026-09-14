@@ -32,7 +32,7 @@ function liveState(observation, family) {
 
 function authoredSiblings(sourceElements, operation) {
   return sourceElements.filter((entry) => (
-    entry?.pagerootIdentityStatus === "valid"
+    entry?.stemmioIdentityStatus === "valid"
     && entry.parentId === operation.parentId
   )).sort((left, right) => left.sourceOrder - right.sourceOrder);
 }
@@ -51,7 +51,7 @@ function sourceState(sourceElements, operation, family) {
   }
   if (family === "move-up" || family === "move-down") {
     const siblings = authoredSiblings(sourceElements, operation);
-    const index = siblings.findIndex((entry) => entry.pagerootId === operation.pagerootId);
+    const index = siblings.findIndex((entry) => entry.stemmioId === operation.stemmioId);
     if (index < 0) return { state: "UNKNOWN", reason: "SOURCE_SIBLING_IDENTITY_UNRESOLVED" };
     const available = family === "move-up" ? index > 0 : index < siblings.length - 1;
     return available

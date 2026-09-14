@@ -1,13 +1,13 @@
-import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
+import { STEMMIO_ELEMENT_ID_ATTRIBUTE } from "../../shared/stemmio-element-identity.mjs";
 
-export const SOURCE_ELEMENT_ATTRIBUTE = PAGEROOT_ELEMENT_ID_ATTRIBUTE;
+export const SOURCE_ELEMENT_ATTRIBUTE = STEMMIO_ELEMENT_ID_ATTRIBUTE;
 
-export function escapedPagerootElementId(elementId) {
+export function escapedStemmioElementId(elementId) {
   return String(elementId).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 export function sourceElementSelector(elementId) {
-  return `[${SOURCE_ELEMENT_ATTRIBUTE}="${escapedPagerootElementId(elementId)}"]`;
+  return `[${SOURCE_ELEMENT_ATTRIBUTE}="${escapedStemmioElementId(elementId)}"]`;
 }
 
 export function sourceElementId(element) {
@@ -37,18 +37,18 @@ export function createBoundSourceElementProof({
     return null;
   }
   return (element) => {
-    const registeredPagerootId = authority.pagerootIds.get(element);
-    const livePagerootId = sourceElementId(element);
-    const liveSourceEntry = livePagerootId
-      ? sourceIndex.byPagerootId.get(livePagerootId)
+    const registeredStemmioId = authority.stemmioIds.get(element);
+    const liveStemmioId = sourceElementId(element);
+    const liveSourceEntry = liveStemmioId
+      ? sourceIndex.byStemmioId.get(liveStemmioId)
       : null;
     return Boolean(
       element
       && authority.elements.has(element)
       && element.isConnected
-      && registeredPagerootId
-      && registeredPagerootId === livePagerootId
-      && (!markerAttribute || element.getAttribute?.(markerAttribute) === registeredPagerootId)
+      && registeredStemmioId
+      && registeredStemmioId === liveStemmioId
+      && (!markerAttribute || element.getAttribute?.(markerAttribute) === registeredStemmioId)
       && liveSourceEntry?.type === "element"
       && liveSourceEntry.tagName === element.localName
     );
@@ -98,35 +98,35 @@ export function grantEditorCreatedSourceElements(options) {
     ) {
       return { ok: false, reason: "created-node-invalid" };
     }
-    const pagerootId = sourceElementId(element);
-    const sourceEntry = pagerootId ? sourceIndex.byPagerootId.get(pagerootId) : null;
+    const stemmioId = sourceElementId(element);
+    const sourceEntry = stemmioId ? sourceIndex.byStemmioId.get(stemmioId) : null;
     if (
-      !pagerootId
-      || !allowed.has(pagerootId)
-      || seenIds.has(pagerootId)
+      !stemmioId
+      || !allowed.has(stemmioId)
+      || seenIds.has(stemmioId)
       || sourceEntry?.type !== "element"
       || sourceEntry.tagName !== element.localName
-      || uniqueSourceElement(documentNode, pagerootId) !== element
+      || uniqueSourceElement(documentNode, stemmioId) !== element
     ) {
       return { ok: false, reason: "created-identity-untrusted" };
     }
     if (authority.elements.has(element)) {
       return { ok: false, reason: "duplicate-grant" };
     }
-    const alreadyId = authority.pagerootIds.get(element);
-    if (alreadyId && alreadyId !== pagerootId) {
+    const alreadyId = authority.stemmioIds.get(element);
+    if (alreadyId && alreadyId !== stemmioId) {
       return { ok: false, reason: "identity-conflict" };
     }
-    seenIds.add(pagerootId);
+    seenIds.add(stemmioId);
   }
   if (seenIds.size !== allowed.size) {
     return { ok: false, reason: "grant-set-incomplete" };
   }
   for (const element of createdElements) {
-    const pagerootId = sourceElementId(element);
+    const stemmioId = sourceElementId(element);
     authority.elements.add(element);
-    authority.pagerootIds.set(element, pagerootId);
-    element.setAttribute(markerAttribute, pagerootId);
+    authority.stemmioIds.set(element, stemmioId);
+    element.setAttribute(markerAttribute, stemmioId);
   }
   return { ok: true };
 }
@@ -137,7 +137,7 @@ export function revokeRemovedSourceElements(options) {
   for (const element of removedElements) {
     if (!element) continue;
     authority.elements.delete(element);
-    authority.pagerootIds.delete(element);
+    authority.stemmioIds.delete(element);
     if (typeof element.removeAttribute === "function") {
       element.removeAttribute(markerAttribute);
     }

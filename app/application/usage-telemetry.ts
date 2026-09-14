@@ -17,7 +17,7 @@ export function captureUsageEvent(
   projectId?: string,
 ): void {
   if (typeof window === "undefined") return;
-  window.htmlAIUsage?.capture(event, properties, projectId);
+  window.stemmioUsage?.capture(event, properties, projectId);
 }
 
 export function countBucket(value: number): "0" | "1" | "2-5" | "6-20" | "21+" {
@@ -89,6 +89,6 @@ export function editPropertyGroup(property?: string): string {
 
 declare global {
   interface Window {
-    htmlAIUsage?: DesktopUsageApi;
+    stemmioUsage?: DesktopUsageApi;
   }
 }

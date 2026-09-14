@@ -1,9 +1,9 @@
-import { isValidPagerootElementId } from "../../../shared/pageroot-element-identity.mjs";
+import { isValidStemmioElementId } from "../../../shared/stemmio-element-identity.mjs";
 
 export function isSavableCommentTarget(target) {
   const persist = target?.commentAnchor || target;
   return persist?.resolution === "exact"
-    && isValidPagerootElementId(persist?.elementId);
+    && isValidStemmioElementId(persist?.elementId);
 }
 
 export function planCommentCommit({

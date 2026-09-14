@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pageroot.local/schemas/semantic-operation.v1.schema.json",
-  "title": "PageRoot semantic source operation v1",
+  "$id": "https://stemmio.local/schemas/semantic-operation.v1.schema.json",
+  "title": "Stemmio semantic source operation v1",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -46,7 +46,7 @@
     "important": { "type": "boolean" },
     "html": { "type": "string", "minLength": 1 },
     "contentHtml": { "type": "string" },
-    "createdPagerootIds": {
+    "createdStemmioIds": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
@@ -95,7 +95,7 @@
     },
     "elementId": {
       "type": "string",
-      "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+      "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"
     },
     "target": {
       "type": "object",

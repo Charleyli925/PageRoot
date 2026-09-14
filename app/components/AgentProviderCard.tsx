@@ -194,7 +194,7 @@ export default function AgentProviderCard({
   const [baseUrl, setBaseUrl] = useState(connection?.vendorId === "custom" ? connection.baseUrl || "" : "");
   const [modelId, setModelId] = useState(
     connection?.vendorId === "custom"
-      ? String(selectedModelId || models[0]?.id || "").replace(/^pageroot:/u, "")
+      ? String(selectedModelId || models[0]?.id || "").replace(/^stemmio:/u, "")
       : "",
   );
   const persistFailed = credentialPersist?.status === "failed";

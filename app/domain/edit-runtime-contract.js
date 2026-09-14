@@ -33,15 +33,15 @@ export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS = (
   + EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs
 ) + 1_000;
 
-export const EDIT_RUNTIME_PROTOCOL_SCHEME = "pageroot-edit-runtime";
+export const EDIT_RUNTIME_PROTOCOL_SCHEME = "stemmio-edit-runtime";
 export const EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE =
-  "data-pageroot-edit-runtime-source";
+  "data-stemmio-edit-runtime-source";
 export const EDIT_RUNTIME_OWNED_ATTRIBUTE =
-  "data-pageroot-edit-runtime-owned";
+  "data-stemmio-edit-runtime-owned";
 export const EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE =
-  "data-pageroot-edit-runtime-script";
+  "data-stemmio-edit-runtime-script";
 export const EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE =
-  "data-pageroot-edit-runtime-bootstrap";
+  "data-stemmio-edit-runtime-bootstrap";
 
 const SESSION_ID_PATTERN = /^[a-f0-9]{32}$/u;
 const EXECUTION_ID_PATTERN = /^[a-f0-9]{24}$/u;
@@ -385,7 +385,7 @@ export function isEditRuntimeDocumentBasePath(value) {
 export function editRuntimeRegistrationProperty(executionId) {
   const normalized = String(executionId || "").toLowerCase();
   return isEditRuntimeExecutionId(normalized)
-    ? `__pageroot_edit_register_${normalized}`
+    ? `__stemmio_edit_register_${normalized}`
     : null;
 }
 

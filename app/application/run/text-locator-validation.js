@@ -90,11 +90,11 @@ export function revalidateCommentTextLocators(comments, html) {
     if (locator === undefined || locator === null) return comment;
 
     const elementId = String(sourceTarget?.elementId || "");
-    const element = sourceIndex.byPagerootId.get(elementId);
+    const element = sourceIndex.byStemmioId.get(elementId);
     if (
       !element
-      || element.pagerootId !== elementId
-      || element.pagerootIdentityStatus !== "valid"
+      || element.stemmioId !== elementId
+      || element.stemmioIdentityStatus !== "valid"
     ) {
       return failed(comment);
     }

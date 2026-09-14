@@ -2,9 +2,9 @@ import type { HtmlCanvasSelection } from "../../components/HtmlCanvasEditor.type
 import { buildSourceIndex } from "../../lib/source-patch-core.js";
 import { resolveReviewCommentSourceElement } from "../../lib/review-comment-source-map.js";
 import {
-  isValidPagerootElementId,
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-} from "../../lib/pageroot-element-identity.js";
+  isValidStemmioElementId,
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+} from "../../lib/stemmio-element-identity.js";
 import type { CommentItem } from "../types";
 import {
   REVIEW_COMMENT_GLOBAL_ATTRIBUTE,
@@ -19,19 +19,19 @@ import type {
   ReviewCommentTarget,
 } from "./types";
 
-function uniqueSourceElementsByPagerootId(document: Document): Map<string, Element> {
+function uniqueSourceElementsByStemmioId(document: Document): Map<string, Element> {
   const mapped = new Map<string, Element>();
   const conflicts = new Set<string>();
-  document.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`).forEach((element) => {
-    const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) || "";
-    if (!isValidPagerootElementId(pagerootId) || conflicts.has(pagerootId)) return;
-    const existing = mapped.get(pagerootId);
+  document.querySelectorAll(`[${STEMMIO_ELEMENT_ID_ATTRIBUTE}]`).forEach((element) => {
+    const stemmioId = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE) || "";
+    if (!isValidStemmioElementId(stemmioId) || conflicts.has(stemmioId)) return;
+    const existing = mapped.get(stemmioId);
     if (existing && existing !== element) {
-      mapped.delete(pagerootId);
-      conflicts.add(pagerootId);
+      mapped.delete(stemmioId);
+      conflicts.add(stemmioId);
       return;
     }
-    mapped.set(pagerootId, element);
+    mapped.set(stemmioId, element);
   });
   return mapped;
 }
@@ -39,7 +39,7 @@ function uniqueSourceElementsByPagerootId(document: Document): Map<string, Eleme
 export function resolvedCommentElement(
   document: Document,
   sourceIndex: ReturnType<typeof buildSourceIndex>,
-  sourceElementsByPagerootId: ReadonlyMap<string, Element>,
+  sourceElementsByStemmioId: ReadonlyMap<string, Element>,
   target: HtmlCanvasSelection,
 ): Element | null {
   if (target.selector.trim().toLowerCase() === "body" && target.level === "module") {
@@ -47,8 +47,8 @@ export function resolvedCommentElement(
   }
   const sourceElement = resolveReviewCommentSourceElement(sourceIndex, target);
   if (sourceElement) {
-    const sourceMappedElement = sourceElement.pagerootId
-      ? sourceElementsByPagerootId.get(sourceElement.pagerootId)
+    const sourceMappedElement = sourceElement.stemmioId
+      ? sourceElementsByStemmioId.get(sourceElement.stemmioId)
       : undefined;
     if (sourceMappedElement) return sourceMappedElement;
     if (sourceElement.selector) {
@@ -145,10 +145,10 @@ export function annotateReviewComments(
   } catch {
     return { groups: [], targets: [] };
   }
-  const sourceElementsByPagerootId = uniqueSourceElementsByPagerootId(document);
-  const pagerootIdByElement = new Map<Element, string>();
-  sourceElementsByPagerootId.forEach((element, pagerootId) => {
-    pagerootIdByElement.set(element, pagerootId);
+  const sourceElementsByStemmioId = uniqueSourceElementsByStemmioId(document);
+  const stemmioIdByElement = new Map<Element, string>();
+  sourceElementsByStemmioId.forEach((element, stemmioId) => {
+    stemmioIdByElement.set(element, stemmioId);
   });
   const groups = new Map<Element, CommentItem[]>();
   comments.forEach((comment) => {
@@ -157,7 +157,7 @@ export function annotateReviewComments(
     const element = resolvedCommentElement(
       document,
       sourceIndex,
-      sourceElementsByPagerootId,
+      sourceElementsByStemmioId,
       sourceTarget,
     );
     if (!element) return;
@@ -186,7 +186,7 @@ export function annotateReviewComments(
         ),
         null,
       );
-    const stableId = global ? undefined : pagerootIdByElement.get(element);
+    const stableId = global ? undefined : stemmioIdByElement.get(element);
     if (selector || stableId) {
       targets.push({
         key,

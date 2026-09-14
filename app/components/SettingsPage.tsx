@@ -464,7 +464,7 @@ function AgentSettings({
             const snapshot = recovery || card.presentation.availability(card.availability);
             const disconnected = card.availability.reason === "disabled"
               || card.availability.status === "unavailable" && card.availability.reason === "disabled";
-            const credentialRestoreFailed = card.selection.providerId === "pageroot"
+            const credentialRestoreFailed = card.selection.providerId === "stemmio"
               && card.credentialPersist?.status === "failed"
               && String(card.credentialPersist.reason || "").startsWith("无法读取已保存的连接凭证");
             const needsConnect = disconnected
@@ -481,18 +481,18 @@ function AgentSettings({
                 ? card.availability.status === "not-installed" ? "安装" : card.presentation.credentialKind === "api-token" ? "连接" : "登录"
                 : card.availability.reason === "initial" ? "检查"
                 : "管理";
-            const canRemoveKey = card.selection.providerId === "pageroot"
+            const canRemoveKey = card.selection.providerId === "stemmio"
               && Boolean(onRemoveRememberedKey)
               && rememberedKey;
             const canDisconnect = Boolean(onDisconnectProvider)
               && !disconnected
               && (card.availability.status === "ready" || Boolean(card.connection) || card.availability.status === "auth-required");
             const canLogout = Boolean(onLogoutAgent)
-              && card.selection.providerId !== "pageroot"
+              && card.selection.providerId !== "stemmio"
               && (card.connection?.authSource === "cli-login"
                 || card.connection?.authSource === "chatgpt");
             const canRelogin = Boolean(onStartLogin)
-              && card.selection.providerId !== "pageroot"
+              && card.selection.providerId !== "stemmio"
               && card.presentation.credentialKind !== "api-token"
               && !disconnected;
             const showMore = canDisconnect || canRemoveKey || canLogout || canRelogin
@@ -601,7 +601,7 @@ function AgentSettings({
                               断开连接
                             </button>
                             <small>
-                              {card.selection.providerId === "pageroot"
+                              {card.selection.providerId === "stemmio"
                                 ? "断开会保留已记住的 Key"
                                 : "断开会保留登录"}
                             </small>
@@ -703,7 +703,7 @@ function AgentSettings({
                             : "退出后需要重新登录。"
                         : confirmAction.kind === "remove-key"
                           ? "移除后需要重新填写 API Key。断开后仍可移除已记住的 Key。"
-                          : card.selection.providerId === "pageroot"
+                          : card.selection.providerId === "stemmio"
                             ? "断开会停用本应用接入，已记住的 Key 仍保留。"
                             : "断开会停用本应用接入，本机登录仍保留。"}
                     </p>
@@ -959,7 +959,7 @@ export default function SettingsPage({
   }, [agentCards]);
 
   useEffect(() => {
-    const readStatus = window.htmlAIIntegrations?.sessionCredentialStatus;
+    const readStatus = window.stemmioIntegrations?.sessionCredentialStatus;
     if (typeof readStatus !== "function") return;
     void readStatus().then((status) => {
       setRememberedKeyState(status?.remembered === true);

@@ -1,4 +1,5 @@
 // Shared schema version, identifier shapes and size limits.
+import { PRODUCT_IMPORT_TEMP_PREFIX } from "../../shared/product-identity.mjs";
 export const PROJECT_FILE_SCHEMA_VERSION = "4.0.0";
 
 export const HTML_EXTENSIONS = new Set([".html", ".htm"]);
@@ -40,6 +41,6 @@ export const MAX_PATH_COMPONENT_BYTES = 255;
 export const WORKING_COPY_SAVE_STATES = new Set(["saved", "saving", "failed"]);
 
 export const IMPORT_STAGING_WRAPPER_BYTES = Buffer.byteLength(
-  "..pageroot-import-00000000-0000-0000-0000-000000000000",
+  `${PRODUCT_IMPORT_TEMP_PREFIX}-00000000-0000-0000-0000-000000000000`,
   "utf8",
 );

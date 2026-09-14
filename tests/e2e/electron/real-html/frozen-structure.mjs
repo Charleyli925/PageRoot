@@ -6,7 +6,7 @@ import { readFrozenActiveGeneration, requireCurrentTextDocument, requireFrozenTe
   requireTextOperationLedger, verifyFrozenHistory } from "./frozen-text.mjs";
 import { compareElementScopedMutation, compareElementStyleMutation, SOURCE_SCOPE_POLICIES } from "./source-scope.mjs";
 
-const ID = /^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u;
+const ID = /^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u;
 const failUnless = (condition, code, details) => {
   if (!condition) throw Object.assign(new Error(code), { code, details });
 };
@@ -41,7 +41,7 @@ export function requireIndependentProjectionExpectation(target, planned, outcome
   }
   return { expected, planned, outcome };
 }
-const idOf = node => node?.attrs?.find(attribute => attribute.name === "data-pageroot-id")?.value;
+const idOf = node => node?.attrs?.find(attribute => attribute.name === "data-stemmio-id")?.value;
 function byteChanges(before, after) {
   let start = 0, suffix = 0;
   while (start < Math.min(before.length, after.length) && before[start] === after[start]) start++;
@@ -77,7 +77,7 @@ export function bindFrozenCopy(beforeBytes, afterBytes, target) {
   const inserted = insertedBytes.toString("utf8");
   const fragment = parseFragment(inserted, { sourceCodeLocationInfo: true });
   const copy = fragment.childNodes.length === 1 ? fragment.childNodes[0] : null;
-  const attr = loc?.attrs?.["data-pageroot-id"], copyAttr = copy?.sourceCodeLocation?.attrs?.["data-pageroot-id"];
+  const attr = loc?.attrs?.["data-stemmio-id"], copyAttr = copy?.sourceCodeLocation?.attrs?.["data-stemmio-id"];
   const identityFreeOriginal = attr ? before.slice(loc.startOffset, attr.startOffset)
     + before.slice(attr.endOffset, loc.endOffset) : null;
   // The kernel adds exactly one preceding space with the new identity attribute.
@@ -102,7 +102,7 @@ export function bindFrozenCopy(beforeBytes, afterBytes, target) {
     idsUnique: ids.length === new Set(ids).size,
     exactlyOneAdded: allAfter.length === nodes.length + 1,
     copyAttributeShape: Boolean(copyAttr && inserted[copyAttr.startOffset - 1] === " "
-      && inserted.slice(copyAttr.startOffset, copyAttr.endOffset) === `data-pageroot-id="${copyId}"`),
+      && inserted.slice(copyAttr.startOffset, copyAttr.endOffset) === `data-stemmio-id="${copyId}"`),
     equivalentBytes: identityFreeOriginal !== null && identityFreeCopy === identityFreeOriginal,
     copyParentMatches: idOf(allAfter.find(node => idOf(node) === copyId)?.parentNode) === binding.parentId,
   };
@@ -180,7 +180,7 @@ export async function readFrozenCopyCapability(editor, target, sourceBytes) {
   const actual = await editor.evaluate(element => {
     const attr = name => element.getAttribute(name);
     const probeBefore = Number(attr("data-e2e-copy-probe-sequence") || 0);
-    element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe"));
+    element.dispatchEvent(new Event("stemmio:e2e-copy-capability-probe"));
     return { probeBefore, probeAfter: Number(attr("data-e2e-copy-probe-sequence")),
       ui: attr("data-element-copy-availability"), uiReason: attr("data-element-copy-reason"),
       uiDiagnostic: attr("data-element-copy-diagnostic"),
@@ -267,8 +267,8 @@ export async function executeFrozenCopyDenied({ frame, target, editor, readSourc
       if (boundary) {
         // The witness ID was independently frozen from source review.
         calls.push({ kind: "fixed-denial-witness", id: proof.witnessId });
-        const exact = frame.locator(`[data-pageroot-id="${proof.witnessId}"]`), count = await exact.count();
-        const live = count === 1 ? await exact.evaluate((e, attribute) => ({ id: e.getAttribute("data-pageroot-id"),
+        const exact = frame.locator(`[data-stemmio-id="${proof.witnessId}"]`), count = await exact.count();
+        const live = count === 1 ? await exact.evaluate((e, attribute) => ({ id: e.getAttribute("data-stemmio-id"),
           tag: e.localName, connected: e.isConnected, childCount: e.childNodes.length,
           attributeValue: attribute ? e.getAttribute(attribute) : null }), proof.attribute) : {};
         witness = verifyFrozenDenialWitness(before, target, { ...live, count });
@@ -308,7 +308,7 @@ export async function probeFrozenEndedContinuation({ page, frame, editor, target
   const start = () => {
     const events = [];
     const listener = event => events.push({ type: event.type, tag: event.target?.localName,
-      id: event.target?.getAttribute?.("data-pageroot-id") || null });
+      id: event.target?.getAttribute?.("data-stemmio-id") || null });
     document.addEventListener("beforeinput", listener, true); document.addEventListener("input", listener, true);
     globalThis.__STEMMIO_FROZEN_INPUT_DELIVERY__ = { events, stop: () => {
       document.removeEventListener("beforeinput", listener, true); document.removeEventListener("input", listener, true);
@@ -322,11 +322,11 @@ export async function probeFrozenEndedContinuation({ page, frame, editor, target
     return events;
   };
   try {
-    await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
+    await editor.evaluate(element => element.dispatchEvent(new Event("stemmio:e2e-copy-capability-probe")));
     const before = await handle.evaluate(element => ({ targetNotEditable: !element.isContentEditable,
       frameFocusIsBody: element.ownerDocument.activeElement === element.ownerDocument.body,
       frameFocusTag: element.ownerDocument.activeElement?.localName,
-      frameFocusId: element.ownerDocument.activeElement?.getAttribute("data-pageroot-id") || null }));
+      frameFocusId: element.ownerDocument.activeElement?.getAttribute("data-stemmio-id") || null }));
     const outer = await page.evaluate(() => ({ tag: document.activeElement?.localName,
       safe: ["body", "iframe", "button"].includes(document.activeElement?.localName) && !document.activeElement?.isContentEditable }));
     before.sessionEnded = await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true";
@@ -357,7 +357,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
   const marker = ` PRCOPY_${fileId}`;
   const restoredMarker = ` PRREST_${fileId}`;
   const originalText = await frozenFrameAccess(frame, target, calls).target(target.selectedId).textContent();
-  const documentId = () => frame.evaluate(() => globalThis.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ ||= crypto.randomUUID());
+  const documentId = () => frame.evaluate(() => globalThis.__STEMMIO_NATIVE_QA_DOCUMENT_TOKEN__ ||= crypto.randomUUID());
   let generation = await readFrozenActiveGeneration(editor);
   const record = async (operation, expected, action) => {
     const row = rows.find(item => item.operation === operation
@@ -378,7 +378,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
     const selected = frame.locator("[data-html-canvas-selected]");
     const count = await selected.count();
     failUnless(count <= 1, "FROZEN_SELECTION_NOT_UNIQUE", { count });
-    const prior = count === 1 ? await selected.getAttribute("data-pageroot-id") : null;
+    const prior = count === 1 ? await selected.getAttribute("data-stemmio-id") : null;
     failUnless(prior === null || allowed.includes(prior), "FROZEN_SELECTION_NOT_KNOWN", { prior, allowed });
     return prior;
   };
@@ -389,8 +389,8 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
   };
   const rebuild = async (action, verifySource, operation) => {
     const before = { generation, documentId: await documentId() };
-    const cursor = await editor.evaluate(() => ({ candidate: globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__.records.length,
-      lifecycle: globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__.lifecycleRecords.length }));
+    const cursor = await editor.evaluate(() => ({ candidate: globalThis.__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__.records.length,
+      lifecycle: globalThis.__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__.lifecycleRecords.length }));
     await action();
     await expect.poll(async () => !(await readSource()).equals(currentBytes), { timeout: 5_000 }).toBe(true);
     const afterBytes = await readSource(), source = verifySource(afterBytes);
@@ -413,7 +413,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
     });
     await refreshActiveFrame();
     const records = await editor.evaluate((_element, cursor) => {
-      const state = globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__;
+      const state = globalThis.__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__;
       return [...state.records.slice(cursor.candidate), ...state.lifecycleRecords.slice(cursor.lifecycle)];
     }, cursor);
     const runtime = verifyFrozenStructureLifecycle({
@@ -543,7 +543,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
     if (closedLoop) {
       await record("style-copy", { fontWeight: "700" }, async () => {
         await page.keyboard.press("Escape");
-        await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
+        await editor.evaluate(element => element.dispatchEvent(new Event("stemmio:e2e-copy-capability-probe")));
         failUnless(await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true", "COPY_EDIT_SESSION_NOT_ENDED");
         await selectCopy(copyTarget.selectedId);
         const locator = frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId);
@@ -567,7 +567,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       await record("move-copy", { parentId: target.destinationParentId }, async () => {
         const result = await rebuild(async () => {
           const moved = await page.getByTestId("html-canvas-editor").evaluate((element, parentElementId) => {
-            const run = element.__PAGEROOT_E2E_STRUCTURE_COMMANDS__?.moveSelectedTo;
+            const run = element.__STEMMIO_E2E_STRUCTURE_COMMANDS__?.moveSelectedTo;
             if (typeof run !== "function") throw new Error("STRUCTURE_COMMAND_UNAVAILABLE:moveSelectedTo");
             return run({ parentElementId });
           }, target.destinationParentId);
@@ -578,14 +578,14 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
           originalParentId: target.copyBinding.parentId,
         }), "move-copy");
         failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId)
-          .evaluate((element, parentId) => element.parentElement?.getAttribute("data-pageroot-id") === parentId,
+          .evaluate((element, parentId) => element.parentElement?.getAttribute("data-stemmio-id") === parentId,
             target.destinationParentId), "FROZEN_MOVE_DISPLAY_PARENT_MISMATCH");
         return result;
       });
     }
     await record("select-copy-for-delete", { id: copyTarget.selectedId }, async () => {
       await page.keyboard.press("Escape");
-      await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
+      await editor.evaluate(element => element.dispatchEvent(new Event("stemmio:e2e-copy-capability-probe")));
       failUnless(await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true", "COPY_EDIT_SESSION_NOT_ENDED");
       return selectCopy(await currentKnownPrior([copyTarget.selectedId]));
     });
@@ -643,7 +643,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       });
       await record("restore-baseline", { sourceRestored: frozenDigest(baseline) }, async () => {
         await page.keyboard.press("Escape");
-        await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
+        await editor.evaluate(element => element.dispatchEvent(new Event("stemmio:e2e-copy-capability-probe")));
         failUnless(await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true", "COPY_EDIT_SESSION_NOT_ENDED");
         const walked = await walkHistory("undo", baseline, "RESTORE_BASELINE_FAILED");
         failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId).count() === 0,
@@ -676,7 +676,7 @@ export async function executeFrozenStructurePathRace({ plan, page, editor, readS
     const selected = frame.locator("[data-html-canvas-selected]");
     const count = await selected.count();
     failUnless(count <= 1, "FROZEN_SELECTION_NOT_UNIQUE", { count });
-    const prior = count === 1 ? await selected.getAttribute("data-pageroot-id") : null;
+    const prior = count === 1 ? await selected.getAttribute("data-stemmio-id") : null;
     await executeFrozenSelection({
       access: frozenFrameAccess(frame, target, calls),
       keyboard: page.keyboard,
@@ -706,9 +706,9 @@ export async function executeFrozenStructurePathRace({ plan, page, editor, readS
   failUnless(working === displayed && working === `sha256:${frozenDigest(after)}`,
     "FROZEN_PATH_RACE_SOURCE_DISPLAY_DRIFT", { working, displayed, source: frozenDigest(after) });
   for (const copy of copies) {
-    failUnless(await frame.locator(`[data-pageroot-id="${copy.originalId}"]`).count() === 1,
+    failUnless(await frame.locator(`[data-stemmio-id="${copy.originalId}"]`).count() === 1,
       "PATH_RACE_ORIGINAL_MISSING", copy);
-    failUnless(await frame.locator(`[data-pageroot-id="${copy.copyId}"]`).count() === 1,
+    failUnless(await frame.locator(`[data-stemmio-id="${copy.copyId}"]`).count() === 1,
       "PATH_RACE_COPY_MISSING", copy);
     failUnless(after.toString("utf8").includes(copy.originalId) && after.toString("utf8").includes(copy.copyId),
       "PATH_RACE_SOURCE_IDENTITY_MISSING", copy);

@@ -14,7 +14,7 @@ import type {
   HtmlCanvasCommentLayoutTarget,
 } from "./HtmlCanvasEditor.types";
 
-const PAGE_VIEW_CONTEXT_ATTRIBUTE = "data-pageroot-view-context";
+const PAGE_VIEW_CONTEXT_ATTRIBUTE = "data-stemmio-view-context";
 
 function pageViewContextElement(
   documentNode: Document,

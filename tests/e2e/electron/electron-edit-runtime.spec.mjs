@@ -16,7 +16,7 @@ import {
   documentToken,
   expectCheckpointPersisted,
   keyShortcut,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   managedWorkingCopyPath,
   mkdirSync,
@@ -25,7 +25,7 @@ import {
   readFileSync,
   removeValidatedTemporaryDirectory,
   setTextSelection,
-  stopPageRoot,
+  stopStemmio,
   tmpdir,
   waitForRuntimeHandoffSettled,
   writeFileSync,
@@ -48,7 +48,7 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({
+    const launched = await launchStemmio({
       activeSourcePath: sourcePath,
       ...launchOptions,
     });
@@ -57,7 +57,7 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
     await run({ ...launched, sourcePath, sourceDirectory });
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeValidatedTemporaryDirectory(sourceDirectory, prefix);
   }
@@ -65,13 +65,13 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
 
 async function armRuntimeCommitHold(page) {
   await page.evaluate(() => {
-    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = [];
+    window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__ = [];
   });
 }
 
 async function waitForHeldRuntimeCommit(page) {
   await expect.poll(() => page.evaluate(() => (
-    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+    window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
   )), {
     timeout: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSurfaceDeadlineMs + 8_000,
   }).toBeGreaterThan(0);
@@ -79,8 +79,8 @@ async function waitForHeldRuntimeCommit(page) {
 
 async function releaseHeldRuntimeCommits(page) {
   await page.evaluate(() => {
-    const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ || [];
-    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = undefined;
+    const releases = window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__ || [];
+    window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__ = undefined;
     releases.forEach((release) => release());
   });
 }
@@ -94,7 +94,7 @@ async function runtimeContractSnapshot(page) {
       candidatePhase: editor?.getAttribute("data-runtime-candidate-phase") || null,
       nativeStartStatus: editor?.getAttribute("data-native-start-status") || null,
       renderVerified: editor?.getAttribute("data-render-verified") || null,
-      held: window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0,
+      held: window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0,
     };
   });
 }
@@ -178,29 +178,29 @@ async function armRuntimeHandoffSamples(page) {
       throw new Error("The active Edit iframe was not available before the runtime handoff.");
     }
     const samples = [];
-    window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ = samples;
-    window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = null;
-    window.__PAGEROOT_RUNTIME_CANDIDATE_FRAMES__ = Object.create(null);
-    window.__PAGEROOT_RUNTIME_OLD_FRAME__ = oldFrame;
-    window.__PAGEROOT_RUNTIME_SLOT_A__ = editor.querySelector(
+    window.__STEMMIO_RUNTIME_HANDOFF_SAMPLES__ = samples;
+    window.__STEMMIO_RUNTIME_CANDIDATE_FRAME__ = null;
+    window.__STEMMIO_RUNTIME_CANDIDATE_FRAMES__ = Object.create(null);
+    window.__STEMMIO_RUNTIME_OLD_FRAME__ = oldFrame;
+    window.__STEMMIO_RUNTIME_SLOT_A__ = editor.querySelector(
       'iframe[data-runtime-slot="a"]',
     );
-    window.__PAGEROOT_RUNTIME_SLOT_B__ = editor.querySelector(
+    window.__STEMMIO_RUNTIME_SLOT_B__ = editor.querySelector(
       'iframe[data-runtime-slot="b"]',
     );
-    window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = true;
+    window.__STEMMIO_RUNTIME_HANDOFF_ACTIVE__ = true;
     const reviewStage = editor.closest(".review-scroll-stage");
     const sample = (rafSequence = null) => {
-      if (!window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) return;
+      if (!window.__STEMMIO_RUNTIME_HANDOFF_ACTIVE__) return;
       const candidate = editor.querySelector('iframe[data-frame-role="runtime-candidate"]');
       if (candidate) {
         const generation = candidate.getAttribute("data-frame-generation");
         if (generation) {
-          window.__PAGEROOT_RUNTIME_CANDIDATE_FRAMES__[generation] = candidate;
-          window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = candidate;
+          window.__STEMMIO_RUNTIME_CANDIDATE_FRAMES__[generation] = candidate;
+          window.__STEMMIO_RUNTIME_CANDIDATE_FRAME__ = candidate;
         }
       }
-      const candidateFrame = window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__;
+      const candidateFrame = window.__STEMMIO_RUNTIME_CANDIDATE_FRAME__;
       const activeFrame = Array.from(editor.querySelectorAll("iframe"))
         .find((frame) => !frame.hasAttribute("data-frame-role"));
       const activeStyle = activeFrame ? getComputedStyle(activeFrame) : null;
@@ -260,7 +260,7 @@ async function armRuntimeHandoffSamples(page) {
         oldBodyChildCount: oldFrame.contentDocument?.body?.childElementCount ?? null,
         oldScriptCount: oldFrame.contentDocument?.querySelectorAll("script").length ?? null,
         oldBootstrapCount: oldFrame.contentDocument?.querySelectorAll(
-          "[data-pageroot-edit-runtime-bootstrap]",
+          "[data-stemmio-edit-runtime-bootstrap]",
         ).length ?? null,
         oldRenderVerified: editor.getAttribute("data-render-verified"),
         oldVisibility: oldFrame.isConnected ? getComputedStyle(oldFrame).visibility : null,
@@ -299,9 +299,9 @@ async function armRuntimeHandoffSamples(page) {
           || null,
         outerActiveTop: outerActiveRect?.top ?? null,
         toolbarTop: toolbarRect?.top ?? null,
-        selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
-        selectionStableId: selected?.getAttribute("data-pageroot-id") || null,
-        viewportAnchorStableId: selected?.getAttribute("data-pageroot-id") || null,
+        selectedStableId: selected?.getAttribute("data-stemmio-id") || null,
+        selectionStableId: selected?.getAttribute("data-stemmio-id") || null,
+        viewportAnchorStableId: selected?.getAttribute("data-stemmio-id") || null,
         selectionAnchorOffset,
         selectionFocusOffset,
         selectionCollapsed: activeSelection?.isCollapsed ?? null,
@@ -326,17 +326,17 @@ async function armRuntimeHandoffSamples(page) {
     };
     const observer = new MutationObserver(() => sample(null));
     observer.observe(editor, { attributes: true, childList: true, subtree: true });
-    window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__ = observer;
+    window.__STEMMIO_RUNTIME_HANDOFF_OBSERVER__ = observer;
     let animationFrame = 0;
     let rafSequence = 0;
     const sampleLoop = () => {
       rafSequence += 1;
       sample(rafSequence);
-      if (window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) {
+      if (window.__STEMMIO_RUNTIME_HANDOFF_ACTIVE__) {
         animationFrame = requestAnimationFrame(sampleLoop);
       }
     };
-    window.__PAGEROOT_RUNTIME_HANDOFF_ANIMATION_FRAME__ = () => cancelAnimationFrame(animationFrame);
+    window.__STEMMIO_RUNTIME_HANDOFF_ANIMATION_FRAME__ = () => cancelAnimationFrame(animationFrame);
     sampleLoop();
   });
 }
@@ -348,12 +348,12 @@ async function assertRuntimeHandoff(page, {
   expectedViewportSample,
 } = {}) {
   await expect.poll(() => page.evaluate(() => (
-    window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+    window.__STEMMIO_RUNTIME_HANDOFF_SAMPLES__ || []
   ).some((sample) => sample.candidateGeneration))).toBe(true);
   if (expectPromotion) {
     try {
       await expect.poll(() => page.evaluate(() => (
-        window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+        window.__STEMMIO_RUNTIME_HANDOFF_SAMPLES__ || []
       ).some((sample) => (
         sample.handoffState === "active"
         && sample.activeGeneration === sample.candidateGeneration
@@ -365,12 +365,12 @@ async function assertRuntimeHandoff(page, {
             .filter((attribute) => attribute.name.startsWith("data-"))
             .map((attribute) => [attribute.name, attribute.value]),
         ),
-        samples: window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [],
+        samples: window.__STEMMIO_RUNTIME_HANDOFF_SAMPLES__ || [],
       }));
       throw new Error(`${cause.message}\nRuntime handoff diagnostics: ${JSON.stringify(diagnostics)}`);
     }
     await expect.poll(() => page.evaluate(() => {
-      const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
+      const samples = window.__STEMMIO_RUNTIME_HANDOFF_SAMPLES__ || [];
       const firstActiveRaf = samples.find((sample) => (
         Number.isInteger(sample.rafSequence)
         && sample.handoffState === "active"
@@ -389,14 +389,14 @@ async function assertRuntimeHandoff(page, {
     // the runtime session's separate static-fallback policy, because that
     // would hide whether the still-authoritative old frame stayed visible.
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+      window.__STEMMIO_RUNTIME_HANDOFF_SAMPLES__ || []
     ).some((sample) => sample.handoffState === "preparing"))).toBe(true);
   }
   const handoffSamples = await page.evaluate(() => {
-    window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = false;
-    window.__PAGEROOT_RUNTIME_HANDOFF_ANIMATION_FRAME__?.();
-    window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__?.disconnect();
-    return window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
+    window.__STEMMIO_RUNTIME_HANDOFF_ACTIVE__ = false;
+    window.__STEMMIO_RUNTIME_HANDOFF_ANIMATION_FRAME__?.();
+    window.__STEMMIO_RUNTIME_HANDOFF_OBSERVER__?.disconnect();
+    return window.__STEMMIO_RUNTIME_HANDOFF_SAMPLES__ || [];
   });
   const candidateSamples = handoffSamples.filter((sample) => sample.candidateGeneration);
   expect(candidateSamples.length).toBeGreaterThan(0);
@@ -554,20 +554,20 @@ async function assertRuntimeCandidateReused(page) {
       slots.length === 2
       && slots.filter((frame) => frame.getAttribute("data-runtime-slot") === "a").length === 1
       && slots.filter((frame) => frame.getAttribute("data-runtime-slot") === "b").length === 1
-      && window.__PAGEROOT_RUNTIME_SLOT_A__ === slots.find(
+      && window.__STEMMIO_RUNTIME_SLOT_A__ === slots.find(
         (frame) => frame.getAttribute("data-runtime-slot") === "a",
       )
-      && window.__PAGEROOT_RUNTIME_SLOT_B__ === slots.find(
+      && window.__STEMMIO_RUNTIME_SLOT_B__ === slots.find(
         (frame) => frame.getAttribute("data-runtime-slot") === "b",
       )
-      && window.__PAGEROOT_RUNTIME_SLOT_A__?.isConnected
-      && window.__PAGEROOT_RUNTIME_SLOT_B__?.isConnected
+      && window.__STEMMIO_RUNTIME_SLOT_A__?.isConnected
+      && window.__STEMMIO_RUNTIME_SLOT_B__?.isConnected
       && active
       && active.isConnected
-      && active === window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__
+      && active === window.__STEMMIO_RUNTIME_CANDIDATE_FRAME__
       && active.contentDocument?.documentElement
       && active.contentDocument.querySelectorAll(
-        "[data-pageroot-edit-runtime-bootstrap]",
+        "[data-stemmio-edit-runtime-bootstrap]",
       ).length === 1
       && inactive
       && inactive.contentDocument?.body
@@ -578,23 +578,23 @@ async function assertRuntimeCandidateReused(page) {
 }
 
 function parserPreclaimFixture() {
-  const futurePagerootId = "pr1_123456789abc4def8abc000000000006";
+  const futureStemmioId = "sm1_123456789abc4def8abc000000000006";
   return `<!doctype html>
-<html data-pageroot-id="pr1_123456789abc4def8abc000000000001"><head data-pageroot-id="pr1_123456789abc4def8abc000000000002"><title data-pageroot-id="pr1_123456789abc4def8abc000000000003">Preclaim</title><script data-pageroot-id="pr1_123456789abc4def8abc000000000004">
+<html data-stemmio-id="sm1_123456789abc4def8abc000000000001"><head data-stemmio-id="sm1_123456789abc4def8abc000000000002"><title data-stemmio-id="sm1_123456789abc4def8abc000000000003">Preclaim</title><script data-stemmio-id="sm1_123456789abc4def8abc000000000004">
     const decoy = document.createElement('button');
     decoy.id = 'runtime-preclaim-decoy';
     decoy.textContent = '伪造源码按钮';
-    decoy.setAttribute('data-pageroot-id', '${futurePagerootId}');
-    decoy.setAttribute('data-pageroot-edit-runtime-source', '${futurePagerootId}');
+    decoy.setAttribute('data-stemmio-id', '${futureStemmioId}');
+    decoy.setAttribute('data-stemmio-edit-runtime-source', '${futureStemmioId}');
     document.documentElement.append(decoy);
-  </script></head><body data-pageroot-id="pr1_123456789abc4def8abc000000000005"><button id="future-source" data-native-case="runtime-preclaim" data-pageroot-id="${futurePagerootId}">真实源码按钮</button></body></html>`;
+  </script></head><body data-stemmio-id="sm1_123456789abc4def8abc000000000005"><button id="future-source" data-native-case="runtime-preclaim" data-stemmio-id="${futureStemmioId}">真实源码按钮</button></body></html>`;
 }
 
 test("author script cannot preclaim a future parser-authored source object", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = parserPreclaimFixture();
-  await withRuntimeProject("pageroot-runtime-preclaim-e2e-", {
+  await withRuntimeProject("stemmio-runtime-preclaim-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-preclaim");
@@ -632,20 +632,20 @@ test("fixed structure samples prove expected-copyable and expected-non-copyable 
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-fixed-copyability-e2e-", {
+  await withRuntimeProject("stemmio-fixed-copyability-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "copyable");
     const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
     const toolbar = page.getByRole("toolbar");
     const copyableSelector =
-      '[data-test-copyability="expected-copyable"][data-pageroot-id]';
+      '[data-test-copyability="expected-copyable"][data-stemmio-id]';
     const nonCopyableSelector =
-      '[data-test-copyability="expected-non-copyable"][data-pageroot-id]';
+      '[data-test-copyability="expected-non-copyable"][data-stemmio-id]';
 
     await expect(frame.locator(copyableSelector)).toHaveCount(1);
     await expect(frame.locator(nonCopyableSelector)).toHaveCount(1);
-    const originalId = await frame.locator(copyableSelector).getAttribute("data-pageroot-id");
+    const originalId = await frame.locator(copyableSelector).getAttribute("data-stemmio-id");
 
     await frame.locator(copyableSelector).click();
     const duplicateButton = toolbar.getByRole("button", { name: "复制元素", exact: true });
@@ -656,20 +656,20 @@ test("fixed structure samples prove expected-copyable and expected-non-copyable 
     frame = await currentEditorFrame(page);
     await expect(frame.locator(copyableSelector)).toHaveCount(2);
     const ids = await frame.locator(copyableSelector).evaluateAll((elements) => (
-      elements.map((element) => element.getAttribute("data-pageroot-id"))
+      elements.map((element) => element.getAttribute("data-stemmio-id"))
     ));
     expect(new Set(ids).size).toBe(2);
     const duplicateId = ids.find((id) => id && id !== originalId);
     expect(duplicateId).toBeTruthy();
 
-    await frame.locator(`[data-pageroot-id="${duplicateId}"]`).click();
+    await frame.locator(`[data-stemmio-id="${duplicateId}"]`).click();
     page.once("dialog", (dialog) => dialog.accept());
     await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
     await waitForRuntimeHandoffSettled(page);
     frame = await currentEditorFrame(page);
     await expect(frame.locator(copyableSelector)).toHaveCount(1);
     expect(await frame.locator(copyableSelector).evaluateAll((elements) => (
-      elements.map((element) => element.getAttribute("data-pageroot-id"))
+      elements.map((element) => element.getAttribute("data-stemmio-id"))
     ))).toEqual([originalId]);
 
     await frame.locator(nonCopyableSelector).click();
@@ -705,32 +705,32 @@ test("author Script cannot add source authority after Runtime starts or save Run
     const sourceIdLate = document.querySelector('#source-id-late');
     const sourceIdDecoy = document.querySelector('#source-id-decoy');
     sourceIdForged.setAttribute(
-      'data-pageroot-id',
-      sourceIdDecoy.getAttribute('data-pageroot-id'),
+      'data-stemmio-id',
+      sourceIdDecoy.getAttribute('data-stemmio-id'),
     );
     sourceIdForged.setAttribute(
-      'data-pageroot-edit-runtime-source',
-      sourceIdDecoy.getAttribute('data-pageroot-edit-runtime-source'),
+      'data-stemmio-edit-runtime-source',
+      sourceIdDecoy.getAttribute('data-stemmio-edit-runtime-source'),
     );
     window.__mutateSelectedSourceIdentity = () => {
       sourceIdLate.setAttribute(
-        'data-pageroot-id',
-        sourceIdDecoy.getAttribute('data-pageroot-id'),
+        'data-stemmio-id',
+        sourceIdDecoy.getAttribute('data-stemmio-id'),
       );
       sourceIdLate.setAttribute(
-        'data-pageroot-edit-runtime-source',
-        sourceIdDecoy.getAttribute('data-pageroot-edit-runtime-source'),
+        'data-stemmio-edit-runtime-source',
+        sourceIdDecoy.getAttribute('data-stemmio-edit-runtime-source'),
       );
     };
     const generated = document.createElement('button');
     generated.id = 'runtime-generated';
     generated.textContent = '运行时按钮';
-    const copiedPagerootId = host.getAttribute('data-pageroot-id');
-    const copiedRuntimeMarker = host.getAttribute('data-pageroot-edit-runtime-source');
-    generated.setAttribute('data-pageroot-edit-runtime-source', copiedRuntimeMarker);
-    generated.setAttribute('data-pageroot-id', copiedPagerootId);
+    const copiedStemmioId = host.getAttribute('data-stemmio-id');
+    const copiedRuntimeMarker = host.getAttribute('data-stemmio-edit-runtime-source');
+    generated.setAttribute('data-stemmio-edit-runtime-source', copiedRuntimeMarker);
+    generated.setAttribute('data-stemmio-id', copiedStemmioId);
     const copiedProofProperty = Object.getOwnPropertyNames(host).find(
-      (name) => name.startsWith('__pageroot_edit_source_'),
+      (name) => name.startsWith('__stemmio_edit_source_'),
     );
     if (copiedProofProperty) {
       Object.defineProperty(generated, copiedProofProperty, {
@@ -771,7 +771,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-disposable-runtime-e2e-", {
+  await withRuntimeProject("stemmio-disposable-runtime-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-host");
@@ -896,9 +896,9 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
     await frame.evaluate(() => window.__mutateSelectedSourceIdentity());
     await expect.poll(async () => frame.locator("#source-id-late").getAttribute(
-      "data-pageroot-id",
+      "data-stemmio-id",
     )).toBe(await frame.locator("#source-id-decoy").getAttribute(
-      "data-pageroot-id",
+      "data-stemmio-id",
     ));
     page.once("dialog", (dialog) => dialog.accept());
     await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
@@ -910,13 +910,13 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
 
     const provenance = await frame.locator("#runtime-generated").evaluate((node) => ({
-      generatedPagerootId: node.getAttribute("data-pageroot-id"),
-      runtimeMarker: node.getAttribute("data-pageroot-edit-runtime-source"),
-      hostPagerootId: node.closest("[data-pageroot-id]")
-        ?.getAttribute("data-pageroot-id") || null,
+      generatedStemmioId: node.getAttribute("data-stemmio-id"),
+      runtimeMarker: node.getAttribute("data-stemmio-edit-runtime-source"),
+      hostStemmioId: node.closest("[data-stemmio-id]")
+        ?.getAttribute("data-stemmio-id") || null,
     }));
-    expect(provenance.generatedPagerootId).toBe(provenance.hostPagerootId);
-    expect(provenance.runtimeMarker).toBe(provenance.generatedPagerootId);
+    expect(provenance.generatedStemmioId).toBe(provenance.hostStemmioId);
+    expect(provenance.runtimeMarker).toBe(provenance.generatedStemmioId);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     expect(readFileSync(sourcePath, "utf8")).not.toContain('<button id="runtime-generated"');
 
@@ -1020,7 +1020,7 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
   document.body.prepend(pageTable);
 </script></body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-comment-dual-anchor-e2e-", {
+  await withRuntimeProject("stemmio-runtime-comment-dual-anchor-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath, electronApp }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-comment-host");
@@ -1032,7 +1032,7 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
     await expect(editor).toHaveAttribute("data-selection-runtime-generated", "true");
     await expect(editor).toHaveAttribute(
       "data-selection-runtime-source-anchor-id",
-      /pr1_[a-f0-9]{32}/u,
+      /sm1_[a-f0-9]{32}/u,
     );
     await expect(editor).toHaveAttribute("data-selection-runtime-kind", "table");
     await expect(editor).toHaveAttribute(
@@ -1134,7 +1134,7 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
     const firstRecord = draftComments.find((comment) => comment.text === firstCommentText);
     expect(firstRecord).toBeTruthy();
     const sourceHostId = await frame.locator("#runtime-output")
-      .getAttribute("data-pageroot-id");
+      .getAttribute("data-stemmio-id");
     expect(firstRecord.sourceAnchor.resolution).toBe("exact");
     expect(firstRecord.sourceAnchor.elementId).toBe(sourceHostId);
     expect(firstRecord.target.elementId).toBe(sourceHostId);
@@ -1168,7 +1168,7 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
     expect(svgRecord.visualHint.relativePath).toBeTruthy();
     expect(canvasRecord.visualHint.relativePath).toBeTruthy();
     const pageTableRecord = draftComments.find((comment) => comment.text.includes("页面级数据表"));
-    const bodySourceHostId = await frame.locator("body").getAttribute("data-pageroot-id");
+    const bodySourceHostId = await frame.locator("body").getAttribute("data-stemmio-id");
     expect(pageTableRecord.sourceAnchor).toMatchObject({
       resolution: "exact",
       elementId: bodySourceHostId,
@@ -1361,7 +1361,7 @@ test("dense runtime tables keep pointer hit testing bounded", {
   document.querySelector('#runtime-perf-output').append(table);
 </script></body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-pointer-perf-e2e-", {
+  await withRuntimeProject("stemmio-runtime-pointer-perf-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-perf-host");
@@ -1382,7 +1382,7 @@ test("dense runtime tables keep pointer hit testing bounded", {
         state.qsa += 1;
         return originalQsa.apply(this, args);
       };
-      window.__PAGEROOT_RUNTIME_POINTER_PERF__ = state;
+      window.__STEMMIO_RUNTIME_POINTER_PERF__ = state;
     });
     const box = await table.boundingBox();
     expect(box).not.toBeNull();
@@ -1392,7 +1392,7 @@ test("dense runtime tables keep pointer hit testing bounded", {
     await page.mouse.move((box?.x || 0) + 12, (box?.y || 0) + 12);
     await page.waitForTimeout(100);
     await frame.evaluate(() => {
-      const state = window.__PAGEROOT_RUNTIME_POINTER_PERF__;
+      const state = window.__STEMMIO_RUNTIME_POINTER_PERF__;
       if (state) {
         state.bcr = 0;
         state.runtimeBcr = 0;
@@ -1406,7 +1406,7 @@ test("dense runtime tables keep pointer hit testing bounded", {
       );
     }
     await page.waitForTimeout(100);
-    const metrics = await frame.evaluate(() => window.__PAGEROOT_RUNTIME_POINTER_PERF__);
+    const metrics = await frame.evaluate(() => window.__STEMMIO_RUNTIME_POINTER_PERF__);
     expect(metrics).toMatchObject({
       bcr: expect.any(Number),
       runtimeBcr: expect.any(Number),
@@ -1431,8 +1431,8 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
     <div aria-hidden="true" style="height:1600px"></div>
   </section>
   <script>
-    parent.__PAGEROOT_RUNTIME_REORDER_EXECUTIONS__ =
-      (parent.__PAGEROOT_RUNTIME_REORDER_EXECUTIONS__ || 0) + 1;
+    parent.__STEMMIO_RUNTIME_REORDER_EXECUTIONS__ =
+      (parent.__STEMMIO_RUNTIME_REORDER_EXECUTIONS__ || 0) + 1;
     const section = document.querySelector('section');
     section.insertBefore(document.querySelector('#third'), document.querySelector('#first'));
     document.querySelector('#runtime-order').textContent = Array.from(
@@ -1442,19 +1442,19 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-rerender-e2e-", {
+  await withRuntimeProject("stemmio-runtime-rerender-e2e-", {
     "runtime-report.html": html,
   }, async ({ electronApp, page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-first");
     await expect(frame.locator("#runtime-order")).toHaveText("丙甲乙");
     await expect(frame.locator("section > p").first()).toHaveAttribute("id", "third");
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_REORDER_EXECUTIONS__ || 0
+      window.__STEMMIO_RUNTIME_REORDER_EXECUTIONS__ || 0
     ))).toBe(1);
     const beforeDocument = await documentToken(page);
     const stableId = await frame.locator('[data-native-case="runtime-first"]')
-      .getAttribute("data-pageroot-id");
-    expect(stableId).toMatch(/^pr1_[a-f0-9]{32}$/u);
+      .getAttribute("data-stemmio-id");
+    expect(stableId).toMatch(/^sm1_[a-f0-9]{32}$/u);
     const reviewStage = page.locator(".review-scroll-stage");
     await expect.poll(() => reviewStage.evaluate((element) => (
       element.scrollHeight - element.clientHeight
@@ -1491,10 +1491,10 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
     await expect(nextFrame.locator("section > p").nth(1)).toHaveAttribute("id", "first");
     await expect(nextFrame.locator("section > p").nth(2)).toHaveAttribute("id", "third");
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_REORDER_EXECUTIONS__ || 0
+      window.__STEMMIO_RUNTIME_REORDER_EXECUTIONS__ || 0
     ))).toBe(1);
     await expect(nextFrame.locator(
-      `[data-pageroot-id="${stableId}"][data-html-canvas-selected]`,
+      `[data-stemmio-id="${stableId}"][data-html-canvas-selected]`,
     )).toHaveAttribute("data-html-canvas-selected", "module");
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
@@ -1522,7 +1522,7 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
     await expect(twiceMovedFrame.locator("section > p").nth(1)).toHaveAttribute("id", "third");
     await expect(twiceMovedFrame.locator("section > p").nth(2)).toHaveAttribute("id", "first");
     await expect(twiceMovedFrame.locator(
-      `[data-pageroot-id="${stableId}"][data-html-canvas-selected]`,
+      `[data-stemmio-id="${stableId}"][data-html-canvas-selected]`,
     )).toHaveAttribute("data-html-canvas-selected", "module");
     await expect(page.getByRole("button", { name: "上移", exact: true })).toBeEnabled();
     await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
@@ -1535,7 +1535,7 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
     const undoRevision = await expectCheckpointPersisted(page, moveRevision);
     await expect.poll(() => documentToken(page)).not.toBe(beforeUndoDocument);
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_REORDER_EXECUTIONS__ || 0
+      window.__STEMMIO_RUNTIME_REORDER_EXECUTIONS__ || 0
     ))).toBe(2);
     const undoFrame = await currentEditorFrame(page);
     await expect(undoFrame.locator("#runtime-order")).toHaveText("乙丙甲");
@@ -1550,7 +1550,7 @@ test("same-parent Runtime reorder keeps one document and does not rerun its scri
     await expectCheckpointPersisted(page, undoRevision);
     await expect.poll(() => documentToken(page)).not.toBe(beforeRedoDocument);
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_REORDER_EXECUTIONS__ || 0
+      window.__STEMMIO_RUNTIME_REORDER_EXECUTIONS__ || 0
     ))).toBe(3);
     const redoFrame = await currentEditorFrame(page);
     await expect(redoFrame.locator("#runtime-order")).toHaveText("乙丙甲");
@@ -1579,12 +1579,12 @@ test("same-source history cancellation reloads through a fixed Runtime candidate
 <html><head><title>Runtime history cancel</title></head><body>
   <p data-native-case="runtime-history-cancel">保持当前源码</p>
   <script>
-    parent.__PAGEROOT_RUNTIME_HISTORY_CANCEL_COUNT__ =
-      (parent.__PAGEROOT_RUNTIME_HISTORY_CANCEL_COUNT__ || 0) + 1;
+    parent.__STEMMIO_RUNTIME_HISTORY_CANCEL_COUNT__ =
+      (parent.__STEMMIO_RUNTIME_HISTORY_CANCEL_COUNT__ || 0) + 1;
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-history-cancel-e2e-", {
+  await withRuntimeProject("stemmio-runtime-history-cancel-e2e-", {
     "runtime-report.html": html,
   }, async ({ electronApp, page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(
@@ -1593,7 +1593,7 @@ test("same-source history cancellation reloads through a fixed Runtime candidate
       "runtime-history-cancel",
     );
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_HISTORY_CANCEL_COUNT__
+      window.__STEMMIO_RUNTIME_HISTORY_CANCEL_COUNT__
     ))).toBe(1);
 
     for (const expectedExecutionCount of [2, 3]) {
@@ -1612,13 +1612,13 @@ test("same-source history cancellation reloads through a fixed Runtime candidate
         "data-runtime-handoff",
       )).toBeNull();
       await page.evaluate(() => {
-        window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = false;
-        window.__PAGEROOT_RUNTIME_HANDOFF_ANIMATION_FRAME__?.();
-        window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__?.disconnect();
+        window.__STEMMIO_RUNTIME_HANDOFF_ACTIVE__ = false;
+        window.__STEMMIO_RUNTIME_HANDOFF_ANIMATION_FRAME__?.();
+        window.__STEMMIO_RUNTIME_HANDOFF_OBSERVER__?.disconnect();
       });
       await assertRuntimeCandidateReused(page);
       await expect.poll(() => page.evaluate(() => (
-        window.__PAGEROOT_RUNTIME_HISTORY_CANCEL_COUNT__
+        window.__STEMMIO_RUNTIME_HISTORY_CANCEL_COUNT__
       ))).toBe(expectedExecutionCount);
       frame = await currentEditorFrame(page);
       await expect(frame.locator('[data-native-case="runtime-history-cancel"]'))
@@ -1647,7 +1647,7 @@ test("runtime handoff refreshes the Presentation Anchor after candidate-time scr
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-presentation-anchor-e2e-", {
+  await withRuntimeProject("stemmio-runtime-presentation-anchor-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(
@@ -1678,7 +1678,7 @@ test("runtime handoff refreshes the Presentation Anchor after candidate-time scr
       );
       const selectedRect = selected?.getBoundingClientRect();
       const frameRect = activeFrame.getBoundingClientRect();
-      const stableId = selected?.getAttribute("data-pageroot-id") || null;
+      const stableId = selected?.getAttribute("data-stemmio-id") || null;
       return {
         sharedScrollTop: stage.scrollTop,
         selectedScreenTop: selectedRect ? frameRect.top + selectedRect.top : null,
@@ -1721,7 +1721,7 @@ test("long-page element duplication stays in the current Runtime document", {
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-duplicate-e2e-", {
+  await withRuntimeProject("stemmio-runtime-duplicate-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let frame = (await loadedDiskFrame(page, sourcePath, "runtime-duplicate")).frame;
@@ -1748,7 +1748,7 @@ test("long-page element duplication stays in the current Runtime document", {
     await expect(frame.locator('[data-native-case="runtime-duplicate"]')).toHaveCount(2);
     await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 1");
     const duplicateIds = await frame.locator('[data-native-case="runtime-duplicate"]')
-      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id")));
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-stemmio-id")));
     expect(new Set(duplicateIds).size).toBe(2);
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(400);
@@ -1764,7 +1764,7 @@ test("long-page element duplication stays in the current Runtime document", {
     await expect(frame.locator('[data-native-case="runtime-duplicate"]')).toHaveCount(3);
     await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 1");
     const secondDuplicateIds = await frame.locator('[data-native-case="runtime-duplicate"]')
-      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id")));
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-stemmio-id")));
     expect(new Set(secondDuplicateIds).size).toBe(3);
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(400);
@@ -1783,7 +1783,7 @@ test("runtime source delete stays in the current document and does not recover f
   <script>document.body.dataset.runtimeReady = "true";</script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-delete-e2e-", {
+  await withRuntimeProject("stemmio-runtime-delete-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let frame = (await loadedDiskFrame(page, sourcePath, "runtime-delete")).frame;
@@ -1829,7 +1829,7 @@ test("body-child duplication stays in the current Runtime document", {
   <p data-native-case="body-copy">普通段落</p>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-body-copy-e2e-", {
+  await withRuntimeProject("stemmio-runtime-body-copy-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let frame = (await loadedDiskFrame(page, sourcePath, "body-copy")).frame;
@@ -1870,7 +1870,7 @@ test("mixed-content delete undo restores the exact text and comment order", {
   </main>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-mixed-undo-e2e-", {
+  await withRuntimeProject("stemmio-runtime-mixed-undo-e2e-", {
     "runtime-report.html": html,
   }, async ({ electronApp, page, sourcePath }) => {
     let frame = (await loadedDiskFrame(page, sourcePath, "mixed-a")).frame;
@@ -1929,7 +1929,7 @@ test("customized builtin hosts never claim a proven in-place structural projecti
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-builtin-e2e-", {
+  await withRuntimeProject("stemmio-runtime-builtin-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const frame = (await loadedDiskFrame(page, sourcePath, "review-host")).frame;
@@ -1965,7 +1965,7 @@ test("independent projection groups refuse, recover and keep ordinary copies in-
   <script>document.body.dataset.runtimeReady = "true";</script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-projection-groups-e2e-", {
+  await withRuntimeProject("stemmio-runtime-projection-groups-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let frame = (await loadedDiskFrame(page, sourcePath, "group-plain")).frame;
@@ -1992,14 +1992,14 @@ test("independent projection groups refuse, recover and keep ordinary copies in-
     );
     const refused = await invokeStructureCommand(page, "moveSelectedTo", {
       parentElementId: await frame.locator('[data-native-case="group-plain"]').first()
-        .getAttribute("data-pageroot-id"),
+        .getAttribute("data-stemmio-id"),
     });
     expect(refused).toBe(false);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     expect(await readPublishedWorkingCopy(workingCopyPath, "utf8")).toBe(beforeRefuse);
 
     await page.evaluate(() => {
-      window.__PAGEROOT_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = true;
+      window.__STEMMIO_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = true;
     });
     frame = await currentEditorFrame(page);
     await frame.locator('[data-native-case="group-plain"]').first().click();
@@ -2014,7 +2014,7 @@ test("independent projection groups refuse, recover and keep ordinary copies in-
     await expect(frame.locator('[data-native-case="group-plain"]')).toHaveCount(3);
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
   });
 });
@@ -2030,14 +2030,14 @@ test("command-port insert and cross-parent move keep a closed structural loop", 
   <aside data-native-case="loop-aside"></aside>
   <script>document.body.dataset.runtimeReady = "true";</script>
 </body></html>`;
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-runtime-structure-loop-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-runtime-structure-loop-e2e-"));
   const sourcePath = path.join(sourceDirectory, "runtime-report.html");
   writeFileSync(sourcePath, html, "utf8");
   const reopenPath = path.join(sourceDirectory, "reopened.html");
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     const { page } = launched;
@@ -2050,7 +2050,7 @@ test("command-port insert and cross-parent move keep a closed structural loop", 
     frame = await currentEditorFrame(page);
     const copies = frame.locator('[data-native-case="loop-p"]');
     await expect(copies).toHaveCount(2);
-    const copyId = await copies.nth(1).getAttribute("data-pageroot-id");
+    const copyId = await copies.nth(1).getAttribute("data-stemmio-id");
     await copies.nth(1).dblclick();
     await expect(copies.nth(1)).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
     await page.keyboard.press("End");
@@ -2058,12 +2058,12 @@ test("command-port insert and cross-parent move keep a closed structural loop", 
     await page.keyboard.press(keyShortcut("a"));
     await editor.getByRole("button", { name: "加粗", exact: true }).click();
     await page.keyboard.press("Escape");
-    const asideId = await frame.locator('[data-native-case="loop-aside"]').getAttribute("data-pageroot-id");
+    const asideId = await frame.locator('[data-native-case="loop-aside"]').getAttribute("data-stemmio-id");
     await copies.nth(1).click();
     expect(await invokeStructureCommand(page, "moveSelectedTo", { parentElementId: asideId })).toBe(true);
     await waitForIndependentProjection(editor, "in-place", { reason: "verified-cross-parent-move" });
     frame = await currentEditorFrame(page);
-    const moved = frame.locator(`[data-pageroot-id="${copyId}"]`);
+    const moved = frame.locator(`[data-stemmio-id="${copyId}"]`);
     await expect(moved).toHaveCount(1);
     expect(await moved.evaluate((element) => element.parentElement?.getAttribute("data-native-case")))
       .toBe("loop-aside");
@@ -2073,24 +2073,24 @@ test("command-port insert and cross-parent move keep a closed structural loop", 
     await page.getByRole("button", { name: "删除元素", exact: true }).click();
     await waitForIndependentProjection(editor, "in-place", { reason: "verified-delete" });
     frame = await currentEditorFrame(page);
-    await expect(frame.locator(`[data-pageroot-id="${copyId}"]`)).toHaveCount(0);
+    await expect(frame.locator(`[data-stemmio-id="${copyId}"]`)).toHaveCount(0);
     await clickEditHistoryMenu(launched.electronApp, page, "undo");
     await expect.poll(async () => (
-      await (await currentEditorFrame(page)).locator(`[data-pageroot-id="${copyId}"]`).count()
+      await (await currentEditorFrame(page)).locator(`[data-stemmio-id="${copyId}"]`).count()
     )).toBe(1);
     await clickEditHistoryMenu(launched.electronApp, page, "redo");
     await expect.poll(async () => (
-      await (await currentEditorFrame(page)).locator(`[data-pageroot-id="${copyId}"]`).count()
+      await (await currentEditorFrame(page)).locator(`[data-stemmio-id="${copyId}"]`).count()
     )).toBe(0);
     await clickEditHistoryMenu(launched.electronApp, page, "undo");
     frame = await currentEditorFrame(page);
-    const restored = frame.locator(`[data-pageroot-id="${copyId}"]`);
+    const restored = frame.locator(`[data-stemmio-id="${copyId}"]`);
     await restored.dblclick();
     await expect(restored).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
     await page.keyboard.press("End");
     await page.keyboard.type(" 可编辑");
     await page.keyboard.press("Escape");
-    const mainId = await frame.locator('[data-native-case="loop-main"]').getAttribute("data-pageroot-id");
+    const mainId = await frame.locator('[data-native-case="loop-main"]').getAttribute("data-stemmio-id");
     expect(await invokeStructureCommand(page, "insertElement", {
       parentElementId: mainId,
       html: "<p data-native-case=\"loop-inserted\">插入段</p>",
@@ -2107,23 +2107,23 @@ test("command-port insert and cross-parent move keep a closed structural loop", 
     )).toBe(true);
     const saved = await readPublishedWorkingCopy(workingCopyPath);
     writeFileSync(reopenPath, saved);
-    await stopPageRoot(electronApp, isolatedUserData);
+    await stopStemmio(electronApp, isolatedUserData);
     electronApp = null;
     isolatedUserData = null;
-    const reopened = await launchPageRoot({ activeSourcePath: reopenPath });
+    const reopened = await launchStemmio({ activeSourcePath: reopenPath });
     electronApp = reopened.electronApp;
     isolatedUserData = reopened.isolatedUserData;
     const reopenedFrame = (await loadedDiskFrame(reopened.page, reopenPath, "loop-inserted")).frame;
-    await expect(reopenedFrame.locator(`[data-pageroot-id="${copyId}"]`)).toContainText("可编辑");
-    expect(await reopenedFrame.locator(`[data-pageroot-id="${copyId}"]`).evaluate((element) => (
+    await expect(reopenedFrame.locator(`[data-stemmio-id="${copyId}"]`)).toContainText("可编辑");
+    expect(await reopenedFrame.locator(`[data-stemmio-id="${copyId}"]`).evaluate((element) => (
       element.ownerDocument.defaultView.getComputedStyle(element).fontWeight
     ))).toBe("700");
     await expect(reopenedFrame.locator('[data-native-case="loop-inserted"]')).toHaveCount(1);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
-    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-runtime-structure-loop-e2e-");
+    removeValidatedTemporaryDirectory(sourceDirectory, "stemmio-runtime-structure-loop-e2e-");
   }
 });
 
@@ -2145,7 +2145,7 @@ test("an in-place copy is not overwritten by a slower Candidate rebuild", {
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-inplace-candidate-race-e2e-", {
+  await withRuntimeProject("stemmio-runtime-inplace-candidate-race-e2e-", {
     "runtime-report.html": html,
     "slow-module.js": "await new Promise((resolve) => setTimeout(resolve, 500));",
   }, async ({ page, sourcePath }) => {
@@ -2214,11 +2214,11 @@ test("in-place copies keep one document while the fallback switch rebuilds", {
       generationUnchanged: await activeFrameGeneration(editor) === beforeGeneration,
       copies: await frame.locator('[data-native-case="ab-plain"]').count(),
       ids: await frame.locator('[data-native-case="ab-plain"]')
-        .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id"))),
+        .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-stemmio-id"))),
     };
   };
 
-  await withRuntimeProject("pageroot-runtime-inplace-ab-e2e-", {
+  await withRuntimeProject("stemmio-runtime-inplace-ab-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const inPlace = await runCopies(page, sourcePath, { disableInPlace: false, count: 8 });
@@ -2228,7 +2228,7 @@ test("in-place copies keep one document while the fallback switch rebuilds", {
     expect(new Set(inPlace.ids).size).toBe(9);
   });
 
-  await withRuntimeProject("pageroot-runtime-fallback-ab-e2e-", {
+  await withRuntimeProject("stemmio-runtime-fallback-ab-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const fallback = await runCopies(page, sourcePath, { disableInPlace: true, count: 3 });
@@ -2272,7 +2272,7 @@ test("overlapping edits promote only the latest Runtime without losing charts or
   <script type="module" src="slow-module.js"></script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-supersession-e2e-", {
+  await withRuntimeProject("stemmio-runtime-supersession-e2e-", {
     "runtime-report.html": html,
     "echarts.js": ECHARTS_STUB,
     "slow-module.js": "await new Promise((resolve) => setTimeout(resolve, 500));",
@@ -2370,12 +2370,12 @@ test("Runtime text and style edits stay in one document across selection and sav
   <script type="module" src="slow-module.js"></script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-style-coalescing-e2e-", {
+  await withRuntimeProject("stemmio-runtime-style-coalescing-e2e-", {
     "runtime-report.html": html,
     "slow-module.js": [
-      "parent.__PAGEROOT_STYLE_RUNTIME_COUNT__ =",
-      "  (parent.__PAGEROOT_STYLE_RUNTIME_COUNT__ || 0) + 1;",
-      "if (parent.__PAGEROOT_STYLE_RUNTIME_COUNT__ > 1) {",
+      "parent.__STEMMIO_STYLE_RUNTIME_COUNT__ =",
+      "  (parent.__STEMMIO_STYLE_RUNTIME_COUNT__ || 0) + 1;",
+      "if (parent.__STEMMIO_STYLE_RUNTIME_COUNT__ > 1) {",
       "  await new Promise((resolve) => setTimeout(resolve, 600));",
       "}",
     ].join("\n"),
@@ -2396,7 +2396,7 @@ test("Runtime text and style edits stay in one document across selection and sav
     const initialGeneration = await editor.locator('iframe:not([data-frame-role])')
       .getAttribute("data-frame-generation");
     const initialScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_STYLE_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_STYLE_RUNTIME_COUNT__ || 0
     ));
     const second = frame.locator('[data-native-case="runtime-style-second"]');
     await first.dblclick();
@@ -2415,7 +2415,7 @@ test("Runtime text and style edits stay in one document across selection and sav
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_STYLE_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_STYLE_RUNTIME_COUNT__ || 0
     ))).toBe(initialScriptCount);
 
     await first.click();
@@ -2455,7 +2455,7 @@ test("Runtime text and style edits stay in one document across selection and sav
       initialGeneration,
     );
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_STYLE_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_STYLE_RUNTIME_COUNT__ || 0
     ))).toBe(initialScriptCount);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
@@ -2511,7 +2511,7 @@ test("Runtime range styling never grants a forged clone source authority", {
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-forged-range-e2e-", {
+  await withRuntimeProject("stemmio-runtime-forged-range-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
@@ -2550,7 +2550,7 @@ test("Runtime range styling never grants a forged clone source authority", {
     expect((await readPipelineCounters(page)).fullPatchApplies).toBe(1);
     await expect(target.locator('span[style*="font-weight"]')).toHaveCount(1);
     await expect(target.locator('span[style*="font-weight"]'))
-      .toHaveAttribute("data-pageroot-id", /^pr1_[0-9a-f]{32}$/u);
+      .toHaveAttribute("data-stemmio-id", /^sm1_[0-9a-f]{32}$/u);
     await expect(forged.locator('span[style*="font-weight"]')).toHaveCount(0);
     await expect(editor).toHaveAttribute(
       "data-native-format-resume",
@@ -2578,12 +2578,12 @@ test("Runtime text history ignores unrelated disposable clone drift", {
     clone.removeAttribute('data-native-case');
     clone.setAttribute('data-runtime-unrelated-clone', 'true');
     unrelated.after(clone);
-    parent.__PAGEROOT_TEXT_HISTORY_RUNTIME_COUNT__ =
-      (parent.__PAGEROOT_TEXT_HISTORY_RUNTIME_COUNT__ || 0) + 1;
+    parent.__STEMMIO_TEXT_HISTORY_RUNTIME_COUNT__ =
+      (parent.__STEMMIO_TEXT_HISTORY_RUNTIME_COUNT__ || 0) + 1;
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-text-history-e2e-", {
+  await withRuntimeProject("stemmio-runtime-text-history-e2e-", {
     "runtime-report.html": html,
   }, async ({ electronApp, page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
@@ -2625,7 +2625,7 @@ test("Runtime text history ignores unrelated disposable clone drift", {
     );
     await expect(editor).toHaveAttribute("data-history-adopt-path", "editable-island-in-place");
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
-    expect(await page.evaluate(() => window.__PAGEROOT_TEXT_HISTORY_RUNTIME_COUNT__)).toBe(1);
+    expect(await page.evaluate(() => window.__STEMMIO_TEXT_HISTORY_RUNTIME_COUNT__)).toBe(1);
   });
 });
 
@@ -2651,24 +2651,24 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     echarts.init(chart).setOption({ series: [{ type: 'bar', data: [1, 2, 3] }] });
     document.querySelector('#latest-wins-proof').textContent =
       '运行时卡片 ' + document.querySelectorAll('[data-native-case="runtime-latest-wins"]').length;
-    if (heading?.textContent.includes('候选失败') && !parent.__PAGEROOT_RUNTIME_FAILURE_CLEARED__) {
-      parent.__PAGEROOT_RUNTIME_FAILURE_COUNT__ =
-        (parent.__PAGEROOT_RUNTIME_FAILURE_COUNT__ || 0) + 1;
+    if (heading?.textContent.includes('候选失败') && !parent.__STEMMIO_RUNTIME_FAILURE_CLEARED__) {
+      parent.__STEMMIO_RUNTIME_FAILURE_COUNT__ =
+        (parent.__STEMMIO_RUNTIME_FAILURE_COUNT__ || 0) + 1;
       throw new Error('synthetic latest candidate activation failure');
     }
   </script>
   <script type="module" src="slow-module.js"></script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-latest-wins-e2e-", {
+  await withRuntimeProject("stemmio-runtime-latest-wins-e2e-", {
     "runtime-report.html": html,
     "echarts.js": ECHARTS_STUB,
     "slow-module.js": [
-      "parent.__PAGEROOT_RUNTIME_MODULE_COUNT__ =",
-      "  (parent.__PAGEROOT_RUNTIME_MODULE_COUNT__ || 0) + 1;",
-      "if (parent.__PAGEROOT_RUNTIME_MODULE_COUNT__ > 1) {",
+      "parent.__STEMMIO_RUNTIME_MODULE_COUNT__ =",
+      "  (parent.__STEMMIO_RUNTIME_MODULE_COUNT__ || 0) + 1;",
+      "if (parent.__STEMMIO_RUNTIME_MODULE_COUNT__ > 1) {",
       "  await new Promise((resolve) => {",
-      "    (parent.__PAGEROOT_RUNTIME_RELEASES__ ||= []).push(resolve);",
+      "    (parent.__STEMMIO_RUNTIME_RELEASES__ ||= []).push(resolve);",
       "  });",
       "}",
     ].join("\n"),
@@ -2835,7 +2835,7 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     const generationBeforeEnter = await editor.locator('iframe:not([data-frame-role])')
       .getAttribute("data-frame-generation");
     await heading.press("Enter");
-    await expect(heading.locator(":scope > br[data-pageroot-id]")).toHaveCount(1);
+    await expect(heading.locator(":scope > br[data-stemmio-id]")).toHaveCount(1);
     await expect.poll(() => documentToken(page)).toBe(documentBeforeEnter);
     await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
       "data-frame-generation",
@@ -2878,11 +2878,11 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     expect(boundaryCandidate).toBeTruthy();
     expect(new Set(candidateIds).size).toBe(candidateIds.length);
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+      window.__STEMMIO_RUNTIME_RELEASES__?.length || 0
     ))).toBeGreaterThan(0);
     await page.evaluate(() => {
-      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
-      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
+      const releases = window.__STEMMIO_RUNTIME_RELEASES__ || [];
+      window.__STEMMIO_RUNTIME_RELEASES__ = [];
       releases.forEach((release) => release());
     });
     await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
@@ -2912,7 +2912,7 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
       .getAttribute("data-persisted-revision"));
     await page.keyboard.insertText("        候选失败");
     const pendingResolverCount = await page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+      window.__STEMMIO_RUNTIME_RELEASES__?.length || 0
     ));
     const failureDocumentBeforeEscape = await documentToken(page);
     const failureGenerationBeforeEscape = await editor.locator('iframe:not([data-frame-role])')
@@ -2939,11 +2939,11 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     expect(failureCandidate).toBeTruthy();
     candidateIds.push(failureCandidate);
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+      window.__STEMMIO_RUNTIME_RELEASES__?.length || 0
     ))).toBeGreaterThan(pendingResolverCount);
     await page.evaluate(() => {
-      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
-      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
+      const releases = window.__STEMMIO_RUNTIME_RELEASES__ || [];
+      window.__STEMMIO_RUNTIME_RELEASES__ = [];
       releases.forEach((release) => release());
     });
     await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
@@ -2981,12 +2981,12 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     latestSource = await readPublishedWorkingCopy(workingCopyPath, "utf8");
 
     const failureCountBeforeRetry = await page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_FAILURE_COUNT__ || 0
+      window.__STEMMIO_RUNTIME_FAILURE_COUNT__ || 0
     ));
     await page.getByRole("button", { name: "更多", exact: true }).click();
     await page.getByRole("menuitem", { name: "重新加载动态内容", exact: true }).click();
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_FAILURE_COUNT__ || 0
+      window.__STEMMIO_RUNTIME_FAILURE_COUNT__ || 0
     )), { timeout: 12_000 }).toBeGreaterThan(failureCountBeforeRetry);
     await expect(surface).toHaveAttribute("data-edit-runtime-outcome", "runtime-partial");
     await expect(editor).toHaveAttribute("data-runtime-degradation", "runtime-partial");
@@ -2994,15 +2994,15 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     frame = await currentEditorFrame(page);
     await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
 
-    await page.evaluate(() => { window.__PAGEROOT_RUNTIME_FAILURE_CLEARED__ = true; });
+    await page.evaluate(() => { window.__STEMMIO_RUNTIME_FAILURE_CLEARED__ = true; });
     await page.getByRole("button", { name: "更多", exact: true }).click();
     await page.getByRole("menuitem", { name: "重新加载动态内容", exact: true }).click();
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+      window.__STEMMIO_RUNTIME_RELEASES__?.length || 0
     ))).toBeGreaterThan(0);
     await page.evaluate(() => {
-      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
-      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
+      const releases = window.__STEMMIO_RUNTIME_RELEASES__ || [];
+      window.__STEMMIO_RUNTIME_RELEASES__ = [];
       releases.forEach((release) => release());
     });
     await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
@@ -3021,7 +3021,7 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     await expect(editor.locator('iframe:not([data-frame-role])')).toHaveCount(1);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     expect(await readPublishedWorkingCopy(workingCopyPath, "utf8")).toBe(latestSource);
-    expect(buildSourceIndex(latestSource).byPagerootId.size).toBeGreaterThanOrEqual(5);
+    expect(buildSourceIndex(latestSource).byStemmioId.size).toBeGreaterThanOrEqual(5);
   });
 });
 
@@ -3047,7 +3047,7 @@ test("long text Enter checkpoints Working HTML without replacing the Runtime doc
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-enter-e2e-", {
+  await withRuntimeProject("stemmio-runtime-enter-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-enter-parent");
@@ -3114,7 +3114,7 @@ test("long text Enter checkpoints Working HTML without replacing the Runtime doc
       .getAttribute("data-runtime-candidate-id")).toBe(beforeCandidate);
     await expect(frame.locator("#enter-proof")).toHaveText("运行时回车 0");
     await expect(parent).toHaveAttribute("contenteditable", "true");
-    await expect(parent.locator(":scope > br[data-pageroot-id]")).toHaveCount(20);
+    await expect(parent.locator(":scope > br[data-stemmio-id]")).toHaveCount(20);
     const continuity = await parent.evaluate((element) => {
       const selection = document.getSelection();
       return {
@@ -3153,7 +3153,7 @@ test("long text Enter checkpoints Working HTML without replacing the Runtime doc
       .toHaveCount(0);
     await expect.poll(() => retainedEditor.locator('iframe:not([data-frame-role])')
       .evaluate((frameElement) => (
-        frameElement.contentWindow?.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ || null
+        frameElement.contentWindow?.__STEMMIO_NATIVE_QA_DOCUMENT_TOKEN__ || null
       ))).toBe(beforeDocument);
   });
 });
@@ -3167,7 +3167,7 @@ test("an accepted Native Edit survives a live-session rebase failure", {
   <script>document.body.dataset.runtimeReady = "true";</script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-accepted-rebase-e2e-", {
+  await withRuntimeProject("stemmio-runtime-accepted-rebase-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-accepted-rebase");
@@ -3176,7 +3176,7 @@ test("an accepted Native Edit survives a live-session rebase failure", {
     const revisionBefore = Number(await page.locator("[data-persist-state]").first()
       .getAttribute("data-persisted-revision"));
     await page.evaluate(() => {
-      window.__PAGEROOT_E2E_FAIL_NEXT_NATIVE_REBASE__ = true;
+      window.__STEMMIO_E2E_FAIL_NEXT_NATIVE_REBASE__ = true;
     });
     const target = await activateNativeEdit(frame, "runtime-accepted-rebase");
     await target.press("End");
@@ -3211,7 +3211,7 @@ test("an accepted Native Edit survives a live-session rebase failure", {
       .toContain("可以继续编辑");
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
   });
 });
@@ -3230,7 +3230,7 @@ test("Escape commits native editing and leaves contenteditable exited", {
   <div aria-hidden="true" style="height:1800px"></div>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-escape-e2e-", {
+  await withRuntimeProject("stemmio-runtime-escape-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-escape-parent");
@@ -3279,7 +3279,7 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-candidate-failure-e2e-", {
+  await withRuntimeProject("stemmio-runtime-candidate-failure-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(
@@ -3323,7 +3323,7 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
     await expect(staticFrame.locator("#runtime-order")).toHaveText("");
     await expect(staticFrame.locator("section > p")).toHaveCount(3);
     const oldFrameState = await page.evaluate(() => {
-      const oldFrame = window.__PAGEROOT_RUNTIME_OLD_FRAME__;
+      const oldFrame = window.__STEMMIO_RUNTIME_OLD_FRAME__;
       return {
         connected: oldFrame?.isConnected || false,
         role: oldFrame?.getAttribute("data-runtime-slot-role") || null,
@@ -3390,7 +3390,7 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
 test("a queued static fallback follows the latest Working HTML after Native Edit", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  await withRuntimeProject("pageroot-runtime-queued-static-latest-e2e-", {
+  await withRuntimeProject("stemmio-runtime-queued-static-latest-e2e-", {
     "runtime-report.html": queuedStaticFixtureHtml(),
   }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, QUEUED_STATIC_CASE);
@@ -3482,7 +3482,7 @@ test("a queued static fallback follows the latest Working HTML after Native Edit
     await page.keyboard.press("Escape");
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
   });
 });
@@ -3490,7 +3490,7 @@ test("a queued static fallback follows the latest Working HTML after Native Edit
 test("queued static fallback keeps R1 when Native Edit does not update source", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  await withRuntimeProject("pageroot-runtime-queued-static-r1-e2e-", {
+  await withRuntimeProject("stemmio-runtime-queued-static-r1-e2e-", {
     "runtime-report.html": queuedStaticFixtureHtml(),
   }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, QUEUED_STATIC_CASE);
@@ -3520,7 +3520,7 @@ test("queued static fallback keeps R1 when Native Edit does not update source", 
     expect(proof.visibleTexts.join("\n")).not.toContain(QUEUED_STATIC_R2);
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
   });
 });
@@ -3546,7 +3546,7 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-double-failure-e2e-", {
+  await withRuntimeProject("stemmio-runtime-double-failure-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath, sourceDirectory, electronApp }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-double-failure");
@@ -3631,7 +3631,7 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
       .toBe(latestSource);
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_STATIC_CANDIDATE_FAILURE: "1",
+      STEMMIO_E2E_STATIC_CANDIDATE_FAILURE: "1",
     },
   });
 });
@@ -3658,7 +3658,7 @@ test("a failed structural candidate after in-place text editing promotes static 
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-text-candidate-failure-e2e-", {
+  await withRuntimeProject("stemmio-runtime-text-candidate-failure-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-text-candidate-failure");
@@ -3818,8 +3818,8 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
     const focusProbe = document.querySelector('#runtime-candidate-focus-probe');
     focusProbe.focus();
     window.focus();
-    parent.__PAGEROOT_CANDIDATE_FOCUS_PROOFS__ = [
-      ...(parent.__PAGEROOT_CANDIDATE_FOCUS_PROOFS__ || []),
+    parent.__STEMMIO_CANDIDATE_FOCUS_PROOFS__ = [
+      ...(parent.__STEMMIO_CANDIDATE_FOCUS_PROOFS__ || []),
       {
         candidate: window.frameElement?.getAttribute('data-frame-role') === 'runtime-candidate',
         childFocused: document.activeElement === focusProbe,
@@ -3829,7 +3829,7 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-commit-hold-edit-e2e-", {
+  await withRuntimeProject("stemmio-runtime-commit-hold-edit-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
@@ -3866,10 +3866,10 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
     await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(1);
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_CANDIDATE_FOCUS_PROOFS__ || []
+      window.__STEMMIO_CANDIDATE_FOCUS_PROOFS__ || []
     ).filter((proof) => proof.candidate).length)).toBeGreaterThanOrEqual(2);
     const hiddenCandidateFocusProofs = await page.evaluate(() => (
-      window.__PAGEROOT_CANDIDATE_FOCUS_PROOFS__ || []
+      window.__STEMMIO_CANDIDATE_FOCUS_PROOFS__ || []
     ).filter((proof) => proof.candidate));
     expect(hiddenCandidateFocusProofs).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -3899,7 +3899,7 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
         publishedCanvasHeight: document.documentElement.style.getPropertyValue(
           "--comment-canvas-height",
         ),
-        selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
+        selectedStableId: selected?.getAttribute("data-stemmio-id") || null,
         toolbarVisible: Boolean(editorElement?.querySelector('[role="toolbar"]')?.getClientRects().length),
         focusedLabel: document.activeElement?.getAttribute?.("aria-label")
           || document.activeElement?.textContent?.trim()
@@ -3911,7 +3911,7 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
     await expect.poll(() => candidateFrame.evaluate((iframe) => ({
       inert: iframe.contentDocument?.documentElement.inert ?? null,
       marker: iframe.contentDocument?.documentElement.getAttribute(
-        "data-pageroot-runtime-candidate-inert",
+        "data-stemmio-runtime-candidate-inert",
       ) ?? null,
     }))).toEqual({ inert: true, marker: null });
     await candidateFrame.evaluate((iframe) => {
@@ -3939,7 +3939,7 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
         publishedCanvasHeight: document.documentElement.style.getPropertyValue(
           "--comment-canvas-height",
         ),
-        selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
+        selectedStableId: selected?.getAttribute("data-stemmio-id") || null,
         toolbarVisible: Boolean(editorElement?.querySelector('[role="toolbar"]')?.getClientRects().length),
         focusedLabel: document.activeElement?.getAttribute?.("aria-label")
           || document.activeElement?.textContent?.trim()
@@ -3987,7 +3987,7 @@ test("a ready Candidate waiting to commit still accepts Native Edit on Active", 
     })).toBe(true);
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
   });
 });
@@ -4010,7 +4010,7 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-latest-intent-e2e-", {
+  await withRuntimeProject("stemmio-runtime-latest-intent-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
@@ -4079,7 +4079,7 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
         "[data-html-canvas-selected]",
       );
       return {
-        stableId: selected?.getAttribute("data-pageroot-id") || null,
+        stableId: selected?.getAttribute("data-stemmio-id") || null,
         screenTop: selected && activeFrame
           ? activeFrame.getBoundingClientRect().top + selected.getBoundingClientRect().top
           : null,
@@ -4108,7 +4108,7 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
         "[data-html-canvas-selected]",
       );
       return {
-        stableId: selected?.getAttribute("data-pageroot-id") || null,
+        stableId: selected?.getAttribute("data-stemmio-id") || null,
         screenTop: selected && activeFrame
           ? activeFrame.getBoundingClientRect().top + selected.getBoundingClientRect().top
           : null,
@@ -4122,7 +4122,7 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
         ),
         inert: activeFrame?.contentDocument?.documentElement.inert ?? null,
         inertMarker: activeFrame?.contentDocument?.documentElement.getAttribute(
-          "data-pageroot-runtime-candidate-inert",
+          "data-stemmio-runtime-candidate-inert",
         ) ?? null,
       };
     });
@@ -4142,7 +4142,7 @@ test("a held Candidate commits the latest Active scroll and selection intent", {
     }
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
   });
 });
@@ -4159,7 +4159,7 @@ test("ending an unchanged Native Edit cannot publish a pending source projection
   <script>document.body.dataset.runtimeReady = "true";</script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-stale-finish-e2e-", {
+  await withRuntimeProject("stemmio-runtime-stale-finish-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-stale-duplicate");
@@ -4194,7 +4194,7 @@ test("ending an unchanged Native Edit cannot publish a pending source projection
     let fontSize = editor.getByLabel("字号（像素）");
     await expect(fontSize).toBeEnabled();
     const heldBeforeStyle = await page.evaluate(() => (
-      window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+      window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
     ));
     await fontSize.fill("24");
     await expectCheckpointPersisted(page, revisionR1);
@@ -4232,7 +4232,7 @@ test("ending an unchanged Native Edit cannot publish a pending source projection
       sourceR1Hash,
     );
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+      window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
     ))).toBe(heldBeforeStyle);
     await releaseHeldRuntimeCommits(page);
     await waitForRuntimeHandoffSettled(page);
@@ -4246,24 +4246,24 @@ test("ending an unchanged Native Edit cannot publish a pending source projection
     await expect(editor).toHaveAttribute("data-rendered-projection-stale", "false");
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
   });
 });
 
 test("Candidate inert ownership cannot be forged or cleared by author markup", async () => {
   const markerMutationHtml = `<!doctype html>
-<html data-pageroot-runtime-candidate-inert="source-owned"><head>
+<html data-stemmio-runtime-candidate-inert="source-owned"><head>
   <title>Runtime Candidate inert marker mutation</title>
 </head><body>
   <main data-native-case="runtime-inert-marker-mutation">Candidate 属性不是授权。</main>
   <script>
-    document.documentElement.removeAttribute('data-pageroot-runtime-candidate-inert');
+    document.documentElement.removeAttribute('data-stemmio-runtime-candidate-inert');
     document.body.dataset.runtimeReady = 'true';
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-inert-marker-mutation-e2e-", {
+  await withRuntimeProject("stemmio-runtime-inert-marker-mutation-e2e-", {
     "runtime-report.html": markerMutationHtml,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(
@@ -4273,27 +4273,27 @@ test("Candidate inert ownership cannot be forged or cleared by author markup", a
     );
     await expect(frame.locator("html")).not.toHaveAttribute("inert", "");
     await expect(frame.locator("html")).not.toHaveAttribute(
-      "data-pageroot-runtime-candidate-inert",
+      "data-stemmio-runtime-candidate-inert",
       /.+/u,
     );
     await expect(frame.locator("body")).toHaveAttribute("data-runtime-ready", "true");
   });
 
   const authoredInertHtml = `<!doctype html>
-<html inert data-pageroot-runtime-candidate-inert="true"><head>
+<html inert data-stemmio-runtime-candidate-inert="true"><head>
   <title>Runtime authored inert root</title>
 </head><body>
   <main data-native-case="runtime-authored-inert">Author inert 必须保留。</main>
   <script>document.body.dataset.runtimeReady = 'true';</script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-authored-inert-e2e-", {
+  await withRuntimeProject("stemmio-runtime-authored-inert-e2e-", {
     "runtime-report.html": authoredInertHtml,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-authored-inert");
     await expect(frame.locator("html")).toHaveAttribute("inert", "");
     await expect(frame.locator("html")).toHaveAttribute(
-      "data-pageroot-runtime-candidate-inert",
+      "data-stemmio-runtime-candidate-inert",
       "true",
     );
     await expect(frame.locator("body")).toHaveAttribute("data-runtime-ready", "true");
@@ -4316,7 +4316,7 @@ test("a Candidate commit verification failure restores the visible Active", {
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-commit-verify-failure-e2e-", {
+  await withRuntimeProject("stemmio-runtime-commit-verify-failure-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
@@ -4342,7 +4342,7 @@ test("a Candidate commit verification failure restores the visible Active", {
     await waitForHeldRuntimeCommit(page);
     await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
     await page.evaluate(() => {
-      window.__PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__ = true;
+      window.__STEMMIO_E2E_FAIL_NEXT_RUNTIME_COMMIT__ = true;
     });
     await releaseHeldRuntimeCommits(page);
 
@@ -4399,7 +4399,7 @@ test("a Candidate commit verification failure restores the visible Active", {
     await expect(editor).toHaveAttribute("data-render-verified", "true");
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
     },
   });
 });
@@ -4426,7 +4426,7 @@ test("Electron Edit executes parser-blocking, inline, defer and module programs 
 </head><body>
   <main data-native-case="scheduled-runtime"></main>
 </body></html>`;
-  await withRuntimeProject("pageroot-scheduled-runtime-e2e-", {
+  await withRuntimeProject("stemmio-scheduled-runtime-e2e-", {
     "runtime-report.html": html,
     "assets/blocking.js": [
       "window.__runtimeOrder = ['parser-blocking'];",
@@ -4451,7 +4451,7 @@ test("Electron Edit executes parser-blocking, inline, defer and module programs 
     ]);
     await expect(frame.locator("base")).toHaveAttribute(
       "href",
-      /^pageroot-edit-runtime:\/\/[a-f0-9]{32}\/assets\/$/u,
+      /^stemmio-edit-runtime:\/\/[a-f0-9]{32}\/assets\/$/u,
     );
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
@@ -4466,7 +4466,7 @@ test("unsupported Script programs enter an explicit static Edit state", async ()
     document.body.dataset.runtimeMarker = runtimeMarker;
   </script>
 </body></html>`;
-  await withRuntimeProject("pageroot-static-runtime-fallback-e2e-", {
+  await withRuntimeProject("stemmio-static-runtime-fallback-e2e-", {
     "runtime-report.html": html,
     "runtime-module.js": "export const runtimeMarker = 'executed';",
   }, async ({ page, sourcePath }) => {
@@ -4501,16 +4501,16 @@ test("static fallback can reload dynamic content and dismiss itself after succes
   </svg>
   <canvas aria-label="尚未绘制的源码画布" width="320" height="180"></canvas>
   <script>
-    parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ =
-      (parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ || 0) + 1;
-    if (parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ <= 2) {
+    parent.__STEMMIO_RUNTIME_RETRY_COUNT__ =
+      (parent.__STEMMIO_RUNTIME_RETRY_COUNT__ || 0) + 1;
+    if (parent.__STEMMIO_RUNTIME_RETRY_COUNT__ <= 2) {
       throw new Error('synthetic activation failure before drawing');
     }
     document.body.dataset.runtimeRetryReady = 'true';
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-retry-e2e-", {
+  await withRuntimeProject("stemmio-runtime-retry-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
@@ -4543,12 +4543,12 @@ test("static fallback can reload dynamic content and dismiss itself after succes
     const latestWorkingSource = (await readPublishedWorkingCopy(workingCopyPath, "utf8"));
     const latestWorkingHash = buildSourceIndex(latestWorkingSource).sourceSha256;
     await page.evaluate(() => {
-      window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__ = [];
-      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
+      window.__STEMMIO_RUNTIME_RETRY_SLOT_TRANSITIONS__ = [];
+      window.__STEMMIO_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
       const observer = new MutationObserver((records) => {
         for (const record of records) {
           if (!(record.target instanceof HTMLIFrameElement)) continue;
-          window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__.push({
+          window.__STEMMIO_RUNTIME_RETRY_SLOT_TRANSITIONS__.push({
             slot: record.target.getAttribute("data-runtime-slot"),
             attribute: record.attributeName,
             previous: record.oldValue,
@@ -4564,12 +4564,12 @@ test("static fallback can reload dynamic content and dismiss itself after succes
         subtree: true,
         attributeFilter: ["data-runtime-slot-role", "sandbox"],
       });
-      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__ = observer;
+      window.__STEMMIO_RUNTIME_RETRY_SLOT_OBSERVER__ = observer;
     });
     await page.getByRole("button", { name: "更多", exact: true }).click();
     await page.getByRole("menuitem", { name: "重新加载动态内容", exact: true }).click();
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_RETRY_COUNT__ || 0
+      window.__STEMMIO_RUNTIME_RETRY_COUNT__ || 0
     )), { timeout: 20_000 }).toBe(2);
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",
@@ -4586,11 +4586,11 @@ test("static fallback can reload dynamic content and dismiss itself after succes
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     await expect(frame.locator("body")).toHaveAttribute("data-runtime-retry-ready", "true");
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_RETRY_COUNT__ || 0
+      window.__STEMMIO_RUNTIME_RETRY_COUNT__ || 0
     ))).toBe(3);
     const slotTransitions = await page.evaluate(() => {
-      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
-      return window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__ || [];
+      window.__STEMMIO_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
+      return window.__STEMMIO_RUNTIME_RETRY_SLOT_TRANSITIONS__ || [];
     });
     expect(slotTransitions).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -4625,7 +4625,7 @@ test("Edit frame navigation blocks location.assign and location.replace", async 
     };
   </script>
 </body></html>`;
-  await withRuntimeProject("pageroot-runtime-navigation-e2e-", {
+  await withRuntimeProject("stemmio-runtime-navigation-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-navigation");
@@ -4651,7 +4651,7 @@ test("inert Script-like markup does not disable the live Runtime program", async
   <main data-native-case="runtime-inert-script">Live Runtime remains enabled</main>
   <script>document.body.dataset.liveRuntimeExecuted = 'true';</script>
 </body></html>`;
-  await withRuntimeProject("pageroot-runtime-inert-script-e2e-", {
+  await withRuntimeProject("stemmio-runtime-inert-script-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-inert-script");
@@ -4677,7 +4677,7 @@ test("Electron Edit renders a source-relative ECharts page in the editable ifram
     chart.append(runtimeOverlay);
   </script>
 </body></html>`;
-  await withRuntimeProject("pageroot-echarts-runtime-e2e-", {
+  await withRuntimeProject("stemmio-echarts-runtime-e2e-", {
     "runtime-report.html": html,
     "echarts.js": ECHARTS_STUB,
   }, async ({ page, sourcePath }) => {
@@ -4690,8 +4690,8 @@ test("Electron Edit renders a source-relative ECharts page in the editable ifram
     await expect.poll(() => frame.locator("#runtime-chart-overlay").evaluate(
       (element) => getComputedStyle(element).cursor,
     )).toBe("crosshair");
-    await expect(frame.locator("[data-pageroot-edit-runtime-bootstrap]")).toHaveCount(1);
-    await expect(frame.locator("[data-pageroot-edit-runtime-frozen]")).toHaveCount(0);
+    await expect(frame.locator("[data-stemmio-edit-runtime-bootstrap]")).toHaveCount(1);
+    await expect(frame.locator("[data-stemmio-edit-runtime-frozen]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     const firstDocumentToken = await documentToken(page);
     const tabs = page.getByRole("tablist", { name: "已打开的页面" });
@@ -4717,7 +4717,7 @@ test("author async scripts settle without blocking deferred DOMContentLoaded", {
   </script>
   <script async src="async-probe.js"></script>
 </body></html>`;
-  await withRuntimeProject("pageroot-runtime-async-dcl-e2e-", {
+  await withRuntimeProject("stemmio-runtime-async-dcl-e2e-", {
     "runtime-report.html": html,
     "async-probe.js": "window.__asyncProbeLoaded = true;",
   }, async ({ page, sourcePath }) => {
@@ -4745,7 +4745,7 @@ test("Electron Edit renders the reviewed ECharts 5.4.3 URL from exact packaged b
     });
   </script>
 </body></html>`;
-  await withRuntimeProject("pageroot-echarts-compatible-e2e-", {
+  await withRuntimeProject("stemmio-echarts-compatible-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(
@@ -4781,7 +4781,7 @@ test("a slow activation already reported ready is not rejected after the fact", 
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-slow-runtime-e2e-", {
+  await withRuntimeProject("stemmio-slow-runtime-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const surface = page.locator(".canvas-edit-surface");
@@ -4816,15 +4816,15 @@ test("a current critical surface already ready wins before an overdue wait is re
       canvas.style.height = '80px';
       document.querySelector('#surface-timeout-host').append(canvas);
     };
-    if (parent.__PAGEROOT_DELAY_READY_SURFACE__) {
-      parent.__PAGEROOT_RELEASE_READY_SURFACE__ = renderSurface;
+    if (parent.__STEMMIO_DELAY_READY_SURFACE__) {
+      parent.__STEMMIO_RELEASE_READY_SURFACE__ = renderSurface;
     } else {
       renderSurface();
     }
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-surface-timeout-e2e-", {
+  await withRuntimeProject("stemmio-runtime-surface-timeout-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
@@ -4833,8 +4833,8 @@ test("a current critical surface already ready wins before an overdue wait is re
     await disableStructuralInPlace(page);
     await expect(frame.locator("#surface-timeout-host canvas")).toHaveCount(1);
     await page.evaluate(() => {
-      window.__PAGEROOT_DELAY_READY_SURFACE__ = true;
-      window.__PAGEROOT_RELEASE_READY_SURFACE__ = undefined;
+      window.__STEMMIO_DELAY_READY_SURFACE__ = true;
+      window.__STEMMIO_RELEASE_READY_SURFACE__ = undefined;
     });
     await frame.locator('[data-native-case="surface-timeout-boundary"]').click();
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
@@ -4843,7 +4843,7 @@ test("a current critical surface already ready wins before an overdue wait is re
     await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
     await expect(editor).toHaveAttribute("data-runtime-activation", "activation-ready");
     await expect.poll(() => page.evaluate(
-      () => typeof window.__PAGEROOT_RELEASE_READY_SURFACE__,
+      () => typeof window.__STEMMIO_RELEASE_READY_SURFACE__,
     )).toBe("function");
     await page.evaluate(() => {
       const actualNow = performance.now.bind(performance);
@@ -4851,7 +4851,7 @@ test("a current critical surface already ready wins before an overdue wait is re
         configurable: true,
         value: () => actualNow() + 13_000,
       });
-      window.__PAGEROOT_RELEASE_READY_SURFACE__?.();
+      window.__STEMMIO_RELEASE_READY_SURFACE__?.();
     });
 
     await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
@@ -4885,7 +4885,7 @@ test("a noncritical author error keeps a ready ECharts surface editable as parti
     throw new Error('noncritical author follow-up failed');
   </script>
 </body></html>`;
-  await withRuntimeProject("pageroot-echarts-partial-e2e-", {
+  await withRuntimeProject("stemmio-echarts-partial-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
@@ -4930,27 +4930,27 @@ const SINGLE_PATH_HTML = `<!doctype html>
 
 async function enablePipelineCounters(page) {
   await expect.poll(() => page.evaluate(() => (
-    typeof window.__PAGEROOT_ENABLE_EDIT_PIPELINE_COUNTERS__
+    typeof window.__STEMMIO_ENABLE_EDIT_PIPELINE_COUNTERS__
   ))).toBe("function");
   await page.evaluate(() => {
-    window.__PAGEROOT_ENABLE_EDIT_PIPELINE_COUNTERS__();
-    window.__PAGEROOT_RESET_EDIT_PIPELINE_COUNTERS__();
+    window.__STEMMIO_ENABLE_EDIT_PIPELINE_COUNTERS__();
+    window.__STEMMIO_RESET_EDIT_PIPELINE_COUNTERS__();
   });
 }
 
 async function resetPipelineCounters(page) {
-  await page.evaluate(() => window.__PAGEROOT_RESET_EDIT_PIPELINE_COUNTERS__());
+  await page.evaluate(() => window.__STEMMIO_RESET_EDIT_PIPELINE_COUNTERS__());
 }
 
 async function readPipelineCounters(page) {
-  return page.evaluate(() => window.__PAGEROOT_READ_EDIT_PIPELINE_COUNTERS__());
+  return page.evaluate(() => window.__STEMMIO_READ_EDIT_PIPELINE_COUNTERS__());
 }
 
 test("Canvas layout changes do not rescan insertion identities while source and document stay", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   test.setTimeout(120_000);
-  await withRuntimeProject("pageroot-edit-pipeline-layout-e2e-", {
+  await withRuntimeProject("stemmio-edit-pipeline-layout-e2e-", {
     "runtime-report.html": SINGLE_PATH_HTML,
   }, async ({ page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
@@ -4986,7 +4986,7 @@ test("accepted Canvas text, style and structure edits each apply once", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   test.setTimeout(180_000);
-  await withRuntimeProject("pageroot-edit-pipeline-apply-e2e-", {
+  await withRuntimeProject("stemmio-edit-pipeline-apply-e2e-", {
     "runtime-report.html": SINGLE_PATH_HTML,
   }, async ({ electronApp, page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
@@ -5037,7 +5037,7 @@ test("accepted Canvas text, style and structure edits each apply once", {
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="pipeline-first"]')).toHaveCount(2);
     const firstIds = await frame.locator('[data-native-case="pipeline-first"]')
-      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id")));
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-stemmio-id")));
     expect(new Set(firstIds).size).toBe(2);
 
     await resetPipelineCounters(page);

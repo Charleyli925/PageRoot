@@ -1,4 +1,4 @@
-// Record provenance answers "who produced this fact" for every record PageRoot
+// Record provenance answers "who produced this fact" for every record Stemmio
 // writes. It is authored by the writer and never accepted from a caller, so a
 // renderer or an AI attempt cannot claim an identity it does not have.
 //

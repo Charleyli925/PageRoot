@@ -2,13 +2,13 @@ import { expect, test } from "@playwright/test";
 
 import {
   activateNativeEdit,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   mkdirSync,
   mkdtempSync,
   path,
   removeValidatedTemporaryDirectory,
-  stopPageRoot,
+  stopStemmio,
   tmpdir,
   writeFileSync,
 } from "./electron-native-harness.mjs";
@@ -34,7 +34,7 @@ async function withRuntimeProject(prefix, files, run) {
     isolatedUserData: null,
   };
   try {
-    Object.assign(session, await launchPageRoot({
+    Object.assign(session, await launchStemmio({
       activeSourcePath: sourcePath,
     }));
     await run({
@@ -45,7 +45,7 @@ async function withRuntimeProject(prefix, files, run) {
     });
   } finally {
     if (session.electronApp && session.isolatedUserData) {
-      await stopPageRoot(session.electronApp, session.isolatedUserData);
+      await stopStemmio(session.electronApp, session.isolatedUserData);
     }
     removeValidatedTemporaryDirectory(sourceDirectory, prefix);
   }
@@ -54,22 +54,22 @@ async function withRuntimeProject(prefix, files, run) {
 async function enableContinuityProbe(page) {
   await expect.poll(() => page.evaluate(() => ({
     editor: Boolean(document.querySelector('[data-testid="html-canvas-editor"]')),
-    enable: typeof window.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__,
+    enable: typeof window.__STEMMIO_ENABLE_RUNTIME_CONTINUITY__,
   })), { timeout: 30_000 }).toEqual({
     editor: true,
     enable: "function",
   });
-  await page.evaluate(() => window.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__());
+  await page.evaluate(() => window.__STEMMIO_ENABLE_RUNTIME_CONTINUITY__());
 }
 
 async function continuitySummary(page) {
-  return page.evaluate(() => window.__PAGEROOT_SUMMARIZE_RUNTIME_CONTINUITY__());
+  return page.evaluate(() => window.__STEMMIO_SUMMARIZE_RUNTIME_CONTINUITY__());
 }
 
 test("clearing the Active iframe fails the editing canary and restoring it recovers", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  await withRuntimeProject("pageroot-seeded-iframe-e2e-", {
+  await withRuntimeProject("stemmio-seeded-iframe-e2e-", {
     "runtime-report.html": STATIC_PAGE,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "seeded-fault");
@@ -84,7 +84,7 @@ test("clearing the Active iframe fails the editing canary and restoring it recov
       if (!iframe?.parentElement) {
         throw new Error("Active iframe is missing before the seeded fault.");
       }
-      window.__PAGEROOT_SEEDED_IFRAME__ = {
+      window.__STEMMIO_SEEDED_IFRAME__ = {
         iframe,
         parent: iframe.parentElement,
         next: iframe.nextSibling,
@@ -94,7 +94,7 @@ test("clearing the Active iframe fails the editing canary and restoring it recov
     await expect.poll(async () => (await continuitySummary(page)).missingVisibleFrame).toBe(true);
 
     await page.evaluate(() => {
-      const seeded = window.__PAGEROOT_SEEDED_IFRAME__;
+      const seeded = window.__STEMMIO_SEEDED_IFRAME__;
       if (!seeded?.iframe || !seeded.parent) {
         throw new Error("Seeded Active iframe cannot be restored.");
       }
@@ -108,7 +108,7 @@ test("clearing the Active iframe fails the editing canary and restoring it recov
 test("creating a Candidate iframe during edit fails the editing canary and removing it recovers", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  await withRuntimeProject("pageroot-seeded-candidate-e2e-", {
+  await withRuntimeProject("stemmio-seeded-candidate-e2e-", {
     "runtime-report.html": STATIC_PAGE,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "seeded-fault");

@@ -2,6 +2,53 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+// Keep the desktop parser self-contained so it can be loaded from app.asar.
+// The Bridge receives the canonical shared/product-identity.mjs as an
+// extraResource; tests pin these values to the same frozen contract.
+const PRODUCT_DISPLAY_NAME_ZH = "源页";
+const PRODUCT_NAME = "Stemmio";
+const PRODUCT_PREVIEW_NAME = "Stemmio Developer Preview";
+const PRODUCT_SOURCE_DIRECTORY_NAME = "Stemmio Development";
+const PRODUCT_STABLE_DIRECTORY_NAME = "Stemmio";
+const PRODUCT_PREVIEW_DIRECTORY_NAME = PRODUCT_PREVIEW_NAME;
+const PRODUCT_PROJECTS_DIRECTORY_NAME = "项目";
+const PRODUCT_PROJECT_RECORDS_DIRECTORY_NAME = "项目记录";
+const PRODUCT_SESSION_DIRECTORY_NAME = "chromium";
+const PRODUCT_AGENTS_DIRECTORY_NAME = "agents";
+const PRODUCT_RECOVERY_JOURNALS_DIRECTORY_NAME = "recovery-journals-v1";
+const PRODUCT_ENV = Object.freeze({
+  RUNTIME_CHANNEL: "STEMMIO_RUNTIME_CHANNEL",
+  E2E: "STEMMIO_E2E",
+  E2E_USER_DATA_DIR: "STEMMIO_E2E_USER_DATA_DIR",
+  E2E_FOREGROUND: "STEMMIO_E2E_FOREGROUND",
+  E2E_ROOT: "STEMMIO_E2E_ROOT",
+  WORKSPACE: "STEMMIO_WORKSPACE",
+  PROJECT_FILES_ROOT: "STEMMIO_PROJECT_FILES_ROOT",
+  AGENTS_ROOT: "STEMMIO_AGENTS_ROOT",
+  LOGS_ROOT: "STEMMIO_LOGS_ROOT",
+  EXPECTED_PRODUCT_NAME: "STEMMIO_EXPECTED_PRODUCT_NAME",
+});
+
+function productDirectoryName(channel) {
+  switch (String(channel || "").trim().toLowerCase()) {
+    case "stable":
+      return PRODUCT_STABLE_DIRECTORY_NAME;
+    case "preview":
+      return PRODUCT_PREVIEW_DIRECTORY_NAME;
+    case "source":
+      return PRODUCT_SOURCE_DIRECTORY_NAME;
+    default:
+      return null;
+  }
+}
+
+function productApplicationName(channel) {
+  const normalized = String(channel || "").trim().toLowerCase();
+  if (normalized === "preview") return PRODUCT_PREVIEW_NAME;
+  if (normalized === "stable") return PRODUCT_NAME;
+  return PRODUCT_DISPLAY_NAME_ZH;
+}
+
 export const RUNTIME_ENVIRONMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_ENVIRONMENT_FILE_NAME = "runtime-environment.json";
 export const RUNTIME_CHANNELS = Object.freeze([
@@ -83,7 +130,7 @@ export function resolveRuntimeChannel({
   allowEnvironmentOverride = true,
   readFile = readFileSync,
 } = {}) {
-  const explicit = String(environment?.PAGEROOT_RUNTIME_CHANNEL ?? "").trim();
+  const explicit = String(environment?.[PRODUCT_ENV.RUNTIME_CHANNEL] ?? "").trim();
   if (explicit && allowEnvironmentOverride) return normalizeChannel(explicit);
 
   const markerPath = path.join(
@@ -123,13 +170,6 @@ function configuredPath(environment, name, fallback, { basePath, label }) {
   return resolved;
 }
 
-function configuredStablePath(environment, name, fallback) {
-  const value = String(environment?.[name] ?? "").trim();
-  // Stable keeps the pre-isolation behavior: an explicit path wins and is
-  // resolved exactly as Main used to resolve it, including relative values.
-  return value ? path.resolve(value) : fallback;
-}
-
 function isInside(candidate, root) {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return relative === "" || (
@@ -159,74 +199,65 @@ export function createRuntimeEnvironment({
     const sessionDataPath = path.join(isolatedRoot, "chromium");
     const projectFilesRoot = configuredPath(
       environment,
-      "HTML_AI_PROJECT_FILES_ROOT",
+      PRODUCT_ENV.PROJECT_FILES_ROOT,
       path.join(isolatedRoot, "project-files"),
-      { basePath: isolatedRoot, label: "HTML_AI_PROJECT_FILES_ROOT" },
+      { basePath: isolatedRoot, label: PRODUCT_ENV.PROJECT_FILES_ROOT },
     );
     const workspacePath = configuredPath(
       environment,
-      "HTML_AI_WORKSPACE",
+      PRODUCT_ENV.WORKSPACE,
       path.join(isolatedRoot, "workspace"),
-      { basePath: isolatedRoot, label: "HTML_AI_WORKSPACE" },
+      { basePath: isolatedRoot, label: PRODUCT_ENV.WORKSPACE },
     );
     const agentsRoot = configuredPath(
       environment,
-      "HTML_AI_AGENTS_ROOT",
-      path.join(isolatedRoot, "agents"),
-      { basePath: isolatedRoot, label: "HTML_AI_AGENTS_ROOT" },
+      PRODUCT_ENV.AGENTS_ROOT,
+      path.join(isolatedRoot, PRODUCT_AGENTS_DIRECTORY_NAME),
+      { basePath: isolatedRoot, label: PRODUCT_ENV.AGENTS_ROOT },
     );
     const logsPath = configuredPath(
       environment,
-      "PAGEROOT_LOGS_ROOT",
+      PRODUCT_ENV.LOGS_ROOT,
       path.join(isolatedRoot, "logs"),
-      { basePath: isolatedRoot, label: "PAGEROOT_LOGS_ROOT" },
+      { basePath: isolatedRoot, label: PRODUCT_ENV.LOGS_ROOT },
     );
     return Object.freeze({
       channel: normalizedChannel,
-      applicationName: String(environment?.PAGEROOT_EXPECTED_PRODUCT_NAME || "源页").trim() || "源页",
+      applicationName: String(environment?.[PRODUCT_ENV.EXPECTED_PRODUCT_NAME] || "源页").trim() || "源页",
       userDataPath,
       sessionDataPath,
       projectFilesRoot,
       workspacePath,
       agentsRoot,
-      recoveryJournalPath: path.join(userDataPath, "recovery-journals-v1"),
+      recoveryJournalPath: path.join(userDataPath, PRODUCT_RECOVERY_JOURNALS_DIRECTORY_NAME),
       logsPath,
     });
   }
 
-  const directoryName = normalizedChannel === "preview"
-    ? "PageRoot Developer Preview"
-    : normalizedChannel === "source"
-      ? "PageRoot Development"
-      : "PageRoot";
+  const directoryName = productDirectoryName(normalizedChannel);
   const userDataPath = path.join(appDataRoot, directoryName);
   const documentsPathForChannel = path.join(documentsRoot, directoryName);
-  const defaultProjectFilesRoot = path.join(documentsPathForChannel, "项目");
-  const defaultWorkspacePath = path.join(documentsPathForChannel, "项目记录");
-  const projectFilesRoot = normalizedChannel === "stable"
-    ? configuredStablePath(environment, "HTML_AI_PROJECT_FILES_ROOT", defaultProjectFilesRoot)
+  const defaultProjectFilesRoot = path.join(documentsPathForChannel, PRODUCT_PROJECTS_DIRECTORY_NAME);
+  const defaultWorkspacePath = path.join(documentsPathForChannel, PRODUCT_PROJECT_RECORDS_DIRECTORY_NAME);
+  const projectFilesRoot = normalizedChannel === "source"
+    ? configuredPath(environment, PRODUCT_ENV.PROJECT_FILES_ROOT, defaultProjectFilesRoot, {
+      label: PRODUCT_ENV.PROJECT_FILES_ROOT,
+    })
     : defaultProjectFilesRoot;
-  const workspacePath = normalizedChannel === "stable"
-    ? configuredStablePath(environment, "HTML_AI_WORKSPACE", defaultWorkspacePath)
+  const workspacePath = normalizedChannel === "source"
+    ? configuredPath(environment, PRODUCT_ENV.WORKSPACE, defaultWorkspacePath, {
+      label: PRODUCT_ENV.WORKSPACE,
+    })
     : defaultWorkspacePath;
   return Object.freeze({
     channel: normalizedChannel,
-    applicationName: normalizedChannel === "preview"
-      ? "PageRoot Developer Preview"
-      : normalizedChannel === "stable"
-        ? "PageRoot"
-        : "源页",
+    applicationName: productApplicationName(normalizedChannel),
     userDataPath,
-    // Keep the formal app's existing Electron session location unchanged;
-    // only Preview and isolated test channels receive an explicit chromium/
-    // child directory.
-    sessionDataPath: normalizedChannel === "preview"
-      ? path.join(userDataPath, "chromium")
-      : userDataPath,
+    sessionDataPath: path.join(userDataPath, PRODUCT_SESSION_DIRECTORY_NAME),
     projectFilesRoot,
     workspacePath,
-    agentsRoot: path.join(userDataPath, "agents"),
-    recoveryJournalPath: path.join(userDataPath, "recovery-journals-v1"),
+    agentsRoot: path.join(userDataPath, PRODUCT_AGENTS_DIRECTORY_NAME),
+    recoveryJournalPath: path.join(userDataPath, PRODUCT_RECOVERY_JOURNALS_DIRECTORY_NAME),
     logsPath: path.join(logsRoot, directoryName),
   });
 }

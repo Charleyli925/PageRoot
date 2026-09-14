@@ -28,8 +28,8 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
   }
   const configuration = JSON.stringify({
     markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-    stableIdAttribute: "data-pageroot-id",
-    scriptStubAttribute: "data-pageroot-edit-runtime-script",
+    stableIdAttribute: "data-stemmio-id",
+    scriptStubAttribute: "data-stemmio-edit-runtime-script",
     disabledScriptAttribute: "data-html-canvas-disabled-script",
     originalScriptTypeAttribute: "data-html-canvas-original-script-type",
     missingAttributeValue: "__html_canvas_missing__",

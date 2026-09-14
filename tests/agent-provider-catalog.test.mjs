@@ -8,7 +8,7 @@ import { readUiPreferences, recordUiWorkspacePreferences } from "../desktop/ui-p
 import {
   AgentCatalogState,
   CODEX_AGENT_PROVIDER,
-  PAGEROOT_AGENT_PROVIDER,
+  STEMMIO_AGENT_PROVIDER,
   QODER_AGENT_PROVIDER,
   agentProviderCardsFromCatalog,
   defaultAgentProviders,
@@ -51,18 +51,18 @@ test("Codex recovery distinguishes local authentication from protocol and networ
 
 test("remembering a credential requires a positive saved receipt, not an empty or partial response", async () => {
   const catalog = new AgentCatalogState({ bridgeClient: { async preflightAgent() {} } });
-  catalog.holdRememberedCredential("pageroot", { apiKey: "synthetic-key" });
+  catalog.holdRememberedCredential("stemmio", { apiKey: "synthetic-key" });
   for (const receipt of [undefined, {}, { ok: true, remembered: false }]) {
-    await catalog.retryRememberedCredential("pageroot", async () => receipt);
-    assert.equal(catalog.credentialPersist("pageroot").status, "failed");
+    await catalog.retryRememberedCredential("stemmio", async () => receipt);
+    assert.equal(catalog.credentialPersist("stemmio").status, "failed");
   }
-  await catalog.retryRememberedCredential("pageroot", async () => ({ ok: true, remembered: true }));
-  assert.equal(catalog.credentialPersist("pageroot").status, "saved");
+  await catalog.retryRememberedCredential("stemmio", async () => ({ ok: true, remembered: true }));
+  assert.equal(catalog.credentialPersist("stemmio").status, "saved");
   catalog.dispose();
 });
 
 test("non-default DeepSeek configuration survives restart and is frozen into the next actual send", async (t) => {
-  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-provider-preferences-"));
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-provider-preferences-"));
   t.after(() => rm(userDataPath, { recursive: true, force: true }));
   const preferencesPort = {
     get: () => readUiPreferences({ userDataPath }),
@@ -82,7 +82,7 @@ test("non-default DeepSeek configuration survives restart and is frozen into the
     },
   };
   const first = new AgentCatalogState(options);
-  const deepseek = first.freezeProviderSelection("pageroot");
+  const deepseek = first.freezeProviderSelection("stemmio");
   first.selectReasoning("high", deepseek);
   await first.saveConfiguration();
   assert.equal(first.freezeSelected().providerId, "codex");
@@ -90,7 +90,7 @@ test("non-default DeepSeek configuration survives restart and is frozen into the
   first.dispose();
   const reopened = new AgentCatalogState(options);
   await reopened.saveConfiguration();
-  const card = agentProviderCardsFromCatalog(reopened.getSnapshot()).find((item) => item.selection.providerId === "pageroot");
+  const card = agentProviderCardsFromCatalog(reopened.getSnapshot()).find((item) => item.selection.providerId === "stemmio");
   assert.equal(card.selection.reasoning.requested, "high");
   assert.equal(reopened.freezeSelected().providerId, "codex");
   reopened.select(card.selection);
@@ -103,19 +103,19 @@ test("non-default DeepSeek configuration survives restart and is frozen into the
 test("the shared Agent chooser exposes 源页 Agent plus both ACP providers without unverified built-ins", () => {
   assert.deepEqual(
     defaultAgentProviders().map(({ providerId }) => providerId),
-    ["pageroot", "qoder", "codex"],
+    ["stemmio", "qoder", "codex"],
   );
-  assert.equal(PAGEROOT_AGENT_PROVIDER.runtimeId, "http");
-  assert.equal(PAGEROOT_AGENT_PROVIDER.securityProfile, "client-mediated");
-  assert.equal(PAGEROOT_AGENT_PROVIDER.installable, false);
-  assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.credentialKind, "api-token");
-  assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.logoSrc, "./brand-logo.png");
-  assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.supportsReasoning, true);
-  assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.reasoningChoices, undefined);
+  assert.equal(STEMMIO_AGENT_PROVIDER.runtimeId, "http");
+  assert.equal(STEMMIO_AGENT_PROVIDER.securityProfile, "client-mediated");
+  assert.equal(STEMMIO_AGENT_PROVIDER.installable, false);
+  assert.equal(STEMMIO_AGENT_PROVIDER.presentation.credentialKind, "api-token");
+  assert.equal(STEMMIO_AGENT_PROVIDER.presentation.logoSrc, "./brand-logo.png");
+  assert.equal(STEMMIO_AGENT_PROVIDER.presentation.supportsReasoning, true);
+  assert.equal(STEMMIO_AGENT_PROVIDER.presentation.reasoningChoices, undefined);
   assert.notEqual(QODER_AGENT_PROVIDER.presentation.supportsReasoning, true);
   assert.notEqual(CODEX_AGENT_PROVIDER.presentation.supportsReasoning, true);
   assert.deepEqual(
-    PAGEROOT_AGENT_PROVIDER.presentation.vendors.map(({ id }) => id),
+    STEMMIO_AGENT_PROVIDER.presentation.vendors.map(({ id }) => id),
     ["deepseek", "custom"],
   );
   assert.equal(
@@ -138,17 +138,17 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers with
     })[0].presentation.availability({ status: "unavailable", reason: "account-capacity" }).statusLabel,
     "连接失败",
   );
-  assert.equal(PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_BALANCE_INSUFFICIENT"), "account-capacity");
-  assert.equal(PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_MODEL_ACCESS_DENIED"), "model-unavailable");
+  assert.equal(STEMMIO_AGENT_PROVIDER.failureReason("AGENT_BALANCE_INSUFFICIENT"), "account-capacity");
+  assert.equal(STEMMIO_AGENT_PROVIDER.failureReason("AGENT_MODEL_ACCESS_DENIED"), "model-unavailable");
   assert.equal(
-    PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_ENDPOINT_REGION_MISMATCH"),
+    STEMMIO_AGENT_PROVIDER.failureReason("AGENT_ENDPOINT_REGION_MISMATCH"),
     "endpoint-region-mismatch",
   );
   assert.equal(
     agentProviderCardsFromCatalog({
       providers: {
-        pageroot: {
-          ...PAGEROOT_AGENT_PROVIDER,
+        stemmio: {
+          ...STEMMIO_AGENT_PROVIDER,
           availability: { status: "unavailable", reason: "endpoint-region-mismatch" },
         },
       },
@@ -720,7 +720,7 @@ test("diagnosis is side-effect free and does not create a preflight ticket or mu
 });
 
 test("weak diagnosis cannot clear a stronger use-time service failure", async () => {
-  const selected = freezeAgentSelection(PAGEROOT_AGENT_PROVIDER.selection);
+  const selected = freezeAgentSelection(STEMMIO_AGENT_PROVIDER.selection);
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() { return { status: "ready" }; },
@@ -740,7 +740,7 @@ test("weak diagnosis cannot clear a stronger use-time service failure", async ()
         };
       },
     },
-    providers: [PAGEROOT_AGENT_PROVIDER],
+    providers: [STEMMIO_AGENT_PROVIDER],
     selected,
     clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
   });
@@ -885,25 +885,25 @@ test("selectModel changes only the selected model identity", () => {
     providers: [QODER_AGENT_PROVIDER],
     selected: QODER_AGENT_PROVIDER.selection,
   });
-  const next = catalog.selectModel("qoder:PageRoot-E2E");
+  const next = catalog.selectModel("qoder:Stemmio-E2E");
   assert.equal(next.providerId, "qoder");
   assert.equal(next.runtimeId, "acp");
-  assert.equal(next.requestedModelId, "qoder:PageRoot-E2E");
-  assert.equal(catalog.freezeSelected().requestedModelId, "qoder:PageRoot-E2E");
+  assert.equal(next.requestedModelId, "qoder:Stemmio-E2E");
+  assert.equal(catalog.freezeSelected().requestedModelId, "qoder:Stemmio-E2E");
 });
 
-test("selectReasoning changes only PageRoot thinking depth", () => {
+test("selectReasoning changes only Stemmio thinking depth", () => {
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() {
         return { status: "ready" };
       },
     },
-    providers: [PAGEROOT_AGENT_PROVIDER],
-    selected: PAGEROOT_AGENT_PROVIDER.selection,
+    providers: [STEMMIO_AGENT_PROVIDER],
+    selected: STEMMIO_AGENT_PROVIDER.selection,
   });
   const next = catalog.selectReasoning("low");
-  assert.equal(next.providerId, "pageroot");
+  assert.equal(next.providerId, "stemmio");
   assert.equal(next.runtimeId, "http");
   assert.deepEqual(next.reasoning, {
     requested: "low",
@@ -937,7 +937,7 @@ test("configuration targets its provider even after a default switch, and reject
 test("Token replacement publishes atomically, clears old model state, and can disconnect", async () => {
   const requests = [];
   let failNext = false;
-  const initial = PAGEROOT_AGENT_PROVIDER.selection;
+  const initial = STEMMIO_AGENT_PROVIDER.selection;
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() { throw new Error("not used"); },
@@ -957,24 +957,24 @@ test("Token replacement publishes atomically, clears old model state, and can di
           selection: {
             ...initial,
             resolvedModelId: request.vendorId === "openai"
-              ? "pageroot:gpt-5"
-              : "pageroot:deepseek-v4-pro",
+              ? "stemmio:gpt-5"
+              : "stemmio:deepseek-v4-pro",
           },
           models: [{
-            id: request.vendorId === "openai" ? "pageroot:gpt-5" : "pageroot:deepseek-v4-pro",
+            id: request.vendorId === "openai" ? "stemmio:gpt-5" : "stemmio:deepseek-v4-pro",
             isDefault: true,
             reasoningChoices: [{ id: "auto", label: "自动" }],
           }],
         };
       },
     },
-    providers: [PAGEROOT_AGENT_PROVIDER],
+    providers: [STEMMIO_AGENT_PROVIDER],
     selected: initial,
     clock: { now: () => 10 },
   });
 
   await catalog.connectWithApiKey(initial, "sk-old", { vendorId: "deepseek" });
-  assert.equal(catalog.freezeSelected().resolvedModelId, "pageroot:deepseek-v4-pro");
+  assert.equal(catalog.freezeSelected().resolvedModelId, "stemmio:deepseek-v4-pro");
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
   assert.equal(catalog.provider().diagnostic.readiness, "ready");
   assert.equal(catalog.provider().diagnostic.facts.service.source, "preflight");
@@ -985,12 +985,12 @@ test("Token replacement publishes atomically, clears old model state, and can di
     catalog.connectWithApiKey(catalog.freezeSelected(), "sk-bad", { vendorId: "openai" }),
     (error) => error?.code === "AGENT_AUTH_REQUIRED",
   );
-  assert.equal(catalog.freezeSelected().resolvedModelId, "pageroot:deepseek-v4-pro");
+  assert.equal(catalog.freezeSelected().resolvedModelId, "stemmio:deepseek-v4-pro");
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
   failNext = false;
   await catalog.connectWithApiKey(catalog.freezeSelected(), "sk-new", { vendorId: "openai" });
-  assert.equal(catalog.freezeSelected().resolvedModelId, "pageroot:gpt-5");
-  assert.deepEqual(catalog.provider().models.map((model) => model.id), ["pageroot:gpt-5"]);
+  assert.equal(catalog.freezeSelected().resolvedModelId, "stemmio:gpt-5");
+  assert.deepEqual(catalog.provider().models.map((model) => model.id), ["stemmio:gpt-5"]);
   await catalog.disconnectApiKey(catalog.freezeSelected());
   assert.equal(catalog.availability().status, "auth-required");
   assert.equal(catalog.provider().diagnostic.readiness, "auth-required");
@@ -1001,7 +1001,7 @@ test("Token replacement publishes atomically, clears old model state, and can di
 });
 
 test("a sidebar pending default is adopted only after that service is ready", async () => {
-  const pageroot = PAGEROOT_AGENT_PROVIDER.selection;
+  const stemmio = STEMMIO_AGENT_PROVIDER.selection;
   const qoder = QODER_AGENT_PROVIDER.selection;
   const catalog = new AgentCatalogState({
     bridgeClient: {
@@ -1014,11 +1014,11 @@ test("a sidebar pending default is adopted only after that service is ready", as
           baseUrl: "https://api.deepseek.com/v1",
           installationDigest: `sha256:${"a".repeat(64)}`,
           selection: {
-            ...pageroot,
-            resolvedModelId: "pageroot:deepseek-v4-pro",
+            ...stemmio,
+            resolvedModelId: "stemmio:deepseek-v4-pro",
           },
           models: [{
-            id: "pageroot:deepseek-v4-pro",
+            id: "stemmio:deepseek-v4-pro",
             isDefault: true,
             reasoningChoices: [{ id: "auto", label: "自动" }],
           }],
@@ -1028,32 +1028,32 @@ test("a sidebar pending default is adopted only after that service is ready", as
         return { status: "ready", preflightId: "unused" };
       },
     },
-    providers: [QODER_AGENT_PROVIDER, PAGEROOT_AGENT_PROVIDER],
+    providers: [QODER_AGENT_PROVIDER, STEMMIO_AGENT_PROVIDER],
     selected: qoder,
     clock: { now: () => 10 },
   });
 
-  catalog.queuePendingDefault(pageroot);
+  catalog.queuePendingDefault(stemmio);
   assert.equal(catalog.freezeSelected().providerId, "qoder");
-  assert.equal(catalog.displaySelection()?.providerId, "pageroot");
+  assert.equal(catalog.displaySelection()?.providerId, "stemmio");
   assert.notEqual(catalog.displayAvailability().status, "ready");
-  assert.equal(catalog.presentation().displayName, PAGEROOT_AGENT_PROVIDER.presentation.displayName);
+  assert.equal(catalog.presentation().displayName, STEMMIO_AGENT_PROVIDER.presentation.displayName);
   assert.equal(catalog.readyPendingDefault(), null);
-  await catalog.connectWithApiKey(pageroot, "sk-secret", { vendorId: "deepseek" });
+  await catalog.connectWithApiKey(stemmio, "sk-secret", { vendorId: "deepseek" });
   assert.equal(catalog.freezeSelected().providerId, "qoder");
-  assert.equal(catalog.readyPendingDefault()?.providerId, "pageroot");
+  assert.equal(catalog.readyPendingDefault()?.providerId, "stemmio");
   assert.equal(
     catalog.peekPendingDefaultIntent()?.validatedSelection?.resolvedModelId,
-    "pageroot:deepseek-v4-pro",
+    "stemmio:deepseek-v4-pro",
   );
   catalog.select(catalog.readyPendingDefault());
   catalog.clearPendingDefault();
-  assert.equal(catalog.freezeSelected().providerId, "pageroot");
+  assert.equal(catalog.freezeSelected().providerId, "stemmio");
   assert.equal(catalog.pendingDefault(), null);
 });
 
 test("updating installation digest or models does not clear connection or credential flags", async () => {
-  const initial = PAGEROOT_AGENT_PROVIDER.selection;
+  const initial = STEMMIO_AGENT_PROVIDER.selection;
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async setAgentSessionCredential(request) {
@@ -1066,10 +1066,10 @@ test("updating installation digest or models does not clear connection or creden
           installationDigest: `sha256:${"a".repeat(64)}`,
           selection: {
             ...initial,
-            resolvedModelId: "pageroot:deepseek-v4-pro",
+            resolvedModelId: "stemmio:deepseek-v4-pro",
           },
           models: [{
-            id: "pageroot:deepseek-v4-pro",
+            id: "stemmio:deepseek-v4-pro",
             isDefault: true,
             reasoningChoices: [{ id: "auto", label: "自动" }],
           }],
@@ -1081,19 +1081,19 @@ test("updating installation digest or models does not clear connection or creden
           preflightId: "ticket_digest",
           selection: {
             ...initial,
-            resolvedModelId: "pageroot:deepseek-v4-pro",
+            resolvedModelId: "stemmio:deepseek-v4-pro",
           },
           expiresAt: new Date(20_000).toISOString(),
           installationDigest: `sha256:${"b".repeat(64)}`,
           models: [{
-            id: "pageroot:deepseek-v4-flash",
+            id: "stemmio:deepseek-v4-flash",
             isDefault: true,
             reasoningChoices: [{ id: "auto", label: "自动" }],
           }],
         };
       },
     },
-    providers: [PAGEROOT_AGENT_PROVIDER],
+    providers: [STEMMIO_AGENT_PROVIDER],
     selected: initial,
     clock: { now: () => 10 },
   });
@@ -1109,7 +1109,7 @@ test("updating installation digest or models does not clear connection or creden
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
   assert.equal(catalog.provider().installable, false);
   assert.equal(catalog.provider().installationDigest, `sha256:${"b".repeat(64)}`);
-  assert.deepEqual(catalog.provider().models.map((model) => model.id), ["pageroot:deepseek-v4-flash"]);
+  assert.deepEqual(catalog.provider().models.map((model) => model.id), ["stemmio:deepseek-v4-flash"]);
 });
 
 test("disabled providers stay disconnected after a ready diagnose and cannot preflight", async () => {
@@ -1423,7 +1423,7 @@ test("cancelAccessOperation withdraws the matching pending default", async () =>
 });
 
 test("credential persist failure survives a catalog refresh", async () => {
-  const pageroot = PAGEROOT_AGENT_PROVIDER.selection;
+  const stemmio = STEMMIO_AGENT_PROVIDER.selection;
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async preflightAgent() { return { status: "ready" }; },
@@ -1433,7 +1433,7 @@ test("credential persist failure survives a catalog refresh", async () => {
       async agentProviders() {
         return {
           providers: [{
-            providerId: "pageroot",
+            providerId: "stemmio",
             installable: false,
             installState: "idle",
             connection: null,
@@ -1443,21 +1443,21 @@ test("credential persist failure survives a catalog refresh", async () => {
         };
       },
     },
-    providers: [PAGEROOT_AGENT_PROVIDER],
-    selected: pageroot,
+    providers: [STEMMIO_AGENT_PROVIDER],
+    selected: stemmio,
   });
-  catalog.holdRememberedCredential("pageroot", { apiKey: "sk-secret" });
-  catalog.noteCredentialPersist("pageroot", {
+  catalog.holdRememberedCredential("stemmio", { apiKey: "sk-secret" });
+  catalog.noteCredentialPersist("stemmio", {
     status: "failed",
     reason: "已连接，但新的 API Key 未保存。",
   });
-  await catalog.diagnose(pageroot);
-  assert.equal(catalog.credentialPersist("pageroot")?.status, "failed");
-  assert.match(catalog.credentialPersist("pageroot")?.reason || "", /未保存/u);
+  await catalog.diagnose(stemmio);
+  assert.equal(catalog.credentialPersist("stemmio")?.status, "failed");
+  assert.match(catalog.credentialPersist("stemmio")?.reason || "", /未保存/u);
 });
 
 test("a catalog refresh keeps API-token vendor facts when Bridge has no login connection", async () => {
-  const pageroot = PAGEROOT_AGENT_PROVIDER.selection;
+  const stemmio = STEMMIO_AGENT_PROVIDER.selection;
   const catalog = new AgentCatalogState({
     bridgeClient: {
       async setAgentSessionCredential(request) {
@@ -1470,11 +1470,11 @@ test("a catalog refresh keeps API-token vendor facts when Bridge has no login co
           baseUrl: "https://api.deepseek.com/v1",
           installationDigest: `sha256:${"a".repeat(64)}`,
           selection: {
-            ...pageroot,
-            resolvedModelId: "pageroot:deepseek-v4-pro",
+            ...stemmio,
+            resolvedModelId: "stemmio:deepseek-v4-pro",
           },
           models: [{
-            id: "pageroot:deepseek-v4-pro",
+            id: "stemmio:deepseek-v4-pro",
             isDefault: true,
             reasoningChoices: [{ id: "auto", label: "自动" }],
           }],
@@ -1487,7 +1487,7 @@ test("a catalog refresh keeps API-token vendor facts when Bridge has no login co
       async agentProviders() {
         return {
           providers: [{
-            providerId: "pageroot",
+            providerId: "stemmio",
             installable: false,
             installState: "idle",
             connection: null,
@@ -1497,12 +1497,12 @@ test("a catalog refresh keeps API-token vendor facts when Bridge has no login co
         };
       },
     },
-    providers: [PAGEROOT_AGENT_PROVIDER],
-    selected: pageroot,
+    providers: [STEMMIO_AGENT_PROVIDER],
+    selected: stemmio,
     clock: { now: () => 10 },
   });
-  await catalog.connectWithApiKey(pageroot, "sk-secret", { vendorId: "deepseek" });
-  await catalog.diagnose(pageroot);
+  await catalog.connectWithApiKey(stemmio, "sk-secret", { vendorId: "deepseek" });
+  await catalog.diagnose(stemmio);
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
   assert.equal(catalog.availability().status, "ready");
 });

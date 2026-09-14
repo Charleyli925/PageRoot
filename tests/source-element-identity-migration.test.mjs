@@ -74,7 +74,7 @@ function fileIdentity(information) {
 }
 
 async function rewriteAsLegacyWorkingCopy(imported, html) {
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const manifestPath = path.join(controlRoot, "manifest.json");
   const manifest = await json(manifestPath);
   const workingCopy = manifest.workingCopies.find(
@@ -116,15 +116,15 @@ async function assertMigrationSchema(value) {
 }
 
 test("identity materialization preserves authored bytes outside start-tag insertions", () => {
-  const existingId = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
-  const source = RAW_HTML.replace("<body>", `<body data-pageroot-id=\"${existingId}\">`);
+  const existingId = "sm1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+  const source = RAW_HTML.replace("<body>", `<body data-stemmio-id=\"${existingId}\">`);
   const materialized = materializeSourceElementIdentity(source, {
     randomUUIDFactory: deterministicUuidFactory(),
   });
 
   assert.equal(materialized.changed, true);
   assert.equal(materialized.html.startsWith("<!doctype html>\r\n"), true);
-  assert.equal(materialized.html.includes(`<body data-pageroot-id=\"${existingId}\">`), true);
+  assert.equal(materialized.html.includes(`<body data-stemmio-id=\"${existingId}\">`), true);
   assert.equal(materialized.identity.complete, true);
   assert.equal(
     materialized.identity.totalElementCount,
@@ -133,8 +133,8 @@ test("identity materialization preserves authored bytes outside start-tag insert
   assert.equal(materialized.identity.totalElementCount, 8);
   assert.equal(materialized.addedElementCount, 7);
   assert.equal(
-    materialized.html.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/gu, ""),
-    source.replace(` data-pageroot-id=\"${existingId}\"`, ""),
+    materialized.html.replace(/ data-stemmio-id="sm1_[a-f0-9]{32}"/gu, ""),
+    source.replace(` data-stemmio-id=\"${existingId}\"`, ""),
   );
 
   const repeated = materializeSourceElementIdentity(materialized.html, {
@@ -153,35 +153,35 @@ test("UTF-8 BOM Working Copies still receive html, head and body identities", ()
   });
   assert.equal(materialized.changed, true);
   assert.equal(materialized.html.startsWith("\uFEFF"), true);
-  assert.match(materialized.html, /<html data-pageroot-id="pr1_[a-f0-9]{32}">/u);
-  assert.match(materialized.html, /<head data-pageroot-id="pr1_[a-f0-9]{32}">/u);
-  assert.match(materialized.html, /<body data-pageroot-id="pr1_[a-f0-9]{32}">/u);
+  assert.match(materialized.html, /<html data-stemmio-id="sm1_[a-f0-9]{32}">/u);
+  assert.match(materialized.html, /<head data-stemmio-id="sm1_[a-f0-9]{32}">/u);
+  assert.match(materialized.html, /<body data-stemmio-id="sm1_[a-f0-9]{32}">/u);
   assert.equal(materialized.identity.complete, true);
   assert.equal(materialized.identity.totalElementCount, 8);
 });
 
 test("identity materialization refuses malformed and duplicate authored identities", () => {
-  const duplicate = "pr1_bbbbbbbbbbbb4bbb9bbbbbbbbbbbbbbb";
+  const duplicate = "sm1_bbbbbbbbbbbb4bbb9bbbbbbbbbbbbbbb";
   const invalid = RAW_HTML
-    .replace("<html>", `<html data-pageroot-id=\"${duplicate}\">`)
-    .replace("<head>", `<head data-pageroot-id=\"${duplicate}\">`);
+    .replace("<html>", `<html data-stemmio-id=\"${duplicate}\">`)
+    .replace("<head>", `<head data-stemmio-id=\"${duplicate}\">`);
   assert.throws(
     () => materializeSourceElementIdentity(invalid),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_INVALID"
-      && error.details.issues.some((issue) => issue.code === "PAGEROOT_ID_DUPLICATE_VALUE"),
+      && error.details.issues.some((issue) => issue.code === "STEMMIO_ID_DUPLICATE_VALUE"),
   );
   assert.throws(
     () => materializeSourceElementIdentity(
-      RAW_HTML.replace("<html>", "<html data-pageroot-id=\"customer-value\">"),
+      RAW_HTML.replace("<html>", "<html data-stemmio-id=\"customer-value\">"),
     ),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_INVALID"
-      && error.details.issues.some((issue) => issue.code === "PAGEROOT_ID_INVALID_FORMAT"),
+      && error.details.issues.some((issue) => issue.code === "STEMMIO_ID_INVALID_FORMAT"),
   );
   assert.throws(
     () => materializeSourceElementIdentity(
       RAW_HTML.replace(
         "<html>",
-        "<html data-pageroot-id=\"pr1_1111111111114111811111111111111&#x31;\">",
+        "<html data-stemmio-id=\"sm1_1111111111114111811111111111111&#x31;\">",
       ),
     ),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_INVALID",
@@ -192,10 +192,10 @@ test("an identity-preserving save requires semantic evidence even for pre-identi
   const current = materializeSourceElementIdentity(RAW_HTML, {
     randomUUIDFactory: deterministicUuidFactory(),
   }).html;
-  const newId = "pr1_99999999999949998999999999999999";
+  const newId = "sm1_99999999999949998999999999999999";
   const next = current.replace(
     "</body>",
-    `<br data-pageroot-id="${newId}"></body>`,
+    `<br data-stemmio-id="${newId}"></body>`,
   );
   assert.throws(
     () => materializeIdentityPreservingSave(current, next),
@@ -217,7 +217,7 @@ test("an identity-preserving save requires semantic evidence even for pre-identi
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
       && error.details.missingElementCount === 1,
   );
-  const removedIdentity = next.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/u, "");
+  const removedIdentity = next.replace(/ data-stemmio-id="sm1_[a-f0-9]{32}"/u, "");
   assert.throws(
     () => materializeIdentityPreservingSave(current, removedIdentity),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
@@ -232,13 +232,13 @@ test("fresh sibling identities cannot disguise a retained ID transplant", () => 
   ).html;
   const [firstId, secondId] = inspectSourceElementIdentity(current).elements
     .filter((element) => element.tagName === "p")
-    .map((element) => element.pagerootId);
-  const freshId = "pr1_99999999999949998999999999999999";
+    .map((element) => element.stemmioId);
+  const freshId = "sm1_99999999999949998999999999999999";
   const next = current.replace(
-    `<p data-pageroot-id="${firstId}">first</p><p data-pageroot-id="${secondId}">second</p>`,
-    `<p data-pageroot-id="${freshId}">first</p>`
-      + `<p data-pageroot-id="${firstId}">new</p>`
-      + `<p data-pageroot-id="${secondId}">second</p>`,
+    `<p data-stemmio-id="${firstId}">first</p><p data-stemmio-id="${secondId}">second</p>`,
+    `<p data-stemmio-id="${freshId}">first</p>`
+      + `<p data-stemmio-id="${firstId}">new</p>`
+      + `<p data-stemmio-id="${secondId}">second</p>`,
   );
   assert.throws(
     () => materializeIdentityPreservingSave(current, next),
@@ -268,11 +268,11 @@ test("the binding seal ignores content but detects identity structure drift", ()
   );
   const paragraphIds = inspectSourceElementIdentity(current).elements
     .filter((element) => element.tagName === "p")
-    .map((element) => element.pagerootId);
+    .map((element) => element.stemmioId);
   const swapped = current
-    .replace(paragraphIds[0], "__pageroot_first_id__")
+    .replace(paragraphIds[0], "__stemmio_first_id__")
     .replace(paragraphIds[1], paragraphIds[0])
-    .replace("__pageroot_first_id__", paragraphIds[1]);
+    .replace("__stemmio_first_id__", paragraphIds[1]);
   assert.notEqual(sourceElementIdentityBindingSha256(swapped), currentSeal);
 });
 
@@ -297,18 +297,18 @@ test("an identity-preserving save rejects swapped and transplanted IDs", () => {
   ).html;
   const paragraphIds = inspectSourceElementIdentity(current).elements
     .filter((element) => element.tagName === "p")
-    .map((element) => element.pagerootId);
+    .map((element) => element.stemmioId);
   assert.equal(paragraphIds.length, 2);
   const [firstId, secondId] = paragraphIds;
   const swapped = current
-    .replace(firstId, "__pageroot_first_id__")
+    .replace(firstId, "__stemmio_first_id__")
     .replace(secondId, firstId)
-    .replace("__pageroot_first_id__", secondId);
+    .replace("__stemmio_first_id__", secondId);
   assert.throws(
     () => materializeIdentityPreservingSave(current, swapped),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
       && error.details.bindingIssues.some(
-        (issue) => issue.code === "PAGEROOT_ID_SOURCE_ORDER_CHANGED",
+        (issue) => issue.code === "STEMMIO_ID_SOURCE_ORDER_CHANGED",
       ),
   );
   assert.throws(
@@ -320,11 +320,11 @@ test("an identity-preserving save rejects swapped and transplanted IDs", () => {
   );
 
   const transplanted = current
-    .replace(` data-pageroot-id="${firstId}"`, "")
+    .replace(` data-stemmio-id="${firstId}"`, "")
     .replace(
-      `<p data-pageroot-id="${secondId}">second</p>`,
-      `<p data-pageroot-id="${firstId}">new</p>`
-        + `<p data-pageroot-id="${secondId}">second</p>`,
+      `<p data-stemmio-id="${secondId}">second</p>`,
+      `<p data-stemmio-id="${firstId}">new</p>`
+        + `<p data-stemmio-id="${secondId}">second</p>`,
     );
   assert.throws(
     () => materializeIdentityPreservingSave(current, transplanted),
@@ -340,7 +340,7 @@ test("an exact source-history reorder cannot authorize topology changes without 
     { randomUUIDFactory: deterministicUuidFactory() },
   ).html;
   const paragraphs = [...current.matchAll(
-    /<p data-pageroot-id="pr1_[0-9a-f]{32}">[^<]+<\/p>/gu,
+    /<p data-stemmio-id="sm1_[0-9a-f]{32}">[^<]+<\/p>/gu,
   )].map((match) => match[0]);
   assert.equal(paragraphs.length, 2);
   const beforeBlock = paragraphs.join("");
@@ -367,16 +367,16 @@ test("a new import writes identified Working Copy bytes without changing the ext
   const value = await fixture(t);
   const imported = await importSource(value, "new-project.html", RAW_HTML);
   const managed = await readFile(imported.target.exactSourcePath, "utf8");
-  const manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
+  const manifest = await json(path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"));
   const workingCopy = manifest.workingCopies[0];
   const state = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     workingCopy.stateRelativePath,
   ));
   const snapshot = await readFile(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     manifest.versions[0].snapshotRelativePath,
   ), "utf8");
 
@@ -422,7 +422,7 @@ test("a legacy Working Copy migrates once and records an auditable committed tra
   assert.equal(
     await readFile(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       (await json(legacy.manifestPath)).versions[0].snapshotRelativePath,
     ), "utf8"),
     RAW_HTML,
@@ -444,7 +444,7 @@ test("a complete legacy identity set is adopted without rewriting Working Copy H
   const value = await fixture(t);
   const imported = await importSource(value, "adopt-existing.html", RAW_HTML);
   const before = await readFile(imported.target.exactSourcePath, "utf8");
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const manifest = await json(path.join(controlRoot, "manifest.json"));
   const workingCopy = manifest.workingCopies[0];
   const statePath = path.join(controlRoot, workingCopy.stateRelativePath);
@@ -540,7 +540,7 @@ test("an already migrated Working Copy fails closed after identity loss", async 
   const value = await fixture(t);
   const imported = await importSource(value, "identity-loss.html", RAW_HTML);
   const managed = await readFile(imported.target.exactSourcePath, "utf8");
-  const damaged = managed.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/u, "");
+  const damaged = managed.replace(/ data-stemmio-id="sm1_[a-f0-9]{32}"/u, "");
   await writeFile(imported.target.exactSourcePath, damaged, "utf8");
 
   await assert.rejects(
@@ -574,9 +574,9 @@ test("a normal save cannot swap identities between source elements", async (t) =
   const before = await readFile(imported.target.exactSourcePath, "utf8");
   const [firstId, secondId] = [...inspectSourceElementIdentity(before).claimedIds];
   const swapped = before
-    .replace(firstId, "__pageroot_first_id__")
+    .replace(firstId, "__stemmio_first_id__")
     .replace(secondId, firstId)
-    .replace("__pageroot_first_id__", secondId);
+    .replace("__stemmio_first_id__", secondId);
 
   await assert.rejects(
     value.repository.saveWorkingCopy({

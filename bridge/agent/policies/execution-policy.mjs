@@ -8,13 +8,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { sha256 } from "../../lifecycle-core.mjs";
+import {
+  PROJECT_CONTROL_DIRECTORY_NAME,
+  projectControlPath,
+} from "../../../shared/project-storage-contract.mjs";
 
 export const MAX_HTML_BYTES = 20 * 1024 * 1024;
 export const MAX_PROMPT_BYTES = 256 * 1024;
 export const MAX_COMMENT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 const POLICY_ERROR_NAME = "AgentPolicyError";
-export const AGENT_POLICY_BRAND = Symbol("pageroot-agent-policy");
+export const AGENT_POLICY_BRAND = Symbol("stemmio-agent-policy");
 
 const FINALIZER_PATH = fileURLToPath(
   new URL("../../finalize-attempt.mjs", import.meta.url),
@@ -232,11 +236,11 @@ export function projectRootForRequest(requestRoot, requestId) {
   if (
     path.basename(requestRoot) !== requestId
     || path.basename(requestsRoot) !== "requests"
-    || path.basename(controlRoot) !== ".pageroot"
+    || path.basename(controlRoot) !== PROJECT_CONTROL_DIRECTORY_NAME
   ) {
     throw policyError(
       "REQUEST_LAYOUT_INVALID",
-      "The Request root is not the current PageRoot .pageroot/requests layout.",
+      "The Request root is not the current Stemmio .stemmio/requests layout.",
     );
   }
   return path.dirname(controlRoot);
@@ -301,7 +305,7 @@ export async function assertRuntimeProcessingAuthority(policy) {
   ) {
     throw policyError(
       "RUNTIME_AUTHORITY_DRIFT",
-      "PageRoot no longer authorizes mutations for this Agent Attempt.",
+      "Stemmio no longer authorizes mutations for this Agent Attempt.",
     );
   }
 }
@@ -343,7 +347,7 @@ export async function loadExecutionPolicy(options) {
     throw policyError("REQUEST_ID_INVALID", "The Request root has an invalid Request identity.");
   }
   const projectRoot = projectRootForRequest(requestRoot, requestId);
-  const controlRoot = path.join(projectRoot, ".pageroot");
+  const controlRoot = projectControlPath(projectRoot);
   const requestAuthority = await verifiedJsonFile(
     path.join(requestRoot, "request.json"),
     requestRoot,
@@ -369,7 +373,7 @@ export async function loadExecutionPolicy(options) {
   ) {
     throw policyError(
       "REQUEST_AUTHORITY_MISMATCH",
-      "request.json does not describe one current frozen PageRoot Attempt.",
+      "request.json does not describe one current frozen Stemmio Attempt.",
     );
   }
   const runtimeAuthority = await verifiedJsonFile(
@@ -395,7 +399,7 @@ export async function loadExecutionPolicy(options) {
   ) {
     throw policyError(
       "RUNTIME_AUTHORITY_MISMATCH",
-      "The external runtime authority does not seal this active PageRoot Attempt.",
+      "The external runtime authority does not seal this active Stemmio Attempt.",
     );
   }
   const manifestPath = path.join(requestRoot, "input-manifest.json");
@@ -408,7 +412,7 @@ export async function loadExecutionPolicy(options) {
   if (inputManifestSha256 !== sha256(manifestBytes)) {
     throw policyError(
       "INPUT_MANIFEST_HASH_MISMATCH",
-      "The frozen input manifest does not match PageRoot's external runtime authority.",
+      "The frozen input manifest does not match Stemmio's external runtime authority.",
     );
   }
   let manifest;
@@ -431,7 +435,7 @@ export async function loadExecutionPolicy(options) {
     if (actual !== expected) {
       throw policyError(
         "TASK_IDENTITY_MISMATCH",
-        `${label} does not match the PageRoot task identity.`,
+        `${label} does not match the Stemmio task identity.`,
       );
     }
   };
@@ -450,7 +454,7 @@ export async function loadExecutionPolicy(options) {
   ) {
     throw policyError(
       "INPUT_MANIFEST_SHAPE_MISMATCH",
-      "The Agent execution policy only accepts PageRoot's exact current frozen input manifest shape.",
+      "The Agent execution policy only accepts Stemmio's exact current frozen input manifest shape.",
     );
   }
 

@@ -87,7 +87,7 @@ async function verifiedSourceAgentAttachmentBytes(bridgeClient, sourcePath, comm
 }
 
 function sourceAgentBudgetExceeded(delivery, preflight, html, comments, attachmentBytes = 0) {
-  if (delivery?.selection?.providerId !== "pageroot") return false;
+  if (delivery?.selection?.providerId !== "stemmio") return false;
   const modelId = delivery.selection.resolvedModelId || delivery.selection.requestedModelId;
   const model = (preflight?.models || []).find((entry) => entry?.id === modelId);
   const htmlBytes = new TextEncoder().encode(String(html || "")).byteLength;
@@ -946,7 +946,7 @@ export class RunWorkflow {
     if (commentOutcome) return commentOutcome;
     if (
       frozenAgentDelivery.mode === MANAGED_AGENT_MODE
-      && frozenAgentDelivery.selection?.providerId === "pageroot"
+      && frozenAgentDelivery.selection?.providerId === "stemmio"
       && unsupportedSourceAgentAttachment(comments)
     ) {
       return blocked(
@@ -979,7 +979,7 @@ export class RunWorkflow {
       comments = this.#commentsForSubmission();
       const registeredCommentOutcome = this.#validateComments(comments);
       if (registeredCommentOutcome) return registeredCommentOutcome;
-      const sourceAgentAttachmentBytes = frozenAgentDelivery.selection?.providerId === "pageroot"
+      const sourceAgentAttachmentBytes = frozenAgentDelivery.selection?.providerId === "stemmio"
         ? await verifiedSourceAgentAttachmentBytes(this.#bridgeClient, context.sourcePath, comments)
         : 0;
       if (!this.#isCurrentContext(context)) return stale(context);
@@ -1123,7 +1123,7 @@ export class RunWorkflow {
         );
       }
       if (
-        frozenAgentDelivery.selection?.providerId === "pageroot"
+        frozenAgentDelivery.selection?.providerId === "stemmio"
         && unsupportedSourceAgentAttachment(persistedComments)
       ) {
         throw responseError(
@@ -1145,7 +1145,7 @@ export class RunWorkflow {
         );
       }
       persistedComments = textLocatorValidation.comments;
-      const finalAttachmentBytes = frozenAgentDelivery.selection?.providerId === "pageroot"
+      const finalAttachmentBytes = frozenAgentDelivery.selection?.providerId === "stemmio"
         ? await verifiedSourceAgentAttachmentBytes(
             this.#bridgeClient,
             context.sourcePath,
@@ -2751,7 +2751,7 @@ export class RunWorkflow {
       }
     }
     if (kind === "reconnect") {
-      if (typeof credentials?.restore === "function" && frozen.providerId === "pageroot") {
+      if (typeof credentials?.restore === "function" && frozen.providerId === "stemmio") {
         await credentials.restore().catch(() => null);
       }
       return this.checkAgentUsability(frozen);
@@ -2760,7 +2760,7 @@ export class RunWorkflow {
       return this.startAgentLogout(frozen);
     }
     let disconnect = succeeded({ kind });
-    if (frozen.providerId === "pageroot" && (kind === "disconnect" || kind === "remove-key")) {
+    if (frozen.providerId === "stemmio" && (kind === "disconnect" || kind === "remove-key")) {
       disconnect = await this.disconnectAgentApiKey(frozen);
       if (!["succeeded", "stale"].includes(disconnect.status)) return disconnect;
     }

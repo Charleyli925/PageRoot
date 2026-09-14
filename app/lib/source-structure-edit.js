@@ -11,7 +11,7 @@ function sourceIndex(indexOrHtml) {
 }
 
 function sourceElement(index, elementId, fieldName) {
-  const element = index?.byPagerootId?.get(elementId) ?? null;
+  const element = index?.byStemmioId?.get(elementId) ?? null;
   if (!element || element.type !== "element") {
     throw new TypeError(`${fieldName} must identify one authored source element.`);
   }
@@ -46,9 +46,9 @@ export function identityFreeSourceElementHtml(indexOrHtml, elementId) {
     .filter((element) => (
       element.range.startOffset >= root.range.startOffset
       && element.range.endOffset <= root.range.endOffset
-      && element.pagerootIdAttribute
+      && element.stemmioIdAttribute
     ))
-    .map((element) => element.pagerootIdAttribute.range)
+    .map((element) => element.stemmioIdAttribute.range)
     .sort((left, right) => right.startOffset - left.startOffset);
   let html = root.raw;
   for (const removal of removals) {
@@ -74,9 +74,9 @@ export function createInsertElementOperation(indexOrHtml, options) {
   return {
     ...envelope(index, options.baseRevision, options.operationId),
     type: "insertElement",
-    parent: createSemanticElementPrecondition(index, parent.pagerootId),
+    parent: createSemanticElementPrecondition(index, parent.stemmioId),
     before: before
-      ? createSemanticElementPrecondition(index, before.pagerootId)
+      ? createSemanticElementPrecondition(index, before.stemmioId)
       : null,
     html: options.html,
   };
@@ -95,9 +95,9 @@ export function createDuplicateElementOperation(indexOrHtml, options) {
   return createInsertElementOperation(index, {
     baseRevision: options.baseRevision,
     operationId: options.operationId,
-    parentElementId: parent.pagerootId,
-    beforeElementId: next?.type === "element" ? next.pagerootId : null,
-    html: identityFreeSourceElementHtml(index, target.pagerootId),
+    parentElementId: parent.stemmioId,
+    beforeElementId: next?.type === "element" ? next.stemmioId : null,
+    html: identityFreeSourceElementHtml(index, target.stemmioId),
   });
 }
 
@@ -110,7 +110,7 @@ export function createDeleteElementOperation(indexOrHtml, options) {
   return {
     ...envelope(index, options.baseRevision, options.operationId),
     type: "deleteElement",
-    target: createSemanticElementPrecondition(index, target.pagerootId),
+    target: createSemanticElementPrecondition(index, target.stemmioId),
   };
 }
 
@@ -130,10 +130,10 @@ export function createMoveElementOperation(indexOrHtml, options) {
   return {
     ...envelope(index, options.baseRevision, options.operationId),
     type: "moveElement",
-    target: createSemanticElementPrecondition(index, target.pagerootId),
-    parent: createSemanticElementPrecondition(index, parent.pagerootId),
+    target: createSemanticElementPrecondition(index, target.stemmioId),
+    parent: createSemanticElementPrecondition(index, parent.stemmioId),
     before: before
-      ? createSemanticElementPrecondition(index, before.pagerootId)
+      ? createSemanticElementPrecondition(index, before.stemmioId)
       : null,
   };
 }

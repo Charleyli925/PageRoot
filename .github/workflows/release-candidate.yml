@@ -67,13 +67,13 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          PAGEROOT_POSTHOG_TOKEN: ${{ secrets.PAGEROOT_POSTHOG_TOKEN }}
-          PAGEROOT_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DEEPSEEK_API_KEY }}
-          PAGEROOT_SMOKE_ZHIPU_API_KEY: ${{ secrets.PAGEROOT_SMOKE_ZHIPU_API_KEY }}
-          PAGEROOT_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DASHSCOPE_API_KEY }}
-          PAGEROOT_SMOKE_OPENAI_API_KEY: ${{ secrets.PAGEROOT_SMOKE_OPENAI_API_KEY }}
+          STEMMIO_POSTHOG_TOKEN: ${{ secrets.STEMMIO_POSTHOG_TOKEN }}
+          STEMMIO_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.STEMMIO_SMOKE_DEEPSEEK_API_KEY }}
+          STEMMIO_SMOKE_ZHIPU_API_KEY: ${{ secrets.STEMMIO_SMOKE_ZHIPU_API_KEY }}
+          STEMMIO_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.STEMMIO_SMOKE_DASHSCOPE_API_KEY }}
+          STEMMIO_SMOKE_OPENAI_API_KEY: ${{ secrets.STEMMIO_SMOKE_OPENAI_API_KEY }}
         run: |
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD PAGEROOT_POSTHOG_TOKEN PAGEROOT_SMOKE_DEEPSEEK_API_KEY PAGEROOT_SMOKE_ZHIPU_API_KEY PAGEROOT_SMOKE_DASHSCOPE_API_KEY PAGEROOT_SMOKE_OPENAI_API_KEY; do
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD STEMMIO_POSTHOG_TOKEN STEMMIO_SMOKE_DEEPSEEK_API_KEY STEMMIO_SMOKE_ZHIPU_API_KEY STEMMIO_SMOKE_DASHSCOPE_API_KEY STEMMIO_SMOKE_OPENAI_API_KEY; do
             test -n "${!name}" || {
               echo "Required release credential is not configured: $name" >&2
               exit 1
@@ -82,10 +82,10 @@ jobs:
       - name: Verify fixed Agent models through the production chain
         timeout-minutes: 45
         env:
-          PAGEROOT_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DEEPSEEK_API_KEY }}
-          PAGEROOT_SMOKE_ZHIPU_API_KEY: ${{ secrets.PAGEROOT_SMOKE_ZHIPU_API_KEY }}
-          PAGEROOT_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DASHSCOPE_API_KEY }}
-          PAGEROOT_SMOKE_OPENAI_API_KEY: ${{ secrets.PAGEROOT_SMOKE_OPENAI_API_KEY }}
+          STEMMIO_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.STEMMIO_SMOKE_DEEPSEEK_API_KEY }}
+          STEMMIO_SMOKE_ZHIPU_API_KEY: ${{ secrets.STEMMIO_SMOKE_ZHIPU_API_KEY }}
+          STEMMIO_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.STEMMIO_SMOKE_DASHSCOPE_API_KEY }}
+          STEMMIO_SMOKE_OPENAI_API_KEY: ${{ secrets.STEMMIO_SMOKE_OPENAI_API_KEY }}
         run: npm run smoke:agent-vendors:real
       - name: Prove hosted Electron scheduling before product checks
         timeout-minutes: 5
@@ -98,11 +98,11 @@ jobs:
       - name: Assemble and verify the app before release credentials are used
         timeout-minutes: 20
         env:
-          PAGEROOT_SOURCE_GATE_TRUSTED: ${{ steps.source-gate.outputs.trusted }}
-          PAGEROOT_SOURCE_GATE_TREE: ${{ steps.source-gate.outputs.tree_sha }}
-          PAGEROOT_SOURCE_GATE_VERSION: ${{ steps.source-gate.outputs.package_version }}
-          PAGEROOT_POSTHOG_TOKEN: ${{ secrets.PAGEROOT_POSTHOG_TOKEN }}
-          PAGEROOT_POSTHOG_HOST: "https://us.i.posthog.com"
+          STEMMIO_SOURCE_GATE_TRUSTED: ${{ steps.source-gate.outputs.trusted }}
+          STEMMIO_SOURCE_GATE_TREE: ${{ steps.source-gate.outputs.tree_sha }}
+          STEMMIO_SOURCE_GATE_VERSION: ${{ steps.source-gate.outputs.package_version }}
+          STEMMIO_POSTHOG_TOKEN: ${{ secrets.STEMMIO_POSTHOG_TOKEN }}
+          STEMMIO_POSTHOG_HOST: "https://us.i.posthog.com"
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-app-preflight
@@ -124,8 +124,8 @@ jobs:
       - name: Launch and verify the signed app identity before sending bytes to Apple
         timeout-minutes: 5
         env:
-          PAGEROOT_PACKAGED_APP_PATH: ${{ github.workspace }}/output/release-candidate/staged/mac-arm64/PageRoot.app
-          PAGEROOT_TEST_ARCH: arm64
+          STEMMIO_PACKAGED_APP_PATH: ${{ github.workspace }}/output/release-candidate/staged/mac-arm64/Stemmio.app
+          STEMMIO_TEST_ARCH: arm64
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-signed-startup
@@ -148,7 +148,7 @@ jobs:
       - name: Verify the signed and notarized app checkpoint
         timeout-minutes: 5
         env:
-          PAGEROOT_REQUIRE_NOTARIZATION: "1"
+          STEMMIO_REQUIRE_NOTARIZATION: "1"
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-app-verify
@@ -189,7 +189,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-release-app-diagnostics-${{ github.run_attempt }}
+          name: Stemmio-release-app-diagnostics-${{ github.run_attempt }}
           path: |
             output/test-runs
             output/playwright
@@ -200,7 +200,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-release-app-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-release-app-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
           if-no-files-found: warn
           retention-days: 30
@@ -286,7 +286,7 @@ jobs:
       - name: Revalidate the restored signature, notarization and payload
         timeout-minutes: 5
         env:
-          PAGEROOT_REQUIRE_NOTARIZATION: "1"
+          STEMMIO_REQUIRE_NOTARIZATION: "1"
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-app-revalidate
@@ -299,7 +299,7 @@ jobs:
       - name: Package the checkpoint and notarize only the final DMG
         timeout-minutes: 50
         env:
-          PAGEROOT_REQUIRE_NOTARIZATION: "1"
+          STEMMIO_REQUIRE_NOTARIZATION: "1"
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: RNK9RB969G
@@ -315,7 +315,7 @@ jobs:
       - name: Verify final DMG, updater assets and frozen app payload
         timeout-minutes: 10
         env:
-          PAGEROOT_REQUIRE_NOTARIZATION: "1"
+          STEMMIO_REQUIRE_NOTARIZATION: "1"
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-candidate-artifact-verify
@@ -341,7 +341,7 @@ jobs:
         run: >-
           node scripts/package-delivery-report.mjs
           --kind formal
-          --artifact "release/PageRoot-${PACKAGE_VERSION}-arm64.dmg"
+          --artifact "release/Stemmio-${PACKAGE_VERSION}-arm64.dmg"
           --version "$PACKAGE_VERSION"
           --architecture arm64
           --repository "$GITHUB_REPOSITORY"
@@ -378,7 +378,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-release-candidate-diagnostics-${{ github.run_attempt }}
+          name: Stemmio-release-candidate-diagnostics-${{ github.run_attempt }}
           path: |
             output/test-runs
             output/playwright
@@ -389,7 +389,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-release-candidate-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-release-candidate-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/ci-evidence
             output/package-delivery

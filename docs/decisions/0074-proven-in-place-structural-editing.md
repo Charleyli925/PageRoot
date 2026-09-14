@@ -19,7 +19,7 @@ position on ordinary source copy, delete, insert and supported moves. Removing
 the structural Candidate branch without a grant path would insert a copy that
 cannot be edited: ADR 0065 seals the Runtime source-object set before author
 scripts run, so a new DOM node cannot gain edit authority merely by carrying a
-valid `data-pageroot-id`.
+  valid `data-stemmio-id`.
 
 ## Decision
 
@@ -43,7 +43,7 @@ must not run a second source edit.
 
 ### B. Editor-created nodes may receive a controlled grant
 
-Author code still cannot extend the trusted node set. Only PageRoot itself,
+Author code still cannot extend the trusted node set. Only Stemmio itself,
 from one accepted semantic source transaction, may grant this generation's
 edit authority to the exact nodes it created.
 

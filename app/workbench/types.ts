@@ -396,11 +396,11 @@ export type DesktopUpdatesApi = {
 
 declare global {
   interface Window {
-    htmlAIProjects?: DesktopProjectsApi;
-    htmlAIWorkbenchTabs?: DesktopWorkbenchTabsApi;
-    htmlAIIntegrations?: DesktopIntegrationsApi;
-    htmlAIUpdates?: DesktopUpdatesApi;
-    htmlAIEdit?: {
+    stemmioProjects?: DesktopProjectsApi;
+    stemmioWorkbenchTabs?: DesktopWorkbenchTabsApi;
+    stemmioIntegrations?: DesktopIntegrationsApi;
+    stemmioUpdates?: DesktopUpdatesApi;
+    stemmioEdit?: {
       onHistoryRequested: (
         listener: (direction: SourceHistoryDirection) => void,
       ) => () => void;
@@ -408,7 +408,7 @@ declare global {
         direction: SourceHistoryDirection,
       ) => Promise<{ applied: boolean }>;
     };
-    htmlAIRuntime?: {
+    stemmioRuntime?: {
       bridgePort: string;
       bridgeAuthToken: string;
       appVersion: string;
@@ -451,12 +451,12 @@ declare global {
         e2eCanvasCapabilityProbe?: boolean;
       }>;
     };
-    __PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?: Array<() => void>;
-    __PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__?: boolean;
-    __PAGEROOT_E2E_FAIL_NEXT_NATIVE_REBASE__?: boolean;
-    __PAGEROOT_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__?: boolean;
-    __PAGEROOT_HYDRATION_STAGE__?: string;
-    __PAGEROOT_PERFORMANCE_TIMELINE__?: ReadonlyArray<Readonly<{
+    __STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__?: Array<() => void>;
+    __STEMMIO_E2E_FAIL_NEXT_RUNTIME_COMMIT__?: boolean;
+    __STEMMIO_E2E_FAIL_NEXT_NATIVE_REBASE__?: boolean;
+    __STEMMIO_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__?: boolean;
+    __STEMMIO_HYDRATION_STAGE__?: string;
+    __STEMMIO_PERFORMANCE_TIMELINE__?: ReadonlyArray<Readonly<{
       stage: string;
       startTime: number;
       operationId: string | null;

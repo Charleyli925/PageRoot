@@ -8,14 +8,14 @@ import {
   bridgeJson,
   caseSelector,
   chooseClipboardDelivery,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   cpSync,
   createSourceFixture,
   currentEditorFrame,
   existsSync,
   expectCheckpointPersisted,
   fixtureBuffer,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   managedWorkingCopyPath,
   mkdirSync,
@@ -34,7 +34,7 @@ import {
   renameSync,
   sameDesktopSourcePath,
   setTextSelection,
-  stopPageRoot,
+  stopStemmio,
   symlinkSync,
   tmpdir,
   titleStemLocator,
@@ -60,7 +60,7 @@ function identityPreservingCandidateHtml(target, title) {
 test("Electron first launch imports the welcome HTML as V1 and sends its comment to Qoder", {
   tag: ["@gate-smoke","@smoke-project-lifecycle","@smoke-agent"],
 }, async () => {
-  const launched = await launchPageRoot();
+  const launched = await launchStemmio();
   const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
   const welcomeLogoPath = path.join(
     launched.isolatedUserData,
@@ -76,7 +76,7 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     await expect.poll(
       async () => {
         const active = await launched.page.evaluate(
-          () => window.htmlAIProjects?.getActiveProject(),
+          () => window.stemmioProjects?.getActiveProject(),
         );
         managedWelcomePath = String(active?.sourcePath || "");
         return Boolean(
@@ -97,11 +97,11 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     await expect.poll(() => (
       existsSync(welcomePath)
       && existsSync(welcomeLogoPath)
-      && existsSync(path.join(managedWelcomePath, "..", ".pageroot", "manifest.json"))
+      && existsSync(path.join(managedWelcomePath, "..", ".stemmio", "manifest.json"))
     )).toBe(true);
     const projectRoot = path.dirname(managedWelcomePath);
     const manifest = JSON.parse(readFileSync(
-      path.join(projectRoot, ".pageroot", "manifest.json"),
+      path.join(projectRoot, ".stemmio", "manifest.json"),
       "utf8",
     ));
     expect(manifest.versions.map((version) => version.versionId)).toEqual(["ver_0001"]);
@@ -115,20 +115,20 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     const managedWelcome = readFileSync(managedWelcomePath);
     expect(managedWelcome).not.toEqual(originalWelcome);
     const managedSourceIds = [...managedWelcome.toString("utf8").matchAll(
-      /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+      /data-stemmio-id="(sm1_[0-9a-f]{32})"/gu,
     )].map((match) => match[1]);
     expect(managedSourceIds.length).toBeGreaterThan(0);
     expect(new Set(managedSourceIds).size).toBe(managedSourceIds.length);
     const firstVersion = manifest.versions[0];
     expect(readFileSync(path.join(
       projectRoot,
-      ".pageroot",
+      ".stemmio",
       firstVersion.snapshotRelativePath,
     ))).toEqual(originalWelcome);
     const firstWorkingCopy = manifest.workingCopies[0];
     const workingCopyState = JSON.parse(readFileSync(path.join(
       projectRoot,
-      ".pageroot",
+      ".stemmio",
       firstWorkingCopy.stateRelativePath,
     ), "utf8"));
     expect(workingCopyState.sourceElementIdentitySchemaVersion).toBe(1);
@@ -177,7 +177,7 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     expect(changeRequest.requirements.instructions[0].text)
       .toBe("把欢迎页主标题改得更简洁。");
   } finally {
-    await stopPageRoot(
+    await stopStemmio(
       launched.electronApp,
       launched.isolatedUserData,
     );
@@ -187,7 +187,7 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
 test("Electron retries a managed Working Copy activation after the first response is lost", async () => {
   test.setTimeout(120_000);
   const source = createSourceFixture("managed-activation-retry.html");
-  const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: source.sourcePath });
   try {
     await waitForProjectReady(launched.page);
     const v1Path = await managedWorkingCopyPath(launched.page, source.sourcePath);
@@ -223,14 +223,14 @@ test("Electron retries a managed Working Copy activation after the first respons
     // value as lost, then replay exactly the same operation as the renderer
     // would after a Bridge response interruption.
     await launched.page.evaluate((input) => (
-      window.htmlAIProjects.activateManagedWorkingCopy(input)
+      window.stemmioProjects.activateManagedWorkingCopy(input)
     ), payload);
     const replayed = await launched.page.evaluate((input) => (
-      window.htmlAIProjects.activateManagedWorkingCopy(input)
+      window.stemmioProjects.activateManagedWorkingCopy(input)
     ), payload);
     expect(replayed.sourcePath).toBe(expectedManagedPath);
     expect(replayed.sha256).toBe(promoted.target.sourceSha256);
-    const active = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+    const active = await launched.page.evaluate(() => window.stemmioProjects.getActiveProject());
     expect(active?.sourcePath).toBe(expectedManagedPath);
     const state = JSON.parse(readFileSync(
       path.join(launched.isolatedUserData, "html-projects.json"),
@@ -239,7 +239,7 @@ test("Electron retries a managed Working Copy activation after the first respons
     expect(state.lastManagedActivation?.operationId).toBe(payload.operationId);
     const staleOperation = await launched.page.evaluate(async (input) => {
       try {
-        const result = await window.htmlAIProjects.activateManagedWorkingCopy(input);
+        const result = await window.stemmioProjects.activateManagedWorkingCopy(input);
         return { inputOperationId: input.operationId, result };
       } catch (error) {
         return {
@@ -263,7 +263,7 @@ test("Electron retries a managed Working Copy activation after the first respons
     });
     expect(stateAfterStaleAttempt.lastManagedActivation?.operationId).toBe(payload.operationId);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);
   }
 });
@@ -271,7 +271,7 @@ test("Electron retries a managed Working Copy activation after the first respons
 test("Electron resumes a pending activation after restart only from its exact predecessor", async () => {
   test.setTimeout(120_000);
   const source = createSourceFixture("managed-activation-recent-receipt.html");
-  let launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  let launched = await launchStemmio({ activeSourcePath: source.sourcePath });
   try {
     await waitForProjectReady(launched.page);
     const firstTargetPath = await managedWorkingCopyPath(launched.page, source.sourcePath);
@@ -317,10 +317,10 @@ test("Electron resumes a pending activation after restart only from its exact pr
       updatedAt: Date.now(),
     }];
     writeFileSync(statePath, JSON.stringify(seededState, null, 2), "utf8");
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData, { cleanup: false });
+    await stopStemmio(launched.electronApp, launched.isolatedUserData, { cleanup: false });
     const workbenchTabsPath = path.join(launched.isolatedUserData, "workbench-tabs.json");
     if (existsSync(workbenchTabsPath)) unlinkSync(workbenchTabsPath);
-    launched = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
+    launched = await launchStemmio({ isolatedUserData: launched.isolatedUserData });
     await waitForProjectReady(launched.page);
     await waitForActiveSourcePath(launched.page, firstTargetPath);
 
@@ -337,7 +337,7 @@ test("Electron resumes a pending activation after restart only from its exact pr
     };
     const result = await launched.page.evaluate(async (input) => {
       try {
-        return { ok: true, value: await window.htmlAIProjects.activateManagedWorkingCopy(input) };
+        return { ok: true, value: await window.stemmioProjects.activateManagedWorkingCopy(input) };
       } catch (error) {
         return { ok: false, code: error?.code || null, message: error?.message || "" };
       }
@@ -356,7 +356,7 @@ test("Electron resumes a pending activation after restart only from its exact pr
       expect.objectContaining({ operationId, status: "completed", effectKind: "active-path" }),
     ]));
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);
   }
 });
@@ -364,7 +364,7 @@ test("Electron resumes a pending activation after restart only from its exact pr
 test("Electron rejects a pending activation after an intermediate activation returns to the same path", async () => {
   test.setTimeout(120_000);
   const source = createSourceFixture("managed-activation-predecessor-aba.html");
-  let launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  let launched = await launchStemmio({ activeSourcePath: source.sourcePath });
   try {
     await waitForProjectReady(launched.page);
     const firstTargetPath = await managedWorkingCopyPath(launched.page, source.sourcePath);
@@ -461,16 +461,16 @@ test("Electron rejects a pending activation after an intermediate activation ret
     // back at A, but its generation/effect proves that A is not the same
     // predecessor anymore.
     writeFileSync(statePath, JSON.stringify(seededState, null, 2), "utf8");
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData, { cleanup: false });
+    await stopStemmio(launched.electronApp, launched.isolatedUserData, { cleanup: false });
     const workbenchTabsPath = path.join(launched.isolatedUserData, "workbench-tabs.json");
     if (existsSync(workbenchTabsPath)) unlinkSync(workbenchTabsPath);
-    launched = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
+    launched = await launchStemmio({ isolatedUserData: launched.isolatedUserData });
     await waitForProjectReady(launched.page);
     await waitForActiveSourcePath(launched.page, firstPath);
 
     const result = await launched.page.evaluate(async (input) => {
       try {
-        return { ok: true, value: await window.htmlAIProjects.activateManagedWorkingCopy(input) };
+        return { ok: true, value: await window.stemmioProjects.activateManagedWorkingCopy(input) };
       } catch (error) {
         return { ok: false, code: error?.code || null, message: error?.message || "" };
       }
@@ -500,7 +500,7 @@ test("Electron rejects a pending activation after an intermediate activation ret
       expect.objectContaining({ operationId: completedOperationId, status: "completed" }),
     ]));
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);
   }
 });
@@ -508,7 +508,7 @@ test("Electron rejects a pending activation after an intermediate activation ret
 test("Electron rejects managed and generated pending activations after production rename A-C-A", async () => {
   test.setTimeout(120_000);
   const source = createSourceFixture("rename-activation-aba.html");
-  let launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  let launched = await launchStemmio({ activeSourcePath: source.sourcePath });
   try {
     await waitForProjectReady(launched.page);
     const pathA = await managedWorkingCopyPath(launched.page, source.sourcePath);
@@ -581,15 +581,15 @@ test("Electron rejects managed and generated pending activations after productio
       activationReceipts: [managedReceipt, generatedReceipt],
     };
     writeFileSync(statePath, JSON.stringify(seededState, null, 2), "utf8");
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData, { cleanup: false });
+    await stopStemmio(launched.electronApp, launched.isolatedUserData, { cleanup: false });
     const workbenchTabsPath = path.join(launched.isolatedUserData, "workbench-tabs.json");
     if (existsSync(workbenchTabsPath)) unlinkSync(workbenchTabsPath);
-    launched = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
+    launched = await launchStemmio({ isolatedUserData: launched.isolatedUserData });
     await waitForProjectReady(launched.page);
     await waitForActiveSourcePath(launched.page, pathA);
 
     const renamedC = await launched.page.evaluate(async ({ sourcePath, expectedSha256 }) => (
-      window.htmlAIProjects.renameHtml({
+      window.stemmioProjects.renameHtml({
         operationId: "e2e_rename_activation_a_to_c_0001",
         sourcePath,
         stem: "rename-activation-aba-C",
@@ -597,7 +597,7 @@ test("Electron rejects managed and generated pending activations after productio
       })
     ), { sourcePath: pathA, expectedSha256: targetB.sourceSha256 });
     const renamedA = await launched.page.evaluate(async ({ sourcePath, expectedSha256 }) => (
-      window.htmlAIProjects.renameHtml({
+      window.stemmioProjects.renameHtml({
         operationId: "e2e_rename_activation_c_to_a_0001",
         sourcePath,
         stem: "rename-activation-aba-V1",
@@ -609,9 +609,9 @@ test("Electron rejects managed and generated pending activations after productio
     // no longer the active path after the second rename.
     writeFileSync(pathA, readFileSync(renamedA.sourcePath), "utf8");
 
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData, { cleanup: false });
+    await stopStemmio(launched.electronApp, launched.isolatedUserData, { cleanup: false });
     if (existsSync(workbenchTabsPath)) unlinkSync(workbenchTabsPath);
-    launched = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
+    launched = await launchStemmio({ isolatedUserData: launched.isolatedUserData });
     await waitForProjectReady(launched.page);
     await waitForActiveSourcePath(launched.page, renamedA.sourcePath);
     const retry = await launched.page.evaluate(async ({ managed, generated }) => {
@@ -624,8 +624,8 @@ test("Electron rejects managed and generated pending activations after productio
         }
       };
       return {
-        managed: await attempt(() => window.htmlAIProjects.activateManagedWorkingCopy(managed)),
-        generated: await attempt(() => window.htmlAIProjects.activateGeneratedVersion(generated)),
+        managed: await attempt(() => window.stemmioProjects.activateManagedWorkingCopy(managed)),
+        generated: await attempt(() => window.stemmioProjects.activateGeneratedVersion(generated)),
       };
     }, {
       managed: {
@@ -659,7 +659,7 @@ test("Electron rejects managed and generated pending activations after productio
       expect.objectContaining({ operationId: generatedOperationId, status: "pending" }),
     ]));
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);
   }
 });
@@ -667,7 +667,7 @@ test("Electron rejects managed and generated pending activations after productio
 test("Electron replays a completed activation only while its exact destination remains active", async () => {
   test.setTimeout(120_000);
   const source = createSourceFixture("managed-activation-active-receipt.html");
-  let launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  let launched = await launchStemmio({ activeSourcePath: source.sourcePath });
   try {
     await waitForProjectReady(launched.page);
     const firstTargetPath = await managedWorkingCopyPath(launched.page, source.sourcePath);
@@ -699,7 +699,7 @@ test("Electron replays a completed activation only while its exact destination r
     });
     const x = payloadFor(firstWorkspace.target, targetB, "e2e_active_receipt_x_0001");
     const first = await launched.page.evaluate((input) => (
-      window.htmlAIProjects.activateManagedWorkingCopy(input)
+      window.stemmioProjects.activateManagedWorkingCopy(input)
     ), x);
     expect(sameDesktopSourcePath(first.sourcePath, targetB.exactSourcePath)).toBe(true);
 
@@ -721,11 +721,11 @@ test("Electron replays a completed activation only while its exact destination r
     })).target;
     const y = payloadFor(targetB, targetC, "e2e_active_receipt_y_0001");
     await launched.page.evaluate((input) => (
-      window.htmlAIProjects.activateManagedWorkingCopy(input)
+      window.stemmioProjects.activateManagedWorkingCopy(input)
     ), y);
     const replay = await launched.page.evaluate(async (input) => {
       try {
-        return { ok: true, value: await window.htmlAIProjects.activateManagedWorkingCopy(input) };
+        return { ok: true, value: await window.stemmioProjects.activateManagedWorkingCopy(input) };
       } catch (error) {
         return {
           ok: false,
@@ -754,13 +754,13 @@ test("Electron replays a completed activation only while its exact destination r
       expect.objectContaining({ operationId: x.operationId, status: "completed", effectKind: "active-path" }),
     ]));
 
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData, { cleanup: false });
-    launched = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
+    await stopStemmio(launched.electronApp, launched.isolatedUserData, { cleanup: false });
+    launched = await launchStemmio({ isolatedUserData: launched.isolatedUserData });
     await waitForProjectReady(launched.page);
     await waitForActiveSourcePath(launched.page, targetC.exactSourcePath);
     const replayAfterRestart = await launched.page.evaluate(async (input) => {
       try {
-        return { ok: true, value: await window.htmlAIProjects.activateManagedWorkingCopy(input) };
+        return { ok: true, value: await window.stemmioProjects.activateManagedWorkingCopy(input) };
       } catch (error) {
         return {
           ok: false,
@@ -789,7 +789,7 @@ test("Electron replays a completed activation only while its exact destination r
       expect.objectContaining({ operationId: x.operationId, status: "completed", effectKind: "active-path" }),
     ]));
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);
   }
 });
@@ -797,7 +797,7 @@ test("Electron replays a completed activation only while its exact destination r
 test("Electron Finder reveals the current draft and derived AI task while history stays immutable", async () => {
   test.setTimeout(120_000);
   const source = createSourceFixture("finder-derived-projections.html");
-  const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: source.sourcePath });
   try {
     await waitForProjectReady(launched.page);
     const initialWorkingCopyPath = await managedWorkingCopyPath(
@@ -832,7 +832,7 @@ test("Electron Finder reveals the current draft and derived AI task while histor
     const continued = await repository.workspace({ sourcePath: created.sourcePath });
     expect(continued.target).toMatchObject(initialIdentity);
     const desktopCurrent = await launched.page.evaluate((payload) => (
-      window.htmlAIProjects.activateManagedWorkingCopy(payload)
+      window.stemmioProjects.activateManagedWorkingCopy(payload)
     ), {
       previousSourcePath: initialWorkingCopyPath,
       nextSourcePath: continued.target.exactSourcePath,
@@ -846,7 +846,7 @@ test("Electron Finder reveals the current draft and derived AI task while histor
     });
     expect(desktopCurrent.sourcePath).toBe(realpathSync(initialWorkingCopyPath));
     const shownCurrent = await launched.page.evaluate((sourcePath) => (
-      window.htmlAIProjects.showInFolder(sourcePath)
+      window.stemmioProjects.showInFolder(sourcePath)
     ), desktopCurrent.sourcePath);
     expect(shownCurrent.sourcePath).toBe(realpathSync(initialWorkingCopyPath));
     expect((await repository.readVersionFile({ target: continued.target, versionId: "ver_0002" })).content).toBe(historicalV2.content);
@@ -878,10 +878,10 @@ test("Electron Finder reveals the current draft and derived AI task while histor
       prompt: "# E2E AI task\n\n只生成候选 HTML。\n",
     });
     const processingTask = await launched.page.evaluate((sourcePath) => (
-      window.htmlAIProjects.revealAiTask({ sourcePath })
+      window.stemmioProjects.revealAiTask({ sourcePath })
     ), desktopCurrent.sourcePath);
     expect(processingTask.aiTaskPath).toMatch(/\/AI任务\/\d{4}-\d{2}-\d{2}-候选版本8$/u);
-    expect(processingTask.aiTaskPath.includes(`${path.sep}.pageroot${path.sep}`)).toBe(false);
+    expect(processingTask.aiTaskPath.includes(`${path.sep}.stemmio${path.sep}`)).toBe(false);
     expect(readFileSync(path.join(processingTask.aiTaskPath, "PROMPT.md"), "utf8"))
       .toBe("# E2E AI task\n\n只生成候选 HTML。\n");
 
@@ -897,7 +897,7 @@ test("Electron Finder reveals the current draft and derived AI task while histor
     });
     expect(completed.status).toBe("candidate-ready");
     const readyTask = await launched.page.evaluate((sourcePath) => (
-      window.htmlAIProjects.revealAiTask({ sourcePath })
+      window.stemmioProjects.revealAiTask({ sourcePath })
     ), desktopCurrent.sourcePath);
     const readyProjection = await repository.materializeAiTaskProjection({
       target: continued.target,
@@ -910,7 +910,7 @@ test("Electron Finder reveals the current draft and derived AI task while histor
 
     writeFileSync(readyProjection.candidatePath, "<!doctype html><html><head><title>tampered</title></head><body><p>tampered</p></body></html>", "utf8");
     const rebuiltTask = await launched.page.evaluate((sourcePath) => (
-      window.htmlAIProjects.revealAiTask({ sourcePath })
+      window.stemmioProjects.revealAiTask({ sourcePath })
     ), desktopCurrent.sourcePath);
     expect(rebuiltTask.aiTaskPath).not.toBe(realpathSync(readyProjection.taskPath));
     const hiddenCandidate = await repository.readCandidate({
@@ -929,22 +929,22 @@ test("Electron Finder reveals the current draft and derived AI task while histor
       previousVersionId: "ver_0007",
     });
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);
   }
 });
 
 test("Electron v4 registry recovers Finder rename and isolates duplicate project copies", async () => {
   test.setTimeout(120_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "finder-registry-state.html");
   const originalExternal = fixtureBuffer("source-fidelity.html");
   writeFileSync(sourcePath, originalExternal);
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
-  const outsideRoot = mkdtempSync(path.join(tmpdir(), "pageroot-managed-root-outside-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
+  const outsideRoot = mkdtempSync(path.join(tmpdir(), "stemmio-managed-root-outside-"));
   let electronApp = null;
   try {
-    const launched = await launchPageRoot({ isolatedUserData });
+    const launched = await launchStemmio({ isolatedUserData });
     electronApp = launched.electronApp;
 
     const preview = await bridgeJson(
@@ -1001,7 +1001,7 @@ test("Electron v4 registry recovers Finder rename and isolates duplicate project
       exactSourcePath: finderRenamedHtml,
     });
     const renamedManifest = JSON.parse(readFileSync(
-      path.join(finderRenamedRoot, ".pageroot", "manifest.json"),
+      path.join(finderRenamedRoot, ".stemmio", "manifest.json"),
       "utf8",
     ));
     expect(renamedManifest.workingCopies[0]).toMatchObject({
@@ -1051,7 +1051,7 @@ test("Electron v4 registry recovers Finder rename and isolates duplicate project
     const copiedRoot = path.join(projectsRoot, "Finder 副本项目");
     cpSync(finderRenamedRoot, copiedRoot, { recursive: true });
     const copiedHtml = path.join(copiedRoot, "Finder-B-V1.html");
-    const copiedManifestPath = path.join(copiedRoot, ".pageroot", "manifest.json");
+    const copiedManifestPath = path.join(copiedRoot, ".stemmio", "manifest.json");
     const copiedManifestBefore = readFileSync(copiedManifestPath);
     const copiedPreview = await bridgeJson(
       launched.page,
@@ -1097,18 +1097,18 @@ test("Electron v4 registry recovers Finder rename and isolates duplicate project
     expect(readFileSync(userSymlinkTarget, "utf8")).toBe("user symlink target");
   } finally {
     if (electronApp) {
-      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+      await stopStemmio(electronApp, isolatedUserData, { cleanup: false });
     }
     removeIsolatedUserData(isolatedUserData);
-    removeValidatedTemporaryDirectory(outsideRoot, "pageroot-managed-root-outside-");
-    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
+    removeValidatedTemporaryDirectory(outsideRoot, "stemmio-managed-root-outside-");
+    removeValidatedTemporaryDirectory(sourceDirectory, "stemmio-native-source-e2e-");
   }
 });
 
 test("Electron keeps managed current draft identity in the selected tab and retires title-bar rename", {
   tag: ["@gate-smoke","@smoke-project-lifecycle"],
 }, async () => {
-  const launched = await launchPageRoot();
+  const launched = await launchStemmio();
   const externalOriginalPath = path.join(
     realpathSync(launched.isolatedUserData),
     "欢迎来到源页.html",
@@ -1119,7 +1119,7 @@ test("Electron keeps managed current draft identity in the selected tab and reti
     await expect.poll(
       async () => {
         const active = await launched.page.evaluate(
-          () => window.htmlAIProjects?.getActiveProject(),
+          () => window.stemmioProjects?.getActiveProject(),
         );
         managedOriginalPath = String(active?.sourcePath || "");
         return Boolean(
@@ -1132,7 +1132,7 @@ test("Electron keeps managed current draft identity in the selected tab and reti
     const projectRoot = path.dirname(managedOriginalPath);
     const originalBytes = readFileSync(externalOriginalPath);
     const originalManifest = JSON.parse(readFileSync(
-      path.join(projectRoot, ".pageroot", "manifest.json"),
+      path.join(projectRoot, ".stemmio", "manifest.json"),
       "utf8",
     ));
     const projectId = originalManifest.projectId;
@@ -1146,7 +1146,7 @@ test("Electron keeps managed current draft identity in the selected tab and reti
     const managedBytes = readFileSync(managedOriginalPath);
     expect(managedBytes).not.toEqual(originalBytes);
     const managedSourceIds = [...managedBytes.toString("utf8").matchAll(
-      /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+      /data-stemmio-id="(sm1_[0-9a-f]{32})"/gu,
     )].map((match) => match[1]);
     expect(managedSourceIds.length).toBeGreaterThan(0);
     expect(new Set(managedSourceIds).size).toBe(managedSourceIds.length);
@@ -1155,7 +1155,7 @@ test("Electron keeps managed current draft identity in the selected tab and reti
     );
     expect(readFileSync(path.join(
       projectRoot,
-      ".pageroot",
+      ".stemmio",
       firstVersion.snapshotRelativePath,
     ))).toEqual(originalBytes);
 
@@ -1168,7 +1168,7 @@ test("Electron keeps managed current draft identity in the selected tab and reti
     expect(state.pendingRename).toBeNull();
 
     const currentManifest = JSON.parse(readFileSync(
-      path.join(projectRoot, ".pageroot", "manifest.json"),
+      path.join(projectRoot, ".stemmio", "manifest.json"),
       "utf8",
     ));
     expect(currentManifest.projectId).toBe(projectId);
@@ -1182,13 +1182,13 @@ test("Electron keeps managed current draft identity in the selected tab and reti
       }),
     ]));
     const registry = JSON.parse(readFileSync(
-      path.join(path.dirname(projectRoot), ".pageroot-registry.json"),
+      path.join(path.dirname(projectRoot), ".stemmio-registry.json"),
       "utf8",
     ));
     expect(realpathSync(registry.projects[projectId].registeredProjectRootPath))
       .toBe(realpathSync(projectRoot));
   } finally {
-    await stopPageRoot(
+    await stopStemmio(
       launched.electronApp,
       launched.isolatedUserData,
     );
@@ -1199,7 +1199,7 @@ test("Electron rapid project switching and immediate close preserve the last nat
   test.setTimeout(180_000);
   const projectA = createSourceFixture("close-switch-a.html");
   const projectB = createSourceFixture("close-switch-b.html");
-  const firstLaunch = await launchPageRoot({
+  const firstLaunch = await launchStemmio({
     activeSourcePath: projectA.sourcePath,
     recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
   });
@@ -1241,9 +1241,9 @@ test("Electron rapid project switching and immediate close preserve the last nat
     await firstLaunch.page.keyboard.insertText(closeText);
     await expect(frame.locator(caseSelector("list-item"))).toHaveText(closeText);
 
-    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
+    await closeStemmioGracefully(firstLaunch.electronApp, firstLaunch.page);
     firstClosed = true;
-    reopened = await launchPageRoot({
+    reopened = await launchStemmio({
       isolatedUserData: firstLaunch.isolatedUserData,
     });
     const { frame: reopenedFrame } = await loadedDiskFrame(
@@ -1257,9 +1257,9 @@ test("Electron rapid project switching and immediate close preserve the last nat
     expect(readFileSync(projectA.sourcePath, "utf8")).not.toContain(closeText);
   } finally {
     if (reopened) {
-      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+      await stopStemmio(reopened.electronApp, reopened.isolatedUserData);
     } else if (!firstClosed) {
-      await stopPageRoot(
+      await stopStemmio(
         firstLaunch.electronApp,
         firstLaunch.isolatedUserData,
       );
@@ -1274,11 +1274,11 @@ test("Electron rapid project switching and immediate close preserve the last nat
 for (const renameKind of ["HTML", "project folder"]) {
   test(`Electron rebases a ${renameKind} rename between active-project classification and read`, async () => {
     const fixture = createSourceFixture("startup-read-rename.html");
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     try {
       await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
       const sourcePath = await managedWorkingCopyPath(launched.page, fixture.sourcePath);
-      const before = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+      const before = await launched.page.evaluate(() => window.stemmioProjects.getActiveProject());
       const root = path.dirname(sourcePath);
       const nextRoot = renameKind === "HTML" ? root : `${root}-renamed`;
       const nextPath = renameKind === "HTML"
@@ -1291,16 +1291,16 @@ for (const renameKind of ["HTML", "project folder"]) {
       await launched.electronApp.evaluate(({ net }) => {
         const fetch = net.fetch.bind(net);
         let pending = true;
-        globalThis.__PAGEROOT_READ_RENAME_WAITING__ = false;
+        globalThis.__STEMMIO_READ_RENAME_WAITING__ = false;
         const renamed = new Promise((resolve) => {
-          globalThis.__PAGEROOT_RELEASE_READ_RENAME__ = resolve;
+          globalThis.__STEMMIO_RELEASE_READ_RENAME__ = resolve;
         });
         let release;
         const barrier = new Promise((resolve) => { release = resolve; });
-        globalThis.__PAGEROOT_FINISH_READ_RENAME__ = () => {
+        globalThis.__STEMMIO_FINISH_READ_RENAME__ = () => {
           net.fetch = fetch;
           release();
-          globalThis.__PAGEROOT_RELEASE_READ_RENAME__();
+          globalThis.__STEMMIO_RELEASE_READ_RENAME__();
         };
         net.fetch = async (input, options) => {
           const url = new URL(String(input));
@@ -1308,16 +1308,16 @@ for (const renameKind of ["HTML", "project folder"]) {
           if (pending && url.pathname === "/registered-project/open"
             && url.searchParams.has("workingCopyId")) {
             pending = false;
-            globalThis.__PAGEROOT_READ_RENAME_WAITING__ = true;
+            globalThis.__STEMMIO_READ_RENAME_WAITING__ = true;
             await renamed;
           }
           return fetch(input, options);
         };
       });
-      const activeRead = launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
-      await expect.poll(() => launched.electronApp.evaluate(() => globalThis.__PAGEROOT_READ_RENAME_WAITING__)).toBe(true);
+      const activeRead = launched.page.evaluate(() => window.stemmioProjects.getActiveProject());
+      await expect.poll(() => launched.electronApp.evaluate(() => globalThis.__STEMMIO_READ_RENAME_WAITING__)).toBe(true);
       renameSync(renameKind === "HTML" ? sourcePath : root, renameKind === "HTML" ? nextPath : nextRoot);
-      await launched.electronApp.evaluate(() => globalThis.__PAGEROOT_RELEASE_READ_RENAME__());
+      await launched.electronApp.evaluate(() => globalThis.__STEMMIO_RELEASE_READ_RENAME__());
       const current = await activeRead;
       expect(current.projectId).toBe(before.projectId);
       expect(current.documentId).toBe(before.documentId);
@@ -1328,20 +1328,20 @@ for (const renameKind of ["HTML", "project folder"]) {
       expect(sameDesktopSourcePath(state.activeManagedLocator.sourcePath, nextPath)).toBe(true);
       expect(sameDesktopSourcePath(state.activeManagedLocator.projectRootPath, nextRoot)).toBe(true);
       expect(readFileSync(nextPath)).toEqual(bytes);
-      await launched.electronApp.evaluate(() => globalThis.__PAGEROOT_FINISH_READ_RENAME__());
+      await launched.electronApp.evaluate(() => globalThis.__STEMMIO_FINISH_READ_RENAME__());
       await launched.page.evaluate(() => {
-        window.__PAGEROOT_READ_RENAME_EVENTS__ = [];
-        window.htmlAIProjects.onSourceFileChanged((event) => {
-          window.__PAGEROOT_READ_RENAME_EVENTS__.push(event.sourcePath);
+        window.__STEMMIO_READ_RENAME_EVENTS__ = [];
+        window.stemmioProjects.onSourceFileChanged((event) => {
+          window.__STEMMIO_READ_RENAME_EVENTS__.push(event.sourcePath);
         });
       });
       writeFileSync(nextPath, bytes);
       await expect.poll(async () => (
-        await launched.page.evaluate(() => window.__PAGEROOT_READ_RENAME_EVENTS__)
+        await launched.page.evaluate(() => window.__STEMMIO_READ_RENAME_EVENTS__)
       ).some((value) => sameDesktopSourcePath(value, nextPath))).toBe(true);
     } finally {
-      await launched.electronApp.evaluate(() => globalThis.__PAGEROOT_FINISH_READ_RENAME__?.());
-      await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+      await launched.electronApp.evaluate(() => globalThis.__STEMMIO_FINISH_READ_RENAME__?.());
+      await stopStemmio(launched.electronApp, launched.isolatedUserData);
       removeSourceFixture(fixture.sourceDirectory);
     }
   });
@@ -1352,7 +1352,7 @@ test("Electron follows a same-directory Finder rename and keeps the selected tab
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(
@@ -1448,7 +1448,7 @@ test("Electron follows a same-directory Finder rename and keeps the selected tab
     })).toHaveCount(1);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeSourceFixture(fixture.sourceDirectory);
   }
@@ -1459,7 +1459,7 @@ test("Electron keeps project identity after Finder rename without restoring titl
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
@@ -1504,18 +1504,18 @@ test("Electron keeps project identity after Finder rename without restoring titl
       .toBe(finalFinderName);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
 
-test("Electron keeps PageRoot bytes when Finder renames and edits the same file", async () => {
+test("Electron keeps Stemmio bytes when Finder renames and edits the same file", async () => {
   const fixture = createSourceFixture("finder-rename-conflict.html");
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
@@ -1543,7 +1543,7 @@ test("Electron keeps PageRoot bytes when Finder renames and edits the same file"
     expect(await editorFrame.locator("body").innerHTML()).not.toContain("finder-external");
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeSourceFixture(fixture.sourceDirectory);
   }
@@ -1554,7 +1554,7 @@ test("Electron does not follow a copied Working Copy or expose the retired title
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
@@ -1571,7 +1571,7 @@ test("Electron does not follow a copied Working Copy or expose the retired title
     const copyDeadline = Date.now() + 800;
     await expect.poll(async () => {
       const current = await launched.page.evaluate(() => (
-        window.htmlAIProjects?.getActiveProject()
+        window.stemmioProjects?.getActiveProject()
       ));
       if (current?.sourcePath !== managedSourcePath) return current?.sourcePath || "";
       return Date.now() >= copyDeadline ? managedSourcePath : "";
@@ -1582,7 +1582,7 @@ test("Electron does not follow a copied Working Copy or expose the retired title
     expect(existsSync(managedSourcePath)).toBe(true);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeSourceFixture(fixture.sourceDirectory);
   }
@@ -1593,7 +1593,7 @@ test("Electron follows a same-parent project folder rename without restoring tit
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
@@ -1617,7 +1617,7 @@ test("Electron follows a same-parent project folder rename without restoring tit
     expect(existsSync(relocatedPath)).toBe(true);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeSourceFixture(fixture.sourceDirectory);
   }
@@ -1629,7 +1629,7 @@ test("Electron does not follow a Working Copy moved out of the registered projec
   let isolatedUserData = null;
   let outsideDirectory = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
@@ -1638,7 +1638,7 @@ test("Electron does not follow a Working Copy moved out of the registered projec
       fixture.sourcePath,
     );
     const originalStem = path.basename(managedSourcePath, path.extname(managedSourcePath));
-    outsideDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-escaped-"));
+    outsideDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-escaped-"));
     const escapedPath = path.join(outsideDirectory, path.basename(managedSourcePath));
     renameSync(managedSourcePath, escapedPath);
     const moveDeadline = Date.now() + 1_200;
@@ -1656,10 +1656,10 @@ test("Electron does not follow a Working Copy moved out of the registered projec
     expect(existsSync(managedSourcePath)).toBe(false);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     if (outsideDirectory) {
-      removeValidatedTemporaryDirectory(outsideDirectory, "pageroot-native-escaped-");
+      removeValidatedTemporaryDirectory(outsideDirectory, "stemmio-native-escaped-");
     }
     removeSourceFixture(fixture.sourceDirectory);
   }

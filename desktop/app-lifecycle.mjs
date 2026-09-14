@@ -58,7 +58,7 @@ export function createWindowLifecycle(ctx) {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
-        ...(process.env.PAGEROOT_E2E === "1"
+        ...(process.env.STEMMIO_E2E === "1"
           ? { backgroundThrottling: false }
           : {}),
       },

@@ -64,6 +64,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/agent-login-url.mjs",
+  "desktop/runtime-project-storage-contract.mjs",
   "shared/agent-vendor-key-url.mjs",
   "shared/agent-configuration-preferences.mjs",
   "app/domain/edit-runtime-contract.js",
@@ -146,7 +147,9 @@ const SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "editable-island.mjs",
   "native-edit-capability.mjs",
-  "pageroot-element-identity.mjs",
+  "stemmio-element-identity.mjs",
+  "product-identity.mjs",
+  "project-storage-contract.mjs",
   "provenance.mjs",
   "semantic-identity-delta.mjs",
   "semantic-structure-plan.mjs",
@@ -174,12 +177,13 @@ const SCHEMA_FILES = [
   "completion.v1.schema.json",
   "conversation.v1.schema.json",
   "conversation.v2.schema.json",
+  "conversation.v3.schema.json",
   "conversation-index.v1.schema.json",
   "conversation-draft.v1.schema.json",
   "conversation-draft.v2.schema.json",
   "current-version-transaction.v1.schema.json",
   "input-manifest.v1.schema.json",
-  "pageroot-element-identity.v1.schema.json",
+  "stemmio-element-identity.v1.schema.json",
   "preserved-draft.v1.schema.json",
   "project-state.v3.schema.json",
   "project-identity.v4.schema.json",
@@ -199,7 +203,7 @@ const SCHEMA_FILES = [
 ];
 
 const LEGAL_RESOURCE_FILES = [
-  "PageRoot 用户声明与免责声明.txt",
+  "源页 用户声明与免责声明.txt",
   "LICENSE",
   "PRIVACY.md",
   "NOTICE",
@@ -253,6 +257,35 @@ test("desktop package manifest owns the exact application and Bridge resource cl
     );
   }
 
+  // Every exact app.asar JavaScript entry must keep its own relative imports
+  // inside app.asar. Resource-only Bridge/shared files are checked separately
+  // below; this catches a desktop entry accidentally importing a file that is
+  // present only under Resources/shared.
+  const exactApplicationSources = packageJson.build.files.filter((entry) => (
+    typeof entry === "string"
+    && !entry.startsWith("!")
+    && !/[?*{}[\]]/u.test(entry)
+    && /\.(?:cjs|js|mjs)$/u.test(entry)
+  ));
+  for (const relativePath of exactApplicationSources) {
+    const source = await readFile(path.join(
+      path.resolve(import.meta.dirname, ".."),
+      relativePath,
+    ), "utf8");
+    for (const match of source.matchAll(
+      /\bfrom\s+["'](\.{1,2}\/[^"']+)["']/gu,
+    )) {
+      const dependency = path.posix.normalize(path.posix.join(
+        path.posix.dirname(relativePath),
+        match[1],
+      ));
+      assert.ok(
+        packageJson.build.files.includes(dependency),
+        `${relativePath} imports an app.asar file that is not packaged: ${dependency}`,
+      );
+    }
+  }
+
   const resourceTargets = packageJson.build.extraResources.map((entry) => entry.to);
   assert.deepEqual(
     sorted(resourceTargets),
@@ -282,7 +315,7 @@ test("desktop package manifest owns the exact application and Bridge resource cl
   assert.deepEqual(
     exactPackagedAppTargets.filter((entry) => resourceTargets.includes(entry)),
     [],
-    "a path listed in both build.files and extraResources is copied only as a resource and never reaches app.asar",
+    "a path listed in both build.files and extraResources is copied only as a resource",
   );
   const packagedRuntimeTargets = new Set([
     ...resourceTargets,
@@ -328,7 +361,7 @@ test("desktop package manifest owns the exact application and Bridge resource cl
 });
 
 test("packaged launch staging refuses every ancestor development dependency tree", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-package-isolation-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-package-isolation-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourceRoot = path.join(temporaryRoot, "source");
   const appPath = path.join(sourceRoot, "release", "Synthetic.app");
@@ -360,12 +393,12 @@ test("desktop package identity and artifact profile stay fixed", async () => {
     "utf8",
   ));
   assert.equal(packageJson.main, "desktop/main.mjs");
-  assert.equal(packageJson.name, "pageroot");
-  assert.match(packageJson.description, /源页（PageRoot）— Editable islands/u);
+  assert.equal(packageJson.name, "stemmio");
+  assert.match(packageJson.description, /源页（Stemmio）— Editable islands/u);
   assert.equal(semver.valid(packageJson.version), packageJson.version);
-  assert.equal(packageJson.build.appId, "com.htmlai.workbench");
-  assert.equal(packageJson.build.productName, "PageRoot");
-  assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
+  assert.equal(packageJson.build.appId, "com.stemmio.app");
+  assert.equal(packageJson.build.productName, "Stemmio");
+  assert.equal(packageJson.build.artifactName, "Stemmio-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.afterPack, "desktop/after-pack.mjs");
   assert.deepEqual(packageJson.build.publish, [
     {
@@ -414,16 +447,16 @@ test("package security boundaries retain CSP, entitlements and final plist clean
   assert.match(rendererHtml, /default-src 'none'/u);
   assert.match(rendererHtml, /script-src 'self'/u);
   const scriptSrc = rendererHtml.match(/script-src [^;]+/u)?.[0] || "";
-  assert.equal(scriptSrc, "script-src 'self' pageroot-edit-runtime:");
-  assert.doesNotMatch(scriptSrc, /pageroot-preview:/u);
-  assert.match(rendererHtml, /style-src 'self' 'unsafe-inline' file: http: https: pageroot-edit-runtime: pageroot-preview:/u);
-  assert.match(rendererHtml, /img-src 'self' file: data: blob: http: https: pageroot-edit-runtime: pageroot-preview:/u);
-  assert.match(rendererHtml, /font-src 'self' file: data: http: https: pageroot-edit-runtime: pageroot-preview:/u);
-  assert.match(rendererHtml, /media-src 'self' file: data: blob: http: https: pageroot-edit-runtime: pageroot-preview:/u);
+  assert.equal(scriptSrc, "script-src 'self' stemmio-edit-runtime:");
+  assert.doesNotMatch(scriptSrc, /stemmio-preview:/u);
+  assert.match(rendererHtml, /style-src 'self' 'unsafe-inline' file: http: https: stemmio-edit-runtime: stemmio-preview:/u);
+  assert.match(rendererHtml, /img-src 'self' file: data: blob: http: https: stemmio-edit-runtime: stemmio-preview:/u);
+  assert.match(rendererHtml, /font-src 'self' file: data: http: https: stemmio-edit-runtime: stemmio-preview:/u);
+  assert.match(rendererHtml, /media-src 'self' file: data: blob: http: https: stemmio-edit-runtime: stemmio-preview:/u);
   assert.match(rendererHtml, /connect-src http:\/\/127\.0\.0\.1:\*/u);
-  assert.match(rendererHtml, /frame-src 'self' data: blob: pageroot-preview: pageroot-edit-runtime:/u);
+  assert.match(rendererHtml, /frame-src 'self' data: blob: stemmio-preview: stemmio-edit-runtime:/u);
   assert.match(rendererHtml, /object-src 'none'/u);
-  assert.match(rendererHtml, /base-uri 'self' file: pageroot-edit-runtime: pageroot-preview:/u);
+  assert.match(rendererHtml, /base-uri 'self' file: stemmio-edit-runtime: stemmio-preview:/u);
   assert.doesNotMatch(rendererHtml, /frame-ancestors/u);
   assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/u);
   assert.doesNotMatch(entitlements, /disable-library-validation/u);
@@ -437,7 +470,7 @@ test("package security boundaries retain CSP, entitlements and final plist clean
 
 test("packaged legal notice and icon remain available as reviewed resources", async () => {
   const [notice, privacy, iconInfo] = await Promise.all([
-    readFile(new URL("../PageRoot 用户声明与免责声明.txt", import.meta.url), "utf8"),
+    readFile(new URL("../源页 用户声明与免责声明.txt", import.meta.url), "utf8"),
     readFile(new URL("../PRIVACY.md", import.meta.url), "utf8"),
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
   ]);

@@ -31,12 +31,12 @@ const IDENTITY = Object.freeze({
   documentId: `doc_${"b".repeat(16)}`,
   requestId: "req_agent_bridge_001",
   attemptId: "attempt_001",
-  sourcePath: "/tmp/pageroot-agent-bridge.html",
+  sourcePath: "/tmp/stemmio-agent-bridge.html",
 });
 const QODER_SELECTION = defaultManagedAgentDelivery().selection;
 
 async function createFakeCommand(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-service-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-service-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const command = path.join(root, "fake-qoder.mjs");
   await writeFile(command, `#!/usr/bin/env node
@@ -61,7 +61,7 @@ if (process.argv.includes("--acp")) {
       if (!line.trim()) continue;
       const request = JSON.parse(line);
       const result = request.method === "initialize"
-        ? { protocolVersion: 1, agentCapabilities: { loadSession: false }, authMethods: [], agentInfo: { name: "pageroot-e2e-qoder", version: "1.1.27" } }
+        ? { protocolVersion: 1, agentCapabilities: { loadSession: false }, authMethods: [], agentInfo: { name: "stemmio-e2e-qoder", version: "1.1.27" } }
         : request.method === "session/new"
           ? { sessionId: "session_preflight" }
           : null;
@@ -78,7 +78,7 @@ if (process.argv.includes("--acp")) {
 }
 
 async function createFailingCommand(t, stderr) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-preflight-failure-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-preflight-failure-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const command = path.join(root, "fake-qoder.mjs");
   await writeFile(command, `#!/usr/bin/env node
@@ -95,7 +95,7 @@ async function createVerifiedNpmCommand(t, {
   models = ["Finder-Sparse-Path"],
   launcherRelativePath = [".npm-global", "bin"],
 } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-npm-command-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-npm-command-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const home = path.join(root, "home");
   const packageRoot = path.join(
@@ -220,9 +220,9 @@ function createService(command, overrides = {}) {
   service = new AgentBridgeService({
     environment: {
       ...process.env,
-      PAGEROOT_E2E: "1",
-      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
-      PAGEROOT_QODER_ACP_COMMAND: command,
+      STEMMIO_E2E: "1",
+      STEMMIO_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      STEMMIO_QODER_ACP_COMMAND: command,
     },
     resolveTask: async (identity) => resolveTask
       ? resolveTask(identity, preflightTickets.get(service))
@@ -255,7 +255,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
       observed.calls += 1;
       observed.prompt = prompt;
       observed.expectedExecutable = expectedExecutable;
-      onEvent({ kind: "initialized", agentName: "pageroot-e2e-qoder", agentVersion: "1.1.27" });
+      onEvent({ kind: "initialized", agentName: "stemmio-e2e-qoder", agentVersion: "1.1.27" });
       onEvent({ kind: "file-read", role: "prompt" });
       return new Promise((resolve) => {
         resolveRun = resolve;
@@ -287,7 +287,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
   assert.equal(service.status(IDENTITY).state, "running");
   assert.equal(service.status(IDENTITY).phase, "reading-task");
   assert.equal(observed.calls, 1);
-  assert.match(observed.prompt, /Candidate pending PageRoot review/u);
+  assert.match(observed.prompt, /Candidate pending Stemmio review/u);
   assert.equal(observed.prompt.includes("/tmp/request"), true);
   assert.equal(observed.expectedExecutable.path, await realpath(command));
   assert.match(observed.expectedExecutable.identity.sha256, /^sha256:[a-f0-9]{64}$/u);
@@ -607,7 +607,7 @@ test("Agent Bridge cancellation aborts the managed task before reporting stopped
   const events = [];
   const service = createService(command, {
     runTask: ({ cancellationSignal, onEvent }) => new Promise((_resolve, reject) => {
-      onEvent({ kind: "initialized", agentName: "pageroot-e2e-qoder", agentVersion: "1.1.27" });
+      onEvent({ kind: "initialized", agentName: "stemmio-e2e-qoder", agentVersion: "1.1.27" });
       cancellationSignal.addEventListener("abort", () => {
         events.push("driver-aborted");
         const error = new Error("raw private driver detail");
@@ -636,7 +636,7 @@ test("Agent Bridge cancellation aborts the managed task before reporting stopped
 
 test("Agent Bridge cancellation never reports stopped after cleanup is unconfirmed", async (t) => {
   const command = await createFakeCommand(t);
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-cancel-unconfirmed-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-cancel-unconfirmed-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const policy = {
     ...fakePolicy(),
@@ -654,7 +654,7 @@ test("Agent Bridge cancellation never reports stopped after cleanup is unconfirm
       },
     },
     runTask: ({ cancellationSignal, onEvent }) => new Promise((_resolve, reject) => {
-      onEvent({ kind: "initialized", agentName: "pageroot-e2e-qoder" });
+      onEvent({ kind: "initialized", agentName: "stemmio-e2e-qoder" });
       cancellationSignal.addEventListener("abort", () => {
         const error = new Error("private process-group cleanup detail");
         error.code = "ACP_PROCESS_CLEANUP_UNCONFIRMED";
@@ -702,7 +702,7 @@ test("Agent Bridge cancellation timeout stays live and fails closed", async (t) 
       },
     },
     runTask: ({ onEvent }) => new Promise(() => {
-      onEvent({ kind: "initialized", agentName: "pageroot-e2e-qoder" });
+      onEvent({ kind: "initialized", agentName: "stemmio-e2e-qoder" });
     }),
   });
   const ticket = await preflight(service);
@@ -762,20 +762,20 @@ test("Agent Bridge never invents a resumed Qoder session after restart", async (
 
 test("Agent Bridge persistent lease blocks a second service from racing the same Request", async (t) => {
   const command = await createFakeCommand(t);
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-lease-test-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-lease-test-"));
   const requestPath = path.join(
     root,
     "project",
-    ".pageroot",
+    ".stemmio",
     "requests",
     IDENTITY.requestId,
   );
   await mkdir(requestPath, { recursive: true });
   const environment = {
     ...process.env,
-    PAGEROOT_E2E: "1",
-    PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
-    PAGEROOT_QODER_ACP_COMMAND: command,
+    STEMMIO_E2E: "1",
+    STEMMIO_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+    STEMMIO_QODER_ACP_COMMAND: command,
   };
   const createLeasedService = (runTask) => {
     let service;
@@ -793,7 +793,7 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
   };
   const first = createLeasedService(({ cancellationSignal, onEvent }) => new Promise(
     (_resolve, reject) => {
-      onEvent({ kind: "initialized", agentName: "pageroot-e2e-qoder" });
+      onEvent({ kind: "initialized", agentName: "stemmio-e2e-qoder" });
       cancellationSignal.addEventListener("abort", () => {
         const error = new Error("cancelled");
         error.code = "ACP_CANCELLED";
@@ -863,7 +863,7 @@ test("Agent Bridge rejects a policy retry that would overwrite an unfinalized ou
 
 test("Agent Bridge uses only a structured Qoder credit-limit error after Request creation", async (t) => {
   const command = await createFakeCommand(t);
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-capacity-test-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-capacity-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const service = createService(command, {
     policyLoader: async () => ({
@@ -899,7 +899,7 @@ test("Agent Bridge uses only a structured Qoder credit-limit error after Request
 
 test("Agent Bridge marks output written before failure as cancel-and-new only", async (t) => {
   const command = await createFakeCommand(t);
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-residue-test-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-residue-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const outputPath = path.join(root, "attempt", "output", "candidate.html");
   await mkdir(path.dirname(outputPath), { recursive: true });
@@ -935,7 +935,7 @@ test("Agent Bridge marks output written before failure as cancel-and-new only", 
 
 test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request retry", async (t) => {
   const command = await createFakeCommand(t);
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-cleanup-test-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-cleanup-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const policy = {
     ...fakePolicy(),
@@ -998,7 +998,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
 
 test("Agent Bridge preserves a verified Candidate when ACP teardown is unconfirmed", async (t) => {
   const command = await createFakeCommand(t);
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-verified-cleanup-test-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-verified-cleanup-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const facts = [];
   const policy = {
@@ -1052,7 +1052,7 @@ test("Agent Bridge preserves a verified Candidate when ACP teardown is unconfirm
 
 test("cleanup-unconfirmed fences survive terminal TTL and capacity pruning", async (t) => {
   const command = await createFakeCommand(t);
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-prune-fence-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-prune-fence-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   let now = Date.parse("2026-08-11T00:00:00.000Z");
   const identities = [1, 2, 3].map((index) => ({
@@ -1116,7 +1116,7 @@ test("Agent Bridge shutdown rejects when an owned Agent never confirms cleanup",
       },
     },
     runTask: ({ onEvent }) => new Promise(() => {
-      onEvent({ kind: "initialized", agentName: "pageroot-e2e-qoder" });
+      onEvent({ kind: "initialized", agentName: "stemmio-e2e-qoder" });
     }),
   });
   const ticket = await preflight(service);
@@ -1176,7 +1176,7 @@ test("Agent Bridge treats directories and special files at result paths as resid
     await t.test(kind, async (caseTest) => {
       const root = await mkdtemp(path.join(
         kind === "socket" ? "/tmp" : os.tmpdir(),
-        `pageroot-agent-${kind}-residue-`,
+        `stemmio-agent-${kind}-residue-`,
       ));
       caseTest.after(() => rm(root, { recursive: true, force: true }));
       const outputPath = path.join(root, "output");

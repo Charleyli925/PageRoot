@@ -1274,8 +1274,8 @@ export class CommentWorkflow {
 
   #recoveryKeys(snapshot) {
     return [
-      snapshot?.documentId ? `html-ai-draft-recovery:${snapshot.documentId}` : "",
-      snapshot?.sourcePath ? `html-ai-draft-recovery:${snapshot.sourcePath}` : "",
+      snapshot?.documentId ? `stemmio-draft-recovery:${snapshot.documentId}` : "",
+      snapshot?.sourcePath ? `stemmio-draft-recovery:${snapshot.sourcePath}` : "",
     ].filter(Boolean);
   }
 

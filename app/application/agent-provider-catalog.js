@@ -26,8 +26,8 @@ import {
   requestCancelAccessOperation,
 } from "../../shared/agent-access-operation.mjs";
 import {
-  PAGEROOT_PROVIDER_ID,
-  PAGEROOT_RUNTIME_ID,
+  STEMMIO_PROVIDER_ID,
+  STEMMIO_RUNTIME_ID,
   DEFAULT_OPENAI_COMPATIBLE_REASONING,
   normalizeOpenAiCompatibleReasoning,
   publicOpenAiCompatibleVendors,
@@ -64,8 +64,8 @@ const QODER_PRESENTATION = Object.freeze({
   notInstalledDetail: "安装后即可从侧栏直接发送。",
   authRequiredDetail: "登录后即可从侧栏直接发送。",
   loginLabel: "登录 Qoder",
-  invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Qoder CLI。",
-  restartRequiredDetail: "Qoder CLI 已发生变化，重新打开 PageRoot 后即可继续。",
+  invalidInstallationDetail: "当前安装不是 Stemmio 支持的独立 Qoder CLI。",
+  restartRequiredDetail: "Qoder CLI 已发生变化，重新打开 Stemmio 后即可继续。",
   checkingDetail: "正在自动检查 Qoder CLI…",
   capacityStatusLabel: "额度已用完",
   capacityDetail: "换源页 Agent 或 Codex，或复制任务给别的 AI。",
@@ -123,15 +123,15 @@ function qoderGuidanceInstruction(kind) {
       "请帮我完成这台 Mac 上独立 Qoder CLI 的官方登录流程。",
       "使用 Qoder 官方支持的登录入口 `qodercli login`；如果需要交互式登录，请启动 `qodercli` 后使用 `/login`。",
       "完成浏览器或令牌登录后，验证 `qodercli --list-models` 能返回当前账号可用的模型。",
-      "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
+      "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
     ].join("\n");
   }
   return [
-    "请帮我在这台 Mac 上准备 PageRoot 支持的独立 Qoder CLI。",
+    "请帮我在这台 Mac 上准备 Stemmio 支持的独立 Qoder CLI。",
     "使用 Qoder 官方 npm 包 `@qoder-ai/qodercli@latest`，不要使用 Qoder 应用包内置的命令。",
     "将它安装到 Finder 或 Dock 启动的应用也能稳定发现的位置；优先使用用户可写的稳定全局目录，或保留当前 nvm、Volta、fnm、mise 配置并确保 qodercli 启动器真实存在。",
     "安装后使用 Qoder 官方登录流程完成登录，并验证 `qodercli --version` 与 `qodercli --list-models` 均可用。",
-    "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
+    "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
   ].join("\n");
 }
 
@@ -185,8 +185,8 @@ const CODEX_PRESENTATION = Object.freeze({
   capacityStatusLabel: "额度已用完",
   capacityDetail: "换源页 Agent 或 Qoder，或复制任务给别的 AI。",
   loginLabel: "登录 Codex",
-  invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Codex ACP。",
-  restartRequiredDetail: "Codex ACP 已发生变化，重新打开 PageRoot 后即可继续。",
+  invalidInstallationDetail: "当前安装不是 Stemmio 支持的独立 Codex ACP。",
+  restartRequiredDetail: "Codex ACP 已发生变化，重新打开 Stemmio 后即可继续。",
   checkingDetail: "正在检查 Codex…",
   timeoutDetail: "Codex 预检没有在规定时间内完成。",
   startUnavailable: "当前 Request 还不能启动 Codex。",
@@ -204,16 +204,16 @@ function codexGuidanceInstruction(kind) {
   if (kind === "login") {
     return [
       "请帮我完成这台 Mac 上独立 Codex CLI 的官方登录流程。",
-      "使用 Codex 官方支持的登录入口 `codex login`；登录 ChatGPT 账号后再回到 PageRoot。",
+      "使用 Codex 官方支持的登录入口 `codex login`；登录 ChatGPT 账号后再回到 Stemmio。",
       "完成浏览器登录后，验证 `codex-acp` 能正常启动。",
-      "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
+      "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
     ].join("\n");
   }
   return [
-    "请帮我在这台 Mac 上准备 PageRoot 支持的独立 Codex ACP。",
-    "使用官方 npm 包 `@agentclientprotocol/codex-acp`，不要改用 PageRoot 安装包内的 bundled Codex。",
+    "请帮我在这台 Mac 上准备 Stemmio 支持的独立 Codex ACP。",
+    "使用官方 npm 包 `@agentclientprotocol/codex-acp`，不要改用 Stemmio 安装包内的 bundled Codex。",
     "安装后使用 `codex login` 完成登录。",
-    "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
+    "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
   ].join("\n");
 }
 
@@ -241,7 +241,7 @@ export const CODEX_AGENT_PROVIDER = Object.freeze({
   guidanceInstruction: codexGuidanceInstruction,
 });
 
-const PAGEROOT_FAILURE_REASONS = Object.freeze({
+const STEMMIO_FAILURE_REASONS = Object.freeze({
   AGENT_AUTH_REQUIRED: "auth-required",
   AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
   AGENT_BALANCE_INSUFFICIENT: "account-capacity",
@@ -256,12 +256,12 @@ const PAGEROOT_FAILURE_REASONS = Object.freeze({
   AGENT_ENDPOINT_REGION_MISMATCH: "endpoint-region-mismatch",
 });
 
-const PAGEROOT_PRESENTATION = Object.freeze({
+const STEMMIO_PRESENTATION = Object.freeze({
   displayName: "源页 Agent",
   agentName: "源页",
   logoSrc: "./brand-logo.png",
-  cardClassName: "pageroot-availability-card",
-  primaryActionDataAttribute: "data-pageroot-primary",
+  cardClassName: "stemmio-availability-card",
+  primaryActionDataAttribute: "data-stemmio-primary",
   readyDetail: "可从侧栏发送",
   authRequiredDetail: "填入 Token 后发送",
   capacityStatusLabel: "额度已用完",
@@ -284,15 +284,15 @@ const PAGEROOT_PRESENTATION = Object.freeze({
   frozenPreviewDetail: "这是本轮冻结并交给源页 Agent 的只读任务资料",
 });
 
-export const PAGEROOT_AGENT_PROVIDER = Object.freeze({
-  providerId: PAGEROOT_PROVIDER_ID,
-  runtimeId: PAGEROOT_RUNTIME_ID,
+export const STEMMIO_AGENT_PROVIDER = Object.freeze({
+  providerId: STEMMIO_PROVIDER_ID,
+  runtimeId: STEMMIO_RUNTIME_ID,
   securityProfile: "client-mediated",
   trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   installable: false,
   selection: freezeAgentSelection(Object.freeze({
-    providerId: PAGEROOT_PROVIDER_ID,
-    runtimeId: PAGEROOT_RUNTIME_ID,
+    providerId: STEMMIO_PROVIDER_ID,
+    runtimeId: STEMMIO_RUNTIME_ID,
     requestedModelId: null,
     resolvedModelId: null,
     reasoning: Object.freeze({
@@ -301,9 +301,9 @@ export const PAGEROOT_AGENT_PROVIDER = Object.freeze({
       resolution: "provider-default",
     }),
   })),
-  presentation: PAGEROOT_PRESENTATION,
+  presentation: STEMMIO_PRESENTATION,
   failureReason(code) {
-    return PAGEROOT_FAILURE_REASONS[String(code || "")] || "service-unavailable";
+    return STEMMIO_FAILURE_REASONS[String(code || "")] || "service-unavailable";
   },
   guidanceInstruction() {
     return "";
@@ -311,7 +311,7 @@ export const PAGEROOT_AGENT_PROVIDER = Object.freeze({
 });
 
 export function defaultAgentProviders() {
-  return Object.freeze([PAGEROOT_AGENT_PROVIDER, QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER]);
+  return Object.freeze([STEMMIO_AGENT_PROVIDER, QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER]);
 }
 
 export function agentAvailabilityCardPresentation(presentation, availability) {
@@ -432,7 +432,7 @@ function agentProviderDisplayAvailability(provider) {
       provider.diagnostic.checkedAt,
     )
     : provider.availability;
-  return provider.providerId === PAGEROOT_PROVIDER_ID
+  return provider.providerId === STEMMIO_PROVIDER_ID
     && diagnosticAvailability.status === "ready"
     && provider.diagnostic?.facts?.protocol?.status === "unknown"
     && provider.diagnostic?.facts?.service?.status === "unknown"
@@ -717,15 +717,15 @@ export class AgentCatalogState {
     const initialConfigurations = new Map([...this.#providers].map(([id, entry]) => [id, agentPreflightKey(entry.selection)]));
     if (credentialStatusPort) {
       void credentialStatusPort().then((status) => {
-        if (!this.#disposed && this.#providers.has("pageroot") && !this.credentialPersist("pageroot")) {
+        if (!this.#disposed && this.#providers.has("stemmio") && !this.credentialPersist("stemmio")) {
           if (status?.unreadable === true || status?.reconnectRequired === true) {
-            this.noteCredentialPersist("pageroot", {
+            this.noteCredentialPersist("stemmio", {
               status: "failed",
               reason: status?.reason
                 || "无法读取已保存的连接凭证。你仍可编辑项目。",
             });
           } else {
-            this.noteCredentialPersist("pageroot", { status: status?.remembered === true ? "saved" : "skipped" });
+            this.noteCredentialPersist("stemmio", { status: status?.remembered === true ? "saved" : "skipped" });
           }
         }
       }).catch(() => {});
@@ -1192,7 +1192,7 @@ export class AgentCatalogState {
     const provider = this.provider(frozen);
     if (!provider) return Promise.reject(this.#unsupportedProvider(frozen.providerId));
     if (provider.enabled === false) {
-      return Promise.reject(Object.assign(new Error("This Agent is disconnected in PageRoot."), {
+      return Promise.reject(Object.assign(new Error("This Agent is disconnected in Stemmio."), {
         code: "AGENT_PROVIDER_DISABLED",
       }));
     }
@@ -1374,7 +1374,7 @@ export class AgentCatalogState {
     const provider = this.provider(frozen);
     if (!provider) throw this.#unsupportedProvider(frozen.providerId);
     if (provider.installable !== true) {
-      throw Object.assign(new Error("This Agent cannot be installed from PageRoot."), {
+      throw Object.assign(new Error("This Agent cannot be installed from Stemmio."), {
         code: "AGENT_INSTALL_UNSUPPORTED",
       });
     }
@@ -1439,7 +1439,7 @@ export class AgentCatalogState {
     const provider = this.provider(frozen);
     if (!provider) throw this.#unsupportedProvider(frozen.providerId);
     if (provider.installable !== true) {
-      throw Object.assign(new Error("This Agent cannot be installed from PageRoot."), {
+      throw Object.assign(new Error("This Agent cannot be installed from Stemmio."), {
         code: "AGENT_INSTALL_UNSUPPORTED",
       });
     }
@@ -1980,7 +1980,7 @@ export class AgentCatalogState {
     });
     const manualModelId = String(extras.modelId || "").trim().slice(0, 80);
     const nextModelId = manualModelId
-      ? `${frozen.providerId}:${manualModelId.replace(/^pageroot:/u, "")}`
+      ? `${frozen.providerId}:${manualModelId.replace(/^stemmio:/u, "")}`
       : frozen.requestedModelId || frozen.resolvedModelId;
     const changedModel = Boolean(manualModelId && nextModelId !== (frozen.requestedModelId || frozen.resolvedModelId));
     const changedVendor = Boolean(provider.connection?.vendorId && extras.vendorId

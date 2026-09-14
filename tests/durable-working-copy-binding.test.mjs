@@ -24,7 +24,7 @@ async function restart(projectsRoot) {
   return JSON.parse(stdout);
 }
 async function drift(target, fields = ["device", "inode", "birthtimeMs"]) {
-  const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+  const manifestPath = path.join(target.projectRootPath, ".stemmio", "manifest.json");
   const manifest = await json(manifestPath);
   for (const member of manifest.workingCopies) for (const field of fields) {
     member.fileIdentity[field] = field === "birthtimeMs" ? 123 : "123";
@@ -39,7 +39,7 @@ for (const fields of [["device"], ["inode"], ["birthtimeMs"], ["device", "inode"
     const rows = await restart(value.projects);
     assert.equal(rows[0].availability, "ready");
     assert.deepEqual(await readFile(target.exactSourcePath), before);
-    const manifest = await json(path.join(target.projectRootPath, ".pageroot", "manifest.json"));
+    const manifest = await json(path.join(target.projectRootPath, ".stemmio", "manifest.json"));
     assert.equal(manifest.versions.length, 1);
     assert.equal(manifest.workingCopies[0].fileIdentity.device, String((await lstat(target.exactSourcePath)).dev));
     assert.equal((await lstat(sourceBindingPath(target.projectRootPath, target.workingCopyId))).ino, (await lstat(target.exactSourcePath)).ino);
@@ -63,7 +63,7 @@ test("five legacy projects converge fifteen drafts into five current files and t
   const rows = await restart(value.projects);
   assert.equal(rows.length, 5); assert.ok(rows.every((row) => row.availability === "ready"));
   for (const active of projects) {
-    const manifest = await json(path.join(active.projectRootPath, ".pageroot/manifest.json"));
+    const manifest = await json(path.join(active.projectRootPath, ".stemmio/manifest.json"));
     assert.equal(manifest.workingCopies.length, 1);
     assert.equal(manifest.workingCopies[0].workingCopyId, active.workingCopyId);
     assert.equal(await readFile(active.exactSourcePath, "utf8"), html("v3"));
@@ -87,7 +87,7 @@ for (const removeBindings of [false, true]) {
       target = (await value.repository.promoteCandidate({ target, candidateId, decisionOperationId: `promote_${candidateId}` })).target;
     }
     await drift(target);
-    const manifestPath = path.join(target.projectRootPath, ".pageroot/manifest.json");
+    const manifestPath = path.join(target.projectRootPath, ".stemmio/manifest.json");
     const before = await json(manifestPath);
     if (removeBindings) for (const member of before.workingCopies) {
       await rm(sourceBindingPath(target.projectRootPath, member.workingCopyId));
@@ -117,7 +117,7 @@ for (const removeBindings of [false, true]) {
     for (const member of after.workingCopies) {
       const sourcePath = path.join(target.projectRootPath, member.sourceRelativePath);
       const source = await readHtmlFile(sourcePath, "Working Copy", { projectRootPath: target.projectRootPath });
-      const state = await json(path.join(target.projectRootPath, ".pageroot", member.stateRelativePath));
+      const state = await json(path.join(target.projectRootPath, ".stemmio", member.stateRelativePath));
       assert.equal(source.sha256, state.currentSha256);
       assert.equal(member.fileIdentity.device, String(source.information.dev));
       assert.equal((await lstat(sourceBindingPath(target.projectRootPath, member.workingCopyId))).ino, source.information.ino);
@@ -132,11 +132,11 @@ test("Bridge startup converges legacy inactive drafts before serving the project
     decisionOperationId: `promote_${candidateId}` });
   await drift(target);
   const bridge = await createBridgeTestEnvironment(t);
-  await bridge.start({ HTML_AI_PROJECT_FILES_ROOT: value.projects });
+  await bridge.start({ STEMMIO_PROJECT_FILES_ROOT: value.projects });
   const { response, body } = await bridge.requestJson("/registered-projects");
   assert.equal(response.status, 200);
   assert.equal(body.projects[0].availability, "ready");
-  const manifest = await json(path.join(target.projectRootPath, ".pageroot/manifest.json"));
+  const manifest = await json(path.join(target.projectRootPath, ".stemmio/manifest.json"));
   assert.equal(manifest.workingCopies.length, 1);
   assert.equal(manifest.workingCopies[0].workingCopyId, promoted.target.workingCopyId);
   const preserved = await value.repository.listPreservedDrafts({ projectId: target.projectId });
@@ -171,7 +171,7 @@ test("incomplete copied project records do not quarantine a complete registered 
   for (const missing of ["manifest.json", "runtime-state.json"]) {
     const partialRoot = path.join(value.projects, `partial-${missing}`);
     await cp(target.projectRootPath, partialRoot, { recursive: true });
-    await rm(path.join(partialRoot, ".pageroot", missing));
+    await rm(path.join(partialRoot, ".stemmio", missing));
   }
   const rows = await restart(value.projects);
   assert.equal(rows[0].availability, "ready");
@@ -226,14 +226,14 @@ for (const stage of ["promotion-prepared", "promotion-snapshot-created", "promot
     const writer = new ProjectFileRepository({ projectsRoot:value.projects, failpoint:(name)=>name===stage });
     await assert.rejects(writer.promoteCandidate({target,candidateId,decisionOperationId: `promote_${candidateId}`}));
     await drift(target);
-    const journalPath=path.join(target.projectRootPath,".pageroot","transactions",`promote_${candidateId}`,"transaction.json");
+    const journalPath=path.join(target.projectRootPath,".stemmio","transactions",`promote_${candidateId}`,"transaction.json");
     // Promotion journals keep legacy observations for compatibility, not authority.
     const transaction=await json(journalPath);
     if(transaction.preparedWorkingCopyFileIdentity) transaction.preparedWorkingCopyFileIdentity.device="777";
     if(transaction.workingCopy) transaction.workingCopy.fileIdentity.device="888";
     await writeFile(journalPath,JSON.stringify(transaction));
     const rows=await restart(value.projects);assert.equal(rows[0].availability,"ready");
-    const manifest=await json(path.join(target.projectRootPath,".pageroot","manifest.json"));
+    const manifest=await json(path.join(target.projectRootPath,".stemmio","manifest.json"));
     assert.equal(manifest.versions.length,2);assert.equal(manifest.latestOfficialVersionId,"ver_0002");
   });
 }
@@ -285,7 +285,7 @@ test("registered projection resolves the stable current identity after adoption"
 for (const [readNumber, sameBytes] of [[1, true], [1, false], [2, true]]) {
   test(`renamed binding rejects replacement before read ${readNumber} with ${sameBytes ? "same" : "different"} bytes`, async (t) => {
     const value = await fixture(t); const { target } = await importSource(value);
-    const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+    const manifestPath = path.join(target.projectRootPath, ".stemmio", "manifest.json");
     const manifestBefore = await readFile(manifestPath);
     const bindingPath = sourceBindingPath(target.projectRootPath, target.workingCopyId);
     const bindingBefore = await lstat(bindingPath);
@@ -334,7 +334,7 @@ for (const collision of ["occupied-copy", "occupied-link", "replaced-link"]) {
     const bindingPath = sourceBindingPath(target.projectRootPath, target.workingCopyId);
     const bindingBefore = await lstat(bindingPath);
     const bytes = await readFile(target.exactSourcePath);
-    const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+    const manifestPath = path.join(target.projectRootPath, ".stemmio", "manifest.json");
     const manifestBefore = await readFile(manifestPath);
     await rm(target.exactSourcePath);
     const originalLink = filesystem.link;
@@ -375,12 +375,12 @@ for (const replacementStage of ["before-recovery", "before-binding-refresh", "af
     const writer = new ProjectFileRepository({ projectsRoot: value.projects,
       failpoint: (name) => name === "promotion-working-copy-created" });
     await assert.rejects(writer.promoteCandidate({ target, candidateId, decisionOperationId: `promote_${candidateId}` }));
-    const transaction = await json(path.join(target.projectRootPath, ".pageroot", "transactions",
+    const transaction = await json(path.join(target.projectRootPath, ".stemmio", "transactions",
       `promote_${candidateId}`, "transaction.json"));
     const visiblePath = path.join(target.projectRootPath, transaction.workingCopy.sourceRelativePath);
     const original = await readFile(visiblePath);
     const originalInformation = await lstat(visiblePath);
-    const manifestPath = path.join(target.projectRootPath, ".pageroot", "manifest.json");
+    const manifestPath = path.join(target.projectRootPath, ".stemmio", "manifest.json");
     const manifestBefore = await readFile(manifestPath);
     let replaced = false;
     const replace = async () => {
@@ -401,7 +401,7 @@ for (const replacementStage of ["before-recovery", "before-binding-refresh", "af
       } else {
         filesystem.open = async function (filePath, ...args) {
           const handle = await originalOpen.call(this, filePath, ...args);
-          if (!replaced && filePath === path.join(target.projectRootPath, ".pageroot", transaction.preparedWorkingCopyRelativePath)) {
+          if (!replaced && filePath === path.join(target.projectRootPath, ".stemmio", transaction.preparedWorkingCopyRelativePath)) {
             const close = handle.close.bind(handle);
             handle.close = async () => { await close(); if (!replaced) await replace(); };
           }

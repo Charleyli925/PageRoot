@@ -390,7 +390,7 @@ export function semanticUnitDescriptor(
       )
       : null,
     persistentIdentityClaimed: ownsElementIdentity
-      && unit.element.hasAttribute("data-pageroot-id"),
+      && unit.element.hasAttribute("data-stemmio-id"),
     identityAmbiguous: ownsElementIdentity
       && hasAmbiguousPersistentIdentity(unit.element, ambiguousPersistentIds),
     exactSignature,
@@ -446,7 +446,7 @@ export function* buildReviewSemanticPairGraphSteps(
     [before, after].forEach((element) => {
       if (!element) return;
       geometryOwners.set(element, ownerId);
-      element.setAttribute("data-pageroot-review-geometry-owner", ownerId);
+      element.setAttribute("data-stemmio-review-geometry-owner", ownerId);
     });
     return ownerId;
   };
@@ -573,7 +573,7 @@ export function sectionElementDescriptor(
       usePersistentIdentity,
       ambiguousPersistentIds,
     ),
-    persistentIdentityClaimed: element.hasAttribute("data-pageroot-id"),
+    persistentIdentityClaimed: element.hasAttribute("data-stemmio-id"),
     identityAmbiguous: hasAmbiguousPersistentIdentity(element, ambiguousPersistentIds),
     exactSignature: exactSubtreeSignature(element, signatures),
     compatibilitySignature: selfCompatibilitySignature(element, signatures),

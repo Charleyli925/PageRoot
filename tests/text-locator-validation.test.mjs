@@ -6,11 +6,11 @@ import {
   TEXT_LOCATOR_STALE_REASON,
 } from "../app/application/run/text-locator-validation.js";
 
-const ELEMENT_ID = "pr1_11111111111141118111111111111111";
-const OTHER_ELEMENT_ID = "pr1_22222222222242229222222222222222";
+const ELEMENT_ID = "sm1_11111111111141118111111111111111";
+const OTHER_ELEMENT_ID = "sm1_22222222222242229222222222222222";
 
 function html(text, otherText = "") {
-  return `<!doctype html><html><body><p data-pageroot-id="${ELEMENT_ID}">${text}</p><aside data-pageroot-id="${OTHER_ELEMENT_ID}">${otherText}</aside></body></html>`;
+  return `<!doctype html><html><body><p data-stemmio-id="${ELEMENT_ID}">${text}</p><aside data-stemmio-id="${OTHER_ELEMENT_ID}">${otherText}</aside></body></html>`;
 }
 
 function comment(locator, overrides = {}) {

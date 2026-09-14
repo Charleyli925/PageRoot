@@ -12,7 +12,7 @@ function sourceElementRange(sourceBytes, sourceId, side) {
     caller: "real-html-source-scope-oracle",
     scope: "test",
   });
-  const element = index.byPagerootId.get(sourceId);
+  const element = index.byStemmioId.get(sourceId);
   if (!element?.range) {
     const error = new Error(`Source element ${sourceId} disappeared from the ${side} bytes.`);
     error.code = "SOURCE_SCOPE_IDENTITY_MISSING";
@@ -175,7 +175,7 @@ export function formattedMarkerAppendedPattern(marker) {
     + "font-weight:\\s*700;\\s*font-style:\\s*italic;\\s*"
     + "text-decoration-line:\\s*underline";
   return new RegExp(
-    ` <span style="${styleValue}" data-pageroot-id="pr1_[0-9a-f]{32}">`
+    ` <span style="${styleValue}" data-stemmio-id="sm1_[0-9a-f]{32}">`
     + `${escapeRegExp(marker)}</span>`,
     "u",
   );
@@ -247,7 +247,7 @@ export function compareElementScopedMutation({
   const appendedBytes = checkedAfter.subarray(relative.after.start, relative.after.end);
   const appendedText = appendedBytes.toString("utf8");
   const appendedStableIds = [...appendedText.matchAll(
-    /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+    /data-stemmio-id="(sm1_[0-9a-f]{32})"/gu,
   )].map((match) => match[1]);
   const resolvedFreshStableIdCount = Number.isInteger(expectedFreshStableIdCount)
     && expectedFreshStableIdCount >= 0 ? expectedFreshStableIdCount : [
@@ -256,9 +256,9 @@ export function compareElementScopedMutation({
   ].includes(normalizationPolicy) ? 1 : 0;
   const freshStableIdsValid = appendedStableIds.length === resolvedFreshStableIdCount
     && new Set(appendedStableIds).size === appendedStableIds.length
-    && appendedStableIds.every((id) => !beforeElement.sourceIndex.byPagerootId.has(id));
-  const sourceIdentityValid = beforeElement.sourceIndex.pagerootIdentity?.valid === true
-    && afterElement.sourceIndex.pagerootIdentity?.valid === true;
+    && appendedStableIds.every((id) => !beforeElement.sourceIndex.byStemmioId.has(id));
+  const sourceIdentityValid = beforeElement.sourceIndex.stemmioIdentity?.valid === true
+    && afterElement.sourceIndex.stemmioIdentity?.valid === true;
   expectedAppendedPattern.lastIndex = 0;
   const appendedMatch = expectedAppendedPattern.exec(appendedText);
   const appendedShapeValid = Boolean(
@@ -287,8 +287,8 @@ export function compareElementScopedMutation({
     expectedFreshStableIdCount: resolvedFreshStableIdCount,
     appendedStableIds,
     identityIssueCodes: [
-      ...(beforeElement.sourceIndex.pagerootIdentity?.issues || []),
-      ...(afterElement.sourceIndex.pagerootIdentity?.issues || []),
+      ...(beforeElement.sourceIndex.stemmioIdentity?.issues || []),
+      ...(afterElement.sourceIndex.stemmioIdentity?.issues || []),
     ].map((issue) => issue.code),
     expectedAppendedPattern: expectedAppendedPattern.source,
     normalizationPolicy,
@@ -369,7 +369,7 @@ export function compareElementSourceDelta({
     },
     domRange: {
       id: sourceId,
-      selector: domSelector || `[data-pageroot-id="${sourceId}"]`,
+      selector: domSelector || `[data-stemmio-id="${sourceId}"]`,
       start: 0,
       end: 1,
     },
@@ -410,8 +410,8 @@ export function compareElementStyleMutation({
   const afterBytes = Buffer.isBuffer(after) ? Buffer.from(after) : Buffer.from(after, "utf8");
   const beforeElement = sourceElementRange(beforeBytes, sourceId, "before");
   const afterElement = sourceElementRange(afterBytes, sourceId, "after");
-  const beforeNode = beforeElement.sourceIndex.byPagerootId.get(sourceId);
-  const afterNode = afterElement.sourceIndex.byPagerootId.get(sourceId);
+  const beforeNode = beforeElement.sourceIndex.byStemmioId.get(sourceId);
+  const afterNode = afterElement.sourceIndex.byStemmioId.get(sourceId);
   const beforeStyle = styleDeclarationMap(beforeNode);
   const afterStyle = styleDeclarationMap(afterNode);
   const allProperties = new Set([
@@ -447,8 +447,8 @@ export function compareElementStyleMutation({
     .equals(afterBytes.subarray(0, afterElement.byteRange.start))
     && beforeBytes.subarray(beforeElement.byteRange.end)
       .equals(afterBytes.subarray(afterElement.byteRange.end));
-  const sourceIdentityValid = beforeElement.sourceIndex.pagerootIdentity?.valid === true
-    && afterElement.sourceIndex.pagerootIdentity?.valid === true;
+  const sourceIdentityValid = beforeElement.sourceIndex.stemmioIdentity?.valid === true
+    && afterElement.sourceIndex.stemmioIdentity?.valid === true;
   const styleSyntaxValid = !beforeStyle.duplicateStyleAttributes
     && !afterStyle.duplicateStyleAttributes
     && beforeStyle.syntaxComplete
@@ -497,8 +497,8 @@ export function compareElementStyleMutation({
       after: afterStyle.unparsedRanges,
     },
     identityIssueCodes: [
-      ...(beforeElement.sourceIndex.pagerootIdentity?.issues || []),
-      ...(afterElement.sourceIndex.pagerootIdentity?.issues || []),
+      ...(beforeElement.sourceIndex.stemmioIdentity?.issues || []),
+      ...(afterElement.sourceIndex.stemmioIdentity?.issues || []),
     ].map((issue) => issue.code),
     changedRanges: relative,
     elementRanges: {

@@ -26,8 +26,8 @@ jobs:
       - run: npm ci
       - name: Run every fixed model through the production Agent chain
         env:
-          PAGEROOT_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DEEPSEEK_API_KEY }}
-          PAGEROOT_SMOKE_ZHIPU_API_KEY: ${{ secrets.PAGEROOT_SMOKE_ZHIPU_API_KEY }}
-          PAGEROOT_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DASHSCOPE_API_KEY }}
-          PAGEROOT_SMOKE_OPENAI_API_KEY: ${{ secrets.PAGEROOT_SMOKE_OPENAI_API_KEY }}
+          STEMMIO_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.STEMMIO_SMOKE_DEEPSEEK_API_KEY }}
+          STEMMIO_SMOKE_ZHIPU_API_KEY: ${{ secrets.STEMMIO_SMOKE_ZHIPU_API_KEY }}
+          STEMMIO_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.STEMMIO_SMOKE_DASHSCOPE_API_KEY }}
+          STEMMIO_SMOKE_OPENAI_API_KEY: ${{ secrets.STEMMIO_SMOKE_OPENAI_API_KEY }}
         run: npm run smoke:agent-vendors:real

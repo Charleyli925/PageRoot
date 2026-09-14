@@ -6,7 +6,7 @@ import {
   parseHtmlSource,
 } from "../../bridge/html-source-parser.mjs";
 
-const ID_ATTRIBUTE = "data-pageroot-id";
+const ID_ATTRIBUTE = "data-stemmio-id";
 
 function elementChildren(node) {
   const children = (node?.childNodes ?? []).filter(
@@ -50,7 +50,7 @@ function sourceSignature(source, node) {
     return "";
   }
   return source.slice(location.startOffset, location.endOffset)
-    .replace(/\s+data-pageroot-id\s*=\s*(?:"pr1_[a-f0-9]{32}"|'pr1_[a-f0-9]{32}'|pr1_[a-f0-9]{32})/giu, "")
+    .replace(/\s+data-stemmio-id\s*=\s*(?:"sm1_[a-f0-9]{32}"|'sm1_[a-f0-9]{32}'|sm1_[a-f0-9]{32})/giu, "")
     .replace(/\s+/gu, " ")
     .trim();
 }
@@ -98,8 +98,8 @@ export function preserveCandidateSourceIdsForFixture(baseHtml, candidateWithoutI
     if (pairedBaseNodes.has(baseNode) || pairedCandidateNodes.has(candidateNode)) return false;
     pairedBaseNodes.add(baseNode);
     pairedCandidateNodes.add(candidateNode);
-    const pagerootId = attributesFor(baseNode).get(ID_ATTRIBUTE);
-    if (pagerootId) pairedIds.set(candidateNode, pagerootId);
+    const stemmioId = attributesFor(baseNode).get(ID_ATTRIBUTE);
+    if (stemmioId) pairedIds.set(candidateNode, stemmioId);
     return true;
   };
   const pairRemainingByTag = (before, after, {
@@ -148,10 +148,10 @@ export function preserveCandidateSourceIdsForFixture(baseHtml, candidateWithoutI
     // their identities, so pair remaining same-tag siblings in source order.
     pairRemainingByTag(before, after, { allowedTags: new Set(["br"]) });
     for (const candidateNode of after) {
-      const pagerootId = pairedIds.get(candidateNode);
-      if (!pagerootId) continue;
+      const stemmioId = pairedIds.get(candidateNode);
+      if (!stemmioId) continue;
       const baseNode = before.find(
-        (value) => attributesFor(value).get(ID_ATTRIBUTE) === pagerootId,
+        (value) => attributesFor(value).get(ID_ATTRIBUTE) === stemmioId,
       );
       if (baseNode) pairChildren(baseNode, candidateNode);
     }
@@ -171,11 +171,11 @@ export function preserveCandidateSourceIdsForFixture(baseHtml, candidateWithoutI
   };
   pairChildren(base.document, candidate.document);
 
-  const insertions = [...pairedIds].flatMap(([node, pagerootId]) => {
+  const insertions = [...pairedIds].flatMap(([node, stemmioId]) => {
     if (attributesFor(node).has(ID_ATTRIBUTE)) return [];
     const offset = closingDelimiterOffset(candidate.source, node);
     return Number.isInteger(offset)
-      ? [{ offset, value: ` ${ID_ATTRIBUTE}="${pagerootId}"` }]
+      ? [{ offset, value: ` ${ID_ATTRIBUTE}="${stemmioId}"` }]
       : [];
   }).sort((left, right) => right.offset - left.offset);
   let result = candidate.source;

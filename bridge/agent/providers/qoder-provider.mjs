@@ -117,7 +117,7 @@ export function qoderFailure(code) {
     case "QODER_COMMAND_NOT_FOUND":
       return "没有找到独立安装的 Qoder CLI。请先安装 Qoder CLI，或改用复制任务。";
     case "QODER_COMMAND_UNTRUSTED":
-      return "找到的 Qoder CLI 不符合独立安装校验，PageRoot 没有启动它。";
+      return "找到的 Qoder CLI 不符合独立安装校验，Stemmio 没有启动它。";
     case "QODER_VERSION_UNSUPPORTED":
       return "当前 Qoder CLI 版本不受支持。请更新后再试。";
     case "AGENT_CANCELLED":
@@ -127,16 +127,16 @@ export function qoderFailure(code) {
     case "AGENT_NETWORK_INTERRUPTED":
       return "Qoder 连接中断，Request 与当前 HTML 均已保留。";
     case "ACP_AGENT_IDENTITY_MISMATCH":
-      return "ACP 进程没有证明自己是 Qoder CLI，PageRoot 已停止它。";
+      return "ACP 进程没有证明自己是 Qoder CLI，Stemmio 已停止它。";
     case "ACP_PROTOCOL_UNSUPPORTED":
     case "ACP_PROTOCOL_INVALID":
       return "Qoder CLI 的 ACP 协议未通过连接检查。当前 HTML 与 Request 均未改变。";
     case "ACP_PROCESS_CLEANUP_UNCONFIRMED":
-      return "Qoder 连接检查进程未确认停止。PageRoot 已停止继续操作。";
+      return "Qoder 连接检查进程未确认停止。Stemmio 已停止继续操作。";
     case "ACP_RUNTIME_AUTHORITY_DRIFT":
       return "本轮 Request 权限已经变化，Qoder 的后续写入已被拒绝。";
     case "AGENT_RETRY_OUTPUT_PRESENT":
-      return "本轮已留下未最终化输出，PageRoot 不会覆盖或转交同一路径。请结束本轮后重新发送。";
+      return "本轮已留下未最终化输出，Stemmio 不会覆盖或转交同一路径。请结束本轮后重新发送。";
     case "AGENT_RESTART_RECOVERY_REQUIRED":
       return "Bridge 上次退出后无法证明旧 Qoder 会话已经停止。请结束本轮，再重新发送为新的 Request。";
     default:
@@ -147,35 +147,35 @@ export function qoderFailure(code) {
 export function qoderPreflightFailure(code) {
   switch (code) {
     case "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED":
-      return "Qoder 预检进程未确认停止。PageRoot 尚未创建本轮 Request；为避免失去控制，本次不能继续，应用也不会退出。";
+      return "Qoder 预检进程未确认停止。Stemmio 尚未创建本轮 Request；为避免失去控制，本次不能继续，应用也不会退出。";
     case "QODER_AUTH_REQUIRED":
-      return "Qoder CLI 尚未登录。PageRoot 尚未创建本轮 Request；请先完成登录，再重试或改用复制任务。";
+      return "Qoder CLI 尚未登录。Stemmio 尚未创建本轮 Request；请先完成登录，再重试或改用复制任务。";
     case "QODER_COMMAND_NOT_FOUND":
-      return "没有找到独立安装的 Qoder CLI。PageRoot 尚未创建本轮 Request；请先安装，或改用复制任务。";
+      return "没有找到独立安装的 Qoder CLI。Stemmio 尚未创建本轮 Request；请先安装，或改用复制任务。";
     case "QODER_COMMAND_UNTRUSTED":
-      return "找到的 Qoder CLI 不符合独立安装校验。PageRoot 尚未创建本轮 Request，也没有启动该命令。";
+      return "找到的 Qoder CLI 不符合独立安装校验。Stemmio 尚未创建本轮 Request，也没有启动该命令。";
     case "QODER_VERSION_UNSUPPORTED":
-      return "当前 Qoder CLI 版本不受支持。PageRoot 尚未创建本轮 Request；请更新后再试。";
+      return "当前 Qoder CLI 版本不受支持。Stemmio 尚未创建本轮 Request；请更新后再试。";
     case "QODER_COMMAND_CHANGED":
-      return "Qoder CLI 在预检期间发生变化。PageRoot 尚未创建本轮 Request，也没有启动变化后的命令。";
+      return "Qoder CLI 在预检期间发生变化。Stemmio 尚未创建本轮 Request，也没有启动变化后的命令。";
     case "QODER_VERSION_INVALID":
-      return "Qoder CLI 没有返回可验证的版本号。PageRoot 尚未创建本轮 Request；请更新或重新安装后再试。";
+      return "Qoder CLI 没有返回可验证的版本号。Stemmio 尚未创建本轮 Request；请更新或重新安装后再试。";
     case "QODER_VERSION_MISMATCH":
-      return "Qoder CLI 版本与独立安装清单不一致。PageRoot 尚未创建本轮 Request；请重新安装后再试。";
+      return "Qoder CLI 版本与独立安装清单不一致。Stemmio 尚未创建本轮 Request；请重新安装后再试。";
     case "QODER_ACCOUNT_CAPACITY_UNAVAILABLE":
     case "QODER_CAPACITY_UNAVAILABLE":
-      return "Qoder 账号当前没有可用模型容量。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
+      return "Qoder 账号当前没有可用模型容量。Stemmio 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
     case "QODER_MODEL_CATALOG_EMPTY":
-      return "Qoder 当前没有返回可用模型。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+      return "Qoder 当前没有返回可用模型。Stemmio 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
     case "QODER_PREFLIGHT_TIMEOUT":
-      return "Qoder CLI 预检超时。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+      return "Qoder CLI 预检超时。Stemmio 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
     case "ACP_AGENT_IDENTITY_MISMATCH":
-      return "Qoder ACP 进程身份不符。PageRoot 尚未创建本轮 Request，也没有执行任务。";
+      return "Qoder ACP 进程身份不符。Stemmio 尚未创建本轮 Request，也没有执行任务。";
     case "ACP_PROTOCOL_UNSUPPORTED":
     case "ACP_PROTOCOL_INVALID":
-      return "Qoder ACP 协议未通过连接检查。PageRoot 尚未创建本轮 Request；请更新或重新安装后再试。";
+      return "Qoder ACP 协议未通过连接检查。Stemmio 尚未创建本轮 Request；请更新或重新安装后再试。";
     default:
-      return "Qoder CLI 预检没有完成。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+      return "Qoder CLI 预检没有完成。Stemmio 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
   }
 }
 
@@ -378,7 +378,7 @@ export async function validateNpmQoderCommand(candidate) {
     return null;
   }
   if (/\.app\/Contents\//u.test(executable)) {
-    fail("QODER_COMMAND_UNTRUSTED", "PageRoot 不会使用 Qoder 桌面应用内置的 CLI；请独立安装 Qoder CLI。");
+    fail("QODER_COMMAND_UNTRUSTED", "Stemmio 不会使用 Qoder 桌面应用内置的 CLI；请独立安装 Qoder CLI。");
   }
   if (path.basename(executable) !== "qodercli.js" || path.basename(path.dirname(executable)) !== "bundle") {
     fail("QODER_COMMAND_UNTRUSTED", "Qoder CLI executable does not match the supported package layout.");
@@ -426,12 +426,12 @@ export async function resolveQoderAcpCommand({
   homeDirectory = os.homedir(),
   managedCandidates = async () => [],
 } = {}) {
-  const configured = cleanProviderText(environment.PAGEROOT_QODER_ACP_COMMAND, 4_096);
+  const configured = cleanProviderText(environment.STEMMIO_QODER_ACP_COMMAND, 4_096);
   const testOverride = configured
-    && environment.PAGEROOT_E2E === "1"
-    && environment.PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND === "1";
+    && environment.STEMMIO_E2E === "1"
+    && environment.STEMMIO_QODER_ACP_ALLOW_TEST_COMMAND === "1";
   if (configured && !testOverride) {
-    fail("QODER_COMMAND_UNTRUSTED", "PAGEROOT_QODER_ACP_COMMAND 只允许用于显式 E2E 测试。");
+    fail("QODER_COMMAND_UNTRUSTED", "STEMMIO_QODER_ACP_COMMAND 只允许用于显式 E2E 测试。");
   }
   if (testOverride) {
     if (!path.isAbsolute(configured)) {
@@ -448,7 +448,7 @@ export async function resolveQoderAcpCommand({
     });
   }
 
-  // Collect every source before selecting one. PageRoot-managed Qoder is the
+  // Collect every source before selecting one. Stemmio-managed Qoder is the
   // reproducible default; a valid user installation remains the fallback.
   const [userResult, managedResult] = await Promise.all([
     commandCandidates(environment, homeDirectory),
@@ -494,7 +494,7 @@ export async function assertQoderInstallationUnchanged(command) {
     || current.mtimeMs !== command.identity.mtimeMs
     || current.sha256 !== command.identity.sha256
   ) {
-    fail("QODER_COMMAND_CHANGED", "Qoder CLI 在预检后发生变化，PageRoot 没有启动它。", {
+    fail("QODER_COMMAND_CHANGED", "Qoder CLI 在预检后发生变化，Stemmio 没有启动它。", {
       status: 409,
     });
   }
@@ -551,7 +551,7 @@ async function inspectQoderRuntime(command, environment, {
       : undefined,
     useVerifiedJavaScriptRuntime: command.source === "verified-npm-package",
     expectedAgentName: command.source === "e2e-override"
-      ? /qoder|pageroot-e2e/iu
+      ? /qoder|stemmio-e2e/iu
       : /qoder/iu,
     startupTimeoutMs: 15_000,
     stderrFieldPrefix: "qoder",
@@ -585,7 +585,7 @@ export async function diagnoseQoder(command, environment, options) {
         : undefined,
       useVerifiedJavaScriptRuntime: command.source === "verified-npm-package",
       expectedAgentName: command.source === "e2e-override"
-        ? /qoder|pageroot-e2e/iu
+        ? /qoder|stemmio-e2e/iu
         : /qoder/iu,
       startupTimeoutMs: 15_000,
       stderrFieldPrefix: "qoder",
@@ -794,7 +794,7 @@ export function createQoderProvider({
         useVerifiedJavaScriptRuntime: installation.source === "verified-npm-package",
         cancellationSignal,
         expectedAgentName: installation.source === "e2e-override"
-          ? /qoder|pageroot-e2e/iu
+          ? /qoder|stemmio-e2e/iu
           : /qoder/iu,
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
         ...(inactivityTimeoutMs ? { inactivityTimeoutMs } : {}),

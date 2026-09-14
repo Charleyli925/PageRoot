@@ -10,20 +10,20 @@ import {
 import { buildSourceIndex } from "../app/lib/source-index.js";
 
 const ids = {
-  html: "pr1_00000000000040008000000000000001",
-  head: "pr1_00000000000040008000000000000002",
-  body: "pr1_00000000000040008000000000000004",
-  created: "pr1_0000000000004000800000000000000d",
+  html: "sm1_00000000000040008000000000000001",
+  head: "sm1_00000000000040008000000000000002",
+  body: "sm1_00000000000040008000000000000004",
+  created: "sm1_0000000000004000800000000000000d",
 };
 
-const html = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><p data-pageroot-id="${ids.created}">New</p></body></html>`;
+const html = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><p data-stemmio-id="${ids.created}">New</p></body></html>`;
 
 function createAuthority({ generation = 7, executionId = "exec_grant" } = {}) {
   return {
     elementGeneration: generation,
     executionId,
     elements: new WeakSet(),
-    pagerootIds: new WeakMap(),
+    stemmioIds: new WeakMap(),
   };
 }
 
@@ -31,11 +31,11 @@ function createSurface(elements) {
   const byId = new Map(elements.map((element) => [element.id, element.node]));
   const documentNode = {
     querySelectorAll(selector) {
-      const match = /data-pageroot-id="([^"]+)"/.exec(selector);
+      const match = /data-stemmio-id="([^"]+)"/.exec(selector);
       const matches = [];
       if (match) {
         for (const element of elements) {
-          if (element.node.getAttribute("data-pageroot-id") === match[1]) matches.push(element.node);
+          if (element.node.getAttribute("data-stemmio-id") === match[1]) matches.push(element.node);
         }
       }
       return matches;
@@ -48,7 +48,7 @@ function createSurface(elements) {
 }
 
 function createNode({ id, tag = "p", connected = true, extraId = null }) {
-  const attrs = { "data-pageroot-id": extraId || id };
+  const attrs = { "data-stemmio-id": extraId || id };
   return {
     id,
     node: {
@@ -110,7 +110,7 @@ test("forged IDs, stale frames, disconnected nodes and incomplete sets fail clos
     authority,
     documentNode,
     createdElements: [created.node],
-    allowedElementIds: ["pr1_000000000000400080000000000000ff"],
+    allowedElementIds: ["sm1_000000000000400080000000000000ff"],
   }).reason, "created-identity-untrusted");
 
   assert.equal(grant({
@@ -191,7 +191,7 @@ test("bound source proof keeps the before-index after the live index advances", 
   }).ok, true);
   const beforeIndex = buildSourceIndex(html);
   const afterIndex = buildSourceIndex(
-    html.replace(`<p data-pageroot-id="${ids.created}">New</p>`, ""),
+    html.replace(`<p data-stemmio-id="${ids.created}">New</p>`, ""),
   );
   const beforeProof = createBoundSourceElementProof({
     authority,

@@ -17,17 +17,17 @@ import {
   createCloseFirstCleanup,
   describeRendererReadiness,
   ensureRendererMounted,
-  launchPageRoot,
+  launchStemmio,
   waitForMainBrowserWindow,
-} from "./e2e/electron/helpers/pageroot-app-fixture.mjs";
+} from "./e2e/electron/helpers/stemmio-app-fixture.mjs";
 
 test("Electron app fixture captures bounded, secret-safe readiness evidence without retrying", async () => {
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-diagnostics-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-diagnostics-"));
   const workspace = path.join(isolatedUserData, "workspace");
   const projectFilesRoot = path.join(isolatedUserData, "project-files");
   try {
     mkdirSync(workspace, { recursive: true });
-    mkdirSync(path.join(projectFilesRoot, "demo", ".pageroot"), { recursive: true });
+    mkdirSync(path.join(projectFilesRoot, "demo", ".stemmio"), { recursive: true });
     writeFileSync(path.join(isolatedUserData, "html-projects.json"), JSON.stringify({
       version: 1,
       activePath: "/tmp/demo.html",
@@ -37,20 +37,20 @@ test("Electron app fixture captures bounded, secret-safe readiness evidence with
       schemaVersion: "3.0.0",
       projects: {},
     }), { flag: "w" });
-    writeFileSync(path.join(projectFilesRoot, "demo", ".pageroot", "project.json"), JSON.stringify({
+    writeFileSync(path.join(projectFilesRoot, "demo", ".stemmio", "project.json"), JSON.stringify({
       projectId: "project_demo",
       documentId: "document_demo",
     }));
-    writeFileSync(path.join(projectFilesRoot, "demo", ".pageroot", "manifest.json"), JSON.stringify({
+    writeFileSync(path.join(projectFilesRoot, "demo", ".stemmio", "manifest.json"), JSON.stringify({
       projectId: "project_demo",
       latestOfficialVersionId: "ver_0001",
     }));
 
     const visibleFailure = `failure-${"x".repeat(5_000)}-bridgeAuthToken=visible-secret`;
     const diagnostics = await collectProjectReadinessDiagnostics({
-      url: () => "file:///pageroot/index.html?bridgeAuthToken=page-secret",
+      url: () => "file:///stemmio/index.html?bridgeAuthToken=page-secret",
       evaluate: async () => ({
-        url: "file:///pageroot/index.html?bridgeAuthToken=document-secret",
+        url: "file:///stemmio/index.html?bridgeAuthToken=document-secret",
         readyState: "complete",
         visibilityState: "visible",
         title: "源页 bridgeAuthToken=title-secret",
@@ -68,7 +68,7 @@ test("Electron app fixture captures bounded, secret-safe readiness evidence with
           visible: false,
           minimized: false,
           destroyed: false,
-          url: "file:///pageroot/index.html?bridgeAuthToken=window-secret",
+          url: "file:///stemmio/index.html?bridgeAuthToken=window-secret",
           loading: false,
           crashed: false,
           processId: 42,
@@ -77,7 +77,7 @@ test("Electron app fixture captures bounded, secret-safe readiness evidence with
       isolatedUserData,
       workspace,
       projectFilesRoot,
-      mainRendererUrl: "file:///pageroot/index.html?bridgeAuthToken=launch-secret",
+      mainRendererUrl: "file:///stemmio/index.html?bridgeAuthToken=launch-secret",
       rendererMount: { reloaded: false },
       processDiagnostics: {
         stdout: ["main stdout bridgeAuthToken=", "stdout-secret"],
@@ -115,7 +115,7 @@ test("Electron app fixture bounds hung readiness diagnostics instead of blocking
   const never = new Promise(() => {});
   const startedAt = Date.now();
   const diagnostics = await collectProjectReadinessDiagnostics({
-    url: () => "file:///pageroot/index.html",
+    url: () => "file:///stemmio/index.html",
     evaluate: () => never,
   }, {
     electronApp: { evaluate: () => never },
@@ -128,7 +128,7 @@ test("Electron app fixture bounds hung readiness diagnostics instead of blocking
 });
 
 test("Electron app fixture bounds a missing first window and preserves launch diagnostics before shutdown", async () => {
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-first-window-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-first-window-"));
   const electronApp = {
     process: () => ({}),
     firstWindow: () => new Promise(() => {}),
@@ -136,7 +136,7 @@ test("Electron app fixture bounds a missing first window and preserves launch di
   let shutdown = null;
   try {
     await assert.rejects(
-      launchPageRoot({
+      launchStemmio({
         isolatedUserData,
         electronLauncher: async () => electronApp,
         shutdown: async (app, userData, options) => {
@@ -145,7 +145,7 @@ test("Electron app fixture bounds a missing first window and preserves launch di
         firstWindowTimeout: 20,
         diagnosticTimeout: 20,
       }),
-      /PageRoot first window timed out after 20ms/u,
+      /Stemmio first window timed out after 20ms/u,
     );
     assert.deepEqual(shutdown, {
       app: electronApp,
@@ -206,7 +206,7 @@ test("a live document that drops a mounted workbench is a renderer fault", () =>
 
 test("renderer readiness failures name the captured renderer faults", () => {
   const message = describeRendererReadiness(
-    "PageRoot renderer unmounted the workbench it had already mounted.",
+    "Stemmio renderer unmounted the workbench it had already mounted.",
     {
       documentId: "doc-1",
       mounted: false,
@@ -244,11 +244,11 @@ test("Electron app fixture waits for the matching native BrowserWindow registrat
   const expected = { focused: false, visible: false };
   const nativeWindow = await waitForMainBrowserWindow({
     evaluate: async (_callback, rendererUrl) => {
-      assert.equal(rendererUrl, "file:///pageroot/index.html");
+      assert.equal(rendererUrl, "file:///stemmio/index.html");
       evaluations += 1;
       return evaluations === 1 ? null : expected;
     },
-  }, "file:///pageroot/index.html", { timeout: 1_000 });
+  }, "file:///stemmio/index.html", { timeout: 1_000 });
 
   assert.equal(evaluations, 2);
   assert.deepEqual(nativeWindow, expected);

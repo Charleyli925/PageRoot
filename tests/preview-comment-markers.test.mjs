@@ -63,7 +63,7 @@ test("each resolvable target becomes one marker carrying its Stable ID", () => {
     groups.map((group) => group.items.map((item) => item.text)),
     [["标题再短一点"], ["这段拆成两句"]],
   );
-  assert.ok(groups.every((group) => /^pr1_[0-9a-f]{32}$/u.test(group.nodeId)));
+  assert.ok(groups.every((group) => /^sm1_[0-9a-f]{32}$/u.test(group.nodeId)));
   assert.equal(new Set(groups.map((group) => group.nodeId)).size, 2);
 });
 

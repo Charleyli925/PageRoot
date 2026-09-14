@@ -19,7 +19,7 @@ if (process.argv.includes("--list-models")) {
     process.stderr.write("No available model capacity.\n");
     process.exit(1);
   }
-  process.stdout.write("MODEL\nPageRoot-E2E\n");
+  process.stdout.write("MODEL\nStemmio-E2E\n");
   process.exit(0);
 }
 
@@ -41,7 +41,7 @@ const visibleTextGateMs = Math.max(
   Math.min(5_000, Number.parseInt(visibleTextGateArgument?.slice("--visible-text-gate-ms=".length) || "0", 10) || 0),
 );
 
-const sessionId = "session_pageroot_e2e_qoder";
+const sessionId = "session_stemmio_e2e_qoder";
 let requestRoot = "";
 
 function promptText(params) {
@@ -55,18 +55,18 @@ function finalizerRequest(params) {
   const line = promptText(params)
     .split(/\r?\n/u)
     .find((value) => value.trim().startsWith("{\"command\""));
-  if (!line) throw new Error("PageRoot finalizer request is missing");
+  if (!line) throw new Error("Stemmio finalizer request is missing");
   return JSON.parse(line);
 }
 
-const app = acp.agent({ name: "pageroot-e2e-qoder" })
+const app = acp.agent({ name: "stemmio-e2e-qoder" })
   .onRequest(acp.methods.agent.initialize, () => ({
     protocolVersion: acp.PROTOCOL_VERSION,
     agentCapabilities: { loadSession: false },
     authMethods: [],
     agentInfo: {
-      name: "pageroot-e2e-qoder",
-      title: "PageRoot E2E Qoder",
+      name: "stemmio-e2e-qoder",
+      title: "Stemmio E2E Qoder",
       version: "1.1.27",
     },
   }))
@@ -106,7 +106,7 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
     const candidate = input.content
       .replace(
         /<body([^>]*)>/iu,
-        '<body$1 data-pageroot-qoder-acp="e2e">',
+        '<body$1 data-stemmio-qoder-acp="e2e">',
       )
       .replace(
         /(<h1\b[^>]*>)\u771f\u5b9e /iu,
@@ -116,8 +116,8 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
       sessionId,
       update: {
         sessionUpdate: "tool_call",
-        toolCallId: "tool_pageroot_e2e",
-        title: "Build PageRoot Candidate",
+        toolCallId: "tool_stemmio_e2e",
+        title: "Build Stemmio Candidate",
         kind: "edit",
         status: "in_progress",
         locations: [{ path: outputPath }],
@@ -139,7 +139,7 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
       terminalId: terminal.terminalId,
     });
     if (status.exitCode !== 0 || status.signal) {
-      throw new Error("PageRoot finalizer failed");
+      throw new Error("Stemmio finalizer failed");
     }
     await client.request(acp.methods.client.terminal.release, {
       sessionId,

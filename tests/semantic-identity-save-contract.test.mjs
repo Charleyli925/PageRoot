@@ -18,19 +18,19 @@ import {
 } from "../bridge/project-file-repository/working-copy.mjs";
 
 const ids = {
-  html: "pr1_00000000000040008000000000000001",
-  head: "pr1_00000000000040008000000000000002",
-  title: "pr1_00000000000040008000000000000003",
-  body: "pr1_00000000000040008000000000000004",
-  left: "pr1_00000000000040008000000000000005",
-  first: "pr1_00000000000040008000000000000006",
-  strong: "pr1_00000000000040008000000000000007",
-  plain: "pr1_00000000000040008000000000000008",
-  second: "pr1_00000000000040008000000000000009",
-  right: "pr1_0000000000004000800000000000000a",
+  html: "sm1_00000000000040008000000000000001",
+  head: "sm1_00000000000040008000000000000002",
+  title: "sm1_00000000000040008000000000000003",
+  body: "sm1_00000000000040008000000000000004",
+  left: "sm1_00000000000040008000000000000005",
+  first: "sm1_00000000000040008000000000000006",
+  strong: "sm1_00000000000040008000000000000007",
+  plain: "sm1_00000000000040008000000000000008",
+  second: "sm1_00000000000040008000000000000009",
+  right: "sm1_0000000000004000800000000000000a",
 };
 
-const html = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Identity</title></head><body data-pageroot-id="${ids.body}"><section data-pageroot-id="${ids.left}"><p data-pageroot-id="${ids.first}">A <strong data-pageroot-id="${ids.strong}">one</strong></p><p data-pageroot-id="${ids.plain}">plain</p><p data-pageroot-id="${ids.second}">B</p></section><aside data-pageroot-id="${ids.right}"></aside></body></html>`;
+const html = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">Identity</title></head><body data-stemmio-id="${ids.body}"><section data-stemmio-id="${ids.left}"><p data-stemmio-id="${ids.first}">A <strong data-stemmio-id="${ids.strong}">one</strong></p><p data-stemmio-id="${ids.plain}">plain</p><p data-stemmio-id="${ids.second}">B</p></section><aside data-stemmio-id="${ids.right}"></aside></body></html>`;
 
 function operation(type, fields, operationId = `sourceop_${type}_identity_001`) {
   const state = createSemanticDocumentState(html);
@@ -180,8 +180,8 @@ test("semantic identityDelta authorizes delete and setText descendant retirement
   const deleting = operation("deleteElement", { target: target(ids.first) });
   const deleted = applyAndSave(deleting);
   assert.deepEqual(deleted.result.identityDelta.removedElementIds, [ids.first, ids.strong]);
-  assert.equal(deleted.index.byPagerootId.has(ids.first), false);
-  assert.equal(deleted.index.byPagerootId.has(ids.strong), false);
+  assert.equal(deleted.index.byStemmioId.has(ids.first), false);
+  assert.equal(deleted.index.byStemmioId.has(ids.strong), false);
 
   const settingText = operation(
     "setText",
@@ -191,7 +191,7 @@ test("semantic identityDelta authorizes delete and setText descendant retirement
   const text = applyAndSave(settingText);
   assert.deepEqual(text.result.identityDelta.removedElementIds, [ids.strong]);
   assert.equal(text.result.identityDelta.retainedTargetRootElementId, ids.first);
-  assert.equal(text.index.byPagerootId.has(ids.strong), false);
+  assert.equal(text.index.byStemmioId.has(ids.strong), false);
 });
 
 test("replaceSubtree keeps its root ID across tag change and replaces descendant identities", () => {
@@ -202,7 +202,7 @@ test("replaceSubtree keeps its root ID across tag change and replaces descendant
   const replaced = applyAndSave(replacing, {
     randomUUID: uuidFactory("10000000-0000-4000-8000-000000000001"),
   });
-  const replacement = replaced.index.byPagerootId.get(ids.first);
+  const replacement = replaced.index.byStemmioId.get(ids.first);
   assert.equal(replacement.tagName, "article");
   assert.equal(replaced.result.identityDelta.retainedTargetRootElementId, ids.first);
   assert.deepEqual(replaced.result.identityDelta.removedElementIds, [ids.strong]);
@@ -239,7 +239,7 @@ test("insert, duplicate, same-parent move and cross-parent move save from semant
     ),
   });
   assert.equal(duplicated.result.identityDelta.addedElementIds.length, 2);
-  assert.equal(duplicated.index.byPagerootId.has(ids.first), true);
+  assert.equal(duplicated.index.byStemmioId.has(ids.first), true);
 
   for (const [operationId, parentElementId, beforeElementId] of [
     ["sourceop_same_parent_move_005", ids.left, ids.first],
@@ -255,29 +255,29 @@ test("insert, duplicate, same-parent move and cross-parent move save from semant
     });
     const moved = applyAndSave(moving);
     assert.deepEqual(moved.result.identityDelta.movedElementIds, [ids.second]);
-    assert.equal(moved.index.byPagerootId.get(ids.second).pagerootId, ids.second);
+    assert.equal(moved.index.byStemmioId.get(ids.second).stemmioId, ids.second);
   }
 });
 
 test("system-created line breaks and range-style wrappers have explicit added-ID deltas", () => {
-  const lineBreakId = "pr1_40000000000040008000000000000001";
+  const lineBreakId = "sm1_40000000000040008000000000000001";
   const lineBreak = operation("setText", {
     target: target(ids.plain),
     text: "first\nsecond",
-    contentHtml: `first<br data-pageroot-id="${lineBreakId}">second`,
-    createdPagerootIds: [lineBreakId],
+    contentHtml: `first<br data-stemmio-id="${lineBreakId}">second`,
+    createdStemmioIds: [lineBreakId],
   }, "sourceop_line_break_identity_007");
   const lineBreakSaved = applyAndSave(lineBreak);
   assert.deepEqual(lineBreakSaved.result.identityDelta.addedElementIds, [lineBreakId]);
 
-  const wrapperId = "pr1_50000000000040008000000000000001";
+  const wrapperId = "sm1_50000000000040008000000000000001";
   const rangeStyle = operation("setStyle", {
     target: target(ids.plain),
     property: "font-weight",
     value: "700",
     important: false,
     range: { startOffset: 0, endOffset: 3, quote: "pla" },
-    createdPagerootIds: [wrapperId],
+    createdStemmioIds: [wrapperId],
   }, "sourceop_range_style_identity_008");
   const styled = applyAndSave(rangeStyle);
   assert.deepEqual(styled.result.identityDelta.addedElementIds, [wrapperId]);
@@ -322,11 +322,11 @@ test("Repository rejects forged deltas and unproved identity topology changes", 
   );
 
   const movedWithoutEvidence = html.replace(
-    `<p data-pageroot-id="${ids.second}">B</p>`,
+    `<p data-stemmio-id="${ids.second}">B</p>`,
     "",
   ).replace(
     `</aside>`,
-    `<p data-pageroot-id="${ids.second}">B</p></aside>`,
+    `<p data-stemmio-id="${ids.second}">B</p></aside>`,
   );
   assert.throws(
     () => materializeIdentityPreservingSave(html, movedWithoutEvidence),
@@ -374,23 +374,23 @@ test("Repository validates the complete semantic operation contract before autho
 });
 
 test("setText additions require exact kernel-created identity evidence", () => {
-  const lineBreakId = "pr1_60000000000040008000000000000002";
+  const lineBreakId = "sm1_60000000000040008000000000000002";
   const settingText = operation("setText", {
     target: target(ids.plain),
     text: "first\nsecond",
-    contentHtml: `first<br data-pageroot-id="${lineBreakId}">second`,
-    createdPagerootIds: [lineBreakId],
+    contentHtml: `first<br data-stemmio-id="${lineBreakId}">second`,
+    createdStemmioIds: [lineBreakId],
   }, "sourceop_text_identity_evidence_011");
   const result = applySemanticOperation(createSemanticDocumentState(html), settingText);
   const missingAllocation = {
     ...settingText,
   };
-  delete missingAllocation.createdPagerootIds;
+  delete missingAllocation.createdStemmioIds;
   for (const forgedOperation of [
     missingAllocation,
     {
       ...settingText,
-      createdPagerootIds: ["pr1_60000000000040008000000000000003"],
+      createdStemmioIds: ["sm1_60000000000040008000000000000003"],
     },
   ]) {
     assert.throws(
@@ -406,13 +406,13 @@ test("setText additions require exact kernel-created identity evidence", () => {
 });
 
 test("setText binds multiple line-break identities to kernel allocation order", () => {
-  const firstBreakId = "pr1_91000000000040008000000000000001";
-  const secondBreakId = "pr1_91000000000040008000000000000002";
+  const firstBreakId = "sm1_91000000000040008000000000000001";
+  const secondBreakId = "sm1_91000000000040008000000000000002";
   const ordered = operation("setText", {
     target: target(ids.plain),
     text: "first\nsecond\nthird",
-    contentHtml: `first<br data-pageroot-id="${firstBreakId}">second<br data-pageroot-id="${secondBreakId}">third`,
-    createdPagerootIds: [firstBreakId, secondBreakId],
+    contentHtml: `first<br data-stemmio-id="${firstBreakId}">second<br data-stemmio-id="${secondBreakId}">third`,
+    createdStemmioIds: [firstBreakId, secondBreakId],
   }, "sourceop_text_ordered_ids_029");
   const orderedResult = applySemanticOperation(createSemanticDocumentState(html), ordered);
   const orderedForward = saveEvidence(html, orderedResult, ordered, "text");
@@ -451,9 +451,9 @@ test("setText binds multiple line-break identities to kernel allocation order", 
   const swapped = {
     ...ordered,
     operationId: "sourceop_text_swapped_ids_030",
-    contentHtml: `first<br data-pageroot-id="${secondBreakId}">second<br data-pageroot-id="${firstBreakId}">third`,
+    contentHtml: `first<br data-stemmio-id="${secondBreakId}">second<br data-stemmio-id="${firstBreakId}">third`,
   };
-  const targetElement = buildSourceIndex(html).byPagerootId.get(ids.plain);
+  const targetElement = buildSourceIndex(html).byStemmioId.get(ids.plain);
   const swappedPatch = {
     startOffset: targetElement.contentRange.startOffset,
     endOffset: targetElement.contentRange.endOffset,
@@ -688,7 +688,7 @@ test("structural semantic patch binding selects exact undo and redo evidence", (
 });
 
 test("same-parent semantic replay preserves exact sibling source boundaries", () => {
-  const implicit = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Implicit</title></head><body data-pageroot-id="${ids.body}"><ul data-pageroot-id="${ids.left}"><li data-pageroot-id="${ids.first}">A<li data-pageroot-id="${ids.second}">B</ul></body></html>`;
+  const implicit = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">Implicit</title></head><body data-stemmio-id="${ids.body}"><ul data-stemmio-id="${ids.left}"><li data-stemmio-id="${ids.first}">A<li data-stemmio-id="${ids.second}">B</ul></body></html>`;
   const moving = createMoveElementOperation(implicit, {
     baseRevision: 0,
     operationId: "sourceop_implicit_sibling_move_022",
@@ -704,15 +704,15 @@ test("same-parent semantic replay preserves exact sibling source boundaries", ()
     ].includes(error?.code),
   );
   const implicitIndex = buildSourceIndex(implicit);
-  const parent = implicitIndex.byPagerootId.get(ids.left);
+  const parent = implicitIndex.byStemmioId.get(ids.left);
   const after = `${implicit.slice(0, parent.contentRange.startOffset)}${
-    `<li data-pageroot-id="${ids.second}">B<li data-pageroot-id="${ids.first}">A`
+    `<li data-stemmio-id="${ids.second}">B<li data-stemmio-id="${ids.first}">A`
   }${implicit.slice(parent.contentRange.endOffset)}`;
   const patch = {
     startOffset: parent.contentRange.startOffset,
     endOffset: parent.contentRange.endOffset,
     before: implicit.slice(parent.contentRange.startOffset, parent.contentRange.endOffset),
-    after: `<li data-pageroot-id="${ids.second}">B<li data-pageroot-id="${ids.first}">A`,
+    after: `<li data-stemmio-id="${ids.second}">B<li data-stemmio-id="${ids.first}">A`,
     kind: "sibling-reorder",
   };
   assert.throws(
@@ -749,11 +749,11 @@ test("same-parent semantic replay preserves exact sibling source boundaries", ()
   for (const [operationId, structuralSource] of [
     [
       "sourceop_void_sibling_move_023",
-      `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Void</title></head><body data-pageroot-id="${ids.body}"><div data-pageroot-id="${ids.left}"><br data-pageroot-id="${ids.first}"><hr data-pageroot-id="${ids.second}"></div></body></html>`,
+      `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">Void</title></head><body data-stemmio-id="${ids.body}"><div data-stemmio-id="${ids.left}"><br data-stemmio-id="${ids.first}"><hr data-stemmio-id="${ids.second}"></div></body></html>`,
     ],
     [
       "sourceop_self_closing_sibling_move_024",
-      `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">SVG</title></head><body data-pageroot-id="${ids.body}"><svg data-pageroot-id="${ids.left}"><circle data-pageroot-id="${ids.first}"/><path data-pageroot-id="${ids.second}"/></svg></body></html>`,
+      `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">SVG</title></head><body data-stemmio-id="${ids.body}"><svg data-stemmio-id="${ids.left}"><circle data-stemmio-id="${ids.first}"/><path data-stemmio-id="${ids.second}"/></svg></body></html>`,
     ],
   ]) {
     const operationValue = createMoveElementOperation(structuralSource, {
@@ -776,17 +776,17 @@ test("same-parent semantic replay preserves exact sibling source boundaries", ()
 });
 
 test("setText and range-style identity additions are bound to exact semantic materialization", () => {
-  const lineBreakId = "pr1_90000000000040008000000000000001";
+  const lineBreakId = "sm1_90000000000040008000000000000001";
   const settingText = operation("setText", {
     target: target(ids.plain),
     text: "first\nsecond",
-    contentHtml: `first<br data-pageroot-id="${lineBreakId}">second`,
-    createdPagerootIds: [lineBreakId],
+    contentHtml: `first<br data-stemmio-id="${lineBreakId}">second`,
+    createdStemmioIds: [lineBreakId],
   }, "sourceop_text_materialization_014");
   const textResult = applySemanticOperation(createSemanticDocumentState(html), settingText);
   const forgedTextEvidence = saveEvidence(html, textResult, {
     ...settingText,
-    contentHtml: `forged<br data-pageroot-id="${lineBreakId}">content`,
+    contentHtml: `forged<br data-stemmio-id="${lineBreakId}">content`,
   });
   assert.throws(
     () => materializeIdentityPreservingSave(html, textResult.html, {
@@ -799,14 +799,14 @@ test("setText and range-style identity additions are bound to exact semantic mat
     ),
   );
 
-  const wrapperId = "pr1_90000000000040008000000000000002";
+  const wrapperId = "sm1_90000000000040008000000000000002";
   const styling = operation("setStyle", {
     target: target(ids.plain),
     property: "font-weight",
     value: "700",
     important: false,
     range: { startOffset: 0, endOffset: 3, quote: "pla" },
-    createdPagerootIds: [wrapperId],
+    createdStemmioIds: [wrapperId],
   }, "sourceop_range_materialization_015");
   const styleResult = applySemanticOperation(createSemanticDocumentState(html), styling);
   for (const forgedStyleOperation of [
@@ -828,14 +828,14 @@ test("setText and range-style identity additions are bound to exact semantic mat
     );
   }
 
-  const targetElement = buildSourceIndex(html).byPagerootId.get(ids.plain);
-  const linkId = "pr1_b0000000000040008000000000000001";
-  const safeLink = `<a href="/safe" data-pageroot-id="${linkId}">plain</a>`;
+  const targetElement = buildSourceIndex(html).byStemmioId.get(ids.plain);
+  const linkId = "sm1_b0000000000040008000000000000001";
+  const safeLink = `<a href="/safe" data-stemmio-id="${linkId}">plain</a>`;
   const linkSource = `${html.slice(0, targetElement.contentRange.startOffset)}${safeLink}${
     html.slice(targetElement.contentRange.endOffset)
   }`;
-  const linkTarget = buildSourceIndex(linkSource).byPagerootId.get(ids.plain);
-  const unsafeLink = `<a href="javascript:alert(1)" onclick="alert(2)" data-pageroot-id="${linkId}">plain</a>`;
+  const linkTarget = buildSourceIndex(linkSource).byStemmioId.get(ids.plain);
+  const unsafeLink = `<a href="javascript:alert(1)" onclick="alert(2)" data-stemmio-id="${linkId}">plain</a>`;
   const unsafeLinkHtml = `${linkSource.slice(0, linkTarget.contentRange.startOffset)}${
     unsafeLink
   }${linkSource.slice(linkTarget.contentRange.endOffset)}`;
@@ -891,7 +891,7 @@ test("setText and range-style identity additions are bound to exact semantic mat
     ),
   );
 
-  const forgedTextWrapper = `<span data-pageroot-id="${lineBreakId}">forged</span>`;
+  const forgedTextWrapper = `<span data-stemmio-id="${lineBreakId}">forged</span>`;
   const forgedTextHtml = `${html.slice(0, targetElement.contentRange.startOffset)}${
     forgedTextWrapper
   }${html.slice(targetElement.contentRange.endOffset)}`;
@@ -934,7 +934,7 @@ test("setText and range-style identity additions are bound to exact semantic mat
     ),
   );
 
-  const forgedWrapper = `<mark data-pageroot-id="${wrapperId}">plain</mark>`;
+  const forgedWrapper = `<mark data-stemmio-id="${wrapperId}">plain</mark>`;
   const forgedHtml = `${html.slice(0, targetElement.contentRange.startOffset)}${forgedWrapper}${
     html.slice(targetElement.contentRange.endOffset)
   }`;
@@ -995,7 +995,7 @@ test("setText and range-style identity additions are bound to exact semantic mat
     property: "color",
     value: "red; position: fixed",
   };
-  const unsafeOpening = `<span style="all: unset; display: inline !important; color: red; position: fixed" data-pageroot-id="${wrapperId}">`;
+  const unsafeOpening = `<span style="all: unset; display: inline !important; color: red; position: fixed" data-stemmio-id="${wrapperId}">`;
   const unsafeClosing = "</span>";
   const unsafeStyledContent = `${unsafeOpening}pla${unsafeClosing}in`;
   const unsafeStyledHtml = `${html.slice(0, targetElement.contentRange.startOffset)}${
@@ -1119,7 +1119,7 @@ test("plain setText is bound to the exact escaped kernel patch plan", () => {
     ),
   );
 
-  const targetElement = buildSourceIndex(html).byPagerootId.get(ids.first);
+  const targetElement = buildSourceIndex(html).byStemmioId.get(ids.first);
   const unrelatedTextPatch = {
     startOffset: targetElement.contentRange.startOffset,
     endOffset: targetElement.contentRange.endOffset,
@@ -1181,7 +1181,7 @@ test("plain setText is bound to the exact escaped kernel patch plan", () => {
 });
 
 test("plain setText target capability is identical in the kernel and Repository", () => {
-  const capabilityHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Capability</title></head><body data-pageroot-id="${ids.body}"><script data-pageroot-id="${ids.strong}">window.value = 1;</script><br data-pageroot-id="${ids.second}"></body></html>`;
+  const capabilityHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">Capability</title></head><body data-stemmio-id="${ids.body}"><script data-stemmio-id="${ids.strong}">window.value = 1;</script><br data-stemmio-id="${ids.second}"></body></html>`;
   const state = createSemanticDocumentState(capabilityHtml);
   for (const [elementId, operationId] of [
     [ids.strong, "sourceop_plain_text_script_027"],
@@ -1201,7 +1201,7 @@ test("plain setText target capability is identical in the kernel and Repository"
       (error) => error?.code === "SEMANTIC_TEXT_TARGET_UNSUPPORTED",
     );
 
-    const element = buildSourceIndex(capabilityHtml).byPagerootId.get(elementId);
+    const element = buildSourceIndex(capabilityHtml).byStemmioId.get(elementId);
     const forgedPatch = {
       startOffset: element.contentRange.startOffset,
       endOffset: element.contentRange.endOffset,
@@ -1411,40 +1411,40 @@ test("Repository exact replay preserves authored attribute and inline-style form
   const variants = [
     {
       source: html.replace(
-        `<section data-pageroot-id="${ids.left}">`,
-        `<section data-pageroot-id="${ids.left}" aria-label='old'>`,
+        `<section data-stemmio-id="${ids.left}">`,
+        `<section data-stemmio-id="${ids.left}" aria-label='old'>`,
       ),
       type: "setAttribute",
       fields: { name: "aria-label", value: "new & exact" },
     },
     {
       source: html.replace(
-        `<section data-pageroot-id="${ids.left}">`,
-        `<section data-pageroot-id="${ids.left}" aria-label='old'>`,
+        `<section data-stemmio-id="${ids.left}">`,
+        `<section data-stemmio-id="${ids.left}" aria-label='old'>`,
       ),
       type: "setAttribute",
       fields: { name: "aria-label", value: null },
     },
     {
       source: html.replace(
-        `<section data-pageroot-id="${ids.left}">`,
-        `<section data-pageroot-id="${ids.left}" style='color: blue !important; padding: 1px'>`,
+        `<section data-stemmio-id="${ids.left}">`,
+        `<section data-stemmio-id="${ids.left}" style='color: blue !important; padding: 1px'>`,
       ),
       type: "setStyle",
       fields: { property: "color", value: "red", important: false },
     },
     {
       source: html.replace(
-        `<section data-pageroot-id="${ids.left}">`,
-        `<section data-pageroot-id="${ids.left}" style='padding: 1px'>`,
+        `<section data-stemmio-id="${ids.left}">`,
+        `<section data-stemmio-id="${ids.left}" style='padding: 1px'>`,
       ),
       type: "setStyle",
       fields: { property: "color", value: "rgb(1, 2, 3)", important: true },
     },
     {
       source: html.replace(
-        `<section data-pageroot-id="${ids.left}">`,
-        `<section style=color:blue data-pageroot-id="${ids.left}">`,
+        `<section data-stemmio-id="${ids.left}">`,
+        `<section style=color:blue data-stemmio-id="${ids.left}">`,
       ),
       type: "setStyle",
       fields: { property: "color", value: "red", important: true },
@@ -1517,7 +1517,7 @@ test("Repository range replay shares Canvas text-host capability", () => {
       () => applySemanticOperation(createSemanticDocumentState(html), semanticOperation),
       (error) => error?.code === "TEXT_RANGE_STYLE_UNSUPPORTED",
     );
-    const title = buildSourceIndex(html).byPagerootId.get(ids.title);
+    const title = buildSourceIndex(html).byStemmioId.get(ids.title);
     const patch = semanticOperation.type === "replaceTextRange"
       ? {
           startOffset: html.indexOf("Identity"),
@@ -1566,11 +1566,11 @@ test("Repository range replay shares Canvas text-host capability", () => {
 });
 
 test("Repository exact replay matches self-closing SVG attribute boundaries", () => {
-  const svgId = "pr1_b0000000000040008000000000000001";
-  const circleId = "pr1_b0000000000040008000000000000002";
+  const svgId = "sm1_b0000000000040008000000000000001";
+  const circleId = "sm1_b0000000000040008000000000000002";
   const svgHtml = html.replace(
-    `<aside data-pageroot-id="${ids.right}"></aside>`,
-    `<aside data-pageroot-id="${ids.right}"><svg data-pageroot-id="${svgId}"><circle data-pageroot-id="${circleId}" style=color:blue data-kind=dot/></svg></aside>`,
+    `<aside data-stemmio-id="${ids.right}"></aside>`,
+    `<aside data-stemmio-id="${ids.right}"><svg data-stemmio-id="${svgId}"><circle data-stemmio-id="${circleId}" style=color:blue data-kind=dot/></svg></aside>`,
   );
   for (const [index, fields] of [
     ["setStyle", { property: "color", value: "red", important: true }],
@@ -1595,14 +1595,14 @@ test("Repository exact replay matches self-closing SVG attribute boundaries", ()
 });
 
 test("range-style materialization selects the original forward proof for undo and redo", () => {
-  const wrapperId = "pr1_a0000000000040008000000000000001";
+  const wrapperId = "sm1_a0000000000040008000000000000001";
   const styling = operation("setStyle", {
     target: target(ids.plain),
     property: "font-style",
     value: "italic",
     important: false,
     range: { startOffset: 0, endOffset: 3, quote: "pla" },
-    createdPagerootIds: [wrapperId],
+    createdStemmioIds: [wrapperId],
   }, "sourceop_range_direction_016");
   const result = applySemanticOperation(createSemanticDocumentState(html), styling);
   const materialization = result.materialization.sourcePatchResult;

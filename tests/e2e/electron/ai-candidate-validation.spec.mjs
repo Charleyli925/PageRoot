@@ -3,15 +3,15 @@ import {
   ORIGINAL_TEXT,
   UPDATED_TEXT,
   addCommentAndSubmit,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture,
   existsSync,
-  launchPageRoot,
+  launchStemmio,
   path,
   readFileSync,
   removeSourceFixture,
   runOfficialFinalizer,
-  stopPageRoot,
+  stopStemmio,
   workingHtmlFiles,
   writeAiOutput,
 } from "./ai-closed-loop-helpers.mjs";
@@ -28,7 +28,7 @@ test("a pre-load review navigation falls back without trusting the replacement p
         document.querySelector("#review-navigation-chart").textContent = reviewNavigationVariant;
         const reviewReplacementHtml = '<!doctype html>'
           + '<html data-review-navigation-replacement="true"><body></body></html>';
-        if (document.documentElement.dataset.pagerootReviewSide) {
+        if (document.documentElement.dataset.stemmioReviewSide) {
           location.replace(
             "data:text/html;charset=utf-8," + encodeURIComponent(reviewReplacementHtml),
           );
@@ -37,7 +37,7 @@ test("a pre-load review navigation falls back without trusting the replacement p
     </section>
   </main>`,
   ));
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -61,17 +61,17 @@ test("a pre-load review navigation falls back without trusting the replacement p
     const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       await expect(frame.locator("html")).toHaveAttribute(
-        "data-pageroot-preview-navigation-fallback",
+        "data-stemmio-preview-navigation-fallback",
         "true",
         { timeout: 30_000 },
       );
       await expect(frame.locator("html"))
         .not.toHaveAttribute("data-review-navigation-replacement", "true");
       await expect(frame.locator("html"))
-        .toHaveAttribute("data-pageroot-review-filter", "all");
+        .toHaveAttribute("data-stemmio-review-filter", "all");
     }
     await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-marker-types~="text"]',
+      '[data-stemmio-review-marker-types~="text"]',
     ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
     await expect(beforeReviewFrame.locator(
       "#review-navigation-chart",
@@ -80,7 +80,7 @@ test("a pre-load review navigation falls back without trusting the replacement p
       "#review-navigation-chart",
     )).toBeEmpty();
     await expect(afterReviewFrame.locator(
-      '#review-navigation-chart[data-pageroot-review-confirmed="true"]',
+      '#review-navigation-chart[data-stemmio-review-confirmed="true"]',
     )).toHaveCount(0);
     await expect(launched.page.getByText("Script 源码调整", { exact: true }))
       .toHaveCount(0);
@@ -109,10 +109,10 @@ test("a pre-load review navigation falls back without trusting the replacement p
     await expect(launched.page.getByRole("dialog"))
       .not.toContainText("无法视觉验证");
     await launched.page.getByRole("button", { name: "继续审阅" }).click();
-    await expect(beforeReviewFrame.locator("[data-pageroot-review-confirmed=\"true\"]"))
+    await expect(beforeReviewFrame.locator("[data-stemmio-review-confirmed=\"true\"]"))
       .not.toHaveCount(0);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -121,7 +121,7 @@ for (const adopt of [true, false]) {
   test(`identical HTML survives restart in Review and explicit ${adopt ? "adoption" : "rejection"}`, async ({}, testInfo) => {
     test.setTimeout(120_000);
     const fixture = createSourceFixture(`identical-${adopt ? "adopt" : "reject"}.html`);
-    let launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    let launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     try {
       const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
       const frozenInput = readFileSync(path.join(request.requestRoot, "input", "base", "index.html"));
@@ -135,8 +135,8 @@ for (const adopt of [true, false]) {
       expect(readFileSync(path.join(request.requestRoot, "candidate.html")).equals(frozenInput)).toBe(true);
       expect(JSON.parse(readFileSync(manifestPath, "utf8")).versions).toHaveLength(1);
 
-      await closePageRootGracefully(launched.electronApp, launched.page);
-      launched = await launchPageRoot({ activeSourcePath: request.sourcePath,
+      await closeStemmioGracefully(launched.electronApp, launched.page);
+      launched = await launchStemmio({ activeSourcePath: request.sourcePath,
         isolatedUserData: launched.isolatedUserData });
       const reviewEntry = launched.page.getByRole("button", { name: "审阅，有 AI 修改待查看", exact: true });
       await expect(reviewEntry).toBeEnabled({ timeout: 30_000 });
@@ -147,7 +147,7 @@ for (const adopt of [true, false]) {
       for (const title of ["修改前", "修改后"]) {
         const frame = launched.page.frameLocator(`iframe[title^="${title}"]`);
         await expect(frame.locator("body")).toBeVisible();
-        await expect(frame.locator("[data-pageroot-review-marker], [data-pageroot-review-overlay-box], [data-pageroot-review-mask-hole]"))
+        await expect(frame.locator("[data-stemmio-review-marker], [data-stemmio-review-overlay-box], [data-stemmio-review-mask-hole]"))
           .toHaveCount(0);
       }
       expect(readFileSync(path.join(request.requestRoot, "candidate.json")).equals(candidateBytes)).toBe(true);
@@ -173,14 +173,14 @@ for (const adopt of [true, false]) {
       expect(manifest.workingCopies).toHaveLength(1);
       expect(readFileSync(request.sourcePath).equals(frozenInput)).toBe(true);
       expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
-      await expect.poll(() => launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject()))
+      await expect.poll(() => launched.page.evaluate(() => window.stemmioProjects?.getActiveProject()))
         .toMatchObject({ sourcePath: request.sourcePath });
-      const active = await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+      const active = await launched.page.evaluate(() => window.stemmioProjects?.getActiveProject());
       expect(readFileSync(active.sourcePath).equals(frozenInput)).toBe(true);
       if (adopt) await expect(launched.page.locator(".comment-card")).toHaveCount(0);
       else await expect(launched.page.locator(".comment-card")).not.toHaveCount(0);
     } finally {
-      await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+      await stopStemmio(launched.electronApp, launched.isolatedUserData);
       removeSourceFixture(fixture.sourceDirectory);
     }
   });
@@ -188,7 +188,7 @@ for (const adopt of [true, false]) {
 
 test("output without the mandatory finalizer never creates or opens a version", async () => {
   const fixture = createSourceFixture();
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -206,14 +206,14 @@ test("output without the mandatory finalizer never creates or opens a version", 
     ).toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
 
 test("a malformed AI HTML return is rejected before completion or opening", async () => {
   const fixture = createSourceFixture();
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -242,7 +242,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
     ).toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -250,7 +250,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
 test("an AI return cannot drop a retained source identity", { tag: ["@smoke-review"] }, async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("candidate-identity-loss.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -258,7 +258,7 @@ test("an AI return cannot drop a retained source identity", { tag: ["@smoke-revi
       fixture.sourcePath,
     );
     writeAiOutput(request.requestRoot, (base) => base.replace(
-      /\sdata-pageroot-id="pr1_[a-f0-9]{32}"/u,
+      /\sdata-stemmio-id="sm1_[a-f0-9]{32}"/u,
       "",
     ));
     expect(() => runOfficialFinalizer(request.requestRoot, request.changeRequest))
@@ -278,7 +278,7 @@ test("an AI return cannot drop a retained source identity", { tag: ["@smoke-revi
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -286,7 +286,7 @@ test("an AI return cannot drop a retained source identity", { tag: ["@smoke-revi
 test("an AI return cannot replace a retained source identity with a forged ID", { tag: ["@smoke-review"] }, async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("candidate-identity-forgery.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -294,8 +294,8 @@ test("an AI return cannot replace a retained source identity with a forged ID", 
       fixture.sourcePath,
     );
     writeAiOutput(request.requestRoot, (base) => base.replace(
-      /data-pageroot-id="pr1_[a-f0-9]{32}"/u,
-      'data-pageroot-id="pr1_ffffffffffff4fff8fffffffffffffff"',
+      /data-stemmio-id="sm1_[a-f0-9]{32}"/u,
+      'data-stemmio-id="sm1_ffffffffffff4fff8fffffffffffffff"',
     ));
     expect(() => runOfficialFinalizer(request.requestRoot, request.changeRequest))
       .toThrow(/CANDIDATE_SOURCE_IDENTITY_FORGED/u);
@@ -314,7 +314,7 @@ test("an AI return cannot replace a retained source identity with a forged ID", 
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("修改已准备好，尚未采用", { timeout: 30_000 });
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });

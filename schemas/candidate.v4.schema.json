@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pageroot.local/schemas/candidate.v4.schema.json",
+  "$id": "https://stemmio.local/schemas/candidate.v4.schema.json",
   "$defs": {
     "overlap": {
       "type": "object",
@@ -159,17 +159,17 @@
         "changedStableElementIds": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+          "items": { "type": "string", "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
         },
         "requestedTargetElementIds": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+          "items": { "type": "string", "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
         },
         "outsideRequestedTargetElementIds": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+          "items": { "type": "string", "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
         },
         "changedElementCount": {
           "type": "integer",
@@ -183,13 +183,13 @@
           "type": "array",
           "uniqueItems": true,
           "maxItems": 100,
-          "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+          "items": { "type": "string", "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
         },
         "outsideTargetElementIdSample": {
           "type": "array",
           "uniqueItems": true,
           "maxItems": 100,
-          "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+          "items": { "type": "string", "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
         },
         "truncated": {
           "type": "boolean"

@@ -2,7 +2,7 @@
 // evidence do not belong in UI preferences.
 export function normalizeAgentConfigurations(value) {
   const result = {};
-  for (const id of ["pageroot", "qoder", "codex"]) {
+  for (const id of ["stemmio", "qoder", "codex"]) {
     const entry = value?.[id];
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const modelId = entry.modelId === null ? null : entry.modelId;
@@ -28,7 +28,7 @@ export function validAgentConfigurations(value) {
 export function normalizeDocumentAgentSelections(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return Object.freeze({});
   return Object.freeze(Object.fromEntries(Object.entries(value).filter(([id, provider]) => (
-    /^doc_[a-f0-9]{16,64}$/u.test(id) && ["pageroot", "qoder", "codex"].includes(provider)
+    /^doc_[a-f0-9]{16,64}$/u.test(id) && ["stemmio", "qoder", "codex"].includes(provider)
   )).slice(-128)));
 }
 

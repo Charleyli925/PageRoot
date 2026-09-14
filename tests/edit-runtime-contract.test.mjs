@@ -212,10 +212,10 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   const sourceSha = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const url = editRuntimeProtocolUrl(
     sessionId,
-    "/.pageroot/bootstrap/" + executionId + ".js",
+    "/.stemmio/bootstrap/" + executionId + ".js",
   );
 
-  assert.equal(EDIT_RUNTIME_PROTOCOL_SCHEME, "pageroot-edit-runtime");
+  assert.equal(EDIT_RUNTIME_PROTOCOL_SCHEME, "stemmio-edit-runtime");
   assert.equal(isEditRuntimeSessionId(sessionId), true);
   assert.equal(isEditRuntimeExecutionId(executionId), true);
   assert.equal(isEditRuntimeRequestId("edit-runtime-12345678"), true);
@@ -226,7 +226,7 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(isEditRuntimeProtocolUrl(url, sessionId), true);
   assert.equal(
     editRuntimeRegistrationProperty(executionId),
-    "__pageroot_edit_register_" + executionId,
+    "__stemmio_edit_register_" + executionId,
   );
   assert.equal(editRuntimeProtocolUrl(sessionId, "relative.js"), null);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetCount, 64);

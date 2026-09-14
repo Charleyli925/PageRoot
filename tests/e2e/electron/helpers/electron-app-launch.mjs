@@ -17,15 +17,15 @@ import { _electron as electron } from "playwright";
 import {
   caseSelector,
   productRoot,
-} from "../../browser/pageroot-driver.mjs";
+} from "../../browser/stemmio-driver.mjs";
 import {
   seedActiveDiskProject,
 } from "./electron-project-fixture.mjs";
-import { stopPageRoot } from "./electron-safe-cleanup.mjs";
+import { stopStemmio } from "./electron-safe-cleanup.mjs";
 
 const require = createRequire(import.meta.url);
 const electronExecutable = require("electron");
-const DEFAULT_USER_DATA_PREFIX = "pageroot-native-e2e-";
+const DEFAULT_USER_DATA_PREFIX = "stemmio-native-e2e-";
 const DEFAULT_MAIN_WINDOW_TIMEOUT = 15_000;
 const MAX_DIAGNOSTIC_STREAM_CHUNKS = 40;
 const MAX_DIAGNOSTIC_TEXT_LENGTH = 4_000;
@@ -262,10 +262,10 @@ function isolatedRegistrySnapshot({ isolatedUserData, workspace, projectFilesRoo
         .map((entry) => ({
           name: boundedDiagnosticText(entry.name, 1_000),
           project: diagnosticFileSnapshot(
-            path.join(registryRoot, entry.name, ".pageroot", "project.json"),
+            path.join(registryRoot, entry.name, ".stemmio", "project.json"),
           ),
           manifest: diagnosticFileSnapshot(
-            path.join(registryRoot, entry.name, ".pageroot", "manifest.json"),
+            path.join(registryRoot, entry.name, ".stemmio", "manifest.json"),
           ),
         }))
       : [];
@@ -358,7 +358,7 @@ async function rendererReadinessSnapshot(page, { timeout }) {
           exists: Boolean(workbench),
           projectState: workbench?.getAttribute("data-project-state") || null,
         },
-        hydrationStage: window.__PAGEROOT_HYDRATION_STAGE__ || null,
+        hydrationStage: window.__STEMMIO_HYDRATION_STAGE__ || null,
         visibleFailure: failure ? {
           text: failure.textContent || "",
           visible: Boolean(failure.getClientRects().length),
@@ -370,7 +370,7 @@ async function rendererReadinessSnapshot(page, { timeout }) {
             .slice(0, 8)
             .map((element) => element.tagName.toLowerCase()),
         },
-        projectApiPresent: Boolean(window.htmlAIProjects),
+        projectApiPresent: Boolean(window.stemmioProjects),
       };
     }),
     timeout,
@@ -417,7 +417,7 @@ async function nativeWindowSnapshot(electronApp, { timeout }) {
 
 async function waitForFirstWindow(electronApp, { timeout }) {
   const outcome = await observeDiagnosticOperation(
-    "PageRoot first window",
+    "Stemmio first window",
     () => electronApp.firstWindow(),
     timeout,
   );
@@ -466,7 +466,7 @@ async function projectReadinessTimeout(page, cause, readinessSamples) {
   const diagnostics = await collectProjectReadinessDiagnostics(page);
   const original = diagnosticError(cause);
   return new Error([
-    "PageRoot project readiness did not settle.",
+    "Stemmio project readiness did not settle.",
     original,
     "Project readiness samples:",
     JSON.stringify(readinessSamples, null, 2),
@@ -479,7 +479,7 @@ async function projectLaunchFailure(page, cause, stage, context) {
   const diagnostics = await collectProjectReadinessDiagnostics(page, context);
   const original = diagnosticError(cause);
   return new Error([
-    `PageRoot launch failed while ${stage}.`,
+    `Stemmio launch failed while ${stage}.`,
     original,
     "Launch diagnostics:",
     JSON.stringify(diagnostics, null, 2),
@@ -508,7 +508,7 @@ export async function waitForMainBrowserWindow(
     return nativeWindow !== null;
   }, {
     timeout,
-    message: "PageRoot main BrowserWindow did not become available during launch.",
+    message: "Stemmio main BrowserWindow did not become available during launch.",
   }).toBe(true);
   return nativeWindow;
 }
@@ -523,7 +523,7 @@ function sleep(ms) {
 
 // Which documents of a page were seen carrying a mounted workbench, and the
 // renderer faults that page reported. Keyed per page so a packaged-app page
-// that never went through launchPageRoot degrades to "no evidence" instead of
+// that never went through launchStemmio degrades to "no evidence" instead of
 // borrowing another page's history.
 const rendererMountHistory = new WeakMap();
 const rendererFaultLogs = new WeakMap();
@@ -553,18 +553,18 @@ export async function rendererProbe(page, {
     "renderer readiness probe",
     () => page.evaluate(() => {
       const globals = window;
-      if (!globals.__PAGEROOT_E2E_DOCUMENT_ID__) {
-        globals.__PAGEROOT_E2E_DOCUMENT_ID__ = `doc-${Date.now()}-${
+      if (!globals.__STEMMIO_E2E_DOCUMENT_ID__) {
+        globals.__STEMMIO_E2E_DOCUMENT_ID__ = `doc-${Date.now()}-${
           Math.random().toString(36).slice(2)
         }`;
       }
       const workbench = document.querySelector("main.workbench");
       const root = document.getElementById("root");
       return {
-        documentId: globals.__PAGEROOT_E2E_DOCUMENT_ID__,
+        documentId: globals.__STEMMIO_E2E_DOCUMENT_ID__,
         mounted: Boolean(workbench),
         projectState: workbench?.getAttribute("data-project-state") || null,
-        hydrationStage: globals.__PAGEROOT_HYDRATION_STAGE__ || null,
+        hydrationStage: globals.__STEMMIO_HYDRATION_STAGE__ || null,
         rootChildren: root ? root.childElementCount : -1,
       };
     }),
@@ -633,10 +633,10 @@ export async function ensureRendererMounted(page, {
   };
 
   if (await waitUntilMounted()) return { reloaded: false };
-  throw new Error("PageRoot renderer did not mount during initial launch.");
+  throw new Error("Stemmio renderer did not mount during initial launch.");
 }
 
-export async function launchPageRoot({
+export async function launchStemmio({
   activeSourcePath = null,
   recentSourcePaths = activeSourcePath ? [activeSourcePath] : [],
   externalSourcePaths = [],
@@ -644,11 +644,11 @@ export async function launchPageRoot({
   injectedEnv = {},
   userDataPrefix = DEFAULT_USER_DATA_PREFIX,
   electronLauncher = (options) => electron.launch(options),
-  shutdown = stopPageRoot,
+  shutdown = stopStemmio,
   firstWindowTimeout = DEFAULT_MAIN_WINDOW_TIMEOUT,
   diagnosticTimeout: diagnosticOperationTimeout = DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT,
 } = {}) {
-  const packagedAppPath = process.env.PAGEROOT_PACKAGED_APP_PATH || null;
+  const packagedAppPath = process.env.STEMMIO_PACKAGED_APP_PATH || null;
   const packagedExecutable = packagedAppPath
     ? path.join(
       packagedAppPath,
@@ -673,14 +673,14 @@ export async function launchPageRoot({
     cwd: productRoot,
     env: {
       ...process.env,
-          PAGEROOT_E2E: "1",
-          PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
-          HTML_AI_WORKSPACE: workspace,
+          STEMMIO_E2E: "1",
+          STEMMIO_E2E_USER_DATA_DIR: isolatedUserData,
+          STEMMIO_WORKSPACE: workspace,
           // New project-file imports deliberately live outside the legacy
           // workspace. Keep that user-owned root inside this isolated E2E
           // profile so tests exercise the real import handoff without
           // creating Finder projects in the developer's Documents folder.
-          HTML_AI_PROJECT_FILES_ROOT: path.join(isolatedUserData, "project-files"),
+          STEMMIO_PROJECT_FILES_ROOT: path.join(isolatedUserData, "project-files"),
           ...injectedEnv,
     },
   });
@@ -740,8 +740,8 @@ export async function launchPageRoot({
     throw failure;
   }
   const foreground = (
-    injectedEnv.PAGEROOT_E2E_FOREGROUND
-    ?? process.env.PAGEROOT_E2E_FOREGROUND
+    injectedEnv.STEMMIO_E2E_FOREGROUND
+    ?? process.env.STEMMIO_E2E_FOREGROUND
   ) === "1";
   expect(nativeWindow.visible).toBe(foreground);
   if (!foreground) expect(nativeWindow.focused).toBe(false);
@@ -762,7 +762,7 @@ export async function launchPageRoot({
 export async function sendToMainRenderer(electronApp, page, channel, payload) {
   const mainRendererUrl = page?.url();
   if (!mainRendererUrl) {
-    throw new Error("PageRoot main renderer URL is unavailable for renderer IPC.");
+    throw new Error("Stemmio main renderer URL is unavailable for renderer IPC.");
   }
   const delivered = await electronApp.evaluate(
     ({ BrowserWindow }, { rendererUrl, messageChannel, messagePayload }) => {
@@ -780,7 +780,7 @@ export async function sendToMainRenderer(electronApp, page, channel, payload) {
     },
   );
   if (!delivered) {
-    throw new Error("PageRoot main BrowserWindow was unavailable for renderer IPC.");
+    throw new Error("Stemmio main BrowserWindow was unavailable for renderer IPC.");
   }
 }
 
@@ -817,7 +817,7 @@ export async function waitForProjectReady(page, {
         });
         if (classification === "torn-down") {
           throw new Error(describeRendererReadiness(
-            "PageRoot renderer unmounted the workbench it had already mounted. "
+            "Stemmio renderer unmounted the workbench it had already mounted. "
             + "A live document must never drop main.workbench.",
             snapshot,
             rendererFaultLog(page),
@@ -829,7 +829,7 @@ export async function waitForProjectReady(page, {
       }
       if (Date.now() >= deadline) {
         throw new Error(describeRendererReadiness(
-          `PageRoot project did not become ready within ${timeout}ms.`,
+          `Stemmio project did not become ready within ${timeout}ms.`,
           snapshot,
           rendererFaultLog(page),
           { visibleFailure: await visibleFailure(snapshot) },
@@ -859,7 +859,7 @@ export async function loadedDiskFrame(
   await expect.poll(
     async () => {
       activeSourcePath = (
-        await page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+        await page.evaluate(() => window.stemmioProjects?.getActiveProject())
       )?.sourcePath || "";
       if (!activeSourcePath) return "";
       const canonicalActiveSourcePath = realpathSync(activeSourcePath);
@@ -932,7 +932,7 @@ export async function loadedDiskFrame(
     }, { timeout }).toBe(true);
   } catch (cause) {
     throw new Error(
-      `PageRoot did not expose the Electron edit frame: ${JSON.stringify(lastFrameProbe)}`,
+      `Stemmio did not expose the Electron edit frame: ${JSON.stringify(lastFrameProbe)}`,
       { cause },
     );
   }

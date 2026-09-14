@@ -1,6 +1,6 @@
 # Compatibility register
 
-This register is the single inventory of PageRoot compatibility inputs. A
+This register is the single inventory of Stemmio compatibility inputs. A
 compatibility decoder may read an immutable historical record, but it must not
 rewrite the record, revive a terminal outcome, or cause a current producer to
 emit its retired shape. Domain, Bridge service, and Workbench view code consume
@@ -19,7 +19,7 @@ A mutable record is one the product reads, edits and writes again: the Registry,
 the Draft aggregate, `manifest.json`,
 `working-copy-state.json` and `runtime-state.json`. For those records every
 required member stays strictly validated and fails closed when missing or
-invalid, while a member added by a newer PageRoot is preserved unchanged across
+invalid, while a member added by a newer Stemmio is preserved unchanged across
 the round trip.
 
 A sub-record is either preserved or authored, and only a preserved one may carry
@@ -236,17 +236,18 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 - Historical producer and version: earlier desktop installs stored recent
   project state under `PageRootV2`, `YuanYe`, or `HTML AI 工作台`, and
   used the corresponding Documents workspace directories.
-- Current consumer: none. Desktop startup reads only the current
-  `userData/html-projects.json`. `workspacePath()` uses `HTML_AI_WORKSPACE`
-  when set, otherwise only `Documents/PageRoot/项目记录`.
+- Current consumer: none. Desktop startup reads only the current Stemmio
+  `userData` state. `workspacePath()` uses `STEMMIO_WORKSPACE` when set,
+  otherwise only `Documents/Stemmio/项目记录`.
 - Decoder and canonical output: removed 2026-08-15. The desktop no longer
   opens `html-projects.json` from older appData directory names. Those
   directories are not deleted.
 - Historical proof: `tests/product-contract.test.mjs` (main process must not
   mention the old appData names) and
   `docs/NOTIFICATION_AND_STARTUP_POLICY.md`.
-- Disk persistence read: no. Recent-file UI state is only the current
-  `userData` file. Bridge open authority remains the v4 Project File Registry.
+- Disk persistence read: no legacy read. Recent-file UI state is only the
+  current Stemmio `userData` file. Bridge open authority remains the v4
+  Project File Registry.
 - Support window and deletion evidence: appData probes were removed after
   P0-B already dropped Documents workspace-root probes. Users who never
   launched a PageRoot-named install still re-open HTML files to rebuild

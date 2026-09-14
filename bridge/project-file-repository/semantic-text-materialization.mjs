@@ -5,8 +5,8 @@ import {
   rawStartTagAttributes,
 } from "../html-source-parser.mjs";
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-} from "../../shared/pageroot-element-identity.mjs";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+} from "../../shared/stemmio-element-identity.mjs";
 import {
   HTML_VOID_TAGS,
   materializeEditableIslandHtml,
@@ -61,7 +61,7 @@ function forwardEvidence(step, direction) {
 }
 
 function identityElementMap(inspection) {
-  return new Map(inspection.elements.map((element) => [element.pagerootId, element]));
+  return new Map(inspection.elements.map((element) => [element.stemmioId, element]));
 }
 
 function parsedElementAt(html, startOffset) {
@@ -274,7 +274,7 @@ function expectedRangeStylePatches(html, rootNode, operation, createdIds) {
       startOffset: segment.startOffset,
       endOffset: segment.startOffset,
       before: "",
-      after: `<span style="${TEXT_RANGE_LAYOUT_GUARD}; ${declaration}" ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${createdIds[index]}">`,
+      after: `<span style="${TEXT_RANGE_LAYOUT_GUARD}; ${declaration}" ${STEMMIO_ELEMENT_ID_ATTRIBUTE}="${createdIds[index]}">`,
       kind: "text-range-style-open",
     },
     {
@@ -425,7 +425,7 @@ function expectedSetAttributePatches(html, target, rootNode, operation) {
   const attributeName = String(operation.name ?? "").toLowerCase();
   if (
     !HTML_ATTRIBUTE_NAME_PATTERN.test(attributeName)
-    || attributeName === PAGEROOT_ELEMENT_ID_ATTRIBUTE
+    || attributeName === STEMMIO_ELEMENT_ID_ATTRIBUTE
   ) {
     fail(
       "SEMANTIC_IDENTITY_OPERATION_MATERIALIZATION_MISMATCH",
@@ -770,7 +770,7 @@ function assertSetTextMaterialization(step, operation, direction, beforeIdentity
   try {
     materializedContent = materializeEditableIslandHtml(operation.contentHtml, {
       baselineInnerHtml: forward.beforeHtml.slice(contentStart, contentEnd),
-      replayPagerootIds: operation.createdPagerootIds ?? [],
+      replayStemmioIds: operation.createdStemmioIds ?? [],
     });
   } catch (cause) {
     fail(
@@ -781,10 +781,10 @@ function assertSetTextMaterialization(step, operation, direction, beforeIdentity
   }
   if (
     materializedContent.html !== operation.contentHtml
-    || materializedContent.createdPagerootIds.length
-      !== (operation.createdPagerootIds ?? []).length
-    || materializedContent.createdPagerootIds.some(
-      (elementId, index) => elementId !== operation.createdPagerootIds[index],
+    || materializedContent.createdStemmioIds.length
+      !== (operation.createdStemmioIds ?? []).length
+    || materializedContent.createdStemmioIds.some(
+      (elementId, index) => elementId !== operation.createdStemmioIds[index],
     )
   ) {
     fail(
@@ -840,12 +840,12 @@ function assertRangeStyleMaterialization(step, operation, direction, beforeIdent
     );
     return;
   }
-  const createdIds = Array.isArray(operation.createdPagerootIds)
-    && operation.createdPagerootIds.length > 0
-    ? operation.createdPagerootIds
+  const createdIds = Array.isArray(operation.createdStemmioIds)
+    && operation.createdStemmioIds.length > 0
+    ? operation.createdStemmioIds
     : forwardAfterIdentity.elements
-      .filter((element) => !forwardBeforeIdentity.claimedIds.has(element.pagerootId))
-      .map((element) => element.pagerootId);
+      .filter((element) => !forwardBeforeIdentity.claimedIds.has(element.stemmioId))
+      .map((element) => element.stemmioId);
   assertExactPatches(
     forward.patches,
     expectedRangeStylePatches(forward.beforeHtml, rootNode, operation, createdIds),

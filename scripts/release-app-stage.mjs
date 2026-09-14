@@ -66,7 +66,7 @@ function withoutReleaseCredentials(environment) {
   return {
     ...sanitized,
     CSC_IDENTITY_AUTO_DISCOVERY: "false",
-    PAGEROOT_REQUIRE_NOTARIZATION: "0",
+    STEMMIO_REQUIRE_NOTARIZATION: "0",
   };
 }
 
@@ -235,26 +235,26 @@ export function candidateArtifactBuilderArguments({
 export function candidateAppEnvironment(environment = process.env) {
   return {
     ...withoutReleaseCredentials(environment),
-    PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1",
+    STEMMIO_REQUIRE_TELEMETRY_CONFIG: "1",
   };
 }
 
 export function releaseDryRunAppEnvironment(environment = process.env) {
   return {
     ...withoutReleaseCredentials(environment),
-    PAGEROOT_POSTHOG_TOKEN: RELEASE_DRY_RUN_TELEMETRY_TOKEN,
-    PAGEROOT_POSTHOG_HOST: RELEASE_DRY_RUN_TELEMETRY_HOST,
-    PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1",
+    STEMMIO_POSTHOG_TOKEN: RELEASE_DRY_RUN_TELEMETRY_TOKEN,
+    STEMMIO_POSTHOG_HOST: RELEASE_DRY_RUN_TELEMETRY_HOST,
+    STEMMIO_REQUIRE_TELEMETRY_CONFIG: "1",
   };
 }
 
 export function candidateArtifactBuilderEnvironment(environment = process.env) {
   const sanitized = withoutReleaseCredentials(environment);
-  delete sanitized.PAGEROOT_POSTHOG_HOST;
-  delete sanitized.PAGEROOT_POSTHOG_TOKEN;
+  delete sanitized.STEMMIO_POSTHOG_HOST;
+  delete sanitized.STEMMIO_POSTHOG_TOKEN;
   return {
     ...sanitized,
-    PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "0",
+    STEMMIO_REQUIRE_TELEMETRY_CONFIG: "0",
   };
 }
 
@@ -270,7 +270,7 @@ export async function signCandidateApp({
   const resolvedAppPath = assertManagedCandidateApp(productRoot, appPath);
   const cscLink = requiredCredential(environment, "CSC_LINK");
   const cscKeyPassword = requiredCredential(environment, "CSC_KEY_PASSWORD");
-  const temporaryDirectory = dependencies.temporaryDirectory ?? new TmpDir("pageroot-sign");
+  const temporaryDirectory = dependencies.temporaryDirectory ?? new TmpDir("stemmio-sign");
   const createSigningKeychain = dependencies.createSigningKeychain ?? createKeychain;
   const resolveIdentity = dependencies.resolveIdentity ?? findIdentity;
   const signApplication = dependencies.signApplication ?? signAsync;

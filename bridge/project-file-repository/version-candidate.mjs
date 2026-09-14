@@ -4,8 +4,8 @@ import {
   assessHtmlCandidate,
 } from "../candidate-assessment.mjs";
 import {
-  isValidPagerootElementId,
-} from "../../shared/pageroot-element-identity.mjs";
+  isValidStemmioElementId,
+} from "../../shared/stemmio-element-identity.mjs";
 
 import {
   ProjectFileRepositoryError,
@@ -58,7 +58,7 @@ export function mapCandidateValidationError(cause) {
       errorCode: "CANDIDATE_IDENTITY_INVALID",
       message: message || "The Candidate source identities are invalid.",
       errorDetail: "输出未保留现有源码元素身份，或包含重复、伪造的 Stable ID",
-      recoveryHint: "请让 AI 保留所有仍存在元素的 data-pageroot-id，并删除对新增元素自行填写的 ID 后重新提交。",
+      recoveryHint: "请让 AI 保留所有仍存在元素的 data-stemmio-id，并删除对新增元素自行填写的 ID 后重新提交。",
     };
   }
   return null;
@@ -158,7 +158,7 @@ export function assertCandidateAssessment(assessment) {
   if (hasLegacyImpact) {
     const validIdList = (value) => (
       Array.isArray(value)
-      && value.every((id) => isValidPagerootElementId(id))
+      && value.every((id) => isValidStemmioElementId(id))
       && new Set(value).size === value.length
     );
     if (
@@ -182,7 +182,7 @@ export function assertCandidateAssessment(assessment) {
     const validSample = (value) => (
       Array.isArray(value)
       && value.length <= IMPACT_SAMPLE_LIMIT
-      && value.every((id) => isValidPagerootElementId(id))
+      && value.every((id) => isValidStemmioElementId(id))
       && new Set(value).size === value.length
     );
     if (

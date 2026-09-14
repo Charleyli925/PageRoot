@@ -93,7 +93,7 @@ test("format recovery failure fails the current row, blocks the remainder, and s
   const result = formatFailureRows({
     formatCases,
     failedIndex: 0,
-    entry: { elementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    entry: { elementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     operationId: "format-font-size",
     operationFailure: { code: "SOURCE_SCOPE_ORACLE_FAILED" },
     recoveryFailure: { code: "HARNESS_RECOVERY_TIMEOUT" },
@@ -112,7 +112,7 @@ test("a recovered property failure does not invent blocked rows", () => {
   const result = formatFailureRows({
     formatCases: [{ behaviorFamily: "font-size" }, { behaviorFamily: "text-color" }],
     failedIndex: 0,
-    entry: { elementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    entry: { elementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     operationId: "format-font-size",
     operationFailure: { code: "FORMAT_COMPUTED_VALUE_MISMATCH" },
   });

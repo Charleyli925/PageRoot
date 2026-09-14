@@ -6,31 +6,31 @@ import {
   reviewVisualVerdict,
 } from "../app/workbench/review/review-visual-model.js";
 
-const A = "pr1_11111111111141118111111111111111";
-const B = "pr1_22222222222242229222222222222222";
-const C = "pr1_3333333333334333a333333333333333";
-const D = "pr1_4444444444444444b444444444444444";
-const E = "pr1_55555555555545558555555555555555";
-const html = (body) => `<!doctype html><html data-pageroot-id="${A}"><body data-pageroot-id="${B}">${body}</body></html>`;
+const A = "sm1_11111111111141118111111111111111";
+const B = "sm1_22222222222242229222222222222222";
+const C = "sm1_3333333333334333a333333333333333";
+const D = "sm1_4444444444444444b444444444444444";
+const E = "sm1_55555555555545558555555555555555";
+const html = (body) => `<!doctype html><html data-stemmio-id="${A}"><body data-stemmio-id="${B}">${body}</body></html>`;
 
 test("visual enhancement rejects incomplete or duplicate identity without cancelling source Review", () => {
   const incomplete = buildReviewVisualEvidence("<p>same</p>", "<p>changed</p>", "s");
   assert.equal(incomplete.binding.identity, "unsupported");
   assert.deepEqual(incomplete.evidence, []);
   const duplicate = buildReviewVisualEvidence(
-    `<main data-pageroot-id="${A}"><p data-pageroot-id="${A}">one</p></main>`,
-    `<main data-pageroot-id="${A}"><p data-pageroot-id="${A}">two</p></main>`, "s",
+    `<main data-stemmio-id="${A}"><p data-stemmio-id="${A}">one</p></main>`,
+    `<main data-stemmio-id="${A}"><p data-stemmio-id="${A}">two</p></main>`, "s",
   );
   assert.equal(duplicate.binding.identity, "unsupported");
 });
 
 test("only same stable ID produces source evidence; a move remains a candidate", () => {
-  const before = html(`<p data-pageroot-id="${A}">old</p>`);
-  const after = html(`<section data-pageroot-id="${A}">new</section>`);
+  const before = html(`<p data-stemmio-id="${A}">old</p>`);
+  const after = html(`<section data-stemmio-id="${A}">new</section>`);
   const result = buildReviewVisualEvidence(before, after, "s");
   assert.equal(result.binding.identity, "unsupported", "duplicate root IDs correctly fail closed");
-  const cleanBefore = `<main data-pageroot-id="${A}"><section data-pageroot-id="${C}"></section><p data-pageroot-id="${B}">old</p></main>`;
-  const cleanAfter = `<main data-pageroot-id="${A}"><section data-pageroot-id="${C}"><p data-pageroot-id="${B}">new</p></section></main>`;
+  const cleanBefore = `<main data-stemmio-id="${A}"><section data-stemmio-id="${C}"></section><p data-stemmio-id="${B}">old</p></main>`;
+  const cleanAfter = `<main data-stemmio-id="${A}"><section data-stemmio-id="${C}"><p data-stemmio-id="${B}">new</p></section></main>`;
   const clean = buildReviewVisualEvidence(cleanBefore, cleanAfter, "s");
   assert.equal(clean.binding.identity, "supported");
   const changed = clean.evidence.find((entry) => entry.stableId === B);
@@ -39,15 +39,15 @@ test("only same stable ID produces source evidence; a move remains a candidate",
 });
 
 test("identical modern pages do not schedule observation-only candidates", () => {
-  const source = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">same</p></main>`;
+  const source = `<main data-stemmio-id="${A}"><p data-stemmio-id="${B}">same</p></main>`;
   const result = buildReviewVisualEvidence(source, source, "same-session");
   assert.equal(result.binding.identity, "supported");
   assert.deepEqual(result.evidence, []);
 });
 
 test("page-level CSS and Script source-only edits never fan out to Stable-ID hosts", () => {
-  const before = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">same</p></main><style data-pageroot-id="${D}">/* before */ .card { color: red; }</style><script data-pageroot-id="${E}">/* before */</script>`;
-  const after = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">same</p></main><style data-pageroot-id="${D}">/* after */ .card { color: red; }</style><script data-pageroot-id="${E}">/* after */</script>`;
+  const before = `<main data-stemmio-id="${A}"><p data-stemmio-id="${B}">same</p></main><style data-stemmio-id="${D}">/* before */ .card { color: red; }</style><script data-stemmio-id="${E}">/* before */</script>`;
+  const after = `<main data-stemmio-id="${A}"><p data-stemmio-id="${B}">same</p></main><style data-stemmio-id="${D}">/* after */ .card { color: red; }</style><script data-stemmio-id="${E}">/* after */</script>`;
   const result = buildReviewVisualEvidence(before, after, "source-only");
 
   assert.equal(result.binding.identity, "supported");
@@ -56,7 +56,7 @@ test("page-level CSS and Script source-only edits never fan out to Stable-ID hos
 
 test("verdict is fail-closed and source candidates cannot promote themselves", () => {
   const { binding, evidence } = buildReviewVisualEvidence(
-    `<main data-pageroot-id="${A}">old</main>`, `<main data-pageroot-id="${A}">new</main>`, "session",
+    `<main data-stemmio-id="${A}">old</main>`, `<main data-stemmio-id="${A}">new</main>`, "session",
   );
   const candidate = evidence[0];
   const observation = (side, fingerprint, extra = {}) => ({
@@ -73,8 +73,8 @@ test("verdict is fail-closed and source candidates cannot promote themselves", (
 });
 
 test("added and removed elements require only the trusted present-side observation", () => {
-  const before = `<main data-pageroot-id="${A}"></main>`;
-  const after = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">added</p></main>`;
+  const before = `<main data-stemmio-id="${A}"></main>`;
+  const after = `<main data-stemmio-id="${A}"><p data-stemmio-id="${B}">added</p></main>`;
   const addedResult = buildReviewVisualEvidence(before, after, "added-session");
   const added = addedResult.evidence.find((entry) => entry.kinds.includes("added"));
   const present = {
@@ -101,16 +101,16 @@ test("added and removed elements require only the trusted present-side observati
 });
 
 test("external runtime does not erase deterministic source facts", () => {
-  const before = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">old</p></main><script data-pageroot-id="${C}" src="echarts.min.js"></script>`;
-  const after = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">new</p></main><script data-pageroot-id="${C}" src="echarts.min.js"></script>`;
+  const before = `<main data-stemmio-id="${A}"><p data-stemmio-id="${B}">old</p></main><script data-stemmio-id="${C}" src="echarts.min.js"></script>`;
+  const after = `<main data-stemmio-id="${A}"><p data-stemmio-id="${B}">new</p></main><script data-stemmio-id="${C}" src="echarts.min.js"></script>`;
   const result = buildReviewVisualEvidence(before, after, "external-runtime");
   assert.deepEqual(result.evidence.map((entry) => entry.stableId), [B]);
   assert.deepEqual(result.evidence[0].kinds, ["text"]);
 });
 
 test("equal bounded summaries never prove a pure style source candidate unchanged", () => {
-  const before = `<main data-pageroot-id="${A}" style="left:0"></main>`;
-  const after = `<main data-pageroot-id="${A}" style="left:120px"></main>`;
+  const before = `<main data-stemmio-id="${A}" style="left:0"></main>`;
+  const after = `<main data-stemmio-id="${A}" style="left:120px"></main>`;
   const result = buildReviewVisualEvidence(before, after, "style-session");
   const evidence = result.evidence[0];
   const observation = (side) => ({
@@ -132,8 +132,8 @@ test("equal bounded summaries never prove a pure style source candidate unchange
 });
 
 test("hidden text, parent-class effects and cross-parent moves remain source evidence", () => {
-  const before = `<main data-pageroot-id="${A}" class="theme-old"><section data-pageroot-id="${C}"><p data-pageroot-id="${B}">old</p></section></main>`;
-  const after = `<main data-pageroot-id="${A}" class="theme-new"><section data-pageroot-id="${C}"></section><p data-pageroot-id="${B}">new</p></main>`;
+  const before = `<main data-stemmio-id="${A}" class="theme-old"><section data-stemmio-id="${C}"><p data-stemmio-id="${B}">old</p></section></main>`;
+  const after = `<main data-stemmio-id="${A}" class="theme-new"><section data-stemmio-id="${C}"></section><p data-stemmio-id="${B}">new</p></main>`;
   const result = buildReviewVisualEvidence(before, after, "hidden-source");
   assert.ok(result.evidence.find((entry) => entry.stableId === A)?.kinds.includes("attribute"));
   const movedText = result.evidence.find((entry) => entry.stableId === B);
@@ -158,13 +158,13 @@ test("hidden text, parent-class effects and cross-parent moves remain source evi
 });
 
 test("long pages schedule only actual source evidence beyond the first 1000 stable IDs", () => {
-  const stableId = (index) => `pr1_${index.toString(16).padStart(12, "0")}40008${"0".repeat(15)}`;
+  const stableId = (index) => `sm1_${index.toString(16).padStart(12, "0")}40008${"0".repeat(15)}`;
   const elements = Array.from({ length: 1_101 }, (_, index) => (
-    `<p data-pageroot-id="${stableId(index + 2)}">item-${index}</p>`
+    `<p data-stemmio-id="${stableId(index + 2)}">item-${index}</p>`
   ));
-  const before = `<main data-pageroot-id="${stableId(1)}">${elements.join("")}</main>`;
-  elements[1_050] = `<p data-pageroot-id="${stableId(1_052)}">changed</p>`;
-  const after = `<main data-pageroot-id="${stableId(1)}">${elements.join("")}</main>`;
+  const before = `<main data-stemmio-id="${stableId(1)}">${elements.join("")}</main>`;
+  elements[1_050] = `<p data-stemmio-id="${stableId(1_052)}">changed</p>`;
+  const after = `<main data-stemmio-id="${stableId(1)}">${elements.join("")}</main>`;
   const result = buildReviewVisualEvidence(before, after, "long-page");
   assert.equal(result.binding.identity, "supported");
   assert.deepEqual(result.evidence.map((entry) => entry.stableId), [stableId(1_052)]);

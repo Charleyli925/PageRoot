@@ -17,9 +17,9 @@ import {
   expect,
   expectCheckpointPersisted,
   keyShortcut,
-  launchPageRoot,
+  launchStemmio,
   managedWorkingCopyPath,
-  stopPageRoot,
+  stopStemmio,
   waitForProjectReady,
   waitForRuntimeHandoffSettled,
 } from "./electron-native-harness.mjs";
@@ -110,16 +110,16 @@ import {
 import { isEditableIslandTarget } from "../../../app/lib/editable-island.js";
 import { isTransparentSourceTextElement } from "../../../app/lib/source-text-map.js";
 
-const corpus = process.env.PAGEROOT_REAL_HTML_DIR;
+const corpus = process.env.STEMMIO_REAL_HTML_DIR;
 if (!corpus) {
   throw new Error(
-    "Set PAGEROOT_REAL_HTML_DIR to the user-designated local HTML corpus. Synthetic fallback is not acceptance.",
+    "Set STEMMIO_REAL_HTML_DIR to the user-designated local HTML corpus. Synthetic fallback is not acceptance.",
   );
 }
 
-const runnerMode = process.env.PAGEROOT_REAL_HTML_MODE || "qualification";
+const runnerMode = process.env.STEMMIO_REAL_HTML_MODE || "qualification";
 if (!["qualification", "capability-preflight-only"].includes(runnerMode)) {
-  throw new Error(`Unsupported PAGEROOT_REAL_HTML_MODE: ${runnerMode}`);
+  throw new Error(`Unsupported STEMMIO_REAL_HTML_MODE: ${runnerMode}`);
 }
 const capabilityPreflightOnly = runnerMode === "capability-preflight-only";
 assertReadOnlyCorpusMode(runnerMode);
@@ -129,7 +129,7 @@ if (!corpusFiles.length) {
   throw new Error("The local corpus contains no HTML files. Acceptance was not run.");
 }
 const requestedFileIndexes = new Set(
-  String(process.env.PAGEROOT_REAL_HTML_FILE_INDEXES || "")
+  String(process.env.STEMMIO_REAL_HTML_FILE_INDEXES || "")
     .split(",")
     .map((value) => Number(value.trim()))
     .filter((value) => Number.isInteger(value) && value >= 1),
@@ -148,7 +148,7 @@ const resultReport = new RealHtmlResultReport(files, {
 });
 const REAL_HTML_LAUNCH_OPTIONS = Object.freeze({
   injectedEnv: Object.freeze({
-    PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
   }),
 });
 const sourceProvenance = workspaceSourceFingerprint();
@@ -435,7 +435,7 @@ async function copyCapabilitySnapshot({
   const workingIndex = buildSourceIndex(workingHtml, {
     caller: "local-html-corpus-copy-diagnostic",
   });
-  const sourceTarget = workingIndex.byPagerootId.get(plan.id) ?? null;
+  const sourceTarget = workingIndex.byStemmioId.get(plan.id) ?? null;
   const sourceCodeUnitRange = sourceTarget?.range
     ? {
         start: sourceTarget.range.startOffset,
@@ -458,7 +458,7 @@ async function copyCapabilitySnapshot({
     document.activeElement?.closest?.("[data-html-canvas-editing]"),
   ));
   await editor.evaluate((root) => {
-    root.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe"));
+    root.dispatchEvent(new Event("stemmio:e2e-copy-capability-probe"));
   });
   const workingSourceSha256 = await editor.getAttribute("data-working-source-sha256");
   const renderedProjectionSha256 = await editor.getAttribute(
@@ -482,7 +482,7 @@ async function copyCapabilitySnapshot({
       tag: plan.tag,
       tabId: plan.tabId,
       sourceTarget: {
-        stableId: sourceTarget?.pagerootId ?? null,
+        stableId: sourceTarget?.stemmioId ?? null,
         tag: sourceTarget?.tagName ?? null,
         unique: Boolean(sourceTarget),
         codeUnitRange: sourceCodeUnitRange,
@@ -550,7 +550,7 @@ async function clickAuthoredTab(page, tabId) {
   if (!tabId) return;
   const readState = async () => {
     const currentFrame = await currentEditorFrame(page);
-    const currentTab = currentFrame.locator(`[data-pageroot-id="${tabId}"]`);
+    const currentTab = currentFrame.locator(`[data-stemmio-id="${tabId}"]`);
     const tabCount = await currentTab.count();
     const ariaSelected = tabCount === 1 ? await currentTab.getAttribute("aria-selected") : null;
     const controls = tabCount === 1 ? await currentTab.getAttribute("aria-controls") : null;
@@ -595,7 +595,7 @@ async function clickAuthoredTab(page, tabId) {
     },
     selectTab: async () => {
       const frame = await currentEditorFrame(page);
-      const tab = frame.locator(`[data-pageroot-id="${tabId}"]`);
+      const tab = frame.locator(`[data-stemmio-id="${tabId}"]`);
       await tab.evaluate((element) => element.scrollIntoView({
         block: "center",
         inline: "center",
@@ -614,7 +614,7 @@ async function clickAuthoredTab(page, tabId) {
 
 async function authoredTabIds(page) {
   const frame = await currentEditorFrame(page);
-  const ids = await frame.locator('[role="tab"][data-pageroot-id]').evaluateAll((elements) => (
+  const ids = await frame.locator('[role="tab"][data-stemmio-id]').evaluateAll((elements) => (
     elements.filter((element) => {
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
@@ -623,7 +623,7 @@ async function authoredTabIds(page) {
         && rect.height > 1
         && style.display !== "none"
         && style.visibility !== "hidden";
-    }).map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
+    }).map((element) => element.getAttribute("data-stemmio-id")).filter(Boolean)
   ));
   return ids.length > 0 ? [...new Set(ids)] : [null];
 }
@@ -669,9 +669,9 @@ async function freezeCapabilityManifest(page, workingCopyPath, { allowUnresolved
       visible.filter((other) => other.tabId === candidate.tabId).length > 1
     ));
     const candidate = visible[0] || group[0];
-    const sourceMatches = sourceElements.filter((entry) => entry.pagerootId === candidate.stableId);
+    const sourceMatches = sourceElements.filter((entry) => entry.stemmioId === candidate.stableId);
     const sourceIdentityValid = sourceMatches.length === 1
-      && sourceMatches[0].pagerootIdentityStatus === "valid";
+      && sourceMatches[0].stemmioIdentityStatus === "valid";
     if (
       sourceIdentityValid
       && candidate.visible
@@ -808,7 +808,7 @@ async function freezeCapabilityManifest(page, workingCopyPath, { allowUnresolved
     const observation = normalized.liveDom.find((entry) => entry.stableId === operationStableId)
       || observations[0];
     const operation = sourceElements.find((sourceEntry) => (
-      sourceEntry.pagerootId === operationStableId
+      sourceEntry.stemmioId === operationStableId
     ));
     const admittedEntry = manifestEntriesById.get(operationStableId) || null;
     return {
@@ -946,8 +946,8 @@ function editableSourceElementCapabilities(sourceBytes) {
     if (!isEditableIslandTarget(index, targetRef).editable) return [];
     const parent = element.parentId ? index.byNodeId.get(element.parentId) : null;
     return [{
-      id: element.pagerootId || element.nodeId,
-      parentId: parent?.type === "element" ? parent.pagerootId || null : null,
+      id: element.stemmioId || element.nodeId,
+      parentId: parent?.type === "element" ? parent.stemmioId || null : null,
       transparent: isTransparentSourceTextElement(element.tagName),
     }];
   });
@@ -960,14 +960,14 @@ async function captureTextTargetSnapshots(page, sourceCapabilities, tabId) {
   const snapshots = await frame.locator(TEXT_TARGET_SELECTOR).evaluateAll((elements, capabilities) => {
     const allowed = new Map(capabilities.map((capability) => [capability.id, capability]));
     const nativeHostFor = (hitElement) => {
-      let candidate = hitElement.closest("[data-pageroot-id]");
+      let candidate = hitElement.closest("[data-stemmio-id]");
       let nearestSafeCandidate = null;
       while (candidate) {
-        const id = candidate.getAttribute("data-pageroot-id");
+        const id = candidate.getAttribute("data-stemmio-id");
         const capability = allowed.get(id);
         if (!capability) return null;
-        const parent = candidate.parentElement?.closest("[data-pageroot-id]") || null;
-        if ((parent?.getAttribute("data-pageroot-id") || null) !== capability.parentId) return null;
+        const parent = candidate.parentElement?.closest("[data-stemmio-id]") || null;
+        if ((parent?.getAttribute("data-stemmio-id") || null) !== capability.parentId) return null;
         nearestSafeCandidate = candidate;
         const display = candidate.ownerDocument.defaultView
           ?.getComputedStyle(candidate).display.toLowerCase() || "";
@@ -984,19 +984,19 @@ async function captureTextTargetSnapshots(page, sourceCapabilities, tabId) {
       const view = element.ownerDocument.defaultView;
       const style = view?.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      const id = element.getAttribute("data-pageroot-id");
-      const parent = element.parentElement?.closest("[data-pageroot-id]") || null;
+      const id = element.getAttribute("data-stemmio-id");
+      const parent = element.parentElement?.closest("[data-stemmio-id]") || null;
       const descendantSourceNodes = Array.from(
-        element.querySelectorAll("[data-pageroot-id]"),
+        element.querySelectorAll("[data-stemmio-id]"),
       );
       const descendantSourceIds = descendantSourceNodes
-        .map((candidate) => candidate.getAttribute("data-pageroot-id"));
+        .map((candidate) => candidate.getAttribute("data-stemmio-id"));
       const descendantSourceTags = descendantSourceNodes.map((candidate) => candidate.localName);
       const excludedAncestor = element.closest(
         "button,a,input,textarea,select,option,nav,[role=tab],[role=tablist],[contenteditable=true]",
       );
       const tag = element.localName;
-      const sourceIdValid = /^pr1_[0-9a-f]{32}$/u.test(id || "");
+      const sourceIdValid = /^sm1_[0-9a-f]{32}$/u.test(id || "");
       const text = element.textContent?.replace(/\s+/gu, " ").trim() || "";
       const hiddenByAttribute = element.hasAttribute("hidden")
         || element.getAttribute("aria-hidden") === "true"
@@ -1017,16 +1017,16 @@ async function captureTextTargetSnapshots(page, sourceCapabilities, tabId) {
         underline: (style?.textDecorationLine || "").split(/\s+/u).includes("underline"),
       };
       const documentOrder = Array.from(
-        element.ownerDocument.querySelectorAll("[data-pageroot-id]"),
+        element.ownerDocument.querySelectorAll("[data-stemmio-id]"),
       ).indexOf(element);
       const domIdentityValid = sourceIdValid
-        && Array.from(element.ownerDocument.querySelectorAll("[data-pageroot-id]"))
-          .filter((candidate) => candidate.getAttribute("data-pageroot-id") === id)
+        && Array.from(element.ownerDocument.querySelectorAll("[data-stemmio-id]"))
+          .filter((candidate) => candidate.getAttribute("data-stemmio-id") === id)
           .length === 1;
       return {
         id,
         tag,
-        parentId: parent?.getAttribute("data-pageroot-id") || null,
+        parentId: parent?.getAttribute("data-stemmio-id") || null,
         documentOrder,
         textLength: text.length,
         childCount: element.childElementCount,
@@ -1055,13 +1055,13 @@ async function planTextTargets(page, workingCopyPath, {
   const sourceCapabilities = editableSourceElementCapabilities(readFileSync(workingCopyPath));
   const initialFrame = await currentEditorFrame(page);
   const tabs = await initialFrame.locator(
-    '[role="tab"][aria-controls][data-pageroot-id]',
+    '[role="tab"][aria-controls][data-stemmio-id]',
   ).evaluateAll((elements) => elements.filter((element) => {
     const rect = element.getBoundingClientRect();
     const style = element.ownerDocument.defaultView.getComputedStyle(element);
     return rect.width > 10 && rect.height > 10
       && style.display !== "none" && style.visibility !== "hidden";
-  }).slice(0, 4).map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean));
+  }).slice(0, 4).map((element) => element.getAttribute("data-stemmio-id")).filter(Boolean));
   const snapshots = [];
   for (const tabId of tabs.length > 0 ? tabs : [null]) {
     await clickAuthoredTab(page, tabId);
@@ -1111,7 +1111,7 @@ async function enterNativeEdit(page, plan, { requireFormatProperty = null } = {}
   await page.keyboard.press("Escape");
   await waitUntilEditable(page);
   const frame = await currentEditorFrame(page);
-  const target = frame.locator(`[data-pageroot-id=${JSON.stringify(plan.id)}]`);
+  const target = frame.locator(`[data-stemmio-id=${JSON.stringify(plan.id)}]`);
   const count = await target.count();
   if (count !== 1) {
     const error = new Error("The frozen text target must resolve to exactly one DOM element.");
@@ -1291,21 +1291,21 @@ async function runNewlineOperation({ page, workingCopyPath, plan, fileIndex }) {
   const target = await enterNativeEdit(page, plan);
   await target.press(keyShortcut("ArrowDown"));
   await page.keyboard.insertText(beforeMarker);
-  const beforeBreakIds = await target.locator("br[data-pageroot-id]").evaluateAll((elements) => (
-    elements.map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
+  const beforeBreakIds = await target.locator("br[data-stemmio-id]").evaluateAll((elements) => (
+    elements.map((element) => element.getAttribute("data-stemmio-id")).filter(Boolean)
   ));
   await page.keyboard.press("Enter");
   await page.keyboard.insertText(marker);
   await expect(target).toContainText(marker);
   await expect.poll(async () => (
-    (await target.locator("br[data-pageroot-id]").evaluateAll((elements) => (
-      elements.map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
+    (await target.locator("br[data-stemmio-id]").evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-stemmio-id")).filter(Boolean)
     ))).filter((id) => !beforeBreakIds.includes(id)).length
   )).toBe(1);
   await saveAndExitTextOperation(page, beforeRevision);
   const saved = await readPublishedWorkingCopy(workingCopyPath, "utf8");
   expect(saved).toMatch(new RegExp(
-    `${beforeMarker}[\\s\\S]*<br\\s+[^>]*data-pageroot-id="pr1_[0-9a-f]{32}"[^>]*>[\\s\\S]*${marker}`,
+    `${beforeMarker}[\\s\\S]*<br\\s+[^>]*data-stemmio-id="sm1_[0-9a-f]{32}"[^>]*>[\\s\\S]*${marker}`,
     "u",
   ));
   return {
@@ -1320,7 +1320,7 @@ async function runNewlineOperation({ page, workingCopyPath, plan, fileIndex }) {
       normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_NEWLINE,
       expectedAfterContains: [beforeMarker, marker],
       expectedAppendedPattern: new RegExp(
-        `${beforeMarker}<br\\s+data-pageroot-id="pr1_[0-9a-f]{32}">${marker}`,
+        `${beforeMarker}<br\\s+data-stemmio-id="sm1_[0-9a-f]{32}">${marker}`,
         "u",
       ),
     }),
@@ -1404,10 +1404,10 @@ async function runFormatOperation({ page, workingCopyPath, plan, fileIndex }) {
 
 function directSiblingStableIds(workingCopyPath, targetId) {
   const index = buildPatchSourceIndex(readFileSync(workingCopyPath, "utf8"));
-  const target = index.byPagerootId.get(targetId);
+  const target = index.byStemmioId.get(targetId);
   const parent = target?.parentId ? index.byNodeId.get(target.parentId) : null;
   if (target?.type !== "element" || parent?.type !== "element") return null;
-  return parent.childElementIds.map((nodeId) => index.byNodeId.get(nodeId)?.pagerootId)
+  return parent.childElementIds.map((nodeId) => index.byNodeId.get(nodeId)?.stemmioId)
     .filter(Boolean);
 }
 
@@ -1419,7 +1419,7 @@ async function duplicateFixedStructureTarget({
 }) {
   await clickAuthoredTab(page, plan.tabId);
   let frame = await currentEditorFrame(page);
-  const original = frame.locator(`[data-pageroot-id="${plan.id}"]`);
+  const original = frame.locator(`[data-stemmio-id="${plan.id}"]`);
   const beforeIds = directSiblingStableIds(workingCopyPath, plan.id);
   if (!beforeIds) throw new Error("The frozen copy target has no source-backed parent.");
   expect(beforeIds).toContain(plan.id);
@@ -1436,13 +1436,13 @@ async function duplicateFixedStructureTarget({
   if (relocatedCount === 1) {
     relocated = await original.evaluate((element, expected) => ({
       count: 1,
-      stableId: element.getAttribute("data-pageroot-id"),
+      stableId: element.getAttribute("data-stemmio-id"),
       tag: element.tagName.toLowerCase(),
       connected: element.isConnected,
       selectedMarker: element.hasAttribute("data-html-canvas-selected"),
       liveStyleAttribute: element.getAttribute("style"),
       sameAsPlanned: (
-        element.getAttribute("data-pageroot-id") === expected.stableId
+        element.getAttribute("data-stemmio-id") === expected.stableId
         && element.tagName.toLowerCase() === expected.tag
       ),
     }), { stableId: plan.id, tag: plan.tag });
@@ -1460,7 +1460,7 @@ async function duplicateFixedStructureTarget({
   await original.scrollIntoViewIfNeeded();
   await original.click({ modifiers: ["Alt"], timeout: 5_000 });
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
-    "data-pageroot-id",
+    "data-stemmio-id",
     plan.id,
   );
   await page.waitForTimeout(0);
@@ -1555,7 +1555,7 @@ async function duplicateFixedStructureTarget({
 async function deleteFixedStructureTargets({ page, workingCopyPath, plan, duplicateIds, originalIds }) {
   for (const duplicateId of duplicateIds) {
     let frame = await currentEditorFrame(page);
-    const duplicate = frame.locator(`[data-pageroot-id="${duplicateId}"]`);
+    const duplicate = frame.locator(`[data-stemmio-id="${duplicateId}"]`);
     await duplicate.scrollIntoViewIfNeeded();
     await duplicate.click();
     const beforeDelete = await currentRevision(page);
@@ -1566,22 +1566,22 @@ async function deleteFixedStructureTargets({ page, workingCopyPath, plan, duplic
     await expectCheckpointPersisted(page, beforeDelete);
 
     frame = await currentEditorFrame(page);
-    await expect(frame.locator(`[data-pageroot-id="${duplicateId}"]`)).toHaveCount(0);
+    await expect(frame.locator(`[data-stemmio-id="${duplicateId}"]`)).toHaveCount(0);
   }
   const frame = await currentEditorFrame(page);
   expect(directSiblingStableIds(workingCopyPath, plan.id)).toEqual(originalIds);
-  const original = frame.locator(`[data-pageroot-id="${plan.id}"]`);
+  const original = frame.locator(`[data-stemmio-id="${plan.id}"]`);
   await expect(original).toHaveCount(1);
 }
 
 async function createAndEditManifestComment(page, entry, marker) {
   await clickAuthoredTab(page, entry.tabId);
   const frame = await currentEditorFrame(page);
-  const target = frame.locator(`[data-pageroot-id=${JSON.stringify(entry.elementId)}]`);
+  const target = frame.locator(`[data-stemmio-id=${JSON.stringify(entry.elementId)}]`);
   await target.scrollIntoViewIfNeeded();
   await target.click({ modifiers: ["Alt"] });
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
-    "data-pageroot-id",
+    "data-stemmio-id",
     entry.elementId,
   );
   const commentButton = editorFor(page).getByRole("button", { name: /留评论/u });
@@ -1621,7 +1621,7 @@ async function selectFrozenRuntimeGeneratedTarget(page, target) {
   await clickAuthoredTab(page, target.tabId);
   const frame = await currentEditorFrame(page);
   const anchor = frame.locator(
-    `[data-pageroot-id=${JSON.stringify(target.sourceAnchorId)}]`,
+    `[data-stemmio-id=${JSON.stringify(target.sourceAnchorId)}]`,
   );
   if (await anchor.count() !== 1) {
     const error = new Error("The frozen Runtime-generated source anchor is not unique.");
@@ -1846,7 +1846,7 @@ async function runExtendedFormatBehaviors(page, workingCopyPath, entry, sourceEl
       });
       const activeFrame = await currentEditorFrame(page);
       const target = activeFrame.locator(
-        `[data-pageroot-id=${JSON.stringify(entry.elementId)}]`,
+        `[data-stemmio-id=${JSON.stringify(entry.elementId)}]`,
       );
       await expect(target).toHaveCount(1);
       const observedInlineValue = await target.evaluate(
@@ -1927,11 +1927,11 @@ async function runExtendedFormatBehaviors(page, workingCopyPath, entry, sourceEl
 async function moveManifestTarget(page, workingCopyPath, entry) {
   await clickAuthoredTab(page, entry.tabId);
   const frame = await currentEditorFrame(page);
-  const target = frame.locator(`[data-pageroot-id=${JSON.stringify(entry.elementId)}]`);
+  const target = frame.locator(`[data-stemmio-id=${JSON.stringify(entry.elementId)}]`);
   await target.scrollIntoViewIfNeeded();
   await target.click({ modifiers: ["Alt"] });
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
-    "data-pageroot-id",
+    "data-stemmio-id",
     entry.elementId,
   );
   const direction = entry.capabilityFamilies.includes("move-up") ? "up" : "down";
@@ -2066,8 +2066,8 @@ async function runDedicatedCapabilityStage({
   }
 
   const isolatedUserData = activeSession.isolatedUserData;
-  await stopPageRoot(activeSession.electronApp, isolatedUserData, { cleanup: false });
-  activeSession = await launchPageRoot({ isolatedUserData, ...REAL_HTML_LAUNCH_OPTIONS });
+  await stopStemmio(activeSession.electronApp, isolatedUserData, { cleanup: false });
+  activeSession = await launchStemmio({ isolatedUserData, ...REAL_HTML_LAUNCH_OPTIONS });
   activePage = activeSession.page;
   await waitForProjectReady(activePage);
   await waitUntilEditable(activePage);
@@ -2125,7 +2125,7 @@ async function runDedicatedCapabilityStage({
   if (identityEntry) {
     await clickAuthoredTab(activePage, identityEntry.tabId);
     const count = await (await currentEditorFrame(activePage))
-      .locator(`[data-pageroot-id=${JSON.stringify(identityEntry.elementId)}]`).count();
+      .locator(`[data-stemmio-id=${JSON.stringify(identityEntry.elementId)}]`).count();
     const state = count === 1 ? "PASS" : "FAIL";
     rows.push(...behaviorResultRows(
       identityEntry,
@@ -2163,10 +2163,10 @@ async function markerDeliverySnapshot(page, marker) {
   const frame = await currentEditorFrame(page);
   const frameFocus = await frame.evaluate((value) => {
     const active = document.activeElement;
-    const host = active?.closest?.("[data-pageroot-id]") || null;
+    const host = active?.closest?.("[data-stemmio-id]") || null;
     const content = active && "value" in active ? String(active.value) : active?.textContent || "";
     return {
-      elementId: host?.getAttribute("data-pageroot-id") || null,
+      elementId: host?.getAttribute("data-stemmio-id") || null,
       markerPresent: Boolean(host && content.includes(value)),
     };
   }, marker);
@@ -2190,12 +2190,12 @@ async function nativeSelectionEvidence(page, expectedElementId) {
   return frame.evaluate((expectedId) => {
     const nearestId = (node) => {
       const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
-      return element?.closest?.("[data-pageroot-id]")
-        ?.getAttribute("data-pageroot-id") || null;
+      return element?.closest?.("[data-stemmio-id]")
+        ?.getAttribute("data-stemmio-id") || null;
     };
     const selection = document.getSelection();
     const activeElementId = nearestId(document.activeElement);
-    const active = document.querySelector(`[data-pageroot-id="${expectedId}"]`);
+    const active = document.querySelector(`[data-stemmio-id="${expectedId}"]`);
     return {
       expectedElementId: expectedId,
       after: {
@@ -2264,12 +2264,12 @@ async function runContinuityCycle({
   await clickAuthoredTab(page, copyEntry.tabId);
   let frame = await currentEditorFrame(page);
   const structureTarget = frame.locator(
-    `[data-pageroot-id=${JSON.stringify(copyEntry.elementId)}]`,
+    `[data-stemmio-id=${JSON.stringify(copyEntry.elementId)}]`,
   );
   await structureTarget.scrollIntoViewIfNeeded();
   await structureTarget.click({ modifiers: ["Alt"] });
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
-    "data-pageroot-id",
+    "data-stemmio-id",
     copyEntry.elementId,
   );
   const copyButton = editorFor(page).getByRole("button", { name: "复制元素", exact: true });
@@ -2278,7 +2278,7 @@ async function runContinuityCycle({
   const rebuildBefore = await runtimeContractSnapshot(page);
   const oldFrame = frame;
   const oldTarget = oldFrame.locator(
-    `[data-pageroot-id=${JSON.stringify(textPlan.id)}]`,
+    `[data-stemmio-id=${JSON.stringify(textPlan.id)}]`,
   );
   const oldTargetHandle = await oldTarget.elementHandle();
   const structureRevision = await currentRevision(page);
@@ -2331,7 +2331,7 @@ async function runContinuityCycle({
   if (!directInputApplied) {
     continuationMode = "session-ended";
     const relocated = await enterNativeEdit(page, textPlan);
-    relocatedElementId = await relocated.getAttribute("data-pageroot-id");
+    relocatedElementId = await relocated.getAttribute("data-stemmio-id");
     const relocatedMarker = `PRQA_${fileIndex}_CHAIN_${cycleIndex}_RELOCATED`;
     await relocated.press(keyShortcut("ArrowDown"));
     await page.keyboard.insertText(` ${relocatedMarker}`);
@@ -2415,20 +2415,20 @@ async function runContinuityCycle({
 
 async function armRuntimeCommitHold(page) {
   await page.evaluate(() => {
-    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = [];
+    window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__ = [];
   });
 }
 
 async function waitForHeldRuntimeCommit(page) {
   await expect.poll(() => page.evaluate(() => (
-    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+    window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
   )), { timeout: 60_000 }).toBeGreaterThan(0);
 }
 
 async function releaseHeldRuntimeCommits(page) {
   await page.evaluate(() => {
-    const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ || [];
-    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = undefined;
+    const releases = window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__ || [];
+    window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__ = undefined;
     releases.forEach((release) => release());
   });
 }
@@ -2444,12 +2444,12 @@ async function runStaleCandidateFence({
   await clickAuthoredTab(page, copyEntry.tabId);
   const frame = await currentEditorFrame(page);
   const structureTarget = frame.locator(
-    `[data-pageroot-id=${JSON.stringify(copyEntry.elementId)}]`,
+    `[data-stemmio-id=${JSON.stringify(copyEntry.elementId)}]`,
   );
   await structureTarget.scrollIntoViewIfNeeded();
   await structureTarget.click({ modifiers: ["Alt"] });
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute(
-    "data-pageroot-id",
+    "data-stemmio-id",
     copyEntry.elementId,
   );
   const copyButton = editorFor(page).getByRole("button", { name: "复制元素", exact: true });
@@ -2495,7 +2495,7 @@ async function runStaleCandidateFence({
     if (!directInputApplied) {
       latestMarker = `PRQA_${fileIndex}_STALE_LATEST`;
       const relocated = await enterNativeEdit(page, textPlan);
-      relocatedElementId = await relocated.getAttribute("data-pageroot-id");
+      relocatedElementId = await relocated.getAttribute("data-stemmio-id");
       await relocated.press(keyShortcut("ArrowDown"));
       await page.keyboard.insertText(` ${latestMarker}`);
       await expect(relocated).toContainText(latestMarker);
@@ -2862,7 +2862,7 @@ for (const filename of files) {
       throw cause;
     }
     try {
-      session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
+      session = await launchStemmio({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
     } catch (cause) {
       resultReport.blockFile(filename, "ENVIRONMENT_BLOCKED", {
         exactReason: "ELECTRON_LAUNCH_FAILED",
@@ -3095,10 +3095,10 @@ for (const filename of files) {
       await waitUntilEditable(page).catch(() => {});
     }
 
-    await stopPageRoot(session.electronApp, session.isolatedUserData);
+    await stopStemmio(session.electronApp, session.isolatedUserData);
     session = undefined;
     writeFileSync(copyPath, original);
-    session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
+    session = await launchStemmio({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
     page = session.page;
     await waitForProjectReady(page);
     await waitUntilEditable(page);
@@ -3268,15 +3268,15 @@ for (const filename of files) {
           tabId: nonCopyable.tabId,
         };
         const nonCopyableTarget = (await currentEditorFrame(page))
-          .locator(`[data-pageroot-id=${JSON.stringify(nonCopyable.elementId)}]`);
+          .locator(`[data-stemmio-id=${JSON.stringify(nonCopyable.elementId)}]`);
         const relocated = await nonCopyableTarget.evaluate((element, expected) => ({
           count: 1,
-          stableId: element.getAttribute("data-pageroot-id"),
+          stableId: element.getAttribute("data-stemmio-id"),
           tag: element.tagName.toLowerCase(),
           connected: element.isConnected,
           selectedMarker: element.hasAttribute("data-html-canvas-selected"),
           liveStyleAttribute: element.getAttribute("style"),
-          sameAsPlanned: element.getAttribute("data-pageroot-id") === expected.stableId
+          sameAsPlanned: element.getAttribute("data-stemmio-id") === expected.stableId
             && element.tagName.toLowerCase() === expected.tag,
         }), { stableId: nonCopyablePlan.id, tag: nonCopyablePlan.tag });
         const diagnostic = await copyCapabilitySnapshot({
@@ -3354,10 +3354,10 @@ for (const filename of files) {
       await waitUntilEditable(page).catch(() => {});
     }
 
-    await stopPageRoot(session.electronApp, session.isolatedUserData);
+    await stopStemmio(session.electronApp, session.isolatedUserData);
     session = undefined;
     writeFileSync(copyPath, original);
-    session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
+    session = await launchStemmio({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
     page = session.page;
     await waitForProjectReady(page);
     await waitUntilEditable(page);
@@ -3513,10 +3513,10 @@ for (const filename of files) {
     await page.screenshot({ path: path.join(copyDir, "after-source-reload.png"), fullPage: true });
 
     const isolatedUserData = session.isolatedUserData;
-    await stopPageRoot(session.electronApp, isolatedUserData, { cleanup: false });
+    await stopStemmio(session.electronApp, isolatedUserData, { cleanup: false });
     session = undefined;
     try {
-      session = await launchPageRoot({ isolatedUserData, ...REAL_HTML_LAUNCH_OPTIONS });
+      session = await launchStemmio({ isolatedUserData, ...REAL_HTML_LAUNCH_OPTIONS });
       await waitForProjectReady(session.page);
       await waitUntilEditable(session.page);
       if (!runtimePlan) {
@@ -3529,7 +3529,7 @@ for (const filename of files) {
       } else {
         await clickAuthoredTab(session.page, runtimePlan.tabId);
         const reopenedTarget = (await currentEditorFrame(session.page)).locator(
-          `[data-pageroot-id="${runtimePlan.id}"]`,
+          `[data-stemmio-id="${runtimePlan.id}"]`,
         );
         await reopenedTarget.scrollIntoViewIfNeeded();
         await reopenedTarget.dblclick({ position: await renderedTextPosition(reopenedTarget) });
@@ -3596,11 +3596,11 @@ for (const filename of files) {
 
     try {
       if (session) {
-        await stopPageRoot(session.electronApp, session.isolatedUserData);
+        await stopStemmio(session.electronApp, session.isolatedUserData);
         session = undefined;
       }
       writeFileSync(copyPath, original);
-      session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
+      session = await launchStemmio({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
       page = session.page;
       await waitForProjectReady(page);
       await waitUntilEditable(page);
@@ -3699,11 +3699,11 @@ for (const filename of files) {
     if (frozenCapability) {
       try {
         if (session) {
-          await stopPageRoot(session.electronApp, session.isolatedUserData);
+          await stopStemmio(session.electronApp, session.isolatedUserData);
           session = undefined;
         }
         writeFileSync(copyPath, original);
-        session = await launchPageRoot({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
+        session = await launchStemmio({ activeSourcePath: copyPath, ...REAL_HTML_LAUNCH_OPTIONS });
         page = session.page;
         await waitForProjectReady(page);
         await waitUntilEditable(page);
@@ -3869,7 +3869,7 @@ for (const filename of files) {
     }
 
     if (session) {
-      await stopPageRoot(session.electronApp, session.isolatedUserData);
+      await stopStemmio(session.electronApp, session.isolatedUserData);
       session = undefined;
     }
     let finalOriginalIssue = null;
@@ -3939,7 +3939,7 @@ for (const filename of files) {
     }
   } finally {
     if (session) {
-      await stopPageRoot(session.electronApp, session.isolatedUserData).catch((cause) => {
+      await stopStemmio(session.electronApp, session.isolatedUserData).catch((cause) => {
         row.cleanupError = String(cause?.stack || cause);
         if (capabilityPreflightOnly) row.status = "DISCOVERY_ERROR";
       });

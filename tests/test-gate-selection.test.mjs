@@ -487,7 +487,7 @@ test("Draft runtime suites coalesce tags and changed specs into one execution", 
       "tests/e2e/electron/electron-workbench-tabs.spec.mjs",
     ],
   });
-  const execution = coalesceRuntimeSuites(plan.suites, plan, "/tmp/pageroot-test-plan");
+  const execution = coalesceRuntimeSuites(plan.suites, plan, "/tmp/stemmio-test-plan");
   const electron = execution.find(({ id }) => id === "electron-selected-tests");
   assert.ok(electron);
   assert.ok(electron.sourceSuites.includes("electron-editing-smoke"));
@@ -758,7 +758,7 @@ test("the shared fixture driver schedules both browser and Electron smoke", () =
   const plan = selectGatePlan({
     map,
     lane: "task",
-    changedFiles: ["tests/e2e/browser/pageroot-driver.mjs"],
+    changedFiles: ["tests/e2e/browser/stemmio-driver.mjs"],
   });
   assert.deepEqual(suiteIds(plan), [
     "typecheck",
@@ -774,7 +774,7 @@ test("the shared Electron app fixture schedules Native and AI smoke with its cle
   const plan = selectGatePlan({
     map,
     lane: "task",
-    changedFiles: ["tests/e2e/electron/helpers/pageroot-app-fixture.mjs"],
+    changedFiles: ["tests/e2e/electron/helpers/stemmio-app-fixture.mjs"],
   });
   assert.deepEqual(suiteIds(plan), [
     "typecheck",
@@ -976,6 +976,7 @@ test("Node groups partition every top-level test exactly once outside full", asy
     "architecture-boundaries.test.mjs",
     "semantic-identity-architecture-contract.test.mjs",
     "stable-id-review-contract.test.mjs",
+    "stemmio-rename-contract.test.mjs",
   ]);
   assert.ok(groups.core.some((file) => file.endsWith("notification-policy.test.mjs")));
   assert.equal(
@@ -1409,6 +1410,13 @@ test("changed review annotation is discovered through the AI selection runtime",
   const plan = selectGatePlan({ map, lane: "task", changedFiles: [file] });
   assert.deepEqual(plan.selectedChangedSpecs["ai-changed-specs"], [file]);
   assert.equal(plan.selectedChangedSpecs["electron-changed-specs"], undefined);
+});
+
+test("hosted Electron preflight stays on its dedicated infra-sensitive config", () => {
+  const file = "tests/e2e/electron/ci-environment-preflight.spec.mjs";
+  const plan = selectGatePlan({ map, lane: "task", changedFiles: [file] });
+  assert.equal(plan.selectedChangedSpecs["electron-changed-specs"], undefined);
+  assert.equal(plan.suites.some(({ id }) => id === "electron-changed-specs"), false);
 });
 
 

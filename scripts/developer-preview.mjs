@@ -9,10 +9,10 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-export const DEVELOPER_PREVIEW_PRODUCT_NAME = "PageRoot Developer Preview";
+export const DEVELOPER_PREVIEW_PRODUCT_NAME = "Stemmio Developer Preview";
 export const DEVELOPER_PREVIEW_APP_ID_SUFFIX = ".developer-preview";
 export const DEVELOPER_PREVIEW_ARTIFACT_PATTERN =
-  "PageRoot-Developer-Preview-${version}-${arch}.${ext}";
+  "Stemmio-Developer-Preview-${version}-${arch}.${ext}";
 
 const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const GIT_SHA_PATTERN = /^[a-f0-9]{40}$/u;
@@ -30,8 +30,8 @@ const SENSITIVE_BUILD_ENVIRONMENT = new Set([
   "GH_TOKEN",
   "GITHUB_TOKEN",
   "NPM_TOKEN",
-  "PAGEROOT_POSTHOG_HOST",
-  "PAGEROOT_POSTHOG_TOKEN",
+  "STEMMIO_POSTHOG_HOST",
+  "STEMMIO_POSTHOG_TOKEN",
 ]);
 
 function assertArchitecture(architecture) {
@@ -159,11 +159,16 @@ function officialStableTag(productRoot, tag, remoteTagObjects) {
   const targetType = headers.find((header) => header.startsWith("type "))?.slice("type ".length);
   const declaredTag = headers.find((header) => header.startsWith("tag "))?.slice("tag ".length);
   const message = annotation.slice(divider + 2).trim();
+  // Existing official tags were created before the identity cutover and keep
+  // their immutable legacy-brand message. New tags use the Stemmio message; both
+  // are valid baselines, but no new tag is written by this preview flow.
+  const validMessage = message === `Stemmio ${version}`
+    || message === `PageRoot ${version}`;
   if (
     !GIT_SHA_PATTERN.test(target ?? "")
     || targetType !== "commit"
     || declaredTag !== tag
-    || message !== `PageRoot ${version}`
+    || !validMessage
   ) {
     return null;
   }
@@ -228,7 +233,7 @@ export function developerPreviewPackageJson(packageJson, identity) {
   const developerPreviewDmg = packageJson.build?.dmg
     ? {
       ...packageJson.build.dmg,
-      title: `PageRoot Developer Preview ${identity.version}`,
+      title: `Stemmio Developer Preview ${identity.version}`,
       contents: Array.isArray(packageJson.build.dmg.contents)
         ? packageJson.build.dmg.contents.map((entry) => (
           entry?.path === "desktop/resources/首次打开说明.txt"
@@ -338,8 +343,8 @@ export function developerPreviewEnvironment(environment = process.env) {
   return {
     ...sanitized,
     CSC_IDENTITY_AUTO_DISCOVERY: "true",
-    PAGEROOT_REQUIRE_NOTARIZATION: "0",
-    PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "0",
+    STEMMIO_REQUIRE_NOTARIZATION: "0",
+    STEMMIO_REQUIRE_TELEMETRY_CONFIG: "0",
   };
 }
 

@@ -30,6 +30,12 @@ import {
 import {
   ProjectFileRepositoryError,
 } from "./errors.mjs";
+import {
+  projectControlRoot as sharedProjectControlRoot,
+  projectControlPath,
+  nonReplaceTemporaryName,
+} from "../../shared/project-storage-contract.mjs";
+import { PRODUCT_ENV, PRODUCT_PROJECTS_DIRECTORY_NAME } from "../../shared/product-identity.mjs";
 
 export const serialPathCache = new AsyncLocalStorage();
 
@@ -73,25 +79,25 @@ export async function verifiedProjectRoot(projectRoot, { allowMissing = true } =
 }
 
 export function defaultProjectsRoot(environment = process.env) {
-  const configured = String(environment.HTML_AI_PROJECT_FILES_ROOT || "").trim();
+  const configured = String(environment[PRODUCT_ENV.PROJECT_FILES_ROOT] || "").trim();
   if (configured) {
     if (!path.isAbsolute(configured)) {
-      const error = new Error("HTML_AI_PROJECT_FILES_ROOT must be an absolute path.");
+      const error = new Error(`${PRODUCT_ENV.PROJECT_FILES_ROOT} must be an absolute path.`);
       error.code = "RUNTIME_PATH_REQUIRED";
       throw error;
     }
     return path.resolve(configured);
   }
-  const channel = String(environment.HTML_AI_RUNTIME_CHANNEL || "").trim().toLowerCase();
+  const channel = String(environment[PRODUCT_ENV.RUNTIME_CHANNEL] || "").trim().toLowerCase();
   if (channel === "stable" || channel === "preview") {
-    const error = new Error(`HTML_AI_PROJECT_FILES_ROOT is required for runtime channel ${channel}.`);
+    const error = new Error(`${PRODUCT_ENV.PROJECT_FILES_ROOT} is required for runtime channel ${channel}.`);
     error.code = "RUNTIME_PATH_REQUIRED";
     throw error;
   }
   // Repository-only source/test callers receive a disposable root. The
   // desktop Bridge always supplies an explicit channel root and therefore
   // never reaches this fallback in a packaged runtime.
-  return path.join(os.tmpdir(), "pageroot-project-runtime", channel || "test", "项目");
+  return path.join(os.tmpdir(), "stemmio-project-runtime", channel || "test", PRODUCT_PROJECTS_DIRECTORY_NAME);
 }
 
 export function nowIso(clock) {
@@ -514,7 +520,7 @@ export async function writeFileNoReplace(filePath, buffer, expectedSha256, label
   }
   const temporary = path.join(
     parent,
-    `.pageroot-new-${process.pid}-${randomUUID()}.tmp`,
+    nonReplaceTemporaryName(`${process.pid}-${randomUUID()}.tmp`),
   );
   await atomicWriteFile(temporary, buffer);
   try {
@@ -629,8 +635,10 @@ export async function ensureProjectDirectory(projectRootPath, directoryPath, lab
 }
 
 export function projectControlRoot(projectRootPath) {
-  return path.join(projectRootPath, ".pageroot");
+  return sharedProjectControlRoot(projectRootPath);
 }
+
+export { projectControlPath };
 
 export function projectPaths(projectRootPath) {
   const controlRoot = projectControlRoot(projectRootPath);

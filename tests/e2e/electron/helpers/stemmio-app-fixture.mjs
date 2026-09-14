@@ -1,10 +1,10 @@
-export { launchPageRoot } from "./electron-app-launch.mjs";
+export { launchStemmio } from "./electron-app-launch.mjs";
 export {
   closeObservationTimeout,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createCloseFirstCleanup,
   removeValidatedTemporaryDirectory,
-  stopPageRoot,
+  stopStemmio,
 } from "./electron-safe-cleanup.mjs";
 export {
   classifyRendererMount,

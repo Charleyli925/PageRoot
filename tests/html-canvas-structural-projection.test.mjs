@@ -20,18 +20,18 @@ import {
 } from "../app/lib/source-structure-edit.js";
 
 const ids = {
-  html: "pr1_00000000000040008000000000000001",
-  head: "pr1_00000000000040008000000000000002",
-  title: "pr1_00000000000040008000000000000003",
-  body: "pr1_00000000000040008000000000000004",
-  left: "pr1_00000000000040008000000000000005",
-  first: "pr1_00000000000040008000000000000006",
-  strong: "pr1_00000000000040008000000000000007",
-  second: "pr1_00000000000040008000000000000008",
-  right: "pr1_00000000000040008000000000000009",
+  html: "sm1_00000000000040008000000000000001",
+  head: "sm1_00000000000040008000000000000002",
+  title: "sm1_00000000000040008000000000000003",
+  body: "sm1_00000000000040008000000000000004",
+  left: "sm1_00000000000040008000000000000005",
+  first: "sm1_00000000000040008000000000000006",
+  strong: "sm1_00000000000040008000000000000007",
+  second: "sm1_00000000000040008000000000000008",
+  right: "sm1_00000000000040008000000000000009",
 };
 
-const html = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Structure</title></head><body data-pageroot-id="${ids.body}"><section data-pageroot-id="${ids.left}"><p data-pageroot-id="${ids.first}">A <strong data-pageroot-id="${ids.strong}">one</strong></p><p data-pageroot-id="${ids.second}">B</p></section><aside data-pageroot-id="${ids.right}"></aside></body></html>`;
+const html = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">Structure</title></head><body data-stemmio-id="${ids.body}"><section data-stemmio-id="${ids.left}"><p data-stemmio-id="${ids.first}">A <strong data-stemmio-id="${ids.strong}">one</strong></p><p data-stemmio-id="${ids.second}">B</p></section><aside data-stemmio-id="${ids.right}"></aside></body></html>`;
 
 function uuidFactory(...values) {
   let cursor = 0;
@@ -135,9 +135,9 @@ test("insert, delete and cross-parent move classify as proven in-place", () => {
 });
 
 test("customized builtins, mixed content and body-as-parent keep distinct projection classes", () => {
-  const card = "pr1_0000000000004000800000000000000f";
-  const cardChild = "pr1_00000000000040008000000000000014";
-  const builtinHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><div is="review-card" data-pageroot-id="${card}"><span data-pageroot-id="${cardChild}">正文</span></div></body></html>`;
+  const card = "sm1_0000000000004000800000000000000f";
+  const cardChild = "sm1_00000000000040008000000000000014";
+  const builtinHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><div is="review-card" data-stemmio-id="${card}"><span data-stemmio-id="${cardChild}">正文</span></div></body></html>`;
   const deletedBuiltin = applySemanticOperation(
     createSemanticDocumentState(builtinHtml),
     createDeleteElementOperation(builtinHtml, {
@@ -151,10 +151,10 @@ test("customized builtins, mixed content and body-as-parent keep distinct projec
     "candidate",
   );
 
-  const host = "pr1_00000000000040008000000000000010";
-  const first = "pr1_00000000000040008000000000000011";
-  const second = "pr1_00000000000040008000000000000012";
-  const mixedHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><div data-pageroot-id="${host}">前<span data-pageroot-id="${first}">中</span>后<span data-pageroot-id="${second}">末</span>尾</div></body></html>`;
+  const host = "sm1_00000000000040008000000000000010";
+  const first = "sm1_00000000000040008000000000000011";
+  const second = "sm1_00000000000040008000000000000012";
+  const mixedHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><div data-stemmio-id="${host}">前<span data-stemmio-id="${first}">中</span>后<span data-stemmio-id="${second}">末</span>尾</div></body></html>`;
   const duplicatedMixed = applySemanticOperation(
     createSemanticDocumentState(mixedHtml),
     createDuplicateElementOperation(mixedHtml, {
@@ -181,8 +181,8 @@ test("customized builtins, mixed content and body-as-parent keep distinct projec
     "in-place",
   );
 
-  const paragraph = "pr1_00000000000040008000000000000013";
-  const bodyHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><p data-pageroot-id="${paragraph}">普通段落</p></body></html>`;
+  const paragraph = "sm1_00000000000040008000000000000013";
+  const bodyHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><p data-stemmio-id="${paragraph}">普通段落</p></body></html>`;
   const duplicatedBodyChild = applySemanticOperation(
     createSemanticDocumentState(bodyHtml),
     createDuplicateElementOperation(bodyHtml, {
@@ -193,12 +193,12 @@ test("customized builtins, mixed content and body-as-parent keep distinct projec
     { randomUUID: uuidFactory("50000000-0000-4000-8000-000000000001") },
   );
   const bodyDecision = decideFromResult(bodyHtml, duplicatedBodyChild, { operationType: "insertElement" });
-  const scriptId = "pr1_00000000000040008000000000000016";
-  const bodyPrettyHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head>
-<body data-pageroot-id="${ids.body}" style="padding:32px">
-  <p data-pageroot-id="${paragraph}">普通段落</p>
-  <div data-pageroot-id="${host}">前<span data-pageroot-id="${first}">中</span>后<span data-pageroot-id="${second}">末</span>尾</div>
-  <script data-pageroot-id="${scriptId}">document.body.dataset.runtimeReady = "true";</script>
+  const scriptId = "sm1_00000000000040008000000000000016";
+  const bodyPrettyHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head>
+<body data-stemmio-id="${ids.body}" style="padding:32px">
+  <p data-stemmio-id="${paragraph}">普通段落</p>
+  <div data-stemmio-id="${host}">前<span data-stemmio-id="${first}">中</span>后<span data-stemmio-id="${second}">末</span>尾</div>
+  <script data-stemmio-id="${scriptId}">document.body.dataset.runtimeReady = "true";</script>
 </body></html>`;
   const duplicatedPrettyBodyChild = applySemanticOperation(
     createSemanticDocumentState(bodyPrettyHtml),
@@ -219,11 +219,11 @@ test("customized builtins, mixed content and body-as-parent keep distinct projec
 });
 
 test("tables, custom elements and mixed identity stay on Candidate", () => {
-  const tableId = "pr1_0000000000004000800000000000000a";
-  const bodyId = "pr1_0000000000004000800000000000000b";
-  const rowId = "pr1_0000000000004000800000000000000c";
-  const cellId = "pr1_0000000000004000800000000000000d";
-  const tableHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><table data-pageroot-id="${tableId}"><tbody data-pageroot-id="${bodyId}"><tr data-pageroot-id="${rowId}"><td data-pageroot-id="${cellId}">cell</td></tr></tbody></table></body></html>`;
+  const tableId = "sm1_0000000000004000800000000000000a";
+  const bodyId = "sm1_0000000000004000800000000000000b";
+  const rowId = "sm1_0000000000004000800000000000000c";
+  const cellId = "sm1_0000000000004000800000000000000d";
+  const tableHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><table data-stemmio-id="${tableId}"><tbody data-stemmio-id="${bodyId}"><tr data-stemmio-id="${rowId}"><td data-stemmio-id="${cellId}">cell</td></tr></tbody></table></body></html>`;
   const deletedRow = applySemanticOperation(
     createSemanticDocumentState(tableHtml),
     createDeleteElementOperation(tableHtml, {
@@ -235,8 +235,8 @@ test("tables, custom elements and mixed identity stay on Candidate", () => {
   const tableDecision = decideFromResult(tableHtml, deletedRow, { operationType: "deleteElement" });
   assert.equal(tableDecision.kind, "candidate");
 
-  const widget = "pr1_0000000000004000800000000000000e";
-  const customHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><x-card data-pageroot-id="${widget}">Hi</x-card></body></html>`;
+  const widget = "sm1_0000000000004000800000000000000e";
+  const customHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><x-card data-stemmio-id="${widget}">Hi</x-card></body></html>`;
   const deletedCustom = applySemanticOperation(
     createSemanticDocumentState(customHtml),
     createDeleteElementOperation(customHtml, {
@@ -322,10 +322,10 @@ test("disabled in-place and program identity changes stay on Candidate", () => {
 });
 
 test("frozen support matrix classifies ordinary parents, body parents and conservative hosts independently", () => {
-  const paragraph = "pr1_00000000000040008000000000000013";
-  const host = "pr1_00000000000040008000000000000010";
-  const first = "pr1_00000000000040008000000000000011";
-  const card = "pr1_0000000000004000800000000000000f";
+  const paragraph = "sm1_00000000000040008000000000000013";
+  const host = "sm1_00000000000040008000000000000010";
+  const first = "sm1_00000000000040008000000000000011";
+  const card = "sm1_0000000000004000800000000000000f";
   const matrix = [
     {
       name: "section-child-duplicate",
@@ -369,7 +369,7 @@ test("frozen support matrix classifies ordinary parents, body parents and conser
       name: "body-parent-duplicate",
       expected: { kind: "in-place", reason: "verified-insert" },
       run: () => {
-        const bodyHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><p data-pageroot-id="${paragraph}">普通段落</p></body></html>`;
+        const bodyHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><p data-stemmio-id="${paragraph}">普通段落</p></body></html>`;
         return decideFromResult(bodyHtml, applySemanticOperation(
           createSemanticDocumentState(bodyHtml),
           createDuplicateElementOperation(bodyHtml, {
@@ -385,7 +385,7 @@ test("frozen support matrix classifies ordinary parents, body parents and conser
       name: "mixed-insert",
       expected: { kind: "candidate", reason: "insert-mixed-content" },
       run: () => {
-        const mixedHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><div data-pageroot-id="${host}">前<span data-pageroot-id="${first}">中</span></div></body></html>`;
+        const mixedHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><div data-stemmio-id="${host}">前<span data-stemmio-id="${first}">中</span></div></body></html>`;
         return decideFromResult(mixedHtml, applySemanticOperation(
           createSemanticDocumentState(mixedHtml),
           createDuplicateElementOperation(mixedHtml, {
@@ -401,7 +401,7 @@ test("frozen support matrix classifies ordinary parents, body parents and conser
       name: "customized-builtin-delete",
       expected: { kind: "candidate", reason: "delete-host-unsupported" },
       run: () => {
-        const builtinHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><div is="review-card" data-pageroot-id="${card}">正文</div></body></html>`;
+        const builtinHtml = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><div is="review-card" data-stemmio-id="${card}">正文</div></body></html>`;
         return decideFromResult(builtinHtml, applySemanticOperation(
           createSemanticDocumentState(builtinHtml),
           createDeleteElementOperation(builtinHtml, {

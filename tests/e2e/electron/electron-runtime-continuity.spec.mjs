@@ -12,14 +12,14 @@ import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-con
 
 import {
   activateNativeEdit,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   currentEditorFrame,
   disableStructuralInPlace,
   documentToken,
   ECHARTS_STUB,
   expectCheckpointPersisted,
   keyShortcut,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   managedWorkingCopyPath,
   mkdirSync,
@@ -27,7 +27,7 @@ import {
   path,
   readFileSync,
   removeValidatedTemporaryDirectory,
-  stopPageRoot,
+  stopStemmio,
   tmpdir,
   writeFileSync,
   waitForRuntimeHandoffSettled,
@@ -47,7 +47,7 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
     isolatedUserData: null,
   };
   try {
-    Object.assign(session, await launchPageRoot({
+    Object.assign(session, await launchStemmio({
       activeSourcePath: sourcePath,
       ...launchOptions,
     }));
@@ -62,7 +62,7 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
       isolatedUserData: session.isolatedUserData,
       relaunch: async () => {
         if (!session.electronApp || !session.page) {
-          throw new Error("PageRoot session is not running.");
+          throw new Error("Stemmio session is not running.");
         }
         const closedApp = session.electronApp;
         const closedPage = session.page;
@@ -74,7 +74,7 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
         } catch {
           closedProcess = null;
         }
-        await closePageRootGracefully(closedApp, closedPage);
+        await closeStemmioGracefully(closedApp, closedPage);
         if (closedProcess && closedProcess.exitCode == null && !closedProcess.killed) {
           await Promise.race([
             new Promise((resolve) => closedProcess.once("exit", resolve)),
@@ -83,7 +83,7 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
             }),
           ]);
         }
-        Object.assign(session, await launchPageRoot({
+        Object.assign(session, await launchStemmio({
           isolatedUserData: session.isolatedUserData,
         }));
         return session;
@@ -92,12 +92,12 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
   } finally {
     if (session.electronApp && session.isolatedUserData) {
       try {
-        await stopPageRoot(session.electronApp, session.isolatedUserData);
+        await stopStemmio(session.electronApp, session.isolatedUserData);
       } catch {
-        removeValidatedTemporaryDirectory(session.isolatedUserData, "pageroot-native-e2e-");
+        removeValidatedTemporaryDirectory(session.isolatedUserData, "stemmio-native-e2e-");
       }
     } else if (session.isolatedUserData) {
-      removeValidatedTemporaryDirectory(session.isolatedUserData, "pageroot-native-e2e-");
+      removeValidatedTemporaryDirectory(session.isolatedUserData, "stemmio-native-e2e-");
     }
     removeValidatedTemporaryDirectory(sourceDirectory, prefix);
   }
@@ -106,10 +106,10 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
 test("frozen character selection reveals oversized targets and rejects clipped host points", async () => {
   const text = "Fixed character " + "cumulative content ".repeat(100);
   const html = `<!doctype html><html><head><title>Fixed point</title></head><body><p data-native-case="oversized" style="width:400px;font-size:60px">${text}</p></body></html>`;
-  await withRuntimeProject("pageroot-frozen-oversized-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+  await withRuntimeProject("stemmio-frozen-oversized-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "oversized");
     const locator = frame.locator('[data-native-case="oversized"]');
-    const id = await locator.getAttribute("data-pageroot-id");
+    const id = await locator.getAttribute("data-stemmio-id");
     const handle = await locator.elementHandle();
     await expect(verifyFrozenHostPoint(handle, { x: 20, y: -10 }))
       .rejects.toMatchObject({ code: "FROZEN_HOST_POINTER_HIT_MISMATCH", details: { withinViewport: false, hostHitMatches: false } });
@@ -136,7 +136,7 @@ test("frozen element entry rejects wrong text bindings and edits heading paragra
     + '<ul><li data-native-case="entry-list"><b>Label</b> item</li></ul>'
     + '<p data-native-case="entry-tail">  Footer <a href="#">link</a>.\n    </p>'
     + '<table><tbody><tr><td data-native-case="entry-cell">Cell</td></tr></tbody></table></body></html>';
-  await withRuntimeProject("pageroot-frozen-elements-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+  await withRuntimeProject("stemmio-frozen-elements-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
     const { editor, frame } = await loadedDiskFrame(page, sourcePath, "entry-heading");
     const working = await managedWorkingCopyPath(page, sourcePath);
     await editor.evaluate(startRuntimeLifecycleObservation);
@@ -146,7 +146,7 @@ test("frozen element entry rejects wrong text bindings and edits heading paragra
         ["entry-list", "li", [1], 1, " item"], ["entry-cell", "td", [0], 0, "Cell"],
         ["entry-tail", "p", [0], 2, "  Footer ", "\n    "],
       ].entries()) {
-        const id = await frame.locator(`[data-native-case="${name}"]`).getAttribute("data-pageroot-id");
+        const id = await frame.locator(`[data-native-case="${name}"]`).getAttribute("data-stemmio-id");
         const target = { clickId: id, selectedId: id, clickTag: tag, selectedTag: tag, mapping: "self",
           selectionClick: "frozen-text-character",
           operations: FROZEN_ELEMENT_OPERATIONS, textEntry: { path: entryPath, offset, textSha256: frozenDigest(text), trailingText },
@@ -208,7 +208,7 @@ test("a real Space key edits a nested summary instead of toggling its disclosure
     + '<details open data-native-case="summary-details">'
     + '<summary data-native-case="summary-space">Heading <span>nested</span></summary>'
     + '<p>body</p></details></body></html>';
-  await withRuntimeProject("pageroot-summary-space-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
+  await withRuntimeProject("stemmio-summary-space-", { "runtime-report.html": html }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "summary-space");
     const working = await managedWorkingCopyPath(page, sourcePath);
     const target = frame.locator('[data-native-case="summary-space"]');
@@ -228,16 +228,16 @@ test("a real Space key edits a nested summary instead of toggling its disclosure
 async function enableContinuityProbe(page) {
   await expect.poll(() => page.evaluate(() => ({
     editor: Boolean(document.querySelector('[data-testid="html-canvas-editor"]')),
-    enable: typeof window.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__,
+    enable: typeof window.__STEMMIO_ENABLE_RUNTIME_CONTINUITY__,
   })), { timeout: 30_000 }).toEqual({
     editor: true,
     enable: "function",
   });
-  await page.evaluate(() => window.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__());
+  await page.evaluate(() => window.__STEMMIO_ENABLE_RUNTIME_CONTINUITY__());
 }
 
 async function continuitySummary(page) {
-  return page.evaluate(() => window.__PAGEROOT_SUMMARIZE_RUNTIME_CONTINUITY__());
+  return page.evaluate(() => window.__STEMMIO_SUMMARIZE_RUNTIME_CONTINUITY__());
 }
 
 async function enterNativeEdit(page, frame, caseId, { scrollTop = 480 } = {}) {
@@ -274,7 +274,7 @@ test("frozen Inspector cache bounds response bodies without losing fetch data or
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
-    await withRuntimeProject("pageroot-inspector-cache-e2e-", { "runtime-report.html": STATIC_PAGE }, async ({ page }) => {
+    await withRuntimeProject("stemmio-inspector-cache-e2e-", { "runtime-report.html": STATIC_PAGE }, async ({ page }) => {
       await waitForRuntimeHandoffSettled(page);
       const endpoint = `http://127.0.0.1:${server.address().port}`;
       const fetchResponse = async suffix => {
@@ -300,7 +300,7 @@ test("frozen Inspector cache bounds response bodies without losing fetch data or
 test("frozen Inspector cache follows sandbox iframe replacement without accepting unbounded sessions", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  await withRuntimeProject("pageroot-inspector-sandbox-e2e-", { "runtime-report.html": STATIC_PAGE }, async ({ page }) => {
+  await withRuntimeProject("stemmio-inspector-sandbox-e2e-", { "runtime-report.html": STATIC_PAGE }, async ({ page }) => {
     await waitForRuntimeHandoffSettled(page);
     const cache = await boundFrozenInspectorCache(page);
     for (const text of ["first sandbox document", "replacement sandbox document"]) {
@@ -320,12 +320,12 @@ test("frozen comment evidence accepts persisted comments beyond the virtual DOM 
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   test.setTimeout(90_000);
-  await withRuntimeProject("pageroot-frozen-virtual-comments-", { "runtime-report.html": STATIC_PAGE }, async ({ page, sourcePath, relaunch }) => {
+  await withRuntimeProject("stemmio-frozen-virtual-comments-", { "runtime-report.html": STATIC_PAGE }, async ({ page, sourcePath, relaunch }) => {
     await waitForRuntimeHandoffSettled(page);
     const frame = await currentEditorFrame(page), target = frame.locator('[data-native-case="continuity-static"]');
-    const targetId = await target.getAttribute("data-pageroot-id");
+    const targetId = await target.getAttribute("data-stemmio-id");
     const workingPath = await managedWorkingCopyPath(page, sourcePath);
-    const draftPath = path.join(path.dirname(workingPath), ".pageroot", "drafts", "work_ver_0001.json");
+    const draftPath = path.join(path.dirname(workingPath), ".stemmio", "drafts", "work_ver_0001.json");
     const readComments = () => JSON.parse(readFileSync(draftPath, "utf8")).comments;
     const comments = [];
     for (let index = 1; index <= 41; index += 1) {
@@ -364,20 +364,20 @@ test("successful Candidate retirement does not retain a growing Document chain",
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({}, testInfo) => {
   const source = '<!doctype html><html><head><title>Retirement memory</title></head><body><p data-native-case="retirement-copy">Fixed copy target</p><script>window.authoredReady=true;</script></body></html>';
-  await withRuntimeProject("pageroot-retirement-memory-e2e-", { "runtime-report.html": source }, async ({ page, sourcePath }) => {
+  await withRuntimeProject("stemmio-retirement-memory-e2e-", { "runtime-report.html": source }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, "retirement-copy");
     await disableStructuralInPlace(page);
     const editor = page.getByTestId("html-canvas-editor").filter({ visible: true });
     await waitForRuntimeHandoffSettled(page);
     const active = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
-    const id = await active.locator('[data-native-case="retirement-copy"]').getAttribute("data-pageroot-id");
-    expect(id).toMatch(/^pr1_[a-f0-9]{32}$/u);
+    const id = await active.locator('[data-native-case="retirement-copy"]').getAttribute("data-stemmio-id");
+    expect(id).toMatch(/^sm1_[a-f0-9]{32}$/u);
     const cdp = await page.context().newCDPSession(page);
     const samples = [];
     try {
       for (let cycle = 0; cycle < 4; cycle += 1) {
         const generation = Number(await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute("data-frame-generation"));
-        await active.locator(`[data-pageroot-id="${id}"]`).click();
+        await active.locator(`[data-stemmio-id="${id}"]`).click();
         await editor.getByRole("button", { name: "复制元素", exact: true }).click();
         await waitForRuntimeHandoffSettled(page, { priorGeneration: generation, requireGenerationAdvance: true });
         await expect(active.locator('[data-native-case="retirement-copy"]')).toHaveCount(cycle + 2);
@@ -416,14 +416,14 @@ const CHART_PAGE = `<!doctype html>
   <div aria-hidden="true" style="height:1800px"></div>
   <script src="echarts.js"></script>
   <script>
-    parent.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ =
-      (parent.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0) + 1;
+    parent.__STEMMIO_BLANK_CARET_RUNTIME_COUNT__ =
+      (parent.__STEMMIO_BLANK_CARET_RUNTIME_COUNT__ || 0) + 1;
     echarts.init(document.querySelector('#chart')).setOption({series:[{type:'bar',data:[1,2,3]}]});
   </script>
 </body></html>`;
 
 test("a restored save publication is not reported as a missing source after stale-hash reconcile", async () => {
-  await withRuntimeProject("pageroot-continuity-publication-e2e-", {
+  await withRuntimeProject("stemmio-continuity-publication-e2e-", {
     "runtime-report.html": STATIC_PAGE,
   }, async ({ page, electronApp, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "continuity-static");
@@ -432,12 +432,12 @@ test("a restored save publication is not reported as a missing source after stal
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     await page.evaluate(() => {
       window.__publicationWatchHints = [];
-      window.htmlAIProjects.onSourceFileChanged((hint) => window.__publicationWatchHints.push(hint));
+      window.stemmioProjects.onSourceFileChanged((hint) => window.__publicationWatchHints.push(hint));
     });
     await electronApp.evaluate(async ({ net }, source) => {
       const { rename } = process.getBuiltinModule("fs/promises");
       const path = process.getBuiltinModule("path");
-      const parked = path.join(path.dirname(source), ".pageroot", "publication-race.html");
+      const parked = path.join(path.dirname(source), ".stemmio", "publication-race.html");
       const originalFetch = net.fetch.bind(net);
       let pending = true;
       net.fetch = async (...args) => {
@@ -472,7 +472,7 @@ test("continuous editing keeps the Runtime document through type, Enter, style a
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const typed = `CONTINUITY_TRANSACTION_MARKER_${"x".repeat(68)}`;
-  await withRuntimeProject("pageroot-continuity-static-e2e-", {
+  await withRuntimeProject("stemmio-continuity-static-e2e-", {
     "runtime-report.html": STATIC_PAGE,
   }, async ({ page, sourcePath, relaunch }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "continuity-static");
@@ -532,7 +532,7 @@ test("continuous editing on a Script page keeps the Runtime document", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const typed = "DYNAMIC_CONTINUITY_MARKER";
-  await withRuntimeProject("pageroot-continuity-dynamic-e2e-", {
+  await withRuntimeProject("stemmio-continuity-dynamic-e2e-", {
     "runtime-report.html": CHART_PAGE,
     "echarts.js": ECHARTS_STUB,
   }, async ({ page, sourcePath }) => {
@@ -562,7 +562,7 @@ test("continuous editing on a Script page keeps the Runtime document", {
 test("comment rail and canvas width stay visually continuous while typing in a nested scroller", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  await withRuntimeProject("pageroot-continuity-nested-e2e-", {
+  await withRuntimeProject("stemmio-continuity-nested-e2e-", {
     "runtime-report.html": NESTED_SCROLL_PAGE,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "continuity-nested");
@@ -571,14 +571,14 @@ test("comment rail and canvas width stay visually continuous while typing in a n
     const { target } = await enterNativeEdit(page, frame, "continuity-nested");
     await enableContinuityProbe(page);
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_READ_RUNTIME_CONTINUITY__?.()?.samples.length || 0
+      window.__STEMMIO_READ_RUNTIME_CONTINUITY__?.()?.samples.length || 0
     ))).toBeGreaterThan(0);
     await page.keyboard.insertText("宽度连续");
     for (let index = 0; index < 8; index += 1) {
       await target.press("Enter");
     }
     await page.waitForFunction(() => {
-      const samples = window.__PAGEROOT_READ_RUNTIME_CONTINUITY__?.()?.samples || [];
+      const samples = window.__STEMMIO_READ_RUNTIME_CONTINUITY__?.()?.samples || [];
       if (samples.length < 2) return false;
       return samples.at(-1).t - samples[0].t >= 500;
     });
@@ -597,7 +597,7 @@ test("ending Runtime text editing keeps the document and the sixth blank-line ca
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const marker = "SIXTH_BLANK_LINE_MARKER";
-  await withRuntimeProject("pageroot-continuity-blank-e2e-", {
+  await withRuntimeProject("stemmio-continuity-blank-e2e-", {
     "runtime-report.html": CHART_PAGE,
     "echarts.js": ECHARTS_STUB,
   }, async ({ page, sourcePath }) => {
@@ -617,7 +617,7 @@ test("ending Runtime text editing keeps the document and the sixth blank-line ca
       .locator('iframe:not([data-frame-role])')
       .getAttribute("data-frame-generation");
     const beforeScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_BLANK_CARET_RUNTIME_COUNT__ || 0
     ));
 
     await page.keyboard.press("Escape");
@@ -628,7 +628,7 @@ test("ending Runtime text editing keeps the document and the sixth blank-line ca
       .locator('iframe:not([data-frame-role])'))
       .toHaveAttribute("data-frame-generation", beforeGeneration);
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_BLANK_CARET_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_BLANK_CARET_RUNTIME_COUNT__ || 0
     ))).toBe(beforeScriptCount);
     const afterBoundary = await continuitySummary(page);
     expect(afterBoundary.frameCreated).toBe(0);
@@ -676,12 +676,12 @@ const DELAYED_CHART_PAGE = `<!doctype html><html><head><title>Continuous report<
 <style>body{font:18px system-ui;padding:32px;color:#25232a}main{display:grid;grid-template-columns:1fr 1fr;gap:24px}#chart{height:180px}canvas{width:320px;height:180px}</style></head>
 <body><h1>Quarterly report</h1><main><p data-native-case="format-chart">Revenue grew steadily this quarter.</p><div id="chart"></div></main>
 <script>
- parent.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ =
-   (parent.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0) + 1;
+ parent.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ =
+   (parent.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0) + 1;
  const text = document.querySelector('[data-native-case="format-chart"]').textContent;
  if (text.includes('FAIL_CHART')) {
-   parent.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ =
-     (parent.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0) + 1;
+   parent.__STEMMIO_DELAYED_CHART_FAILURE_COUNT__ =
+     (parent.__STEMMIO_DELAYED_CHART_FAILURE_COUNT__ || 0) + 1;
    throw new Error('synthetic chart initialization failure');
  }
  setTimeout(() => {
@@ -695,14 +695,14 @@ const DELAYED_CHART_PAGE = `<!doctype html><html><head><title>Continuous report<
 test("formatting preserves charts without an edit-boundary Runtime rebuild", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({}, testInfo) => {
-  await withRuntimeProject("pageroot-chart-format-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+  await withRuntimeProject("stemmio-chart-format-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, "format-chart");
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     const editor = page.getByTestId('html-canvas-editor');
     const generation = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
     const beforeDocument = await documentToken(page);
     const beforeScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0
     ));
     await activateNativeEdit(frame, 'format-chart');
     const target = frame.locator('[data-native-case="format-chart"]');
@@ -729,7 +729,7 @@ test("formatting preserves charts without an edit-boundary Runtime rebuild", {
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', generation);
     await expect.poll(() => documentToken(page)).toBe(beforeDocument);
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0
     ))).toBe(beforeScriptCount);
     await expect(editor).not.toHaveAttribute('data-runtime-refresh-pending', '');
     frame = await currentEditorFrame(page);
@@ -744,7 +744,7 @@ test("formatting preserves charts without an edit-boundary Runtime rebuild", {
 });
 
 test("failed chart refresh keeps the latest static source quietly editable across repeated retries", async ({}, testInfo) => {
-  await withRuntimeProject("pageroot-chart-failure-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+  await withRuntimeProject("stemmio-chart-failure-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
     let { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
     const editor = page.getByTestId('html-canvas-editor').filter({ visible: true }).first();
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
@@ -757,11 +757,11 @@ test("failed chart refresh keeps the latest static source quietly editable acros
     await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('FAIL_CHART');
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
     const failuresBeforeFirstRetry = await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_FAILURE_COUNT__ || 0
     ));
     await editor.getByRole('button', { name: '复制元素', exact: true }).click();
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_FAILURE_COUNT__ || 0
     )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeFirstRetry);
     await expect(page.getByTestId('edit-runtime-static-fallback')).toHaveCount(0);
     await expect(editor).toHaveAttribute(
@@ -785,12 +785,12 @@ test("failed chart refresh keeps the latest static source quietly editable acros
     await expect(editor).toHaveAttribute('aria-readonly', 'false');
 
     const failuresBeforeRetry = await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_FAILURE_COUNT__ || 0
     ));
     await page.getByRole('button', { name: '更多', exact: true }).click();
     await page.getByRole('menuitem', { name: '重新加载动态内容', exact: true }).click();
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_FAILURE_COUNT__ || 0
     )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeRetry);
     await expect(editor).toHaveAttribute(
       'data-runtime-degradation',
@@ -817,8 +817,8 @@ const HIDDEN_TAB_CHART_PAGE = `<!doctype html><html><head><title>Tabbed report</
 <section role="tabpanel" id="overview" class="panel"><p data-native-case="overview-copy">Report overview</p></section>
 <section role="tabpanel" id="details" class="panel" hidden><p data-native-case="hidden-chart-copy">Revenue grew this quarter.</p><div id="chart"></div></section>
 <script>
-parent.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ =
- (parent.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0) + 1;
+parent.__STEMMIO_HIDDEN_CHART_RUNTIME_COUNT__ =
+ (parent.__STEMMIO_HIDDEN_CHART_RUNTIME_COUNT__ || 0) + 1;
 const chart = echarts.init(document.querySelector('#chart'));
 chart.setOption({animation:false,xAxis:{data:['A','B']},yAxis:{},series:[{type:'bar',data:[30,60]}]});
 window.addEventListener('resize',()=>chart.resize());
@@ -827,7 +827,7 @@ window.addEventListener('resize',()=>chart.resize());
 test("an active hidden tab keeps chart geometry without ordinary edit promotion", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({}, testInfo) => {
-  await withRuntimeProject('pageroot-hidden-chart-e2e-', {
+  await withRuntimeProject('stemmio-hidden-chart-e2e-', {
     'runtime-report.html': HIDDEN_TAB_CHART_PAGE,
     'echarts.js': readFileSync(new URL('../../../node_modules/echarts/dist/echarts.min.js', import.meta.url), 'utf8'),
   }, async ({ page, sourcePath }) => {
@@ -843,7 +843,7 @@ test("an active hidden tab keeps chart geometry without ordinary edit promotion"
     const initialGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
       .getAttribute('data-frame-generation');
     const initialScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_HIDDEN_CHART_RUNTIME_COUNT__ || 0
     ));
     for (const marker of [' First edit.', ' Second edit.']) {
       await activateNativeEdit(frame, 'hidden-chart-copy');
@@ -854,7 +854,7 @@ test("an active hidden tab keeps chart geometry without ordinary edit promotion"
       await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', initialGeneration);
       await expect.poll(() => documentToken(page)).toBe(initialDocument);
       expect(await page.evaluate(() => (
-        window.__PAGEROOT_HIDDEN_CHART_RUNTIME_COUNT__ || 0
+        window.__STEMMIO_HIDDEN_CHART_RUNTIME_COUNT__ || 0
       ))).toBe(initialScriptCount);
       await expect(editor).not.toHaveAttribute('data-runtime-refresh-pending', '');
       frame = await currentEditorFrame(page);
@@ -871,7 +871,7 @@ test("owned composition snapshots keep formatted source nodes editable but autho
   tag: ["@cap-canvas-editing"],
 }, async ({}, testInfo) => {
   const source = DELAYED_CHART_PAGE.replace("Revenue grew steadily this quarter.", "Revenue <strong>grew steadily</strong> this quarter.");
-  await withRuntimeProject("pageroot-owned-snapshot-e2e-", { "runtime-report.html": source }, async ({ page, sourcePath }) => {
+  await withRuntimeProject("stemmio-owned-snapshot-e2e-", { "runtime-report.html": source }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, "format-chart");
     const editor = page.getByTestId("html-canvas-editor");
     const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
@@ -896,7 +896,7 @@ test("owned composition snapshots keep formatted source nodes editable but autho
     const activeGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]').getAttribute('data-frame-generation');
     const activeDocument = await documentToken(page);
     const activeScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0
     ));
     await page.keyboard.press("Escape");
     await expect(paragraph).not.toHaveAttribute("contenteditable", "true");
@@ -904,7 +904,7 @@ test("owned composition snapshots keep formatted source nodes editable but autho
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toHaveAttribute('data-frame-generation', activeGeneration);
     await expect.poll(() => documentToken(page)).toBe(activeDocument);
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0
     ))).toBe(activeScriptCount);
     // Both physical slots persist, but an ordinary successful text/style edit
     // leaves the second slot empty instead of preparing a deferred Candidate.
@@ -925,7 +925,7 @@ test("owned composition snapshots keep formatted source nodes editable but autho
 });
 
 test("the read-only recovery notice reloads source authority even when dynamic preparation fails", async ({}, testInfo) => {
-  await withRuntimeProject("pageroot-static-reload-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, electronApp, sourcePath }) => {
+  await withRuntimeProject("stemmio-static-reload-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, electronApp, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, 'format-chart');
     await disableStructuralInPlace(page);
     const editor = page.getByTestId('html-canvas-editor');
@@ -938,11 +938,11 @@ test("the read-only recovery notice reloads source authority even when dynamic p
     await page.keyboard.insertText(' FAIL_CHART');
     await page.keyboard.press('Escape');
     const failuresBeforeReload = await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_FAILURE_COUNT__ || 0
     ));
     await editor.getByRole('button', { name: '复制元素', exact: true }).click();
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_FAILURE_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_FAILURE_COUNT__ || 0
     )), { timeout: 12_000 }).toBeGreaterThan(failuresBeforeReload);
     await expect(editor).toHaveAttribute('aria-readonly', 'true', { timeout: 20_000 });
     await expect(page.getByTestId('edit-runtime-static-fallback')).toContainText('页面暂时无法编辑');
@@ -976,13 +976,13 @@ test("the read-only recovery notice reloads source authority even when dynamic p
     await page.screenshot({ path: testInfo.outputPath('reload-editing-restored.png') });
   }, {
     injectedEnv: {
-      PAGEROOT_E2E_STATIC_CANDIDATE_FAILURE: "1",
+      STEMMIO_E2E_STATIC_CANDIDATE_FAILURE: "1",
     },
   });
 });
 
 test("Canvas shortcuts follow the promoted frame and same-source reload keeps charts running", async ({}, testInfo) => {
-  await withRuntimeProject("pageroot-history-focus-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+  await withRuntimeProject("stemmio-history-focus-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, "format-chart");
     const editor = page.getByTestId("html-canvas-editor");
     const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
@@ -1014,7 +1014,7 @@ test("Canvas shortcuts follow the promoted frame and same-source reload keeps ch
     const activeFrame = editor.locator('iframe[data-runtime-slot-role="active"]');
     const beforeReloadDocument = await documentToken(page);
     const beforeReloadScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0
     ));
     const beforeReloadLastKnownGood = await editor.getAttribute(
       "data-runtime-last-known-good-id",
@@ -1026,7 +1026,7 @@ test("Canvas shortcuts follow the promoted frame and same-source reload keeps ch
     await page.getByRole("menuitem", { name: "从磁盘重新载入 HTML", exact: true }).click();
     await expect(page.locator(".workbench-chrome-status")).toHaveText("页面已重新加载，可以继续编辑");
     await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0
     ))).toBe(beforeReloadScriptCount + 1);
     await expect.poll(() => documentToken(page)).not.toBe(beforeReloadDocument);
     await expect.poll(() => activeFrame.evaluate((frame) => Boolean(
@@ -1052,10 +1052,10 @@ test("a layout-safe format refusal keeps the Runtime text session active", {
   const source = `<!doctype html><html><head><title>Flex format refusal</title></head><body>
   <p style="display:inline-flex;gap:8px" data-native-case="flex-format-refusal">Flexible source text</p>
   <script>
-    parent.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ =
-      (parent.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0) + 1;
+    parent.__STEMMIO_FLEX_FORMAT_RUNTIME_COUNT__ =
+      (parent.__STEMMIO_FLEX_FORMAT_RUNTIME_COUNT__ || 0) + 1;
   </script></body></html>`;
-  await withRuntimeProject("pageroot-flex-format-refusal-e2e-", {
+  await withRuntimeProject("stemmio-flex-format-refusal-e2e-", {
     "runtime-report.html": source,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "flex-format-refusal");
@@ -1065,7 +1065,7 @@ test("a layout-safe format refusal keeps the Runtime text session active", {
     const beforeGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
       .getAttribute("data-frame-generation");
     const beforeScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_FLEX_FORMAT_RUNTIME_COUNT__ || 0
     ));
 
     await activateNativeEdit(frame, "flex-format-refusal");
@@ -1103,7 +1103,7 @@ test("a layout-safe format refusal keeps the Runtime text session active", {
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
       .toHaveAttribute("data-frame-generation", beforeGeneration);
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_FLEX_FORMAT_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_FLEX_FORMAT_RUNTIME_COUNT__ || 0
     ))).toBe(beforeScriptCount);
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
   });
@@ -1115,10 +1115,10 @@ test("a partial background fill refusal validates the Kernel result before publi
   const source = `<!doctype html><html><head><title>Background format refusal</title></head><body>
   <p data-native-case="background-format-refusal">Background source text</p>
   <script>
-    parent.__PAGEROOT_BACKGROUND_FORMAT_RUNTIME_COUNT__ =
-      (parent.__PAGEROOT_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0) + 1;
+    parent.__STEMMIO_BACKGROUND_FORMAT_RUNTIME_COUNT__ =
+      (parent.__STEMMIO_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0) + 1;
   </script></body></html>`;
-  await withRuntimeProject("pageroot-background-format-refusal-e2e-", {
+  await withRuntimeProject("stemmio-background-format-refusal-e2e-", {
     "runtime-report.html": source,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "background-format-refusal");
@@ -1128,7 +1128,7 @@ test("a partial background fill refusal validates the Kernel result before publi
     const beforeGeneration = await editor.locator('iframe[data-runtime-slot-role="active"]')
       .getAttribute("data-frame-generation");
     const beforeScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0
     ));
 
     await activateNativeEdit(frame, "background-format-refusal");
@@ -1175,14 +1175,14 @@ test("a partial background fill refusal validates the Kernel result before publi
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
       .toHaveAttribute("data-frame-generation", beforeGeneration);
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_BACKGROUND_FORMAT_RUNTIME_COUNT__ || 0
     ))).toBe(beforeScriptCount);
   });
 });
 
 test("format state ignores unselected boundary text and unchanged formatting keeps the native session", async () => {
   const source = DELAYED_CHART_PAGE.replace('Revenue grew steadily this quarter.', '<span style="font-style:italic">Selected</span> unselected normal text.');
-  await withRuntimeProject('pageroot-format-boundary-e2e-', { 'runtime-report.html': source }, async ({ page, sourcePath }) => {
+  await withRuntimeProject('stemmio-format-boundary-e2e-', { 'runtime-report.html': source }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, 'format-chart');
     const editor = page.getByTestId('html-canvas-editor');
     const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
@@ -1224,7 +1224,7 @@ test("format state ignores unselected boundary text and unchanged formatting kee
 test("in-place text Undo and Redo leave no deferred Runtime refresh", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  await withRuntimeProject("pageroot-history-no-refresh-e2e-", {
+  await withRuntimeProject("stemmio-history-no-refresh-e2e-", {
     "runtime-report.html": DELAYED_CHART_PAGE,
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "format-chart");
@@ -1233,7 +1233,7 @@ test("in-place text Undo and Redo leave no deferred Runtime refresh", {
     const working = await managedWorkingCopyPath(page, sourcePath);
     const initialDocument = await documentToken(page);
     const initialScriptCount = await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0
     ));
 
     await activateNativeEdit(frame, "format-chart");
@@ -1270,13 +1270,13 @@ test("in-place text Undo and Redo leave no deferred Runtime refresh", {
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
     await expect.poll(() => documentToken(page)).toBe(initialDocument);
     expect(await page.evaluate(() => (
-      window.__PAGEROOT_DELAYED_CHART_RUNTIME_COUNT__ || 0
+      window.__STEMMIO_DELAYED_CHART_RUNTIME_COUNT__ || 0
     ))).toBe(initialScriptCount);
   });
 });
 
 test("editing a published Undo projection remains available while its save receipt waits", async () => {
-  await withRuntimeProject('pageroot-history-followup-e2e-', { 'runtime-report.html': DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
+  await withRuntimeProject('stemmio-history-followup-e2e-', { 'runtime-report.html': DELAYED_CHART_PAGE }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, 'format-chart');
     const editor = page.getByTestId('html-canvas-editor');
     const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');

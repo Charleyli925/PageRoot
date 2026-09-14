@@ -51,7 +51,7 @@ export type PageViewContextEntry = Readonly<{
 }>;
 
 export type PageViewContext = Readonly<{
-  protocol: "pageroot-page-view-context";
+  protocol: "stemmio-page-view-context";
   version: 2;
   documentKey: string;
   generation: number;
@@ -67,7 +67,7 @@ export type PagePresentationAction = Readonly<{
 }>;
 
 export type RawPageViewSnapshot = {
-  protocol: "pageroot-page-view-context";
+  protocol: "stemmio-page-view-context";
   version: 2;
   sourceSha256: string;
   truncated?: boolean;
@@ -83,7 +83,7 @@ export type RawPageViewSnapshot = {
   }>;
 };
 
-export const PAGE_VIEW_CONTEXT_PROTOCOL: "pageroot-page-view-context";
+export const PAGE_VIEW_CONTEXT_PROTOCOL: "stemmio-page-view-context";
 export const PAGE_VIEW_CONTEXT_VERSION: 2;
 
 export function createPageViewContext(options?: {

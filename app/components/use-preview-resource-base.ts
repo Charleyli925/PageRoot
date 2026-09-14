@@ -23,7 +23,7 @@ export function usePreviewResourceBase(
   const sessionKeyRef = useRef("");
   const createChainRef = useRef(Promise.resolve());
 
-  const previewApi = typeof window === "undefined" ? undefined : window.htmlAIPreview;
+  const previewApi = typeof window === "undefined" ? undefined : window.stemmioPreview;
   const canCreatePreviewSession = Boolean(
     previewApi?.createSession && previewApi?.revokeSession,
   );
@@ -37,7 +37,7 @@ export function usePreviewResourceBase(
   }
 
   useEffect(() => {
-    const livePreviewApi = window.htmlAIPreview;
+    const livePreviewApi = window.stemmioPreview;
     const revoke = (sessionId: string | null) => {
       if (sessionId && livePreviewApi?.revokeSession) {
         void livePreviewApi.revokeSession(sessionId);
@@ -101,7 +101,7 @@ export function usePreviewResourceBase(
     const sessionId = sessionIdRef.current;
     sessionIdRef.current = null;
     sessionKeyRef.current = "";
-    if (sessionId) void window.htmlAIPreview?.revokeSession?.(sessionId);
+    if (sessionId) void window.stemmioPreview?.revokeSession?.(sessionId);
   }, []);
 
   return { resourceBase, ready };

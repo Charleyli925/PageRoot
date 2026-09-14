@@ -35,7 +35,7 @@ function activeDraft(revision = 0, extra = {}) {
 function target(id = "target_1") {
   return {
     id,
-    elementId: "pr1_11111111111141118111111111111111",
+    elementId: "sm1_11111111111141118111111111111111",
     expectedSourceSha256: SOURCE_SHA256,
     label: "正文",
     selector: "main p",
@@ -680,9 +680,9 @@ test("missing edit or comment targets fail closed on intent commands", () => {
 
 test("deleting a source subtree removes its saved comments and draft in one durable update", async () => {
   const harness = createHarness();
-  const removedRootId = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
-  const removedChildId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const survivingId = "pr1_cccccccccccc4ccc8ccccccccccccccc";
+  const removedRootId = "sm1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+  const removedChildId = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const survivingId = "sm1_cccccccccccc4ccc8ccccccccccccccc";
   const rootAttachment = attachment({
     attachmentId: "attachment_removed_root",
     commentId: "comment_removed_root",
@@ -801,7 +801,7 @@ test("unapplied recovery publishes tombstones and later text together", async (t
   }
   const server = (await h.client.workspace()).runtimeState.draft;
   const context = h.projectSession.context;
-  const keys = [`html-ai-draft-recovery:${context.documentId}`, `html-ai-draft-recovery:${context.sourcePath}`];
+  const keys = [`stemmio-draft-recovery:${context.documentId}`, `stemmio-draft-recovery:${context.sourcePath}`];
   const local = recoveryStore.readRecords(keys)[0].value;
   const operationId = "draftop_pending_local_restore_0001";
   recoveryStore.write(keys, {

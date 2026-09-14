@@ -1,6 +1,6 @@
 # Codex workflow
 
-This document defines the repeatable PageRoot workflow for Codex and other coding agents. `AGENTS.md` contains the compact mandatory rules; this file contains operational detail.
+This document defines the repeatable Stemmio workflow for Codex and other coding agents. `AGENTS.md` contains the compact mandatory rules; this file contains operational detail.
 
 ## Default completion boundary
 
@@ -16,14 +16,14 @@ Use the user's requested authorization level:
 
 An implementation PR is not a release. Merging to `main` updates the canonical source; only an immutable version tag may create an official installer.
 
-## PageRoot Agent runtime boundary
+## Stemmio Agent runtime boundary
 
 Qoder and Codex both use the shared ACP runtime. Codex is discovered as an
-independent user or PageRoot-managed `codex-acp` installation; the packaged
+independent user or Stemmio-managed `codex-acp` installation; the packaged
 application contains neither a private Codex App Server path nor a native Codex
 binary. Package verification checks that absence while the ACP catalog retains
 the managed adapter/native closure and its integrity checks. 源页 Agent is a
-separate `pageroot`/`http` path: PageRoot calls the user-selected OpenAI-compatible
+separate `stemmio`/`http` path: Stemmio calls the user-selected OpenAI-compatible
 HTTPS endpoint with a session Token and never grants the model filesystem access.
 
 ## Validation handoff and instruction scope
@@ -75,7 +75,7 @@ npm run task:start -- fix/short-description
 
 `task:start`:
 
-1. verifies that the command is running at the primary PageRoot Git root;
+1. verifies that the command is running at the primary Stemmio Git root;
 2. refuses a dirty worktree or detached/non-`main` checkout;
 3. fetches and prunes `origin`;
 4. fast-forwards local `main` to `origin/main`;
@@ -228,7 +228,7 @@ classification and rerun policy live in
 Every successful installer handoff, formal or developer preview, must include
 every associated Pull Request with its current GitHub status. When the user asks
 for the latest installer without a source override, include the latest head of every
-applicable PageRoot Pull Request that was not explicitly excluded.
+applicable Stemmio Pull Request that was not explicitly excluded.
 
 
 开发者说“生成最新的安装包”、“生成最新的开发者测试安装包”或等价表述时，
@@ -247,7 +247,7 @@ applicable PageRoot Pull Request that was not explicitly excluded.
    本身只打当前 Tree，不会在内部悄悄合并其他 PR。
 5. 若最新 head 无法取得或存在未解决冲突，停止并报告，不得静默漏包。
 
-只要组合 Tree 含未合并 PR，它就只能产生 `PageRoot Developer Preview`；
+只要组合 Tree 含未合并 PR，它就只能产生 `Stemmio Developer Preview`；
 “生成正式安装包”不会把未合并代码冒充为正式源码，而是要求相关 PR 先通
 过审查并合并，或由开发者明确排除。“只打 `main`”、“排除 #N”、“只包含
 #N/#M”等说法才改变默认范围。
@@ -327,11 +327,11 @@ Recommended review lifecycle:
 
 Scheduled monitoring is read-only unless a later instruction explicitly authorizes a fix. Recommended jobs:
 
-- Weekdays: summarize open PageRoot PRs, failed or pending required checks, review requests and merge blockers. Report only actionable changes.
+- Weekdays: summarize open Stemmio PRs, failed or pending required checks, review requests and merge blockers. Report only actionable changes.
 - Daily: optionally run `npm run ci:health` for a read-only conclusion/flaky summary of recent `ci.yml` runs. Do not mutate workflows automatically.
 - Weekly: inspect Dependabot PRs and run or verify the dependency-audit policy. Report new, expired or changed advisories; do not merge dependency updates automatically.
 - Weekly: run the read-only task audit and report `ACTIVE_DIRTY`, `LOCAL_ONLY`,
   `MERGED_READY`, `ABANDON_REVIEW`, `STALE_REGISTRATION` and primary-worktree
   violations. Do not pass `--apply` from a scheduled job.
 
-Use a GitHub-connected task when only remote state is needed. Use an isolated PageRoot worktree when local commands are required. Never run scheduled modification work directly in a checkout that may contain active user edits.
+Use a GitHub-connected task when only remote state is needed. Use an isolated Stemmio worktree when local commands are required. Never run scheduled modification work directly in a checkout that may contain active user edits.

@@ -417,12 +417,12 @@ export function normalizePostHogProjectToken(value) {
 
 export function createTelemetryBuildConfig(environment = process.env) {
   const projectToken = normalizePostHogProjectToken(
-    environment.PAGEROOT_POSTHOG_TOKEN,
+    environment.STEMMIO_POSTHOG_TOKEN,
   );
   return Object.freeze({
     version: USAGE_TELEMETRY_CONFIG_VERSION,
     enabled: Boolean(projectToken),
-    host: normalizePostHogHost(environment.PAGEROOT_POSTHOG_HOST),
+    host: normalizePostHogHost(environment.STEMMIO_POSTHOG_HOST),
     projectToken,
   });
 }
@@ -540,7 +540,7 @@ async function loadTelemetryState(statePath) {
 }
 
 function postHogEventName(event) {
-  return `pageroot ${event.replaceAll("_", " ")}`;
+  return `stemmio ${event.replaceAll("_", " ")}`;
 }
 
 function batchPayload({ token, state, appMetadata, items }) {

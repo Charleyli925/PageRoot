@@ -48,9 +48,9 @@ function fixedNow() {
 }
 
 async function projectContext(overrides = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), "pageroot-conversation-"));
+  const root = await mkdtemp(path.join(tmpdir(), "stemmio-conversation-"));
   return {
-    projectRoot: path.join(root, ".pageroot"),
+    projectRoot: path.join(root, ".stemmio"),
     projectId,
     documentId,
     ...overrides,
@@ -108,7 +108,7 @@ test("sealing a turn assigns a strictly increasing sequence from the record itse
     {
       turnId: firstTurn,
       status: "completed",
-      messages: [userMessage("one"), userMessage("two", { actor: "qoder" })],
+      messages: [userMessage("one"), userMessage("two", { actor: "agent", providerId: "qoder" })],
     },
     { now: fixedNow },
   );
@@ -145,7 +145,7 @@ test("a stored message must be terminal, so a streaming fragment is never writte
         {
           turnId,
           status: "completed",
-          messages: [userMessage("half", { actor: "qoder", status })],
+          messages: [userMessage("half", { actor: "agent", providerId: "qoder", status })],
         },
         { now: fixedNow },
       ),
@@ -171,7 +171,7 @@ test("a stored message refuses an interface or interaction member", () => {
           turnId,
           status: "completed",
           messages: [userMessage("decide", {
-            actor: "pageroot",
+            actor: "stemmio",
             kind: "decision-outcome",
             [key]: ["adopt"],
           })],
@@ -360,7 +360,7 @@ test("archiving keeps every record and links the replacement", () => {
   );
 });
 
-test("a PageRoot fact seals immediately as its own terminal message", () => {
+test("a Stemmio fact seals immediately as its own terminal message", () => {
   const conversation = appendConversationFact(
     seededConversation(),
     {
@@ -372,7 +372,7 @@ test("a PageRoot fact seals immediately as its own terminal message", () => {
     { now: fixedNow },
   );
   assert.equal(conversation.messages.length, 1);
-  assert.equal(conversation.messages[0].actor, "pageroot");
+  assert.equal(conversation.messages[0].actor, "stemmio");
   assert.equal(conversation.messages[0].status, "completed");
   assert.equal(conversation.turns[0].status, "completed");
   assert.equal(conversationHasInFlightTurn(conversation), false);
@@ -458,7 +458,7 @@ test("a persisted conversation restores after a reopen with its terminal message
       {
         turnId,
         status: "completed",
-        messages: [userMessage("恢复我"), userMessage("好的", { actor: "qoder" })],
+        messages: [userMessage("恢复我"), userMessage("好的", { actor: "agent", providerId: "qoder" })],
       },
       { now },
     )

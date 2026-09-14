@@ -3,12 +3,12 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { expect } from '@playwright/test';
-import { launchPageRoot, stopPageRoot, createSourceFixture, addComment, openAgentSettingsPage, expandSettingsAgent, chooseModifyIntent } from '../tests/e2e/electron/ai-closed-loop-helpers.mjs';
+import { launchStemmio, stopStemmio, createSourceFixture, addComment, openAgentSettingsPage, expandSettingsAgent, chooseModifyIntent } from '../tests/e2e/electron/ai-closed-loop-helpers.mjs';
 if (process.env.STEMMIO_REAL_ACCOUNT_QA !== 'authorized') throw new Error('Explicit real-account authorization required.');
 const output = path.resolve('output/playwright/trusted-loop-real-accounts');
 mkdirSync(output, { recursive: true });
-const profile = process.env.STEMMIO_REAL_QA_PROFILE || mkdtempSync(path.join(os.tmpdir(), 'pageroot-native-e2e-real-qa-'));
-const managed = path.join(os.homedir(), 'Library/Application Support/PageRoot/agents');
+const profile = process.env.STEMMIO_REAL_QA_PROFILE || mkdtempSync(path.join(os.tmpdir(), 'stemmio-native-e2e-real-qa-'));
+const managed = path.join(os.homedir(), 'Library/Application Support/Stemmio/agents');
 if (!existsSync(path.join(profile, 'agents'))) cpSync(managed, path.join(profile, 'agents'), { recursive: true });
 const fixture = createSourceFixture('trusted-loop-real-accounts.html');
 writeFileSync(path.join(output, 'local-session.json'), JSON.stringify({ profile, fixture }, null, 2));
@@ -16,7 +16,7 @@ const report = { startedAt: new Date().toISOString(), providers: {}, synthetic: 
 let app;
 try {
   console.log("Launching isolated real-account QA");
-  app = await launchPageRoot({ isolatedUserData: profile, activeSourcePath: fixture.sourcePath });
+  app = await launchStemmio({ isolatedUserData: profile, activeSourcePath: fixture.sourcePath });
   const workingCopyPath = await addComment(app.page, fixture.sourcePath, '只把选中的列表项文字改为“可信闭环验证通过”，其余 HTML 保持不变。');
   const workingCopyBefore = readFileSync(workingCopyPath);
   app.page.on('response', async (response) => {
@@ -97,7 +97,7 @@ try {
   await expect(app.page.getByTestId('ai-review-workspace')).toBeVisible({ timeout: 60000 });
   await app.page.screenshot({ path: path.join(output, 'codex-real-review.png') });
   await sidebar.getByRole('button', { name: '采用修改', exact: true }).click();
-  await expect.poll(async () => (await app.page.evaluate(() => window.htmlAIProjects.getActiveProject()))?.sourcePath, { timeout: 60000 }).toMatch(/-V2\.html$/u);
+  await expect.poll(async () => (await app.page.evaluate(() => window.stemmioProjects.getActiveProject()))?.sourcePath, { timeout: 60000 }).toMatch(/-V2\.html$/u);
   report.providers.codex.adopted = true;
   await expect(sidebar).toContainText('已采用本次修改。', { timeout: 15000 });
   report.status = 'qoder-stop-codex-adopted';
@@ -110,5 +110,5 @@ try {
   report.finishedAt = new Date().toISOString();
   writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
-  if (app) await stopPageRoot(app.electronApp, profile, { cleanup: false });
+  if (app) await stopStemmio(app.electronApp, profile, { cleanup: false });
 }

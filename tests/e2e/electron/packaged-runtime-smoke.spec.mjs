@@ -23,15 +23,15 @@ import {
   replaceEditableIslandBytes,
   setTextSelection,
   withBomAndCrLf,
-} from "../browser/pageroot-driver.mjs";
+} from "../browser/stemmio-driver.mjs";
 import { stagePackagedApplicationForLaunch } from "./helpers/packaged-app-launch.mjs";
 const packageVersion = JSON.parse(
   readFileSync(path.join(productRoot, "package.json"), "utf8"),
 ).version;
 
-function packagedApplication(appPath = process.env.PAGEROOT_PACKAGED_APP_PATH) {
+function packagedApplication(appPath = process.env.STEMMIO_PACKAGED_APP_PATH) {
   if (!appPath || !path.isAbsolute(appPath) || path.extname(appPath) !== ".app") {
-    throw new Error("PAGEROOT_PACKAGED_APP_PATH must name the absolute packaged PageRoot.app path.");
+    throw new Error("STEMMIO_PACKAGED_APP_PATH must name the absolute packaged Stemmio.app path.");
   }
   const executable = path.join(
     appPath,
@@ -39,7 +39,7 @@ function packagedApplication(appPath = process.env.PAGEROOT_PACKAGED_APP_PATH) {
     "MacOS",
     path.basename(appPath, ".app"),
   );
-  if (!existsSync(executable)) throw new Error(`Packaged PageRoot executable is missing: ${executable}`);
+  if (!existsSync(executable)) throw new Error(`Packaged Stemmio executable is missing: ${executable}`);
   return { appPath, executable };
 }
 
@@ -65,10 +65,10 @@ async function launchPackaged(isolatedUserData, packagedApp) {
     cwd: packagedApp.cwd,
     env: {
       ...process.env,
-      PAGEROOT_E2E: "1",
-      PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
-      HTML_AI_WORKSPACE: path.join(isolatedUserData, "workspace"),
-      HTML_AI_PROJECT_FILES_ROOT: path.join(isolatedUserData, "project-files"),
+      STEMMIO_E2E: "1",
+      STEMMIO_E2E_USER_DATA_DIR: isolatedUserData,
+      STEMMIO_WORKSPACE: path.join(isolatedUserData, "workspace"),
+      STEMMIO_PROJECT_FILES_ROOT: path.join(isolatedUserData, "project-files"),
     },
   });
   const page = await electronApp.firstWindow();
@@ -82,12 +82,12 @@ async function bridgeJson(page, pathname, {
   body,
 } = {}) {
   await page.waitForFunction(
-    () => Boolean(window.htmlAIRuntime?.getBridgeConnection?.()),
+    () => Boolean(window.stemmioRuntime?.getBridgeConnection?.()),
     undefined,
     { timeout: 30_000 },
   );
   const runtime = await page.evaluate(() => (
-    window.htmlAIRuntime?.getBridgeConnection?.() || window.htmlAIRuntime
+    window.stemmioRuntime?.getBridgeConnection?.() || window.stemmioRuntime
   ));
   const url = new URL(`http://127.0.0.1:${runtime.bridgePort}${pathname}`);
   if (sourcePath) url.searchParams.set("sourcePath", sourcePath);
@@ -95,7 +95,7 @@ async function bridgeJson(page, pathname, {
     method: body ? "POST" : "GET",
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      "x-html-ai-bridge-token": runtime.bridgeAuthToken,
+      "x-stemmio-bridge-token": runtime.bridgeAuthToken,
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -111,7 +111,7 @@ async function bridgeJson(page, pathname, {
 async function closePackagedGracefully(electronApp, page) {
   const mainRendererUrl = page?.url();
   if (!mainRendererUrl) {
-    throw new Error("PageRoot main renderer URL is unavailable for graceful close.");
+    throw new Error("Stemmio main renderer URL is unavailable for graceful close.");
   }
   const closed = electronApp.waitForEvent("close", { timeout: 35_000 });
   const requested = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
@@ -123,7 +123,7 @@ async function closePackagedGracefully(electronApp, page) {
     return true;
   }, mainRendererUrl);
   if (!requested) {
-    throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
+    throw new Error("Stemmio main BrowserWindow was unavailable for graceful close.");
   }
   await closed;
 }
@@ -132,7 +132,7 @@ function removeIsolatedDirectory(directory) {
   const resolved = path.resolve(directory);
   if (
     path.dirname(resolved) !== path.resolve(tmpdir())
-    || !path.basename(resolved).startsWith("pageroot-native-e2e-")
+    || !path.basename(resolved).startsWith("stemmio-native-e2e-")
   ) {
     throw new Error(`Refusing to remove non-E2E directory: ${directory}`);
   }
@@ -144,9 +144,9 @@ function removeIsolatedDirectory(directory) {
   });
 }
 
-test("packaged PageRoot imports pre-v4 shell state as V1 and reconciles draft revision before close", async () => {
+test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft revision before close", async () => {
   test.setTimeout(120_000);
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-packaged-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-packaged-"));
   const sourcePackagedApp = packagedApplication();
   const stagedPackagedApp = stagePackagedApplicationForLaunch({
     appPath: sourcePackagedApp.appPath,
@@ -175,7 +175,7 @@ test("packaged PageRoot imports pre-v4 shell state as V1 and reconciles draft re
     let launched = await launchPackaged(isolatedUserData, packagedApp);
     electronApp = launched.electronApp;
     let page = launched.page;
-    const runtime = await page.evaluate(() => window.htmlAIRuntime);
+    const runtime = await page.evaluate(() => window.stemmioRuntime);
     expect(runtime?.appVersion).toBe(packageVersion);
     await electronApp.evaluate(({ dialog }, destination) => {
       dialog.showSaveDialog = async () => ({
@@ -186,12 +186,12 @@ test("packaged PageRoot imports pre-v4 shell state as V1 and reconciles draft re
 
     await expect.poll(
       async () => (await page.evaluate(
-        () => window.htmlAIProjects?.getActiveProject(),
+        () => window.stemmioProjects?.getActiveProject(),
       ))?.sourcePath,
       { timeout: 30_000 },
     ).toMatch(/\/packaged-source\.html$/u);
     sourcePath = await page.evaluate(async () => (
-      await window.htmlAIProjects?.getActiveProject()
+      await window.stemmioProjects?.getActiveProject()
     )?.sourcePath || "");
     expect(sourcePath).not.toBe(externalSourcePath);
     expect(readFileSync(externalSourcePath)).toEqual(original);
@@ -277,7 +277,7 @@ test("packaged PageRoot imports pre-v4 shell state as V1 and reconciles draft re
     page = launched.page;
     await expect.poll(
       async () => (await page.evaluate(
-        () => window.htmlAIProjects?.getActiveProject(),
+        () => window.stemmioProjects?.getActiveProject(),
       ))?.sourcePath,
       { timeout: 30_000 },
     ).toBe(sourcePath);

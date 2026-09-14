@@ -132,7 +132,7 @@ export async function notarizeAndStapleDmg({
   environment = process.env,
   commandRunner = runCommand,
 }) {
-  if (environment.PAGEROOT_REQUIRE_NOTARIZATION !== "1") {
+  if (environment.STEMMIO_REQUIRE_NOTARIZATION !== "1") {
     return { skipped: true };
   }
   await access(dmgPath);
@@ -230,11 +230,11 @@ export async function writeUsageTelemetryBuildConfig({
 } = {}) {
   const config = createTelemetryBuildConfig(environment);
   if (
-    environment.PAGEROOT_REQUIRE_TELEMETRY_CONFIG === "1"
+    environment.STEMMIO_REQUIRE_TELEMETRY_CONFIG === "1"
     && !config.enabled
   ) {
     throw new Error(
-      "PAGEROOT_POSTHOG_TOKEN is required for a telemetry-enabled release candidate.",
+      "STEMMIO_POSTHOG_TOKEN is required for a telemetry-enabled release candidate.",
     );
   }
   const destination = path.join(
@@ -385,7 +385,7 @@ async function main() {
     process.platform === "win32" ? "electron-builder.cmd" : "electron-builder",
   );
   // A release tag makes electron-builder infer `--publish onTagOrDraft` unless
-  // publishing is disabled explicitly. PageRoot publishes only after the DMG
+  // publishing is disabled explicitly. Stemmio publishes only after the DMG
   // and updater assets have passed the artifact gate in the Release workflow.
   const builderArguments = isDeveloperPreview
     ? developerPreviewBuilderArguments({

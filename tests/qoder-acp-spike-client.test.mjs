@@ -91,7 +91,7 @@ function createVirtualTimer() {
 
 async function createFixture(t) {
   const root = await realpath(
-    await mkdtemp(path.join(tmpdir(), "pageroot-qoder-acp-test-")),
+    await mkdtemp(path.join(tmpdir(), "stemmio-qoder-acp-test-")),
   );
   t.after(() => rm(root, { recursive: true, force: true }));
   const sources = path.join(root, "sources");
@@ -108,7 +108,7 @@ async function createFixture(t) {
   const { target } = imported;
   const managedSourceHtml = await readFile(target.exactSourcePath, "utf8");
   assert.equal(inspectSourceElementIdentity(managedSourceHtml).complete, true);
-  const promptText = "Follow the PageRoot task contract.\n";
+  const promptText = "Follow the Stemmio task contract.\n";
   const request = await repository.prepareRequest({
     target,
     ...IDENTITIES,
@@ -129,7 +129,7 @@ async function createFixture(t) {
   });
   const requestPath = await realpath(path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     IDENTITIES.requestId,
   ));
@@ -517,7 +517,7 @@ test("restricted Qoder ACP host rechecks durable runtime authority before every 
   host.bindSessionId("session_authority_drift");
   const runtimePath = path.join(
     fixture.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "runtime-state.json",
   );
   const runtime = JSON.parse(await readFile(runtimePath, "utf8"));
@@ -637,7 +637,7 @@ test("Qoder ACP mutation lock closes cancel and finalizer overlap races", async 
 function createSyntheticAgent(fixture, observed) {
   const sessionId = "session_agent_bridge";
   return acp
-    .agent({ name: "pageroot-synthetic-agent" })
+    .agent({ name: "stemmio-synthetic-agent" })
     .onRequest(acp.methods.agent.initialize, ({ params }) => {
       observed.initialize = params;
       return {
@@ -645,8 +645,8 @@ function createSyntheticAgent(fixture, observed) {
         agentCapabilities: { loadSession: false },
         authMethods: [],
         agentInfo: {
-          name: observed.agentName || "pageroot-synthetic-agent",
-          title: "PageRoot Synthetic Agent",
+          name: observed.agentName || "stemmio-synthetic-agent",
+          title: "Stemmio Synthetic Agent",
           version: "1.0.0",
         },
       };
@@ -659,7 +659,7 @@ function createSyntheticAgent(fixture, observed) {
       observed.prompt = params;
       observed.promptCount = (observed.promptCount || 0) + 1;
       if (observed.rejectIdentity && (observed.promptCount === 1 || observed.alwaysRejectIdentity)) {
-        const bad = identityPreservingCandidate(fixture, "ACP Candidate").replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(12)}4fff8${"f".repeat(15)}`);
+        const bad = identityPreservingCandidate(fixture, "ACP Candidate").replace(/sm1_[a-f0-9]+/u, `sm1_${"f".repeat(12)}4fff8${"f".repeat(15)}`);
         await assert.rejects(client.request(acp.methods.client.fs.writeTextFile, {
           sessionId, path: fixture.outputPath, content: bad,
         }));
@@ -755,12 +755,12 @@ import * as acp from ${JSON.stringify(acpSdkModuleUrl)};
 
 const config = JSON.parse(process.argv[2]);
 const sessionId = "session_stdio_agent";
-const app = acp.agent({ name: "pageroot-stdio-agent" })
+const app = acp.agent({ name: "stemmio-stdio-agent" })
   .onRequest(acp.methods.agent.initialize, () => ({
     protocolVersion: acp.PROTOCOL_VERSION,
     agentCapabilities: { loadSession: false },
     authMethods: [],
-    agentInfo: { name: "pageroot-stdio-agent", version: "1.0.0" },
+    agentInfo: { name: "stemmio-stdio-agent", version: "1.0.0" },
   }))
   .onRequest(acp.methods.agent.session.new, ({ params }) => {
     if (params.cwd !== config.requestPath || params.mcpServers.length !== 0) {
@@ -834,7 +834,7 @@ async function waitForProcessExit(pid, timeoutMs) {
   return !processExists(pid);
 }
 
-test("ACP ClientApp completes a synthetic PageRoot Candidate turn", async (t) => {
+test("ACP ClientApp completes a synthetic Stemmio Candidate turn", async (t) => {
   const fixture = await createFixture(t);
   const reviewBoundaryBefore = await captureQoderAcpReviewBoundary({
     repository: fixture.repository,
@@ -853,7 +853,7 @@ test("ACP ClientApp completes a synthetic PageRoot Candidate turn", async (t) =>
   });
 
   assert.equal(result.stopReason, "end_turn");
-  assert.equal(result.initialized.agentInfo.name, "pageroot-synthetic-agent");
+  assert.equal(result.initialized.agentInfo.name, "stemmio-synthetic-agent");
   assert.equal(observed.newSession.cwd, fixture.requestPath);
   assert.deepEqual(observed.newSession.mcpServers, []);
   assert.equal(observed.newSession.additionalDirectories, undefined);
@@ -962,7 +962,7 @@ test("ACP stdio transport completes the same synthetic Candidate contract", asyn
   });
 
   assert.equal(result.stopReason, "end_turn");
-  assert.equal(result.initialized.agentInfo.name, "pageroot-stdio-agent");
+  assert.equal(result.initialized.agentInfo.name, "stemmio-stdio-agent");
   assert.equal(result.stderr, "");
   const status = await fixture.repository.requestStatus({
     target: fixture.target,
@@ -1024,7 +1024,7 @@ test("ACP stdio transport runs a verified npm-style bundle with Finder's sparse 
   });
 
   assert.equal(result.stopReason, "end_turn");
-  assert.equal(result.initialized.agentInfo.name, "pageroot-stdio-agent");
+  assert.equal(result.initialized.agentInfo.name, "stemmio-stdio-agent");
   const status = await fixture.repository.requestStatus({
     target: fixture.target,
     ...IDENTITIES,
@@ -1053,7 +1053,7 @@ test("ACP stdio transport runs a verified npm-style bundle with Finder's sparse 
 
 test("verified JavaScript execution stays bound to the checked inode after path replacement", async (t) => {
   const root = await realpath(
-    await mkdtemp(path.join(tmpdir(), "pageroot-qoder-inode-bind-")),
+    await mkdtemp(path.join(tmpdir(), "stemmio-qoder-inode-bind-")),
   );
   t.after(() => rm(root, { recursive: true, force: true }));
   const executable = path.join(root, "qodercli.js");
@@ -1106,7 +1106,7 @@ process.stdout.write("unverified-replacement-bytes\\n");
 
 test("verified preflight cleans same-group descendants before reporting success", async (t) => {
   const root = await realpath(
-    await mkdtemp(path.join(tmpdir(), "pageroot-qoder-preflight-group-")),
+    await mkdtemp(path.join(tmpdir(), "stemmio-qoder-preflight-group-")),
   );
   t.after(() => rm(root, { recursive: true, force: true }));
   const executable = path.join(root, "qodercli.js");
@@ -1176,7 +1176,7 @@ process.stdout.write("1.1.27\\n");
 });
 
 test("verified JavaScript execution uses Electron as Node without inheriting Finder PATH", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "pageroot-qoder-electron-runtime-"));
+  const root = await mkdtemp(path.join(tmpdir(), "stemmio-qoder-electron-runtime-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const executable = path.join(root, "qodercli.js");
   const runner = path.join(root, "electron-runner.mjs");
@@ -1195,7 +1195,7 @@ process.stdout.write(JSON.stringify({
   await writeFile(runner, `import { readFile, realpath, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { runVerifiedQoderJavaScript } from ${JSON.stringify(clientModuleUrl)};
-const command = await realpath(process.env.PAGEROOT_TEST_QODER_COMMAND);
+const command = await realpath(process.env.STEMMIO_TEST_QODER_COMMAND);
 const information = await stat(command);
 const bytes = await readFile(command);
 const result = await runVerifiedQoderJavaScript({
@@ -1211,7 +1211,7 @@ const result = await runVerifiedQoderJavaScript({
       sha256: "sha256:" + createHash("sha256").update(bytes).digest("hex"),
     },
   },
-  baseEnvironment: { HOME: process.env.PAGEROOT_TEST_HOME, PATH: "/usr/bin:/bin" },
+  baseEnvironment: { HOME: process.env.STEMMIO_TEST_HOME, PATH: "/usr/bin:/bin" },
   timeoutMs: 5_000,
 });
 process.stdout.write(JSON.stringify({
@@ -1225,8 +1225,8 @@ process.stdout.write(JSON.stringify({
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
-      PAGEROOT_TEST_HOME: root,
-      PAGEROOT_TEST_QODER_COMMAND: executable,
+      STEMMIO_TEST_HOME: root,
+      STEMMIO_TEST_QODER_COMMAND: executable,
     },
     encoding: "utf8",
     timeout: 10_000,
@@ -1294,7 +1294,7 @@ test("ACP stdio transport binds the preflight executable identity before spawn",
 test("ACP stdio transport fails immediately on process errors and cleans orphaned groups", async (t) => {
   const fixture = await createFixture(t);
   const invalidExecutable = path.join(fixture.root, "missing-interpreter-agent");
-  await writeFile(invalidExecutable, "#!/pageroot/definitely-missing-interpreter\n", "utf8");
+  await writeFile(invalidExecutable, "#!/stemmio/definitely-missing-interpreter\n", "utf8");
   await chmod(invalidExecutable, 0o700);
   await assert.rejects(
     runQoderAcpTask({
@@ -1384,7 +1384,7 @@ test("ACP stdio transport rejects invalid UTF-8 and oversized unterminated frame
 test("ACP stop reason cannot replace Candidate finalization evidence", async (t) => {
   const fixture = await createFixture(t);
   const agent = acp
-    .agent({ name: "pageroot-early-stop-agent" })
+    .agent({ name: "stemmio-early-stop-agent" })
     .onRequest(acp.methods.agent.initialize, () => ({
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: { loadSession: false },
@@ -1443,7 +1443,7 @@ test("ACP turn timeout fails closed and requests session cancellation", async (t
   let releasePrompt;
   let cancelled = false;
   const agent = acp
-    .agent({ name: "pageroot-timeout-agent" })
+    .agent({ name: "stemmio-timeout-agent" })
     .onRequest(acp.methods.agent.initialize, () => ({
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: { loadSession: false },
@@ -1490,12 +1490,12 @@ test("ACP activity watchdog allows a turn to run beyond one window without expos
     assertTurnCompleted: async () => {},
   };
   const agent = acp
-    .agent({ name: "pageroot-activity-agent" })
+    .agent({ name: "stemmio-activity-agent" })
     .onRequest(acp.methods.agent.initialize, () => ({
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: { loadSession: false },
       authMethods: [],
-      agentInfo: { name: "pageroot-activity-agent", version: "1.0.0" },
+      agentInfo: { name: "stemmio-activity-agent", version: "1.0.0" },
     }))
     .onRequest(acp.methods.agent.session.new, () => ({ sessionId }))
     .onRequest(acp.methods.agent.session.prompt, async ({ client }) => {
@@ -1545,12 +1545,12 @@ test("ACP activity watchdog permits valid protocol activity beyond 45 virtual mi
     assertTurnCompleted: async () => {},
   };
   const agent = acp
-    .agent({ name: "pageroot-long-activity-agent" })
+    .agent({ name: "stemmio-long-activity-agent" })
     .onRequest(acp.methods.agent.initialize, () => ({
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: { loadSession: false },
       authMethods: [],
-      agentInfo: { name: "pageroot-long-activity-agent", version: "1.0.0" },
+      agentInfo: { name: "stemmio-long-activity-agent", version: "1.0.0" },
     }))
     .onRequest(acp.methods.agent.session.new, () => ({ sessionId }))
     .onRequest(acp.methods.agent.session.prompt, async ({ client }) => {

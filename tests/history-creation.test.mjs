@@ -37,7 +37,7 @@ for (const stage of ["prepared", "snapshot-written", "source-written", "manifest
     const { target } = await importSource(value);
     await value.repository.saveDraft({ target, operationId: "draftop_history_preserved", expectedDraftRevision: 0,
       comments: [{ commentId: "comment_preserve", text: "keep original task" }], changeEvents: [], deletedCommentIds: [] });
-    const draftPath = path.join(target.projectRootPath, ".pageroot/drafts/work_ver_0001.json");
+    const draftPath = path.join(target.projectRootPath, ".stemmio/drafts/work_ver_0001.json");
     const draftBefore = await readFile(draftPath, "utf8");
     const rulesBefore = await readFile(path.join(target.projectRootPath, "PROJECT.md"), "utf8");
     const repository = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: (name) => name === `current-version-${stage}` });
@@ -174,7 +174,7 @@ for (const stage of ["prepared", "source-written"]) {
       const repository = new ProjectFileRepository({ projectsRoot: value.projects, failpoint: (name) => name === `current-version-${stage}` });
       await assert.rejects(repository.createVersionFromHistory({ target: active, versionId: "ver_0001", operationId,
         expectedSourceSha256: active.sourceSha256, expectedSnapshotSha256: target.sourceSha256 }), { code: "INJECTED_FAILPOINT" });
-      const directory = path.join(target.projectRootPath, ".pageroot/transactions", `current_${operationId}`);
+      const directory = path.join(target.projectRootPath, ".stemmio/transactions", `current_${operationId}`);
       const journalPath = path.join(directory, "transaction.json");
       const journal = JSON.parse(await readFile(journalPath, "utf8"));
       journal.beforeMember.fileIdentity.device += "17";

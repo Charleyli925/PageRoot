@@ -1,6 +1,6 @@
 import { seedLegacyHistoryActivation } from "../../helpers/legacy-history-activation.mjs";
 import { expect, test } from "@playwright/test";
-import { loadedDiskFrame as loadedStaticDiskFrame } from "./helpers/pageroot-app-fixture.mjs";
+import { loadedDiskFrame as loadedStaticDiskFrame } from "./helpers/stemmio-app-fixture.mjs";
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import {
   ProjectFileRepository,
@@ -8,10 +8,10 @@ import {
   caseSelector,
   setTextSelection,
   keyShortcut,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture,
   expectCheckpointPersisted,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   mkdirSync,
   managedWorkingCopyPath,
@@ -23,7 +23,7 @@ import {
   removeIsolatedUserData,
   removeSourceFixture,
   sha256,
-  stopPageRoot,
+  stopStemmio,
   waitForProjectReady,
 } from "./electron-native-harness.mjs";
 
@@ -43,7 +43,7 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
 }, async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture("workbench-tabs-restart.html");
-  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const firstLaunch = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   let firstClosed = false;
   let reopened = null;
   try {
@@ -92,9 +92,9 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
       }
     }).toMatchObject({ version: 1, activeTabId: null });
 
-    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
+    await closeStemmioGracefully(firstLaunch.electronApp, firstLaunch.page);
     firstClosed = true;
-    reopened = await launchPageRoot({ isolatedUserData: firstLaunch.isolatedUserData });
+    reopened = await launchStemmio({ isolatedUserData: firstLaunch.isolatedUserData });
     const reopenedTabs = reopened.page.getByRole("tablist", { name: "已打开的页面" });
     await expect(reopenedTabs.getByRole("tab")).toHaveCount(2);
     await expect(reopenedTabs.getByRole("tab").nth(0)).toHaveAttribute("aria-selected", "true");
@@ -131,9 +131,9 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
     await expect(reopenedTabs.getByRole("tab").first()).toBeFocused();
   } finally {
     if (reopened) {
-      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+      await stopStemmio(reopened.electronApp, reopened.isolatedUserData);
     } else if (!firstClosed) {
-      await stopPageRoot(firstLaunch.electronApp, firstLaunch.isolatedUserData);
+      await stopStemmio(firstLaunch.electronApp, firstLaunch.isolatedUserData);
     } else {
       removeIsolatedUserData(firstLaunch.isolatedUserData);
     }
@@ -146,7 +146,7 @@ test("Electron settings routes categories and persists restore preference withou
 }, async () => {
   test.setTimeout(240_000);
   const fixture = createSourceFixture("settings-workspace-preferences.html");
-  const first = await launchPageRoot({
+  const first = await launchStemmio({
     activeSourcePath: fixture.sourcePath,
   });
   let firstClosed = false;
@@ -187,8 +187,8 @@ test("Electron settings routes categories and persists restore preference withou
       await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
       await expect(visibleToast).toBeHidden();
     }
-    const captureDirectory = process.env.PAGEROOT_CAPTURE_SETTINGS_DIR
-      ? path.resolve(process.env.PAGEROOT_CAPTURE_SETTINGS_DIR)
+    const captureDirectory = process.env.STEMMIO_CAPTURE_SETTINGS_DIR
+      ? path.resolve(process.env.STEMMIO_CAPTURE_SETTINGS_DIR)
       : null;
     const captureSettings = async (name, width, height) => {
       if (!captureDirectory) return;
@@ -303,9 +303,9 @@ test("Electron settings routes categories and persists restore preference withou
       }
     }).toBe(280);
 
-    await closePageRootGracefully(first.electronApp, first.page);
+    await closeStemmioGracefully(first.electronApp, first.page);
     firstClosed = true;
-    reopened = await launchPageRoot({
+    reopened = await launchStemmio({
       isolatedUserData: first.isolatedUserData,
     });
     const reopenedTabs = reopened.page.getByRole("tablist", { name: "已打开的页面" })
@@ -318,10 +318,10 @@ test("Electron settings routes categories and persists restore preference withou
       getComputedStyle(element).getPropertyValue("--workbench-sidebar-width-saved").trim()
     ))).toBe("280px");
     await expect(reopenedTabs).toHaveCount(1);
-    await closePageRootGracefully(reopened.electronApp, reopened.page);
+    await closeStemmioGracefully(reopened.electronApp, reopened.page);
     reopenedClosed = true;
 
-    external = await launchPageRoot({
+    external = await launchStemmio({
       isolatedUserData: first.isolatedUserData,
       externalSourcePaths: [fixture.sourcePath],
     });
@@ -332,11 +332,11 @@ test("Electron settings routes categories and persists restore preference withou
     );
   } finally {
     if (external) {
-      await stopPageRoot(external.electronApp, external.isolatedUserData);
+      await stopStemmio(external.electronApp, external.isolatedUserData);
     } else if (reopened && !reopenedClosed) {
-      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+      await stopStemmio(reopened.electronApp, reopened.isolatedUserData);
     } else if (!firstClosed) {
-      await stopPageRoot(first.electronApp, first.isolatedUserData);
+      await stopStemmio(first.electronApp, first.isolatedUserData);
     } else {
       removeIsolatedUserData(first.isolatedUserData);
     }
@@ -351,7 +351,7 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
   const projectA = createSourceFixture("registry-restart-a.html");
   const projectB = createSourceFixture("registry-restart-b.html");
   const projectC = createSourceFixture("external-cold-priority-c.html");
-  const first = await launchPageRoot({
+  const first = await launchStemmio({
     activeSourcePath: projectA.sourcePath,
     recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
   });
@@ -389,10 +389,10 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
         expect.objectContaining({ projectId: expect.stringContaining("project_") }),
       ]),
     });
-    await closePageRootGracefully(first.electronApp, first.page);
+    await closeStemmioGracefully(first.electronApp, first.page);
     firstClosed = true;
 
-    restored = await launchPageRoot({ isolatedUserData: first.isolatedUserData });
+    restored = await launchStemmio({ isolatedUserData: first.isolatedUserData });
     await loadedDiskFrame(restored.page, projectB.sourcePath, "list-item");
     const restoredTabs = restored.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(restoredTabs.filter({ hasText: "registry-restart-a" })).toHaveCount(1);
@@ -403,12 +403,12 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
     await expect(restored.page.locator('[data-testid="workbench-document-surface-cache"] iframe'))
       .toHaveCount(0, { timeout: 30_000 });
     const readStartupPresentation = () => restored.page.evaluate(() => ({
-      projected: performance.getEntriesByName("pageroot:tab-cache:prewarmed", "mark")
+      projected: performance.getEntriesByName("stemmio:tab-cache:prewarmed", "mark")
         .find((entry) => entry.detail?.hot === true)?.startTime || null,
-      visible: performance.getEntriesByName("pageroot:tab-cache:visible-ready", "mark")[0]
+      visible: performance.getEntriesByName("stemmio:tab-cache:visible-ready", "mark")[0]
         ?.startTime || null,
       verified: (() => {
-        return performance.getEntriesByName("pageroot:canvas:render-verified", "mark")
+        return performance.getEntriesByName("stemmio:canvas:render-verified", "mark")
           .at(-1)?.startTime || null;
       })(),
     }));
@@ -422,10 +422,10 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
       expect(startupPresentation.visible).toBeLessThan(startupPresentation.verified);
     }
 
-    await closePageRootGracefully(restored.electronApp, restored.page);
+    await closeStemmioGracefully(restored.electronApp, restored.page);
     restoredClosed = true;
 
-    external = await launchPageRoot({
+    external = await launchStemmio({
       isolatedUserData: first.isolatedUserData,
       externalSourcePaths: [projectC.sourcePath],
     });
@@ -435,11 +435,11 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
       .toHaveAttribute("aria-selected", "true");
   } finally {
     if (external) {
-      await stopPageRoot(external.electronApp, external.isolatedUserData);
+      await stopStemmio(external.electronApp, external.isolatedUserData);
     } else if (restored && !restoredClosed) {
-      await stopPageRoot(restored.electronApp, restored.isolatedUserData);
+      await stopStemmio(restored.electronApp, restored.isolatedUserData);
     } else if (!firstClosed) {
-      await stopPageRoot(first.electronApp, first.isolatedUserData);
+      await stopStemmio(first.electronApp, first.isolatedUserData);
     } else {
       removeIsolatedUserData(first.isolatedUserData);
     }
@@ -455,7 +455,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
   test.setTimeout(180_000);
   const projectA = createSourceFixture("sidebar-history-a.html");
   const projectB = createSourceFixture("sidebar-history-b.html", (html) => html.replace("</body>", '<script>throw new Error("test dynamic author failure")</script></body>'));
-  const launched = await launchPageRoot({ activeSourcePath: projectA.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: projectA.sourcePath });
   let firstClosed = false;
   let reopened = null;
   try {
@@ -505,7 +505,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
       version.ordinal === 3
     ));
     expect(historicalVersion).toBeTruthy();
-    const catalogRows = await launched.page.evaluate(() => window.htmlAIProjects.listRegisteredProjects());
+    const catalogRows = await launched.page.evaluate(() => window.stemmioProjects.listRegisteredProjects());
     expect(catalogRows.filter((row) => row.availability === "ready").every((row) => row.sourceStatus === "unknown")).toBe(true);
 
 
@@ -519,7 +519,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(currentProject.locator(".sidebar-project-row"))
       .toHaveAttribute("aria-expanded", "true");
     const beforeExpansion = await launched.page.evaluate(async () => (
-      (await window.htmlAIProjects?.getActiveProject())?.projectId || null
+      (await window.stemmioProjects?.getActiveProject())?.projectId || null
     ));
     const importedProject = sidebar.locator(".sidebar-project-item")
       .filter({ hasText: "sidebar-history-b" })
@@ -534,7 +534,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
       timeout: 30_000,
     });
     expect(await launched.page.evaluate(async () => (
-      (await window.htmlAIProjects?.getActiveProject())?.projectId || null
+      (await window.stemmioProjects?.getActiveProject())?.projectId || null
     ))).toBe(beforeExpansion);
 
     await expect(importedProject.locator(".sidebar-version-index")).toHaveText(["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8"]);
@@ -684,7 +684,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(importedProject.locator(".sidebar-project-current-row")).toHaveAttribute("aria-current", "page");
     await expect(importedProject.locator('.sidebar-version-row[data-selected="true"]')).toHaveCount(0);
     expect(creates).toBe(1);
-    const createdPath = await launched.page.evaluate(async () => (await window.htmlAIProjects.getActiveProject()).sourcePath);
+    const createdPath = await launched.page.evaluate(async () => (await window.stemmioProjects.getActiveProject()).sourcePath);
     expect(realpathSync(createdPath)).toBe(realpathSync(target.exactSourcePath));
     const { frame: createdFrame } = await loadedStaticDiskFrame(launched.page, createdPath, { expectedCase: "list-item", includeEditor: true });
     await activateNativeEdit(createdFrame, "list-item");
@@ -703,17 +703,17 @@ test("Electron sidebar opens an imported historical version in the existing proj
     expect((await repository.readVersionFile({ target, versionId: "ver_0008" })).content).toBe(protectedLatest.content);
     expect((await repository.workspace({ sourcePath: createdPath })).target.workingCopyId).toBe(target.workingCopyId);
     await launched.page.screenshot({ path: test.info().outputPath("history-created-v9.png") });
-    await closePageRootGracefully(launched.electronApp, launched.page);
+    await closeStemmioGracefully(launched.electronApp, launched.page);
     firstClosed = true;
-    reopened = await launchPageRoot({ isolatedUserData: launched.isolatedUserData });
+    reopened = await launchStemmio({ isolatedUserData: launched.isolatedUserData });
     await waitForProjectReady(reopened.page);
     await expect(reopened.page.getByRole("tab", { selected: true })).toContainText(path.basename(createdPath));
     expect((await repository.listRegisteredProjectVersionSummaries({ projectId: target.projectId })).versions).toHaveLength(9);
     const { frame: restartedFrame } = await loadedStaticDiskFrame(reopened.page, createdPath, { expectedCase: "list-item", includeEditor: true });
     await expect(restartedFrame.locator(caseSelector("list-item"))).toContainText("HISTORY_V9_SAVED");
   } finally {
-    if (reopened) await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
-    else if (!firstClosed) await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    if (reopened) await stopStemmio(reopened.electronApp, reopened.isolatedUserData);
+    else if (!firstClosed) await stopStemmio(launched.electronApp, launched.isolatedUserData);
     else removeIsolatedUserData(launched.isolatedUserData);
     removeSourceFixture(projectA.sourceDirectory);
     removeSourceFixture(projectB.sourceDirectory);
@@ -729,7 +729,7 @@ test("Electron sidebar keeps multiple project lists expanded without switching i
   const projectC = createSourceFixture(
     "sidebar-expansion-c-with-a-very-long-file-name-for-tooltip.html",
   );
-  const launched = await launchPageRoot({ activeSourcePath: projectA.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: projectA.sourcePath });
   try {
     await loadedDiskFrame(launched.page, projectA.sourcePath, "list-item");
     await waitForProjectReady(launched.page);
@@ -772,7 +772,7 @@ test("Electron sidebar keeps multiple project lists expanded without switching i
       timeout: 30_000,
     });
     const currentProjectId = await launched.page.evaluate(async () => (
-      (await window.htmlAIProjects?.getActiveProject())?.projectId || null
+      (await window.stemmioProjects?.getActiveProject())?.projectId || null
     ));
     const currentProject = sidebar.locator(".sidebar-project-item")
       .filter({ hasText: "sidebar-expansion-a" })
@@ -797,7 +797,7 @@ test("Electron sidebar keeps multiple project lists expanded without switching i
     await expect(importedProject(projectB.sourcePath).locator(".sidebar-version-file"))
       .toHaveCount(1, { timeout: 30_000 });
     expect(await launched.page.evaluate(async () => (
-      (await window.htmlAIProjects?.getActiveProject())?.projectId || null
+      (await window.stemmioProjects?.getActiveProject())?.projectId || null
     ))).toBe(currentProjectId);
 
     await projectCRow.click();
@@ -817,7 +817,7 @@ test("Electron sidebar keeps multiple project lists expanded without switching i
     await expect(projectBRow).toHaveAttribute("aria-expanded", "false");
     await expect(projectCRow).toHaveAttribute("aria-expanded", "true");
     expect(await launched.page.evaluate(async () => (
-      (await window.htmlAIProjects?.getActiveProject())?.projectId || null
+      (await window.stemmioProjects?.getActiveProject())?.projectId || null
     ))).toBe(currentProjectId);
 
     const versionVisualFacts = await projectCContainer.locator(".sidebar-version-tree")
@@ -837,7 +837,7 @@ test("Electron sidebar keeps multiple project lists expanded without switching i
     await expect(currentRow)
       .toHaveAttribute("aria-expanded", "true");
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(projectA.sourceDirectory);
     removeSourceFixture(projectB.sourceDirectory);
     removeSourceFixture(projectC.sourceDirectory);
@@ -851,14 +851,14 @@ for (const recoveryCase of ["pending", "rename", "superseded"]) {
   }, async () => {
     test.setTimeout(180_000);
     const fixture = createSourceFixture(`history-restart-${recoveryCase}.html`);
-    let app = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    let app = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     const userData = app.isolatedUserData;
     try {
       await loadedDiskFrame(app.page, fixture.sourcePath, "list-item");
       const initialPath = await managedWorkingCopyPath(app.page, fixture.sourcePath);
       const repository = new ProjectFileRepository({ projectsRoot: path.dirname(path.dirname(initialPath)) });
       let target = (await repository.workspace({ sourcePath: initialPath })).target;
-      await closePageRootGracefully(app.electronApp, app.page);
+      await closeStemmioGracefully(app.electronApp, app.page);
       app = null;
       for (let ordinal = 2; ordinal <= 8; ordinal += 1) {
         const candidate = await repository.createCandidate({ target, requestId: `req_restart_${ordinal}`,
@@ -866,7 +866,7 @@ for (const recoveryCase of ["pending", "rename", "superseded"]) {
           expectedSourceSha256: target.sourceSha256 });
         target = (await repository.promoteCandidate({ target, candidateId: candidate.candidate.candidateId, decisionOperationId: `promote_${candidate.candidate.candidateId}` })).target;
       }
-      app = await launchPageRoot({ isolatedUserData: userData, activeSourcePath: target.exactSourcePath });
+      app = await launchStemmio({ isolatedUserData: userData, activeSourcePath: target.exactSourcePath });
       await waitForProjectReady(app.page);
       const mode = app.page.getByRole("group", { name: "工作模式", exact: true });
       await app.page.getByRole("button", { name: "展开左侧边栏", exact: true }).click();
@@ -915,9 +915,9 @@ for (const recoveryCase of ["pending", "rename", "superseded"]) {
         // The simulated workspace outage also prevents verifying the replaced
         // current file for graceful close. Exercise crash recovery while keeping
         // that protection and the unopened history receipt intact.
-        await stopPageRoot(app.electronApp, userData, { cleanup: false });
+        await stopStemmio(app.electronApp, userData, { cleanup: false });
       } else {
-        await closePageRootGracefully(app.electronApp, app.page);
+        await closeStemmioGracefully(app.electronApp, app.page);
       }
       app = null;
       if (recoveryCase === "rename") {
@@ -928,16 +928,16 @@ for (const recoveryCase of ["pending", "rename", "superseded"]) {
       }
       // The pending case intentionally uses the existing persisted tab. For
       // a later AI promotion, seed its selected working file as the open target.
-      app = await launchPageRoot({ isolatedUserData: userData,
+      app = await launchStemmio({ isolatedUserData: userData,
         ...(recoveryCase === "superseded" ? { activeSourcePath: expectedPath } : {}) });
       await waitForProjectReady(app.page);
       await expect(app.page.getByRole("tab", { selected: true })).toContainText(path.basename(expectedPath));
       if (recoveryCase === "superseded") {
         // Persist the selected V10, then exercise an ordinary restart without
         // a command-line target. The V9 acknowledgment is still missing.
-        await closePageRootGracefully(app.electronApp, app.page);
+        await closeStemmioGracefully(app.electronApp, app.page);
         app = null;
-        app = await launchPageRoot({ isolatedUserData: userData });
+        app = await launchStemmio({ isolatedUserData: userData });
         await waitForProjectReady(app.page);
         await expect(app.page.getByRole("tab", { selected: true })).toContainText(path.basename(expectedPath));
       }
@@ -962,7 +962,7 @@ for (const recoveryCase of ["pending", "rename", "superseded"]) {
       await expect(app.page.getByRole("dialog", { name: /创建新版本/ })).toBeVisible();
       await app.page.getByRole("dialog").getByRole("button", { name: "取消", exact: true }).click();
     } finally {
-      if (app) await stopPageRoot(app.electronApp, userData);
+      if (app) await stopStemmio(app.electronApp, userData);
       else removeIsolatedUserData(userData);
       removeSourceFixture(fixture.sourceDirectory);
     }
@@ -974,7 +974,7 @@ test("Electron local current draft saves immutable versions and exports with an 
 }, async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture("local-current-draft.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
     const currentPath = await managedWorkingCopyPath(launched.page, fixture.sourcePath);
@@ -1114,7 +1114,7 @@ test("Electron local current draft saves immutable versions and exports with an 
     expect(readFileSync(fixture.sourcePath, "utf8")).toBe(versionOne.content);
     expect(await currentIdentity()).toEqual(identity);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });

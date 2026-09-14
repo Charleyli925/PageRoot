@@ -46,9 +46,9 @@ import {
   type PageViewContext,
 } from "../lib/page-view-context.js";
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  isValidPagerootElementId,
-} from "../../shared/pageroot-element-identity.mjs";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  isValidStemmioElementId,
+} from "../../shared/stemmio-element-identity.mjs";
 import {
   applyPatchPlan,
   buildSourceIndex,
@@ -296,14 +296,14 @@ function sourceSubtreeElementIds(
   sourceIndex: SourceIndexValue | null,
   rootElementId: string | undefined,
 ): Set<string> {
-  const root = rootElementId ? sourceIndex?.byPagerootId.get(rootElementId) : null;
+  const root = rootElementId ? sourceIndex?.byStemmioId.get(rootElementId) : null;
   if (!root || root.type !== "element") return new Set();
   const elementIds = new Set<string>();
   const pending = [root];
   while (pending.length > 0) {
     const element = pending.pop();
     if (!element) continue;
-    if (element.pagerootId) elementIds.add(element.pagerootId);
+    if (element.stemmioId) elementIds.add(element.stemmioId);
     for (const childNodeId of element.childElementIds) {
       const child = sourceIndex?.byNodeId.get(childNodeId);
       if (child?.type === "element") pending.push(child);
@@ -332,8 +332,8 @@ function reconcileAllocatedLineBreakIds(
   previousTemplate.innerHTML = previousSourceInnerHtml;
   nextTemplate.innerHTML = nextSourceInnerHtml;
   const previousIds = new Set(Array.from(
-    previousTemplate.content.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`),
-  ).map((element) => element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)));
+    previousTemplate.content.querySelectorAll(`[${STEMMIO_ELEMENT_ID_ATTRIBUTE}]`),
+  ).map((element) => element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE)));
   const liveElements = Array.from(hostElement.querySelectorAll("*"));
   const sourceElements = Array.from(nextTemplate.content.querySelectorAll("*"));
   if (liveElements.length !== sourceElements.length) {
@@ -347,14 +347,14 @@ function reconcileAllocatedLineBreakIds(
     if (liveElement.localName !== sourceElement.localName) {
       throw new Error("实时编辑 DOM 与已保存的源码元素顺序不一致。");
     }
-    const liveId = liveElement.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-    const sourceId = sourceElement.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+    const liveId = liveElement.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
+    const sourceId = sourceElement.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
     if (liveId === sourceId) continue;
     if (
       liveId !== null
       || sourceElement.localName !== "br"
       || typeof sourceId !== "string"
-      || !isValidPagerootElementId(sourceId)
+      || !isValidStemmioElementId(sourceId)
       || previousIds.has(sourceId)
       || assignedIds.has(sourceId)
     ) {
@@ -365,7 +365,7 @@ function reconcileAllocatedLineBreakIds(
   }
   for (const assignment of assignments) {
     assignment.element.setAttribute(
-      PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+      STEMMIO_ELEMENT_ID_ATTRIBUTE,
       assignment.elementId,
     );
   }
@@ -441,11 +441,11 @@ const EDITOR_DOCUMENT_STYLES = `
     user-select: text !important;
   }
 
-  [data-pageroot-edit-runtime-host] {
+  [data-stemmio-edit-runtime-host] {
     cursor: default !important;
   }
 
-  [data-pageroot-edit-runtime-host] * {
+  [data-stemmio-edit-runtime-host] * {
     pointer-events: none !important;
     -webkit-user-select: none !important;
     user-select: none !important;
@@ -469,7 +469,7 @@ type RuntimeSourceElements = {
   elementGeneration: number;
   executionId: string;
   elements: WeakSet<HTMLElement>;
-  pagerootIds: WeakMap<HTMLElement, string>;
+  stemmioIds: WeakMap<HTMLElement, string>;
   runtimeShadowHosts: WeakSet<HTMLElement>;
 };
 
@@ -570,8 +570,8 @@ function runtimeSourceElementForStableId(
   sourceIndex: SourceIndexValue | null,
   stableId: string | null | undefined,
 ): Element | null {
-  if (!sourceIndex || !stableId || !isValidPagerootElementId(stableId)) return null;
-  const sourceEntry = sourceIndex.byPagerootId.get(stableId);
+  if (!sourceIndex || !stableId || !isValidStemmioElementId(stableId)) return null;
+  const sourceEntry = sourceIndex.byStemmioId.get(stableId);
   if (!sourceEntry || sourceEntry.type !== "element") return null;
   return uniqueSourceElement(documentNode, stableId);
 }
@@ -580,11 +580,11 @@ function runtimeStableIdForElement(
   element: Element | null,
   sourceIndex: SourceIndexValue | null,
 ): string | null {
-  const stableId = element?.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-  const sourceEntry = stableId ? sourceIndex?.byPagerootId.get(stableId) : null;
+  const stableId = element?.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
+  const sourceEntry = stableId ? sourceIndex?.byStemmioId.get(stableId) : null;
   if (
     !stableId
-    || !isValidPagerootElementId(stableId)
+    || !isValidStemmioElementId(stableId)
     || sourceEntry?.type !== "element"
     || sourceEntry.tagName !== element?.localName
   ) return null;
@@ -607,7 +607,7 @@ function captureRuntimePresentationAnchor({
   const documentNode = iframe?.contentDocument;
   const frameView = iframe?.contentWindow;
   const selectedStableId = (
-    isValidPagerootElementId(selectedSourceSelection?.elementId)
+    isValidStemmioElementId(selectedSourceSelection?.elementId)
       ? selectedSourceSelection?.elementId
       : runtimeStableIdForElement(selectedElement, sourceIndex)
   ) || null;
@@ -841,8 +841,8 @@ type InlineStyleOverride = {
 
 function sourceIndexIdentityReady(sourceIndex: SourceIndexValue | null | undefined): boolean {
   const identity = (sourceIndex as {
-    pagerootIdentity?: { complete?: unknown; valid?: unknown };
-  } | null | undefined)?.pagerootIdentity;
+    stemmioIdentity?: { complete?: unknown; valid?: unknown };
+  } | null | undefined)?.stemmioIdentity;
   return identity?.complete === true && identity?.valid === true;
 }
 
@@ -1243,7 +1243,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     containerRef.current?.setAttribute("data-render-verified", "true");
     syncProjectionHashDiagnostics();
     if (content) {
-      performance.mark("pageroot:canvas:render-verified", {
+      performance.mark("stemmio:canvas:render-verified", {
         detail: Object.freeze({ content }),
       });
     }
@@ -1386,7 +1386,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const transferRuntimeSourceElement = useCallback((original: Element, clone: Element) => {
     const registered = runtimeSourceElementsRef.current;
     const runtime = runtimeFrameRef.current;
-    const id = registered?.pagerootIds.get(original as HTMLElement);
+    const id = registered?.stemmioIds.get(original as HTMLElement);
     if (!registered || !runtime || !id
       || registered.elementGeneration !== runtime.elementGeneration
       || registered.executionId !== runtime.grant.executionId
@@ -1394,11 +1394,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || original.ownerDocument !== iframeRef.current?.contentDocument
       || clone.ownerDocument !== original.ownerDocument
       || !registered.elements.has(original as HTMLElement)
-      || original.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) !== id
-      || clone.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) !== id
+      || original.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE) !== id
+      || clone.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE) !== id
       || clone.localName !== original.localName) return;
     registered.elements.add(clone as HTMLElement);
-    registered.pagerootIds.set(clone as HTMLElement, id);
+    registered.stemmioIds.set(clone as HTMLElement, id);
     clone.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, id);
   }, []);
 
@@ -1409,21 +1409,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ) => {
     const registered = runtimeSourceElementsRef.current;
     const runtime = runtimeFrameRef.current;
-    const rootId = registered?.pagerootIds.get(authorityRoot);
+    const rootId = registered?.stemmioIds.get(authorityRoot);
     if (!registered || !runtime || !sourceIndex || !rootId
       || !registered.elements.has(authorityRoot)
-      || authorityRoot.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) !== rootId
+      || authorityRoot.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE) !== rootId
       || registered.elementGeneration !== runtime.elementGeneration
       || registered.executionId !== runtime.grant.executionId
       || runtime.elementGeneration !== frameLoadGenerationRef.current
       || authorityRoot.ownerDocument !== iframeRef.current?.contentDocument) return;
     for (const element of elements) {
-      const id = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-      const entry = id ? sourceIndex.byPagerootId.get(id) : null;
+      const id = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
+      const entry = id ? sourceIndex.byStemmioId.get(id) : null;
       if (!id || entry?.type !== "element" || entry.tagName !== element.localName
         || element.ownerDocument !== authorityRoot.ownerDocument) continue;
       registered.elements.add(element as HTMLElement);
-      registered.pagerootIds.set(element as HTMLElement, id);
+      registered.stemmioIds.set(element as HTMLElement, id);
       element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, id);
     }
   }, []);
@@ -1794,8 +1794,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // E2E-only: pause after the dynamic Candidate has failed, before the
     // static-preparing lock. The callback only continues scheduling; it does
     // not mark the failed Candidate ready.
-    if (window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true) {
-      const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__;
+    if (window.stemmioRuntime?.diagnostics?.e2eRuntimeCommitHooks === true) {
+      const releases = window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__;
       if (Array.isArray(releases)) {
         releases.push(run);
         return;
@@ -1904,7 +1904,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (pendingCandidate) {
       cancelRuntimeCandidateRef.current(pendingCandidate, "superseded");
     }
-    performance.mark("pageroot:canvas:load-start");
+    performance.mark("stemmio:canvas:load-start");
     const frameView = iframeRef.current?.contentWindow;
     const sharedScrollElement = containerRef.current?.closest<HTMLElement>(
       ".review-scroll-stage",
@@ -1981,7 +1981,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceIndexRef.current = sourceIndex;
       latestSourceProjectionRef.current = { source, sourceIndex };
       if (!sourceIndexIdentityReady(sourceIndex)) {
-        throw new Error("PAGEROOT_IDENTITY_INCOMPLETE");
+        throw new Error("STEMMIO_IDENTITY_INCOMPLETE");
       }
       setEditFeedback(null);
     } catch (cause) {
@@ -1999,7 +1999,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       onEditBlockedRef.current?.(message);
     }
-    performance.mark("pageroot:canvas:instrumented");
+    performance.mark("stemmio:canvas:instrumented");
     const verificationToken = token;
     const prepared = prepareCanvasFrameDocument(instrumentedSource, token, {
       mode: "static",
@@ -2211,7 +2211,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceIndex = buildSourceIndex(source);
       latestSourceProjectionRef.current = { source, sourceIndex };
       if (!sourceIndexIdentityReady(sourceIndex)) {
-        throw new Error("PAGEROOT_IDENTITY_INCOMPLETE");
+        throw new Error("STEMMIO_IDENTITY_INCOMPLETE");
       }
     } catch (cause) {
       latestSourceProjectionRef.current = { source, sourceIndex: null };
@@ -2284,7 +2284,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       if (
         prepared
-        && window.htmlAIRuntime?.diagnostics?.e2eStaticCandidateFailure === true
+        && window.stemmioRuntime?.diagnostics?.e2eStaticCandidateFailure === true
       ) {
         prepared = prepared.replaceAll(
           verificationToken,
@@ -2412,14 +2412,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           }
           const elements = new WeakSet<HTMLElement>();
           const runtimeShadowHosts = new WeakSet<HTMLElement>();
-          const claimedByPagerootId = new Map<string, HTMLElement>();
-          const pagerootIdByElement = new WeakMap<HTMLElement, string>();
-          const conflictedPagerootIds = new Set<string>();
+          const claimedByStemmioId = new Map<string, HTMLElement>();
+          const stemmioIdByElement = new WeakMap<HTMLElement, string>();
+          const conflictedStemmioIds = new Set<string>();
           candidate.sourceElements = {
             elementGeneration: candidateGeneration,
             executionId: runtimeFrame.grant.executionId,
             elements,
-            pagerootIds: pagerootIdByElement,
+            stemmioIds: stemmioIdByElement,
             runtimeShadowHosts,
           };
           const registerProved = (candidates: unknown) => {
@@ -2437,9 +2437,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               documentNode: activeIframe.contentDocument,
               sourceIndex,
               elements,
-              pagerootIds: pagerootIdByElement,
-              claimed: claimedByPagerootId,
-              conflicted: conflictedPagerootIds,
+              stemmioIds: stemmioIdByElement,
+              claimed: claimedByStemmioId,
+              conflicted: conflictedStemmioIds,
               markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
             });
             // Source registration runs before author scripts. Restore the visible
@@ -2902,10 +2902,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       adjustOuter: true,
     });
     if (
-      window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true
-      && window.__PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__ === true
+      window.stemmioRuntime?.diagnostics?.e2eRuntimeCommitHooks === true
+      && window.__STEMMIO_E2E_FAIL_NEXT_RUNTIME_COMMIT__ === true
     ) {
-      window.__PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__ = false;
+      window.__STEMMIO_E2E_FAIL_NEXT_RUNTIME_COMMIT__ = false;
       const marker = promotedDocument.head.querySelector<HTMLMetaElement>(
         `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
       );
@@ -2993,8 +2993,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         });
         requestAnimationFrame(() => {
           if (!isCurrent()) return;
-          if (window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true) {
-            const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__;
+          if (window.stemmioRuntime?.diagnostics?.e2eRuntimeCommitHooks === true) {
+            const releases = window.__STEMMIO_E2E_RUNTIME_COMMIT_RELEASES__;
             if (Array.isArray(releases)) {
               releases.push(commitWhenUnblocked);
               return;
@@ -3028,7 +3028,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // commit state into the next static Candidate's baseline.
       candidate.handoffContext.presentationAnchor = {
         ...rememberedAnchor,
-        selectedStableId: isValidPagerootElementId(
+        selectedStableId: isValidStemmioElementId(
           selectedSourceSelectionRef.current?.elementId,
         )
           ? selectedSourceSelectionRef.current?.elementId ?? null
@@ -3460,7 +3460,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       if (!targetedRuntimeSync && previousSurface?.some((entry, index) => (
         liveNodes[index].getAttribute(SOURCE_ELEMENT_ATTRIBUTE)
-          !== previousElements[index]?.pagerootId
+          !== previousElements[index]?.stemmioId
       ))) return failPreviewSync("previous-surface-order");
       const detachedSurface = alignPreviewSourceSurface(result.sourceIndex, detachedNodes);
       if (
@@ -3482,7 +3482,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || nextTarget?.type !== "element"
       ) return failPreviewSync("target-resolution");
       const liveTargetCandidates = liveNodes.filter((node) => (
-        node.getAttribute(SOURCE_ELEMENT_ATTRIBUTE) === previousTarget.pagerootId
+        node.getAttribute(SOURCE_ELEMENT_ATTRIBUTE) === previousTarget.stemmioId
       ));
       const liveTarget = targetedRuntimeSync
         ? (() => {
@@ -3501,7 +3501,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           })()
         : liveTargetCandidates[0];
       const detachedTarget = detachedNodes.find((node) => (
-        node.getAttribute(SOURCE_ELEMENT_ATTRIBUTE) === nextTarget.pagerootId
+        node.getAttribute(SOURCE_ELEMENT_ATTRIBUTE) === nextTarget.stemmioId
       ));
       if (!(liveTarget instanceof LiveHTMLElement)) return failPreviewSync("live-target");
       if (!detachedTarget) return failPreviewSync("detached-target");
@@ -3532,32 +3532,32 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           || sourceBackedSiblings.length !== liveParent.children.length
           || !sourceBackedSiblings.includes(liveTarget)
         ) return failPreviewSync("reorder-sibling-surface");
-        const desiredPagerootIds: Array<string | null> = nextParent.childElementIds.map(
+        const desiredStemmioIds: Array<string | null> = nextParent.childElementIds.map(
           (nodeId: string) => {
             const element = result.sourceIndex.byNodeId.get(nodeId);
-            return element?.type === "element" ? element.pagerootId : null;
+            return element?.type === "element" ? element.stemmioId : null;
           },
         );
-        if (desiredPagerootIds.some((pagerootId: string | null) => !pagerootId)) {
+        if (desiredStemmioIds.some((stemmioId: string | null) => !stemmioId)) {
           return failPreviewSync("reorder-next-identity");
         }
-        const liveByPagerootId = new Map<string, Element>();
+        const liveByStemmioId = new Map<string, Element>();
         const sourceProof = targetedRuntimeSync ? currentRuntimeSourceProof() : null;
         for (const sibling of sourceBackedSiblings) {
-          const pagerootId = sibling.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+          const stemmioId = sibling.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
           if (
-            !pagerootId
-            || liveByPagerootId.has(pagerootId)
+            !stemmioId
+            || liveByStemmioId.has(stemmioId)
             || (targetedRuntimeSync && (
               !(sibling instanceof LiveHTMLElement)
               || sourceProof?.(sibling) !== true
             ))
           ) return failPreviewSync("reorder-live-identity");
-          liveByPagerootId.set(pagerootId, sibling);
+          liveByStemmioId.set(stemmioId, sibling);
         }
-        const desiredSiblings: Array<Element | null> = desiredPagerootIds.map(
-          (pagerootId: string | null) => (
-            pagerootId ? liveByPagerootId.get(pagerootId) ?? null : null
+        const desiredSiblings: Array<Element | null> = desiredStemmioIds.map(
+          (stemmioId: string | null) => (
+            stemmioId ? liveByStemmioId.get(stemmioId) ?? null : null
           ),
         );
         if (desiredSiblings.some((sibling: Element | null) => !sibling)) {
@@ -3572,11 +3572,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             liveParent.insertBefore(desiredSibling, currentSibling ?? null);
           }
         }
-        const finalPagerootIds = Array.from(liveParent.children)
+        const finalStemmioIds = Array.from(liveParent.children)
           .filter((element) => element.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE))
           .map((element) => element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE));
-        if (finalPagerootIds.some((pagerootId, index) => (
-          pagerootId !== desiredPagerootIds[index]
+        if (finalStemmioIds.some((stemmioId, index) => (
+          stemmioId !== desiredStemmioIds[index]
         ))) return failPreviewSync("reorder-final-order");
       } else if (originalMutation.kind === "style") {
         if (isTextRangeStyle) {
@@ -3599,12 +3599,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               element.tagName === "span"
               && element.startTagRange.startOffset === shiftedStartOffset
             ));
-            return insertedSpan ? [insertedSpan.pagerootId] : [];
+            return insertedSpan ? [insertedSpan.stemmioId] : [];
           });
-          selectedRangeElements = insertedSpanNodeIds.flatMap((pagerootId) => {
-            if (!pagerootId) return [];
+          selectedRangeElements = insertedSpanNodeIds.flatMap((stemmioId) => {
+            if (!stemmioId) return [];
             const selectedSpan = liveTarget.querySelector<HTMLElement>(
-              `[${SOURCE_ELEMENT_ATTRIBUTE}="${pagerootId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`,
+              `[${SOURCE_ELEMENT_ATTRIBUTE}="${stemmioId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`,
             );
             return selectedSpan ? [selectedSpan] : [];
           });
@@ -3616,11 +3616,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           )?.nodeId;
           if (openingPatches.length === 0 && coalescedElementId) {
             const previousStyleElementIndex = previousElements.findIndex(
-              (element) => element.pagerootId === coalescedElementId
+              (element) => element.stemmioId === coalescedElementId
                 || element.nodeId === coalescedElementId,
             );
             const nextStyleElementId = previousStyleElementIndex >= 0
-              ? nextElements[previousStyleElementIndex]?.pagerootId
+              ? nextElements[previousStyleElementIndex]?.stemmioId
               : null;
             if (!nextStyleElementId) return false;
             const selectedStyleElement = liveTarget.querySelector<HTMLElement>(
@@ -3671,7 +3671,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
         const trustedImported = new Set(trustedImportedRuntimeElements);
         const registered = runtimeSourceElementsRef.current;
-        stableUpdates.forEach(({ element: stableElement, pagerootId }) => {
+        stableUpdates.forEach(({ element: stableElement, stemmioId }) => {
           if (
             !registered
             || registered.elementGeneration !== currentRuntime?.elementGeneration
@@ -3683,9 +3683,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ) return;
           stableElement.setAttribute(
             EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-            pagerootId,
+            stemmioId,
           );
-          registered.pagerootIds.set(stableElement, pagerootId);
+          registered.stemmioIds.set(stableElement, stemmioId);
           registered.elements.add(stableElement);
         });
       }
@@ -3807,12 +3807,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         nextIndex,
       );
       const registered = runtimeSourceElementsRef.current;
-      stableUpdates.forEach(({ element, pagerootId }) => {
+      stableUpdates.forEach(({ element, stemmioId }) => {
         if (
           registered?.elements.has(element)
-          && registered.pagerootIds.get(element) === pagerootId
+          && registered.stemmioIds.get(element) === stemmioId
         ) {
-          element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, pagerootId);
+          element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, stemmioId);
         }
       });
       stableIdsRebound = true;
@@ -4013,7 +4013,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           semanticOperation.type !== "setStyle"
           && semanticOperation.type !== "setText"
         ) return semanticOperation;
-        const nextTarget = result.sourceIndex.byPagerootId.get(
+        const nextTarget = result.sourceIndex.byStemmioId.get(
           semanticOperation.target.elementId,
         );
         const canonicalContentHtml = semanticOperation.type === "setText"
@@ -4029,15 +4029,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ...(canonicalContentHtml !== null ? { contentHtml: canonicalContentHtml } : {}),
           ...(semanticOperation.type === "setStyle"
             && semanticOperation.range
-            && !semanticOperation.createdPagerootIds
+            && !semanticOperation.createdStemmioIds
             && semanticResult.allocatedElementIds?.length
-            ? { createdPagerootIds: [...semanticResult.allocatedElementIds] }
+            ? { createdStemmioIds: [...semanticResult.allocatedElementIds] }
             : {}),
           ...(semanticOperation.type === "setText"
             && semanticOperation.contentHtml !== undefined
-            && !semanticOperation.createdPagerootIds
+            && !semanticOperation.createdStemmioIds
             && semanticResult.allocatedElementIds?.length
-            ? { createdPagerootIds: [...semanticResult.allocatedElementIds] }
+            ? { createdStemmioIds: [...semanticResult.allocatedElementIds] }
             : {}),
         } as SemanticOperation;
       })();
@@ -4122,7 +4122,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           sourceRevision: result.sourceSha256,
         };
         activeNativeEdit.rootTargetRef = refreshedRootRef;
-        const nextLiveElementId = refreshedIsland.element.pagerootId
+        const nextLiveElementId = refreshedIsland.element.stemmioId
           ?? activeNativeEdit.liveElementId;
         activeNativeEdit.liveElementId = typeof nextLiveElementId === "string"
           ? nextLiveElementId
@@ -4133,11 +4133,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         onSelectRef.current?.(appliedMutation.target);
         const nextSourceInnerHtml = refreshedIsland.innerHtml;
         const failNextNativeRebase = Boolean(
-          window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks
-          && window.__PAGEROOT_E2E_FAIL_NEXT_NATIVE_REBASE__ === true
+          window.stemmioRuntime?.diagnostics?.e2eRuntimeCommitHooks
+          && window.__STEMMIO_E2E_FAIL_NEXT_NATIVE_REBASE__ === true
         );
         if (failNextNativeRebase) {
-          window.__PAGEROOT_E2E_FAIL_NEXT_NATIVE_REBASE__ = false;
+          window.__STEMMIO_E2E_FAIL_NEXT_NATIVE_REBASE__ = false;
         }
         const rebased = failNextNativeRebase
           ? false
@@ -4190,10 +4190,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ) return false;
         const documentNode = iframeRef.current.contentDocument;
         if (
-          window.htmlAIRuntime?.diagnostics?.e2eRuntimeCommitHooks === true
-          && window.__PAGEROOT_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ === true
+          window.stemmioRuntime?.diagnostics?.e2eRuntimeCommitHooks === true
+          && window.__STEMMIO_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ === true
         ) {
-          window.__PAGEROOT_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = false;
+          window.__STEMMIO_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = false;
           throw new Error("结构原地投影失败：injected-projection-failure");
         }
         const executed = executeVerifiedStructuralProjection({
@@ -5196,7 +5196,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const validStableAnchor = Boolean(
       commentAnchor
       && commentAnchor.resolution === "exact"
-      && isValidPagerootElementId(commentAnchor.elementId),
+      && isValidStemmioElementId(commentAnchor.elementId),
     );
     const sourceIndex = sourceIndexRef.current;
     let resolvedAnchorElement: HTMLElement | null = null;
@@ -5208,7 +5208,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           { surface: "comments" },
         );
         const sourceElementIdValue = resolved.target?.type === "element"
-          ? resolved.target.pagerootId
+          ? resolved.target.stemmioId
           : commentAnchor.elementId;
         if (sourceElementIdValue) {
           resolvedAnchorElement = iframeRef.current?.contentDocument
@@ -5327,7 +5327,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         "这段可见内容不是当前源码中的唯一静态文字，无法安全进入原位编辑。",
       );
       const selectedSource = sourceElementId(selectedElement)
-        ? sourceIndex.byPagerootId.get(sourceElementId(selectedElement)!)
+        ? sourceIndex.byStemmioId.get(sourceElementId(selectedElement)!)
         : null;
       if (selectedSource?.type === "element") {
         try {
@@ -5815,7 +5815,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return Boolean(applySourceCommand({
           type: "direct-semantic-operation",
           operation: siblingReorderOperation(sourceIndex, {
-            elementId: sourceElement.pagerootId,
+            elementId: sourceElement.stemmioId,
             toIndex: nextIndex,
             baseRevision: semanticRevisionRef.current,
           }),
@@ -6105,7 +6105,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           onSelectRef.current?.(unresolved);
           return unresolved;
         }
-        const elementId = String(resolution.target.pagerootId ?? "");
+        const elementId = String(resolution.target.stemmioId ?? "");
         const element = elementId
           ? uniqueSourceElement(documentNode, elementId)
           : null;
@@ -6315,7 +6315,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     containerRef.current?.setAttribute(
       "data-native-fence-target",
       `${liveElementId ?? "none"}:${
-        liveElementId && sourceIndexRef.current?.byPagerootId.has(liveElementId)
+        liveElementId && sourceIndexRef.current?.byStemmioId.has(liveElementId)
           ? "mapped"
           : "missing"
       }:${currentTarget.resolution}`,
@@ -6586,9 +6586,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (
         previousTarget?.type !== "element"
         || nextTarget?.type !== "element"
-        || previousTarget.pagerootId !== nextTarget.pagerootId
+        || previousTarget.stemmioId !== nextTarget.stemmioId
         || previousTarget.tagName !== nextTarget.tagName
-        || sourceElementId(rootElement) !== previousTarget.pagerootId
+        || sourceElementId(rootElement) !== previousTarget.stemmioId
       ) return false;
       const attributesWithoutStyle = (element: SourceElementValue) => JSON.stringify(
         element.attributes
@@ -6604,7 +6604,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ) return false;
       const canonicalTarget = canonicalNativeHostPreview(
         rootElement,
-        String(nextTarget.pagerootId || nextTarget.nodeId || ""),
+        String(nextTarget.stemmioId || nextTarget.nodeId || ""),
         nextIndex,
       );
       if (!canonicalTarget) return false;
@@ -7827,7 +7827,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           const compositionWasActive = activeNativeEdit.session.isComposing();
           if (activeNativeEdit.session.consumeCompositionEscape()) {
             // This listener runs in document capture before the authored host.
-            // Let a live IME keep the native default, but stop PageRoot from
+            // Let a live IME keep the native default, but stop Stemmio from
             // interpreting either the live or trailing Escape as session exit.
             if (!compositionWasActive) event.preventDefault();
             event.stopPropagation();
@@ -8164,7 +8164,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           );
           containerRef.current?.setAttribute(
             "data-runtime-bootstrap-count",
-            String(documentNode.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length),
+            String(documentNode.querySelectorAll("[data-stemmio-edit-runtime-bootstrap]").length),
           );
           containerRef.current?.setAttribute("data-runtime-handoff", "active");
           updateOverlayPosition({ allowRuntimeHandoff: true });
@@ -8312,7 +8312,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         connectedRuntimeFrame.settled = true;
         containerRef.current?.setAttribute(
           "data-runtime-bootstrap-count",
-          String(documentNode.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length),
+          String(documentNode.querySelectorAll("[data-stemmio-edit-runtime-bootstrap]").length),
         );
       }
       if (pendingSelection && !lockedRef.current) {
@@ -8406,7 +8406,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ) {
         // Static documents can connect after parsing. Runtime documents wait
         // for iframe load so native script ordering and deferred work settle
-        // according to browser semantics rather than a PageRoot paint probe.
+        // according to browser semantics rather than a Stemmio paint probe.
         if (connectFrame(iframe, connectedFrameGeneration)) {
           return;
         }
@@ -8954,7 +8954,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const elementCopyAvailability = elementCopyAssessment.availability;
   useEffect(() => {
     const root = containerRef.current;
-    if (!root || window.htmlAIRuntime?.diagnostics?.e2eCanvasCapabilityProbe !== true) return;
+    if (!root || window.stemmioRuntime?.diagnostics?.e2eCanvasCapabilityProbe !== true) return;
     const probe = () => {
       copyCapabilityProbeSequenceRef.current += 1;
       const assessment: ElementCopyAssessment = elementCopyAssessmentForTarget({
@@ -8981,7 +8981,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       root.setAttribute(
         "data-e2e-copy-live-target-id",
-        selectedElementRef.current?.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) || "",
+        selectedElementRef.current?.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE) || "",
       );
       root.setAttribute(
         "data-e2e-copy-native-edit-ended",
@@ -8989,19 +8989,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
     };
     (root as HTMLElement & {
-      __PAGEROOT_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
-    }).__PAGEROOT_E2E_STRUCTURE_COMMANDS__ = {
+      __STEMMIO_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
+    }).__STEMMIO_E2E_STRUCTURE_COMMANDS__ = {
       insertElement: (options) => canvasCommandsRef.current.insertElement(options),
       moveSelectedTo: (options) => canvasCommandsRef.current.moveSelectedTo(options),
       duplicateSelected: () => canvasCommandsRef.current.duplicateSelected(),
       deleteSelected: () => canvasCommandsRef.current.deleteSelected(),
     };
-    root.addEventListener("pageroot:e2e-copy-capability-probe", probe);
+    root.addEventListener("stemmio:e2e-copy-capability-probe", probe);
     return () => {
       delete (root as HTMLElement & {
-        __PAGEROOT_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
-      }).__PAGEROOT_E2E_STRUCTURE_COMMANDS__;
-      root.removeEventListener("pageroot:e2e-copy-capability-probe", probe);
+        __STEMMIO_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
+      }).__STEMMIO_E2E_STRUCTURE_COMMANDS__;
+      root.removeEventListener("stemmio:e2e-copy-capability-probe", probe);
     };
   }, [currentRuntimeShadowProof, currentRuntimeSourceProof]);
   const selectionCapability = selection && !interactionLocked

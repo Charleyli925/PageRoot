@@ -6,10 +6,10 @@ export type WorkspacePreferences = {
   restoreTabsOnLaunch: boolean;
   reviewChangeContextVisibility: number;
   reviewCommentContextVisibility: number;
-  defaultAgentProviderId: "pageroot" | "qoder" | "codex";
-  documentAgentSelections: Readonly<Record<string, "pageroot" | "qoder" | "codex">>;
+  defaultAgentProviderId: "stemmio" | "qoder" | "codex";
+  documentAgentSelections: Readonly<Record<string, "stemmio" | "qoder" | "codex">>;
   agentConfigurations: Readonly<Record<string, Readonly<{ modelId: string | null; reasoning: string | null }>>>;
-  disabledAgentProviderIds: ReadonlyArray<"pageroot" | "qoder" | "codex">;
+  disabledAgentProviderIds: ReadonlyArray<"stemmio" | "qoder" | "codex">;
 };
 
 export type UiPreferencesSnapshot = {
@@ -29,6 +29,6 @@ export type DesktopUiPreferencesApi = {
 
 declare global {
   interface Window {
-    htmlAIUiPreferences?: DesktopUiPreferencesApi;
+    stemmioUiPreferences?: DesktopUiPreferencesApi;
   }
 }

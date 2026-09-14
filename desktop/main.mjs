@@ -38,6 +38,7 @@ import {
   readHtmlFile,
 } from "./project-files.mjs";
 import { WELCOME_LOGO_RELATIVE_PATH } from "./welcome-project-content.mjs";
+import { PROJECT_CONTROL_DIRECTORY_NAME } from "./runtime-project-storage-contract.mjs";
 import {
   exportHtmlCopyToFile,
   createExportRevealAccess,
@@ -173,11 +174,11 @@ registerPreviewProtocolScheme(protocol);
 registerEditRuntimeProtocolScheme(protocol);
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
-const USER_NOTICE_FILE_NAME = "PageRoot 用户声明与免责声明.txt";
+const USER_NOTICE_FILE_NAME = "源页 用户声明与免责声明.txt";
 const e2eUserDataPath = (() => {
-  if (process.env.PAGEROOT_E2E !== "1") return null;
-  const candidate = process.env.PAGEROOT_E2E_USER_DATA_DIR;
-  if (!candidate) throw new Error("PAGEROOT_E2E_USER_DATA_DIR is required in E2E mode.");
+  if (process.env.STEMMIO_E2E !== "1") return null;
+  const candidate = process.env.STEMMIO_E2E_USER_DATA_DIR;
+  if (!candidate) throw new Error("STEMMIO_E2E_USER_DATA_DIR is required in E2E mode.");
   const resolved = path.resolve(candidate);
   const temporaryRoot = path.resolve(tmpdir());
   const relative = path.relative(temporaryRoot, resolved);
@@ -185,14 +186,14 @@ const e2eUserDataPath = (() => {
     relative === ""
     || relative.startsWith("..")
     || path.isAbsolute(relative)
-    || !path.basename(resolved).startsWith("pageroot-native-e2e-")
+    || !path.basename(resolved).startsWith("stemmio-native-e2e-")
   ) {
-    throw new Error("PageRoot E2E userData must be an isolated pageroot-native-e2e-* directory under the system temporary directory.");
+    throw new Error("Stemmio E2E userData must be an isolated stemmio-native-e2e-* directory under the system temporary directory.");
   }
   return resolved;
 })();
 const e2eWindowForeground = Boolean(e2eUserDataPath)
-  && process.env.PAGEROOT_E2E_FOREGROUND === "1";
+  && process.env.STEMMIO_E2E_FOREGROUND === "1";
 const e2eWindowRunsInBackground = Boolean(e2eUserDataPath)
   && !e2eWindowForeground;
 // 前台调试只改变测试窗口的可见性，不应允许自动化测试弹出任何
@@ -201,8 +202,8 @@ const e2eNativeDialogsSuppressed = Boolean(e2eUserDataPath);
 const e2eEditRuntimePrepareGate = {
   held: null,
 };
-if (process.env.PAGEROOT_E2E === "1") {
-  globalThis.__pagerootE2eHoldEditRuntimePrepare = () => {
+if (process.env.STEMMIO_E2E === "1") {
+  globalThis.__stemmioE2eHoldEditRuntimePrepare = () => {
     if (e2eEditRuntimePrepareGate.held) return;
     let release;
     const barrier = new Promise((resolve) => {
@@ -210,21 +211,21 @@ if (process.env.PAGEROOT_E2E === "1") {
     });
     e2eEditRuntimePrepareGate.held = { barrier, release };
   };
-  globalThis.__pagerootE2eReleaseEditRuntimePrepare = () => {
+  globalThis.__stemmioE2eReleaseEditRuntimePrepare = () => {
     e2eEditRuntimePrepareGate.held?.release();
     e2eEditRuntimePrepareGate.held = null;
   };
 }
 const runtimeChannel = resolveRuntimeChannel({
-  environment: process.env.PAGEROOT_E2E === "1"
-    ? { ...process.env, PAGEROOT_RUNTIME_CHANNEL: "e2e" }
+  environment: process.env.STEMMIO_E2E === "1"
+    ? { ...process.env, STEMMIO_RUNTIME_CHANNEL: "e2e" }
     : process.env,
   resourcesPath: process.resourcesPath || path.resolve(directory, "..", "resources"),
   defaultApp: process.defaultApp === true,
   // A packaged app must obey the marker embedded by its build. E2E is the
   // sole intentional packaged override so its disposable root cannot touch a
   // signed build's real user data.
-  allowEnvironmentOverride: process.env.PAGEROOT_E2E === "1" || process.defaultApp === true,
+  allowEnvironmentOverride: process.env.STEMMIO_E2E === "1" || process.defaultApp === true,
 });
 const runtimeEnvironment = assertRuntimeEnvironment(createRuntimeEnvironment({
   channel: runtimeChannel,
@@ -305,19 +306,19 @@ const PROJECT_CHANNELS = Object.freeze({
   sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const APP_CHANNELS = Object.freeze({
-  prepareClose: "html-app:prepare-close",
-  closeResult: "html-app:close-result",
-  closeAborted: "html-app:close-aborted",
-  aboutRequested: "html-app:about-requested",
-  workspaceUnavailable: "html-app:workspace-unavailable",
-  workspaceRecoveryReady: "html-app:workspace-recovery-ready",
-  externalOpenRequested: "html-app:external-open-requested",
-  externalOpenReady: "html-app:external-open-ready",
-  externalOpenFailed: "html-app:external-open-failed",
-  externalOpenFailedReady: "html-app:external-open-failed-ready",
-  bridgeReady: "html-app:bridge-ready",
-  relaunch: "html-app:relaunch",
-  openUserNotice: "html-app:open-user-notice",
+  prepareClose: "stemmio-app:prepare-close",
+  closeResult: "stemmio-app:close-result",
+  closeAborted: "stemmio-app:close-aborted",
+  aboutRequested: "stemmio-app:about-requested",
+  workspaceUnavailable: "stemmio-app:workspace-unavailable",
+  workspaceRecoveryReady: "stemmio-app:workspace-recovery-ready",
+  externalOpenRequested: "stemmio-app:external-open-requested",
+  externalOpenReady: "stemmio-app:external-open-ready",
+  externalOpenFailed: "stemmio-app:external-open-failed",
+  externalOpenFailedReady: "stemmio-app:external-open-failed-ready",
+  bridgeReady: "stemmio-app:bridge-ready",
+  relaunch: "stemmio-app:relaunch",
+  openUserNotice: "stemmio-app:open-user-notice",
 });
 const WORKBENCH_TAB_CHANNELS = Object.freeze({
   get: "html-workbench-tabs:get",
@@ -649,11 +650,11 @@ async function initializeUsageTelemetry() {
     ? environmentConfig
     : packagedConfig || environmentConfig;
   const runtimeEnabled = (
-    process.env.PAGEROOT_TELEMETRY_DISABLED !== "1"
-    && process.env.PAGEROOT_E2E !== "1"
+    process.env.STEMMIO_TELEMETRY_DISABLED !== "1"
+    && process.env.STEMMIO_E2E !== "1"
     && (
       app.isPackaged
-      || process.env.PAGEROOT_TELEMETRY_DEV === "1"
+      || process.env.STEMMIO_TELEMETRY_DEV === "1"
     )
   );
   usageTelemetry = createUsageTelemetry({
@@ -694,11 +695,11 @@ process.on("uncaughtExceptionMonitor", (error) => {
 
 function reportSuppressedNativeDialog(title, message) {
   console.error(
-    `[PageRoot E2E] 后台测试模式拦截原生弹窗：${title} — ${message}`,
+    `[Stemmio E2E] 后台测试模式拦截原生弹窗：${title} — ${message}`,
   );
 }
 
-function requestAboutPageRoot() {
+function requestAboutStemmio() {
   if (
     !rendererHasLoaded
     || !mainWindow
@@ -727,7 +728,7 @@ function installApplicationMenu() {
       submenu: [
         {
           label: "关于源页",
-          click: requestAboutPageRoot,
+          click: requestAboutStemmio,
         },
         { type: "separator" },
         { role: "services" },
@@ -1503,7 +1504,7 @@ async function fetchBridgePost(pathname, body, {
     cache: "no-store",
     headers: {
       "Content-Type": "application/json",
-      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+      "X-Stemmio-Bridge-Token": bridgeAuthToken,
     },
     body: JSON.stringify(body),
   });
@@ -1723,7 +1724,7 @@ async function acceptExternalFileOpen(payload) {
   if (!request) {
     throw new ProjectFileError(
       "EXTERNAL_OPEN_REQUEST_EXPIRED",
-      "这次外部打开请求已经失效，请从 QoderWork 再点一次 PageRoot。",
+      "这次外部打开请求已经失效，请从 QoderWork 再点一次 Stemmio。",
     );
   }
   if (request.requestId !== payload.requestId) {
@@ -1781,7 +1782,7 @@ async function ensureBridgeProjectRegistered(project) {
     cache: "no-store",
     headers: {
       "Content-Type": "application/json",
-      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+      "X-Stemmio-Bridge-Token": bridgeAuthToken,
     },
     body: JSON.stringify({
       sourcePath: project.sourcePath,
@@ -2393,14 +2394,14 @@ async function openProjectsRoot() {
   if (!information?.isDirectory() || information.isSymbolicLink()) {
     throw new ProjectFileError(
       "PROJECTS_ROOT_UNAVAILABLE",
-      "PageRoot 项目目录暂时无法打开，请稍后重试。",
+      "Stemmio 项目目录暂时无法打开，请稍后重试。",
     );
   }
   const openError = await shell.openPath(rootPath);
   if (openError) {
     throw new ProjectFileError(
       "PROJECTS_ROOT_OPEN_FAILED",
-      "PageRoot 项目目录暂时无法打开，请稍后重试。",
+      "Stemmio 项目目录暂时无法打开，请稍后重试。",
       { reason: openError },
     );
   }
@@ -2432,7 +2433,7 @@ const createPreviewSession = createPreviewSessionOperation({
 });
 
 async function prepareEditAuthorRuntime(payload) {
-  if (process.env.PAGEROOT_E2E === "1" && e2eEditRuntimePrepareGate.held) {
+  if (process.env.STEMMIO_E2E === "1" && e2eEditRuntimePrepareGate.held) {
     await e2eEditRuntimePrepareGate.held.barrier;
   }
   const activeSourcePath = await currentActivePath();
@@ -2545,7 +2546,7 @@ async function rebindRenamedWorkspace(sourcePath, expectedSha256) {
   const response = await net.fetch(endpoint, {
     cache: "no-store",
     headers: {
-      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+      "X-Stemmio-Bridge-Token": bridgeAuthToken,
     },
   });
   const workspace = await response.json().catch(() => null);
@@ -2918,7 +2919,7 @@ async function reconcileActiveManagedSourceOperation(payload) {
   ) {
     throw new ProjectFileError(
       "MANAGED_SOURCE_IDENTITY_MISMATCH",
-      "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+      "当前工作文件身份无法核对，Stemmio 没有切换路径。",
     );
   }
   const [previousSourcePath, nextSourcePath] = await Promise.all([
@@ -2926,8 +2927,8 @@ async function reconcileActiveManagedSourceOperation(payload) {
     existingPathIdentity(openTarget.exactSourcePath),
   ]);
   if (
-    process.env.PAGEROOT_E2E === "1"
-    && process.env.PAGEROOT_E2E_RECONCILE_REPLACE_BEFORE_READ === "1"
+    process.env.STEMMIO_E2E === "1"
+    && process.env.STEMMIO_E2E_RECONCILE_REPLACE_BEFORE_READ === "1"
     && requested.operationId === E2E_RECONCILE_HASH_RACE_OPERATION_ID
   ) {
     // E2E-only injection: model an external editor replacing the Working Copy
@@ -2980,8 +2981,8 @@ async function activateManagedWorkingCopy(payload) {
 async function activateManagedWorkingCopyOperation(payload) {
   const requested = assertManagedWorkingCopyActivationPayload(payload);
   if (
-    process.env.PAGEROOT_E2E === "1"
-    && process.env.PAGEROOT_E2E_GENERATED_VERSION_OPEN_FAILURE === "1"
+    process.env.STEMMIO_E2E === "1"
+    && process.env.STEMMIO_E2E_GENERATED_VERSION_OPEN_FAILURE === "1"
     && requested.versionId !== "ver_0001"
   ) {
     throw new ProjectFileError(
@@ -3062,7 +3063,7 @@ async function activateManagedWorkingCopyOperation(payload) {
   endpoint.searchParams.set("sourcePath", nextSourcePath);
   const response = await net.fetch(endpoint, {
     cache: "no-store",
-    headers: { "X-HTML-AI-Bridge-Token": bridgeAuthToken },
+    headers: { "X-Stemmio-Bridge-Token": bridgeAuthToken },
   });
   const workspace = await response.json().catch(() => null);
   const target = workspace?.openTarget;
@@ -3164,8 +3165,8 @@ async function activateGeneratedVersionOperation(payload) {
     throw new TypeError("新版本文件身份无效。");
   }
   if (
-    process.env.PAGEROOT_E2E === "1"
-    && process.env.PAGEROOT_E2E_GENERATED_VERSION_OPEN_FAILURE === "1"
+    process.env.STEMMIO_E2E === "1"
+    && process.env.STEMMIO_E2E_GENERATED_VERSION_OPEN_FAILURE === "1"
   ) {
     throw new ProjectFileError(
       "E2E_GENERATED_VERSION_OPEN_FAILED",
@@ -3231,7 +3232,7 @@ async function activateGeneratedVersionOperation(payload) {
   const sourceResponse = await net.fetch(sourceEndpoint, {
     cache: "no-store",
     headers: {
-      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+      "X-Stemmio-Bridge-Token": bridgeAuthToken,
     },
   });
   const authoritativeSource = await sourceResponse.json().catch(() => null);
@@ -3346,7 +3347,7 @@ async function revealVersionFile(payload) {
   const response = await net.fetch(endpoint, {
     cache: "no-store",
     headers: {
-      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+      "X-Stemmio-Bridge-Token": bridgeAuthToken,
     },
   });
   const versionRecord = await response.json().catch(() => null);
@@ -3393,7 +3394,7 @@ async function revealVersionFile(payload) {
       || relativeWorkingCopyPath.startsWith(`..${path.sep}`)
       || relativeWorkingCopyPath === ".."
       || path.isAbsolute(relativeWorkingCopyPath)
-      || relativeWorkingCopyPath.split(path.sep).includes(".pageroot")
+      || relativeWorkingCopyPath.split(path.sep).includes(PROJECT_CONTROL_DIRECTORY_NAME)
       || !HTML_EXTENSIONS.has(path.extname(resolvedWorkingCopyPath).toLowerCase())
     ) {
       throw new ProjectFileError(
@@ -3493,7 +3494,7 @@ async function revealAiTask(payload) {
   const response = await net.fetch(endpoint, {
     cache: "no-store",
     headers: {
-      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+      "X-Stemmio-Bridge-Token": bridgeAuthToken,
     },
   });
   const taskRecord = await response.json().catch(() => null);
@@ -3534,7 +3535,7 @@ async function revealAiTask(payload) {
     || relativeTaskPath !== expectedRelativePath
     || !taskRecord.aiTaskRelativePath.startsWith("AI任务/")
     || taskRecord.aiTaskRelativePath.split("/").length !== 2
-    || taskRecord.aiTaskRelativePath.includes("/.pageroot/")
+    || taskRecord.aiTaskRelativePath.includes("/.stemmio/")
   ) {
     throw new ProjectFileError(
       "UNSAFE_AI_TASK_PATH",
@@ -3726,7 +3727,7 @@ async function fetchBridgeJson(pathname) {
   }
   const response = await net.fetch(`http://127.0.0.1:${bridgePort}${pathname}`, {
     cache: "no-store",
-    headers: { "X-HTML-AI-Bridge-Token": bridgeAuthToken },
+    headers: { "X-Stemmio-Bridge-Token": bridgeAuthToken },
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload || payload.ok !== true) {
@@ -3750,7 +3751,7 @@ async function fetchBridgeCommand(pathname, body) {
     cache: "no-store",
     headers: {
       "Content-Type": "application/json",
-      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+      "X-Stemmio-Bridge-Token": bridgeAuthToken,
     },
     body: JSON.stringify(body),
   });
@@ -3769,14 +3770,14 @@ async function fetchBridgeCommand(pathname, body) {
 }
 
 async function restoreRememberedAgentCredential() {
-  if (process.env.PAGEROOT_E2E === "1") {
+  if (process.env.STEMMIO_E2E === "1") {
     return Object.freeze({ ok: true, restored: false });
   }
   try {
     const preferences = await readUiPreferences({
       userDataPath: app.getPath("userData"),
     });
-    if (preferences.workspace.disabledAgentProviderIds.includes("pageroot")) {
+    if (preferences.workspace.disabledAgentProviderIds.includes("stemmio")) {
       return Object.freeze({ ok: true, restored: false });
     }
     const loaded = typeof agentSessionCredentialStore.loadResult === "function"
@@ -4050,7 +4051,7 @@ function ensureApplicationUpdateController() {
       runtimeChannel === "stable"
       && app.isPackaged
       && process.platform === "darwin"
-      && process.env.PAGEROOT_E2E !== "1"
+      && process.env.STEMMIO_E2E !== "1"
     ),
     onStatus: publishApplicationUpdateStatus,
   });
@@ -4709,20 +4710,20 @@ async function launchBridge() {
   const child = utilityProcess.fork(bridgeScriptPath(), [], {
     env: {
       ...process.env,
-      HTML_AI_ALLOW_FILE_ORIGIN: "1",
-      HTML_AI_BRIDGE_AUTH_TOKEN: bridgeAuthToken,
-      HTML_AI_BRIDGE_PORT: String(port),
-      HTML_AI_DEVICE_ID: device.deviceId,
-      HTML_AI_RUNTIME_CHANNEL: runtimeChannel,
-      HTML_AI_USER_DATA_ROOT: runtimeEnvironment.userDataPath,
-      HTML_AI_SESSION_DATA_ROOT: runtimeEnvironment.sessionDataPath,
-      HTML_AI_PROJECT_FILES_ROOT: runtimeEnvironment.projectFilesRoot,
-      HTML_AI_WORKSPACE: workspace,
-      HTML_AI_AGENTS_ROOT: runtimeEnvironment.agentsRoot,
-      HTML_AI_RECOVERY_JOURNALS_ROOT: runtimeEnvironment.recoveryJournalPath,
-      PAGEROOT_LOGS_ROOT: runtimeEnvironment.logsPath,
+      STEMMIO_ALLOW_FILE_ORIGIN: "1",
+      STEMMIO_BRIDGE_AUTH_TOKEN: bridgeAuthToken,
+      STEMMIO_BRIDGE_PORT: String(port),
+      STEMMIO_DEVICE_ID: device.deviceId,
+      STEMMIO_RUNTIME_CHANNEL: runtimeChannel,
+      STEMMIO_USER_DATA_ROOT: runtimeEnvironment.userDataPath,
+      STEMMIO_SESSION_DATA_ROOT: runtimeEnvironment.sessionDataPath,
+      STEMMIO_PROJECT_FILES_ROOT: runtimeEnvironment.projectFilesRoot,
+      STEMMIO_WORKSPACE: workspace,
+      STEMMIO_AGENTS_ROOT: runtimeEnvironment.agentsRoot,
+      STEMMIO_RECOVERY_JOURNALS_ROOT: runtimeEnvironment.recoveryJournalPath,
+      STEMMIO_LOGS_ROOT: runtimeEnvironment.logsPath,
     },
-    serviceName: "HTML AI Workspace Bridge",
+    serviceName: "Stemmio Workspace Bridge",
     stdio: "pipe",
   });
 

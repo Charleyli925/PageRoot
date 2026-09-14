@@ -51,7 +51,7 @@ test("ADR 0067 and Architecture Contract freeze full-HTML Candidate identity", a
   assert.match(validation, /不做\s*启发式重绑/u);
   assert.match(policyOwner, /Never create, copy, normalize, transfer, duplicate or reuse an ID/u);
   assert.match(policyOwner, /surviving Stable IDs are preserved and new elements have no IDs/u);
-  assert.doesNotMatch(promptOwner, /data-pageroot-id|Stable ID 是唯一元素身份/u);
+  assert.doesNotMatch(promptOwner, /data-stemmio-id|Stable ID 是唯一元素身份/u);
 });
 
 test("Candidate v4 schema admits sealed submitted and normalized identity evidence", async () => {

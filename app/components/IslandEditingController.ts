@@ -9,9 +9,9 @@ import {
   isFrozenEditableIslandSubtree,
 } from "../lib/editable-island.js";
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  isValidPagerootElementId,
-} from "../lib/pageroot-element-identity.js";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  isValidStemmioElementId,
+} from "../lib/stemmio-element-identity.js";
 import {
   NATIVE_EDIT_CHECKPOINT_DELAY_MS,
 } from "../lib/native-edit-policy.js";
@@ -106,7 +106,7 @@ type CompositionSnapshot = {
 const SESSION_ATTRIBUTES = [
   "aria-label",
   "contenteditable",
-  "data-pageroot-v2-editing",
+  "data-stemmio-editing",
   "role",
   "spellcheck",
 ] as const;
@@ -544,7 +544,7 @@ function isRuntimeAttributeName(name: string): boolean {
     || normalized === "role"
     || normalized === "spellcheck"
     || normalized.startsWith("data-html-canvas-")
-    || normalized.startsWith("data-pageroot-");
+    || normalized.startsWith("data-stemmio-");
 }
 
 function isImmutableFormattingNode(node: Node): boolean {
@@ -716,7 +716,7 @@ export class IslandEditingController {
     this.hostElement.setAttribute("contenteditable", "true");
     this.hostElement.setAttribute("spellcheck", "false");
     this.hostElement.setAttribute("role", "textbox");
-    this.hostElement.setAttribute("data-pageroot-v2-editing", "true");
+    this.hostElement.setAttribute("data-stemmio-editing", "true");
     if (options.ariaLabel) {
       this.hostElement.setAttribute("aria-label", options.ariaLabel);
     }
@@ -784,20 +784,20 @@ export class IslandEditingController {
   }
 
   private validatePersistentDescendantIdentities(): void {
-    const hostId = this.hostElement.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+    const hostId = this.hostElement.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
     if (hostId === null) return;
-    if (!isValidPagerootElementId(hostId)) {
+    if (!isValidStemmioElementId(hostId)) {
       throw new Error("The editable source host has an invalid persistent element identity.");
     }
     const allocated = new Set([hostId]);
     const descendants = Array.from(this.hostElement.querySelectorAll("*"));
     for (const element of descendants) {
-      const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-      if (pagerootId === null) continue;
-      if (!isValidPagerootElementId(pagerootId) || allocated.has(pagerootId)) {
+      const stemmioId = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
+      if (stemmioId === null) continue;
+      if (!isValidStemmioElementId(stemmioId) || allocated.has(stemmioId)) {
         throw new Error("The editable source island has invalid persistent element identities.");
       }
-      allocated.add(pagerootId);
+      allocated.add(stemmioId);
     }
   }
 

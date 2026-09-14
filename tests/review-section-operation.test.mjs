@@ -79,7 +79,7 @@ test("evidence-free and content-neutral marks decide nothing", () => {
 
 test("a text operation only counts when a text marker carries it", () => {
   // review-document only reads the operation attribute from elements that also
-  // carry data-pageroot-review-text, so an operation-free mark is inert.
+  // carry data-stemmio-review-text, so an operation-free mark is inert.
   assert.equal(
     reviewSectionChangeOperation([{ textOperation: "", structureTone: "" }]),
     null,

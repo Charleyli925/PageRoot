@@ -8,23 +8,23 @@ const DETERMINISTIC_KINDS = new Set([
 
 function sourceElementMap(html) {
   const index = buildSourceIndex(html);
-  return { index, elements: index.byPagerootId };
+  return { index, elements: index.byStemmioId };
 }
 
 function comparableAttributes(element, excluded = new Set()) {
   return element.attributes
     .filter((attribute) => (
       !excluded.has(attribute.name)
-      && !attribute.name.startsWith("data-pageroot-")
+      && !attribute.name.startsWith("data-stemmio-")
     ))
     .map((attribute) => `${attribute.name}=${attribute.value ?? attribute.rawValue ?? ""}`)
     .sort()
     .join("\u001f");
 }
 
-function parentPagerootId(index, element) {
+function parentStemmioId(index, element) {
   const parent = element.parentId ? index.byNodeId.get(element.parentId) : null;
-  return parent?.type === "element" ? parent.pagerootId : null;
+  return parent?.type === "element" ? parent.stemmioId : null;
 }
 
 function isPageSourceElement(element) {
@@ -36,9 +36,9 @@ function isPageSourceElement(element) {
 }
 
 function topologyDescriptors(index) {
-  return index.elements.flatMap((element) => element.pagerootId ? [{
-    id: element.pagerootId,
-    parentId: parentPagerootId(index, element),
+  return index.elements.flatMap((element) => element.stemmioId ? [{
+    id: element.stemmioId,
+    parentId: parentStemmioId(index, element),
     index: element.siblingIndex,
   }] : []);
 }
@@ -47,7 +47,7 @@ function outermost(element, changedIds, index) {
   for (let parentId = element.parentId; parentId;) {
     const parent = index.byNodeId.get(parentId);
     if (!parent || parent.type !== "element") break;
-    if (parent.pagerootId && changedIds.has(parent.pagerootId)) return false;
+    if (parent.stemmioId && changedIds.has(parent.stemmioId)) return false;
     parentId = parent.parentId;
   }
   return true;
@@ -76,8 +76,8 @@ export function isVisualOnlyReviewSourceEvidence(evidence) {
 export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
   const before = sourceElementMap(beforeHtml);
   const after = sourceElementMap(afterHtml);
-  const beforeIdentity = before.index.pagerootIdentity;
-  const afterIdentity = after.index.pagerootIdentity;
+  const beforeIdentity = before.index.stemmioIdentity;
+  const afterIdentity = after.index.stemmioIdentity;
   const binding = {
     sessionId,
     sourceHash: {
@@ -122,7 +122,7 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
     evidence.push({
       id: `candidate-${id}`,
       stableId: id,
-      parentStableId: parentPagerootId(after.index, afterElement),
+      parentStableId: parentStemmioId(after.index, afterElement),
       kinds: [...new Set(kinds)],
       types: evidenceTypes(kinds),
       beforePresent: true,
@@ -143,7 +143,7 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
     evidence.push({
       id: `candidate-${range.parentId}`,
       stableId: range.parentId,
-      parentStableId: parentPagerootId(after.index, parent),
+      parentStableId: parentStemmioId(after.index, parent),
       kinds: ["reordered"],
       types: ["structure"],
       beforePresent: true,
@@ -157,7 +157,7 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
     evidence.push({
       id: `candidate-${id}`,
       stableId: id,
-      parentStableId: parentPagerootId(before.index, element),
+      parentStableId: parentStemmioId(before.index, element),
       kinds: ["removed"],
       types: ["structure"],
       beforePresent: true,
@@ -170,7 +170,7 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
     evidence.push({
       id: `candidate-${id}`,
       stableId: id,
-      parentStableId: parentPagerootId(after.index, element),
+      parentStableId: parentStemmioId(after.index, element),
       kinds: ["added"],
       types: ["structure"],
       beforePresent: false,

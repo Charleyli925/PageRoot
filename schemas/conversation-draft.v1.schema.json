@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/conversation-draft.v1.schema.json",
-  "title": "PageRoot AI conversation composer draft v1",
+  "$id": "https://stemmio.local/schemas/conversation-draft.v1.schema.json",
+  "title": "Stemmio AI conversation composer draft v1",
   "$comment": "The unsent Composer content for one Conversation. It is kept in its own small record so a debounced draft write never rewrites the message history. A draft never enters a Request, Prompt, USER_SUPPLEMENT or Candidate. Forward compatible: unknown members are preserved through read, edit and write.",
   "type": "object",
   "required": [

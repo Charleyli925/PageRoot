@@ -26,16 +26,16 @@ test("preflight submission persists before Request authorization and replay keep
   const value = await setup(t);
   const record = await value.repository.recordSubmission({ ...value, operationId });
   assert.equal(record.status, "accepted");
-  await assert.rejects(readFile(path.join(value.target.projectRootPath, ".pageroot", "requests", record.requestId, "request.json")), { code: "ENOENT" });
+  await assert.rejects(readFile(path.join(value.target.projectRootPath, ".stemmio", "requests", record.requestId, "request.json")), { code: "ENOENT" });
   const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
   const replayed = await restarted.recordSubmission({ ...value, operationId });
   assert.equal(replayed.turnId, record.turnId);
-  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".stemmio"), projectId: value.target.projectId, documentId: value.target.documentId });
   assert.equal(conversation.turns.length, 1);
   assert.equal(conversation.messages.length, 1);
   const ended = await restarted.finishSubmission({ target: value.target, operationId, status: "not-started", errorCode: "AGENT_AUTH_REQUIRED" });
   assert.equal(ended.status, "not-started");
-  const restored = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const restored = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".stemmio"), projectId: value.target.projectId, documentId: value.target.documentId });
   assert.equal(restored.turns[0].status, "failed");
   assert.equal(restored.messages.length, 2);
 });
@@ -77,7 +77,7 @@ test("new Bridge owner recovers unstarted submission without granting Request au
   const recovered = await restarted.submissionReceipt({ target: value.target, operationId });
   assert.equal(recovered.status, "not-started");
   assert.equal(recovered.errorCode, "SUBMISSION_INTERRUPTED_BEFORE_REQUEST");
-  await assert.rejects(readFile(path.join(value.target.projectRootPath, ".pageroot", "requests", receipt.requestId, "request.json")), { code: "ENOENT" });
+  await assert.rejects(readFile(path.join(value.target.projectRootPath, ".stemmio", "requests", receipt.requestId, "request.json")), { code: "ENOENT" });
 });
 
 test("execution facts replay exactly once and restart preserves uncertain Request authority", async (t) => {
@@ -92,9 +92,9 @@ test("execution facts replay exactly once and restart preserves uncertain Reques
   const recovered = await restarted.submissionReceipt({ target: value.target, operationId });
   assert.equal(recovered.events.filter((fact) => fact.kind === "started").length, 1);
   assert.equal(recovered.events.filter((fact) => fact.kind === "interrupted").length, 1);
-  const record = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".pageroot", "requests", receipt.requestId, "request.json"), "utf8"));
+  const record = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".stemmio", "requests", receipt.requestId, "request.json"), "utf8"));
   assert.equal(record.status, "processing");
-  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".stemmio"), projectId: value.target.projectId, documentId: value.target.documentId });
   assert.equal(conversation.turns.length, 1);
   assert.equal(conversation.turns[0].status, "interrupted");
   assert.equal(conversation.messages.filter((message) => message.text === "已开始执行本轮修改。").length, 1);
@@ -115,12 +115,12 @@ test("historical v4 no-change remains terminal with its receipt and outbox uncha
   assert.equal(workspace.activeRequest, null);
   assert.equal(workspace.activeCandidate, null);
   assert.equal(workspace.manifest.versions.length, 1);
-  const runtime = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".pageroot", "runtime-state.json"), "utf8"));
+  const runtime = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".stemmio", "runtime-state.json"), "utf8"));
   assert.deepEqual(runtime.lastAiTask, legacy.runtime.lastAiTask);
   assert.equal(runtime.activeRequest, null);
   assert.equal(runtime.activeCandidateId, null);
   assert.deepEqual(await Promise.all(legacy.files.map((file) => readFile(file, "utf8"))), legacy.bytes);
-  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".stemmio"), projectId: value.target.projectId, documentId: value.target.documentId });
   assert.equal(conversation.turns[0].status, "completed");
   assert.equal(conversation.messages.filter((message) => message.text.startsWith("本轮没有产生修改")).length, 1);
   assert.equal(conversation.messages.some((message) => message.text === "修改已准备好，尚未采用。"), false);
@@ -138,7 +138,7 @@ test("crash after authoritative outcome write replays history without repeating 
   const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
   await restarted.initialize();
   await restarted.initialize();
-  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".stemmio"), projectId: value.target.projectId, documentId: value.target.documentId });
   assert.equal(conversation.turns[0].status, "completed");
   assert.equal(conversation.messages.filter((message) => message.text === "修改已准备好，尚未采用。").length, 1);
   const workspace = await restarted.workspace({ sourcePath: value.target.exactSourcePath });
@@ -154,7 +154,7 @@ test("accepted stop fences late output while confirmed cancellation remains sepa
     attemptId: receipt.attemptId, event: { eventId: "event_stop_1", kind: "stop-requested", timestamp: new Date().toISOString() } });
   await assert.rejects(value.repository.completeRequest({ target: value.target, requestId: receipt.requestId,
     attemptId: receipt.attemptId, html: await readFile(value.target.exactSourcePath, "utf8") }), { code: "AGENT_STOP_PENDING" });
-  const record = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".pageroot", "requests", receipt.requestId, "request.json"), "utf8"));
+  const record = JSON.parse(await readFile(path.join(value.target.projectRootPath, ".stemmio", "requests", receipt.requestId, "request.json"), "utf8"));
   assert.equal(record.status, "processing");
   const cancelled = await value.repository.cancelRequest({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId });
   assert.equal(cancelled.status, "cancelled");
@@ -201,7 +201,7 @@ test(`adoption consumes only unchanged submitted comments and replays once (same
   assert.deepEqual(workspace.draft.comments.map((comment) => comment.commentId), [edited.commentId, added.commentId]);
   const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
   await restarted.initialize();
-  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".stemmio"), projectId: value.target.projectId, documentId: value.target.documentId });
   assert.equal(conversation.messages.filter((message) => message.text === "已采用本次修改。").length, 1);
   const restored = await restarted.workspace({ sourcePath: result.target.exactSourcePath });
   assert.deepEqual(restored.draft.comments, workspace.draft.comments);
@@ -215,7 +215,7 @@ test(`adoption consumes only unchanged submitted comments and replays once (same
 test("bounded progress exposes truncation while keeping the terminal outcome", async (t) => {
   const value = await setup(t);
   const receipt = await prepareRecordedRequest(value);
-  const file = path.join(value.target.projectRootPath, ".pageroot", "submissions", `${operationId}.json`);
+  const file = path.join(value.target.projectRootPath, ".stemmio", "submissions", `${operationId}.json`);
   const saved = JSON.parse(await readFile(file, "utf8"));
   saved.events = Array.from({ length: 64 }, (_, index) => ({ eventId: `event_reading_${index}`, kind: "reading-task", timestamp: receipt.createdAt }));
   await writeFile(file, JSON.stringify(saved));
@@ -227,7 +227,7 @@ test("bounded progress exposes truncation while keeping the terminal outcome", a
   assert.equal(final.eventsTruncated, true);
   assert.equal(final.events.filter((event) => event.kind === "reading-task").length, 64);
   assert.equal(final.events.filter((event) => event.kind === "candidate-ready").length, 1);
-  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".stemmio"), projectId: value.target.projectId, documentId: value.target.documentId });
   assert.equal(conversation.messages.filter((message) => message.text.includes("早期过程已省略")).length, 1);
   assert.equal(conversation.turns[0].status, "completed");
 });
@@ -258,7 +258,7 @@ for (const boundary of ["messages", "contexts", "bytes"]) {
   test(`submission reserves terminal capacity near conversation ${boundary} limit`, async (t) => {
     const { appendConversationContext, startConversationTurn, sealConversationTurn } = await import("../shared/conversation.mjs");
     const value = await setup(t);
-    const context = { projectRoot: path.join(value.target.projectRootPath, ".pageroot"),
+    const context = { projectRoot: path.join(value.target.projectRootPath, ".stemmio"),
       projectId: value.target.projectId, documentId: value.target.documentId };
     const now = () => "2026-09-08T00:00:00.000Z";
     let old = await ensureCurrentConversation(context);
@@ -317,7 +317,7 @@ test("sealed public summary is sanitized, bounded and restored once after failur
   const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
   await restarted.initialize();
   await restarted.initialize();
-  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".pageroot"), projectId: value.target.projectId, documentId: value.target.documentId });
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, ".stemmio"), projectId: value.target.projectId, documentId: value.target.documentId });
   const summaries = conversation.messages.filter((message) => message.messageId === "message_event_public_summary_0001");
   assert.equal(summaries.length, 1);
   assert.equal(summaries[0].actor, "agent");
@@ -337,8 +337,8 @@ test("execution tools belong to the Agent while preparation and validation belon
     await value.repository.recordExecutionFact({ target: value.target, requestId: receipt.requestId, attemptId: receipt.attemptId,
       event: { eventId: `owner_${kind}`, kind, timestamp: '2026-09-09T00:00:00.000Z' } });
   }
-  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, '.pageroot'), projectId: value.target.projectId, documentId: value.target.documentId });
-  assert.deepEqual(conversation.messages.filter(message => message.messageId.startsWith('message_owner_')).map(message => message.actor), ['pageroot','agent','agent','agent','pageroot','pageroot']);
+  const conversation = await ensureCurrentConversation({ projectRoot: path.join(value.target.projectRootPath, '.stemmio'), projectId: value.target.projectId, documentId: value.target.documentId });
+  assert.deepEqual(conversation.messages.filter(message => message.messageId.startsWith('message_owner_')).map(message => message.actor), ['stemmio','agent','agent','agent','stemmio','stemmio']);
 });
 
 test("canonical renderer comments keep frozen compatibility and newer requirements through adoption and restart", async (t) => {
@@ -351,7 +351,7 @@ test("canonical renderer comments keep frozen compatibility and newer requiremen
   value.input.comments = submitted.map(persistedComment);
   value.input.targets = value.input.comments.map((comment) => comment.target);
   const receipt = await prepareRecordedRequest(value);
-  const annotationsPath = path.join(value.target.projectRootPath, ".pageroot", "requests", receipt.requestId, "input", "annotations", "records.json");
+  const annotationsPath = path.join(value.target.projectRootPath, ".stemmio", "requests", receipt.requestId, "input", "annotations", "records.json");
   const frozenAnnotations = await readFile(annotationsPath, "utf8");
   const decodedAgain = commentsFromRecords(JSON.parse(JSON.stringify(value.input.comments)));
   const edited = { ...decodedAgain[0], text: "Keep later edit", updatedAt: "2026-09-12T00:00:00.000Z" };

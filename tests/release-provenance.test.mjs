@@ -26,7 +26,7 @@ test("build provenance is strict and identifies one source tree", () => {
   assert.deepEqual(
     assertBuildInfo(fixture(), {
       schemaVersion: 1,
-      name: "pageroot",
+      name: "stemmio",
       version: "0.8.6",
       architecture: "arm64",
     }),

@@ -437,7 +437,7 @@ export function ciHealthIssueBodies(report) {
   const violations = report.budgetViolations || [];
   const blocking = violations.filter((item) => item.blocking);
   const lines = [
-    "PageRoot CI health found repeated blocking budget violations.",
+    "Stemmio CI health found repeated blocking budget violations.",
     "",
     ...blocking.map((item) => `- \`${item.code}\`: ${item.actual} (limit ${item.limit})`),
     "",

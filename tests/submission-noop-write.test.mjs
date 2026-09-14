@@ -26,7 +26,7 @@ async function setup(t, { capped = false } = {}) {
       target: { targetId: "target_write_count" }, attachments: [] }],
     targets: [{ targetId: "target_write_count" }], agentDelivery: { mode: "clipboard" },
   } });
-  const context = { projectRoot: path.join(target.projectRootPath, ".pageroot"),
+  const context = { projectRoot: path.join(target.projectRootPath, ".stemmio"),
     projectId: target.projectId, documentId: target.documentId };
   const loaded = { paths: { projectRootPath: target.projectRootPath },
     project: { projectId: target.projectId, documentId: target.documentId },

@@ -61,13 +61,13 @@ export const REAL_HTML_CAPABILITY_PLAN = Object.freeze({
 export const FIXED_STRUCTURE_SAMPLES = Object.freeze({
   expectedCopyable: Object.freeze({
     id: "expected-copyable-paragraph",
-    selector: '[data-test-copyability="expected-copyable"][data-pageroot-id]',
+    selector: '[data-test-copyability="expected-copyable"][data-stemmio-id]',
     expectedCopyable: true,
     expectedNativeMode: "native-editable",
   }),
   expectedNonCopyable: Object.freeze({
     id: "expected-non-copyable-canvas",
-    selector: '[data-test-copyability="expected-non-copyable"][data-pageroot-id]',
+    selector: '[data-test-copyability="expected-non-copyable"][data-stemmio-id]',
     expectedCopyable: false,
     expectedNativeMode: "comment-only",
   }),

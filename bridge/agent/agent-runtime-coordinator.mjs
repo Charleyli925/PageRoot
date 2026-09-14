@@ -17,7 +17,7 @@ import {
   normalizeAgentDelivery,
 } from "../../shared/agent-delivery.mjs";
 import {
-  PAGEROOT_PROVIDER_ID,
+  STEMMIO_PROVIDER_ID,
   httpAgentLaunchBaseUrl,
   resolveOpenAiCompatibleVendor,
 } from "../../shared/openai-compatible-vendors.mjs";
@@ -118,14 +118,14 @@ function finalizerPrompt(policy) {
     env: Object.entries(policy.finalizer.env).map(([name, value]) => ({ name, value })),
   };
   return [
-    "Complete this single frozen PageRoot task.",
+    "Complete this single frozen Stemmio task.",
     `Read ${policy.manifestPath} and then every file in its exact readOrder.`,
     `Follow ${policy.promptPath}.`,
     `Write one complete HTML document only to ${policy.outputPath}.`,
     "Then invoke ACP terminal/create exactly once with this JSON request:",
     JSON.stringify(terminalRequest),
     "Do not use a shell wrapper or write any other path.",
-    "The result remains a Candidate pending PageRoot review and must not replace the Working Copy.",
+    "The result remains a Candidate pending Stemmio review and must not replace the Working Copy.",
   ].join("\n");
 }
 
@@ -335,8 +335,8 @@ export class AgentRuntimeCoordinator {
   }
 
   #environmentForProvider(providerId) {
-    if (providerId !== PAGEROOT_PROVIDER_ID) return this.#environment;
-    const credential = this.#sessionCredentials.get(PAGEROOT_PROVIDER_ID);
+    if (providerId !== STEMMIO_PROVIDER_ID) return this.#environment;
+    const credential = this.#sessionCredentials.get(STEMMIO_PROVIDER_ID);
     if (!credential) return this.#environment;
     return Object.freeze({
       ...this.#environment,
@@ -349,7 +349,7 @@ export class AgentRuntimeCoordinator {
 
   async updateAgentConfiguration(providerId, candidate = {}) {
     const id = cleanAgentText(providerId, 32);
-    if (id !== PAGEROOT_PROVIDER_ID) {
+    if (id !== STEMMIO_PROVIDER_ID) {
       failAgentRuntime(
         "AGENT_SESSION_CREDENTIAL_UNSUPPORTED",
         "当前 Agent 不支持 API Token。",
@@ -392,7 +392,7 @@ export class AgentRuntimeCoordinator {
         credentialGeneration: generation,
       });
       const requestedSelection = canonicalSelection(candidate.selection || {
-        providerId: PAGEROOT_PROVIDER_ID,
+        providerId: STEMMIO_PROVIDER_ID,
         runtimeId: "http",
         requestedModelId: null,
         resolvedModelId: null,
@@ -918,9 +918,9 @@ export class AgentRuntimeCoordinator {
         purpose: "execution",
         environment: executionEnvironment,
       });
-      if (ticket.providerId === PAGEROOT_PROVIDER_ID) {
+      if (ticket.providerId === STEMMIO_PROVIDER_ID) {
         const currentGeneration = Number(
-          this.#environmentForProvider(ticket.providerId).PAGEROOT_API_CREDENTIAL_GENERATION || 0,
+          this.#environmentForProvider(ticket.providerId).STEMMIO_API_CREDENTIAL_GENERATION || 0,
         );
         if (currentGeneration !== ticket.configuration?.credentialGeneration) {
           failAgentRuntime(
@@ -1174,7 +1174,7 @@ export class AgentRuntimeCoordinator {
     entry.phase = "cancelling";
     this.#touch(entry);
     await this.#queueExecutionFact(entry, "stop-requested");
-    entry.controller.abort(new AgentRuntimeError("AGENT_CANCELLED", "Cancelled by PageRoot."));
+    entry.controller.abort(new AgentRuntimeError("AGENT_CANCELLED", "Cancelled by Stemmio."));
     const timeout = timeoutAfter(
       this.#cancelTimeoutMs,
       "AGENT_CANCEL_UNCONFIRMED",

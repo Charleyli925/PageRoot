@@ -5,9 +5,9 @@ import { createElementTextLocator } from "../app/lib/comment-text-locator.js";
 import { buildSourceIndex } from "../app/lib/source-patch-core.js";
 
 test("selected text persists as element-relative decoded offsets and affinity", () => {
-  const html = `<p data-pageroot-id="pr1_11111111111141118111111111111111">开头<strong data-pageroot-id="pr1_22222222222242229222222222222222">中间</strong>结尾</p>`;
+  const html = `<p data-stemmio-id="sm1_11111111111141118111111111111111">开头<strong data-stemmio-id="sm1_22222222222242229222222222222222">中间</strong>结尾</p>`;
   const index = buildSourceIndex(html);
-  const paragraph = index.byPagerootId.get("pr1_11111111111141118111111111111111");
+  const paragraph = index.byStemmioId.get("sm1_11111111111141118111111111111111");
   const textNodes = index.textNodes.filter((node) => {
     let current = node;
     while (current?.parentId) {
@@ -36,12 +36,12 @@ test("selected text persists as element-relative decoded offsets and affinity", 
 });
 
 test("selected text locates from a Stable-ID target without an ephemeral nodeId", () => {
-  const html = `<p data-pageroot-id="pr1_11111111111141118111111111111111">可靠文字</p>`;
+  const html = `<p data-stemmio-id="sm1_11111111111141118111111111111111">可靠文字</p>`;
   const index = buildSourceIndex(html);
-  const paragraph = index.byPagerootId.get("pr1_11111111111141118111111111111111");
+  const paragraph = index.byStemmioId.get("sm1_11111111111141118111111111111111");
   const textNode = index.textNodes[0];
   const locator = createElementTextLocator(index, {
-    target: { elementId: paragraph.pagerootId },
+    target: { elementId: paragraph.stemmioId },
     segments: [{ textNodeId: textNode.nodeId, startOffset: 0, endOffset: 2 }],
     text: "可靠",
     direction: "forward",
@@ -55,9 +55,9 @@ test("selected text locates from a Stable-ID target without an ephemeral nodeId"
 });
 
 test("selected text locator fails closed when source segments and quote disagree", () => {
-  const html = `<p data-pageroot-id="pr1_11111111111141118111111111111111">可靠文字</p>`;
+  const html = `<p data-stemmio-id="sm1_11111111111141118111111111111111">可靠文字</p>`;
   const index = buildSourceIndex(html);
-  const paragraph = index.byPagerootId.get("pr1_11111111111141118111111111111111");
+  const paragraph = index.byStemmioId.get("sm1_11111111111141118111111111111111");
   const textNode = index.textNodes[0];
   assert.equal(createElementTextLocator(index, {
     target: { nodeId: paragraph.nodeId },

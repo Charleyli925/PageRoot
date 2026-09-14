@@ -4,7 +4,7 @@ import {
   sourceSha256,
 } from "./source-index.js";
 import { isPositionalSelector } from "../../bridge/target-identity.mjs";
-import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
+import { isValidStemmioElementId } from "../../shared/stemmio-element-identity.mjs";
 
 const TARGET_LEVELS = new Set([
   "module",
@@ -40,8 +40,8 @@ function cloneFingerprint(fingerprint) {
 
 function targetNode(index, nodeOrId) {
   if (typeof nodeOrId === "string") {
-    if (isValidPagerootElementId(nodeOrId)) {
-      return index.byPagerootId.get(nodeOrId) ?? null;
+    if (isValidStemmioElementId(nodeOrId)) {
+      return index.byStemmioId.get(nodeOrId) ?? null;
     }
     return index.byNodeId.get(nodeOrId) ?? null;
   }
@@ -109,7 +109,7 @@ export function createTargetRef(indexOrHtml, nodeOrId, options = {}) {
     endOffset: node.range.endOffset,
     fingerprint,
   };
-  const elementId = subject.pagerootId ?? undefined;
+  const elementId = subject.stemmioId ?? undefined;
   return {
     targetId: options.targetId ?? targetIdFor(
       elementId ? { level, elementId } : identity,
@@ -192,15 +192,15 @@ export function createInsertionPointTargetRef(indexOrHtml, options) {
   fingerprint.textPrefix = textPrefix || undefined;
   fingerprint.textSuffix = textSuffix || undefined;
   return {
-    targetId: options.targetId ?? targetIdFor(parent.pagerootId
-      ? { level: "insertion-point", elementId: parent.pagerootId, offset }
+    targetId: options.targetId ?? targetIdFor(parent.stemmioId
+      ? { level: "insertion-point", elementId: parent.stemmioId, offset }
       : {
           level: "insertion-point",
           sourceSha256: index.sourceSha256,
           offset,
           fingerprint,
         }),
-    ...(parent.pagerootId ? { elementId: parent.pagerootId } : {}),
+    ...(parent.stemmioId ? { elementId: parent.stemmioId } : {}),
     expectedSourceSha256: index.sourceSha256,
     label: options.label ?? `Insert in ${parent.label}`,
     level: "insertion-point",
@@ -332,7 +332,7 @@ function resolveInsertionPoint(index, targetRef) {
     );
   }
 
-  const parent = index.byPagerootId.get(targetRef.elementId) ?? null;
+  const parent = index.byStemmioId.get(targetRef.elementId) ?? null;
   if (!parent) {
     return resolved(targetRef, "orphaned", null, [], "stable-parent-not-found");
   }
@@ -393,10 +393,10 @@ function resolveInsertionPoint(index, targetRef) {
 }
 
 function resolveByStableElementId(index, targetRef) {
-  if (!isValidPagerootElementId(targetRef.elementId)) {
+  if (!isValidStemmioElementId(targetRef.elementId)) {
     return resolved(targetRef, "orphaned", null, [], "stable-element-id-invalid");
   }
-  const element = index.byPagerootId.get(targetRef.elementId) ?? null;
+  const element = index.byStemmioId.get(targetRef.elementId) ?? null;
   if (!element) {
     return resolved(targetRef, "orphaned", null, [], "stable-element-not-found");
   }
@@ -442,7 +442,7 @@ function resolveByStableElementId(index, targetRef) {
 
 function resolveManagedOfficialTargetRef(index, targetRef) {
   if (targetRef.level === "insertion-point") {
-    if (!isValidPagerootElementId(targetRef.elementId)) {
+    if (!isValidStemmioElementId(targetRef.elementId)) {
       return resolved(
         targetRef,
         "orphaned",

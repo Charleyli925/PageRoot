@@ -81,7 +81,7 @@ async function assertRepositoryRoot(root) {
     realpath(root),
   ]);
   if (actual !== expected) {
-    throw new Error(`Run this command at a PageRoot worktree root. Expected ${expected}, found ${actual}.`);
+    throw new Error(`Run this command at a Stemmio worktree root. Expected ${expected}, found ${actual}.`);
   }
 }
 
@@ -283,7 +283,7 @@ async function assertPrimaryWorktree(root) {
   const primary = await primaryWorktree(root);
   const [actual, expected] = await Promise.all([realpath(root), realpath(primary.path)]);
   if (actual !== expected) {
-    throw new Error(`Run this command from the primary PageRoot worktree: ${primary.path}`);
+    throw new Error(`Run this command from the primary Stemmio worktree: ${primary.path}`);
   }
   return primary;
 }
@@ -348,7 +348,7 @@ export function formatTaskReport(report) {
     ? `unavailable against ${report.base}`
     : `${report.ahead} ahead / ${report.behind} behind ${report.base}`;
   const lines = [
-    "PageRoot task report",
+    "Stemmio task report",
     `- repository: ${report.repository}`,
     `- remote: ${report.remote || "unavailable"}`,
     `- version: ${report.version || "unavailable"}`,
@@ -704,7 +704,7 @@ export async function auditRepository({
 
 export function formatAuditReport(report) {
   const lines = [
-    "PageRoot worktree and branch audit",
+    "Stemmio worktree and branch audit",
     `- repository: ${report.repository}`,
     `- primary worktree: ${report.primaryWorktree}`,
     `- comparison base: ${report.base}`,
@@ -809,7 +809,7 @@ export async function retireTask({
 
 export function formatRetireReport(report) {
   const lines = [
-    `PageRoot task retirement ${report.apply ? "apply" : "preview"}`,
+    `Stemmio task retirement ${report.apply ? "apply" : "preview"}`,
     `- branch: ${report.branch}`,
     `- classification: ${report.classification}`,
     `- merged PR: ${report.merged ? "yes" : "no"}`,
@@ -846,7 +846,7 @@ export async function syncMain({
 async function main() {
   const options = parseTaskArguments(process.argv.slice(2));
   if (options.command === "policy") {
-    console.log(`Valid PageRoot branch: ${options.branch}`);
+    console.log(`Valid Stemmio branch: ${options.branch}`);
     return;
   }
   let report;

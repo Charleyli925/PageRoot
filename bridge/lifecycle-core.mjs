@@ -19,6 +19,7 @@ import {
   semanticVersionLabel,
   workingCopyFileName,
 } from "./product-contract.mjs";
+import { nonReplaceTemporaryName } from "../shared/project-storage-contract.mjs";
 
 export const LIFECYCLE_SCHEMA_VERSION = "3.0.0";
 export const COMPLETION_SCHEMA_VERSION = "1.0.0";
@@ -188,7 +189,7 @@ export async function atomicWriteFile(filePath, content, options = {}) {
   // 255-byte budget, so the temporary sibling must not include that name.
   const temporary = path.join(
     parent,
-    `.pageroot-write-${process.pid}-${randomUUID()}.tmp`,
+    nonReplaceTemporaryName(`write-${process.pid}-${randomUUID()}.tmp`),
   );
   const handle = await open(temporary, "wx", options.mode ?? 0o600);
   try {
@@ -1402,8 +1403,8 @@ function outputRelativePathForAttempt(project, activeRun, changeRequest) {
     );
   }
   // Older frozen Attempts keep their fixed staging name so a newly installed
-  // PageRoot never strands an in-flight task. New Requests must use the exact
-  // user-name-plus-version filename computed by PageRoot itself.
+  // Stemmio never strands an in-flight task. New Requests must use the exact
+  // user-name-plus-version filename computed by Stemmio itself.
   if (outputRelativePath === "output/index.html") return outputRelativePath;
   const expectedOutputRelativePath = `output/${workingCopyFileName(
     project.displayName,

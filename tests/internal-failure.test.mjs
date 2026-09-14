@@ -26,7 +26,7 @@ test("reportInternalFailure logs without throwing and never returns UI fields", 
     assert.equal(record.recovered, false);
     assert.equal("title" in record, false);
     assert.equal("message" in record, false);
-    assert.match(warnings.at(-1).join(" "), /pageroot:internal-failure/u);
+    assert.match(warnings.at(-1).join(" "), /stemmio:internal-failure/u);
     assert.match(warnings.at(-1).join(" "), /ack unavailable/u);
   } finally {
     console.warn = originalWarn;

@@ -8,13 +8,13 @@ import { createHash } from "node:crypto";
 import { expect } from "@playwright/test";
 
 import {
-  closePageRootGracefully,
+  closeStemmioGracefully,
   currentEditorFrame,
+  launchStemmio,
   disableStructuralInPlace,
-  launchPageRoot,
   managedWorkingCopyPath,
   removeIsolatedUserData,
-  stopPageRoot,
+  stopStemmio,
   waitForProjectReady,
   waitForRuntimeHandoffSettled,
 } from "./electron-native-harness.mjs";
@@ -38,10 +38,10 @@ const fail = (condition, code, details = {}) => {
   if (!condition) throw Object.assign(new Error(code), { code, details });
 };
 
-const lane = process.env.PAGEROOT_SPECIALIZED_LANE || "";
-const fileId = process.env.PAGEROOT_SPECIALIZED_FILE_ID || "";
-const manifestPath = process.env.PAGEROOT_EXTENDED_MANIFEST || "";
-const requestedRounds = Number(process.env.PAGEROOT_SPECIALIZED_ROUNDS || 3);
+const lane = process.env.STEMMIO_SPECIALIZED_LANE || "";
+const fileId = process.env.STEMMIO_SPECIALIZED_FILE_ID || "";
+const manifestPath = process.env.STEMMIO_EXTENDED_MANIFEST || "";
+const requestedRounds = Number(process.env.STEMMIO_SPECIALIZED_ROUNDS || 3);
 const laneNames = new Set(["external-paste", "IME", "race/rapid-actions", "long-session"]);
 fail(laneNames.has(lane), "SPECIALIZED_LANE_INVALID", { lane });
 fail(/^H0[1-8]$/u.test(fileId), "SPECIALIZED_FILE_ID_INVALID", { fileId });
@@ -131,7 +131,7 @@ async function waitForSpecializedRuntimeTerminal() {
 
 async function selectFixedTarget() {
   const frame = await activeFrame();
-  const exact = frame.locator(`[data-pageroot-id="${target.selectedId}"]`);
+  const exact = frame.locator(`[data-stemmio-id="${target.selectedId}"]`);
   const exactCount = await exact.count();
   fail(exactCount === 1, "SPECIALIZED_TARGET_NOT_PRESENT_IN_ACTIVE_FRAME", {
     targetId: target.selectedId,
@@ -143,7 +143,7 @@ async function selectFixedTarget() {
   const selected = frame.locator("[data-html-canvas-selected]");
   const selectedCount = await selected.count();
   fail(selectedCount <= 1, "SPECIALIZED_PRIOR_SELECTION_NOT_UNIQUE", { selectedCount });
-  const priorSelectionId = selectedCount === 1 ? await selected.getAttribute("data-pageroot-id") : null;
+  const priorSelectionId = selectedCount === 1 ? await selected.getAttribute("data-stemmio-id") : null;
   fail(priorSelectionId === null || priorSelectionId === target.selectedId,
     "SPECIALIZED_PRIOR_SELECTION_NOT_FROZEN", { priorSelectionId, expected: target.selectedId });
   const calls = [];
@@ -298,7 +298,7 @@ async function race() {
   fail(Boolean(runtimeTerminal), "SPECIALIZED_RACE_RUNTIME_TERMINAL_NOT_READY", { records });
   const marker = `RACE_${fileId}`;
   const calls = [];
-  const freshTarget = frame.locator(`[data-pageroot-id="${target.selectedId}"]`);
+  const freshTarget = frame.locator(`[data-stemmio-id="${target.selectedId}"]`);
   fail(await freshTarget.count() === 1, "SPECIALIZED_RACE_ORIGINAL_IDENTITY_MISSING");
   await freshTarget.dblclick({ timeout: 3_000 });
   await expect(freshTarget).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
@@ -342,7 +342,7 @@ async function longSession() {
       let cumulative = await readPublishedWorkingCopy(workingPath, null);
       const settledFrame = await currentEditorFrame(session.page);
       const frameTextAfterSave = await settledFrame.locator(
-        `[data-pageroot-id="${target.selectedId}"]`,
+        `[data-stemmio-id="${target.selectedId}"]`,
       ).textContent().catch(() => null);
       const editorStateAfterSave = await editor.evaluate((node) => ({
         workingProjection: node.getAttribute("data-working-source-sha256"),
@@ -388,9 +388,9 @@ async function longSession() {
   const beforeReopen = await readPublishedWorkingCopy(workingPath, null);
   report.operations.push({ operation: "long-session-before-reopen", sourceSha256: frozenDigest(beforeReopen),
     markerPresence: markers.map(marker => beforeReopen.toString("utf8").includes(marker)) });
-  await closePageRootGracefully(session.electronApp, session.page);
+  await closeStemmioGracefully(session.electronApp, session.page);
   session.electronApp = null;
-  session = await launchPageRoot({ isolatedUserData: session.isolatedUserData });
+  session = await launchStemmio({ isolatedUserData: session.isolatedUserData });
   await waitForProjectReady(session.page);
   workingPath = await managedWorkingCopyPath(session.page, importPath);
   await waitForRuntimeHandoffSettled(session.page, {
@@ -399,7 +399,7 @@ async function longSession() {
   });
   await waitForSpecializedRuntimeTerminal();
   const reopened = await currentEditorFrame(session.page);
-  const reopenedLocator = reopened.locator(`[data-pageroot-id="${target.selectedId}"]`);
+  const reopenedLocator = reopened.locator(`[data-stemmio-id="${target.selectedId}"]`);
   fail(await reopenedLocator.count() === 1, "SPECIALIZED_LONG_SESSION_REOPEN_IDENTITY_MISSING");
   const source = await readPublishedWorkingCopy(workingPath, null);
   report.operations.push({ operation: "long-session-after-reopen", sourceSha256: frozenDigest(source),
@@ -409,7 +409,7 @@ async function longSession() {
 }
 
 try {
-  session = await launchPageRoot({ activeSourcePath: importPath });
+  session = await launchStemmio({ activeSourcePath: importPath });
   await waitForProjectReady(session.page);
   editor = session.page.getByTestId("html-canvas-editor").filter({ visible: true });
   await expect(editor).toHaveCount(1);
@@ -433,7 +433,7 @@ try {
     try { report.lifecycle = attributeRuntimeObserverRequests((await editor.evaluate(stopRuntimeLifecycleObservation)).records || []); }
     catch {}
   }
-  if (session?.electronApp) await stopPageRoot(session.electronApp, session.isolatedUserData).catch(() => {});
+  if (session?.electronApp) await stopStemmio(session.electronApp, session.isolatedUserData).catch(() => {});
   else if (session?.isolatedUserData) removeIsolatedUserData(session.isolatedUserData);
   try {
     report.originalUnchanged = readFileSync(file.original.path).equals(baselineOriginal);

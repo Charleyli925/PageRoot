@@ -25,7 +25,7 @@ function structuralType(operation) {
 
 function normalizedElements(source, elements) {
   const result = (Array.isArray(elements) ? elements : []).map((element) => ({
-    elementId: String(element?.elementId ?? element?.pagerootId ?? ""),
+    elementId: String(element?.elementId ?? element?.stemmioId ?? ""),
     tagName: String(element?.tagName ?? "").toLowerCase(),
     parentElementId: element?.parentElementId
       ? String(element.parentElementId)

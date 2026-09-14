@@ -17,6 +17,7 @@ const CONTRACT_TESTS = new Set([
   "architecture-boundaries.test.mjs",
   "semantic-identity-architecture-contract.test.mjs",
   "stable-id-review-contract.test.mjs",
+  "stemmio-rename-contract.test.mjs",
 ]);
 
 const PACKAGE_TESTS = new Set([

@@ -656,12 +656,12 @@ async function main() {
     ? developerPreviewPackageJson(packageJson, developerPreviewIdentity)
     : packageJson;
   if (options.lane === "candidate-app") {
-    if (process.env.PAGEROOT_SOURCE_GATE_TRUSTED !== "true") {
+    if (process.env.STEMMIO_SOURCE_GATE_TRUSTED !== "true") {
       throw new Error(`${options.lane} requires a trusted source-gate decision from CI.`);
     }
     if (
-      process.env.PAGEROOT_SOURCE_GATE_TREE !== repository.tree
-      || process.env.PAGEROOT_SOURCE_GATE_VERSION !== packageJson.version
+      process.env.STEMMIO_SOURCE_GATE_TREE !== repository.tree
+      || process.env.STEMMIO_SOURCE_GATE_VERSION !== packageJson.version
     ) {
       throw new Error(
         `${options.lane} source-gate tree or version does not match the clean checkout.`,
@@ -789,19 +789,19 @@ async function main() {
       console.log(`\n[${suite.id}] ${shellDisplay(command.command, command.args)}`);
       const env = {
         ...process.env,
-        ...(suite.runtimeSelection ? { PAGEROOT_SMOKE_SUITE: suite.id } : {}),
+        ...(suite.runtimeSelection ? { STEMMIO_SMOKE_SUITE: suite.id } : {}),
         ...(options.realHtmlPath && suite.id === "dom-editing-compatibility"
-          ? { PAGEROOT_REAL_HTML_PATH: options.realHtmlPath }
+          ? { STEMMIO_REAL_HTML_PATH: options.realHtmlPath }
           : {}),
         ...((suite.id === "packaged-runtime"
           || suite.id === "developer-packaged-startup"
           || suite.id === "candidate-app-runtime")
           ? {
-            PAGEROOT_PACKAGED_APP_PATH: artifact.appPath,
-            PAGEROOT_EXPECTED_APP_VERSION: artifact.version,
-            PAGEROOT_EXPECTED_PRODUCT_NAME: artifact.productName,
-            PAGEROOT_EXPECTED_BUNDLE_ID: packagedPackageJson.build.appId,
-            PAGEROOT_TEST_ARCH: options.arch,
+            STEMMIO_PACKAGED_APP_PATH: artifact.appPath,
+            STEMMIO_EXPECTED_APP_VERSION: artifact.version,
+            STEMMIO_EXPECTED_PRODUCT_NAME: artifact.productName,
+            STEMMIO_EXPECTED_BUNDLE_ID: packagedPackageJson.build.appId,
+            STEMMIO_TEST_ARCH: options.arch,
           }
           : {}),
       };

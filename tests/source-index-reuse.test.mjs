@@ -23,7 +23,7 @@ import {
 import { createTargetRef } from "../app/lib/target-resolver.js";
 
 function elementId(sequence) {
-  return `pr1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
+  return `sm1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
 }
 
 const IDS = {
@@ -35,17 +35,17 @@ const IDS = {
 };
 
 function managedHtml(body = "Hello") {
-  return `<!doctype html><html data-pageroot-id="${IDS.html}"><head data-pageroot-id="${IDS.head}"><title data-pageroot-id="${IDS.title}">Demo</title></head><body data-pageroot-id="${IDS.body}"><p data-pageroot-id="${IDS.paragraph}">${body}</p></body></html>`;
+  return `<!doctype html><html data-stemmio-id="${IDS.html}"><head data-stemmio-id="${IDS.head}"><title data-stemmio-id="${IDS.title}">Demo</title></head><body data-stemmio-id="${IDS.body}"><p data-stemmio-id="${IDS.paragraph}">${body}</p></body></html>`;
 }
 
 function duplicateIdHtml() {
-  return `<!doctype html><html data-pageroot-id="${IDS.html}"><head data-pageroot-id="${IDS.head}"><title data-pageroot-id="${IDS.title}">Demo</title></head><body data-pageroot-id="${IDS.body}"><p data-pageroot-id="${IDS.paragraph}">A</p><span data-pageroot-id="${IDS.paragraph}">B</span></body></html>`;
+  return `<!doctype html><html data-stemmio-id="${IDS.html}"><head data-stemmio-id="${IDS.head}"><title data-stemmio-id="${IDS.title}">Demo</title></head><body data-stemmio-id="${IDS.body}"><p data-stemmio-id="${IDS.paragraph}">A</p><span data-stemmio-id="${IDS.paragraph}">B</span></body></html>`;
 }
 
 function stylePlan(html, index = buildSourceIndex(html)) {
   return planInlineStylePatch(index, {
     type: "set-inline-style",
-    targetRef: createTargetRef(index, index.byPagerootId.get(IDS.paragraph), { level: "subregion" }),
+    targetRef: createTargetRef(index, index.byStemmioId.get(IDS.paragraph), { level: "subregion" }),
     property: "color",
     value: "red",
     important: true,
@@ -70,23 +70,23 @@ test("owned source indexes are read-only and only reuse exact corresponding byte
   const index = buildSourceIndex(html);
   const other = buildSourceIndex(managedHtml("Other"));
   assert.equal(isOwnedSourceIndex(index), true);
-  assert.equal(index.byPagerootId.size > 0, true);
+  assert.equal(index.byStemmioId.size > 0, true);
   assert.equal(resolveOwnedSourceIndex(html, index), index);
   assert.throws(
-    () => index.byPagerootId.set("forged", { pagerootId: "forged" }),
+    () => index.byStemmioId.set("forged", { stemmioId: "forged" }),
     /read-only/u,
   );
   assert.throws(
-    () => index.elements.push({ pagerootId: "forged" }),
+    () => index.elements.push({ stemmioId: "forged" }),
     TypeError,
   );
-  assert.equal(index.byPagerootId.get(IDS.paragraph).pagerootId, IDS.paragraph);
-  assert.equal(other.byPagerootId.get(IDS.paragraph).raw.includes("Other"), true);
+  assert.equal(index.byStemmioId.get(IDS.paragraph).stemmioId, IDS.paragraph);
+  assert.equal(other.byStemmioId.get(IDS.paragraph).raw.includes("Other"), true);
 
   const forged = {
     source: html,
     sourceSha256: sourceSha256(html),
-    byPagerootId: new Map(index.byPagerootId),
+    byStemmioId: new Map(index.byStemmioId),
   };
   assert.equal(isOwnedSourceIndex(forged), false);
   assert.throws(
@@ -109,7 +109,7 @@ test("applyPatchPlan rejects a mismatched or forged baseIndex and still checks s
       baseIndex: {
         source: html,
         sourceSha256: sourceSha256(html),
-        byPagerootId: index.byPagerootId,
+        byStemmioId: index.byStemmioId,
       },
     }),
     (error) => error instanceof SourcePatchError && error.code === "SOURCE_INDEX_NOT_OWNED",
@@ -168,7 +168,7 @@ test("one operation cannot mutate the source index another operation is using", 
     setTextOperation(rightState, "op_reuse_right_01", "Righted"),
   );
   assert.throws(
-    () => leftIndex.byPagerootId.delete(IDS.paragraph),
+    () => leftIndex.byStemmioId.delete(IDS.paragraph),
     /read-only/u,
   );
   const left = applySemanticOperation(

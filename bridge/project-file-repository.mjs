@@ -50,9 +50,15 @@ import {
   normalizeNewAgentDelivery,
 } from "../shared/agent-delivery.mjs";
 import {
-  isValidPagerootElementId,
-  PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
-} from "../shared/pageroot-element-identity.mjs";
+  isValidStemmioElementId,
+  STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
+} from "../shared/stemmio-element-identity.mjs";
+import {
+  PROJECT_CONTROL_DIRECTORY_NAME,
+  importTemporaryName,
+  projectControlPath,
+  projectRegistryPath,
+} from "../shared/project-storage-contract.mjs";
 import {
   assertTaskSpec,
   compileTaskSpec,
@@ -277,7 +283,7 @@ export class ProjectFileRepository {
 
   constructor({
     projectsRoot = defaultProjectsRoot(),
-    registryPath = path.join(projectsRoot, ".pageroot-registry.json"),
+    registryPath = projectRegistryPath(projectsRoot),
     clock = Date.now,
     deviceId = null,
     agentDeliveryNormalizer = normalizeNewAgentDelivery,
@@ -834,13 +840,13 @@ export class ProjectFileRepository {
   }
 
   async #recoverSubmissionHistory(loaded, { restart = false } = {}) {
-    const submissionsRoot = path.join(loaded.paths.projectRootPath, ".pageroot", "submissions");
+    const submissionsRoot = projectControlPath(loaded.paths.projectRootPath, "submissions");
     if (!await directoryInformation(submissionsRoot, "submissions", { projectRootPath: loaded.paths.projectRootPath })) return;
     const entries = await listProjectDirectory(loaded.paths.projectRootPath, submissionsRoot, "submissions");
     for (const entry of entries) {
       if (!entry.isFile() || !/^submission_[a-f0-9]{32}\.json$/u.test(entry.name)) continue;
       const operationId = entry.name.slice(0, -5);
-      const raw = await readJsonFile(path.join(loaded.paths.projectRootPath, ".pageroot", "submissions", entry.name), "submission", { projectRootPath: loaded.paths.projectRootPath });
+      const raw = await readJsonFile(projectControlPath(loaded.paths.projectRootPath, "submissions", entry.name), "submission", { projectRootPath: loaded.paths.projectRootPath });
       const workingCopy = loaded.manifest.workingCopies.find((value) => value.workingCopyId === raw?.workingCopyId);
       if (!workingCopy) continue;
       const bound = { ...loaded, workingCopy };
@@ -1171,7 +1177,7 @@ export class ProjectFileRepository {
     if (workingCopy) {
       const missingLegacyIdentityBinding = (
         state?.sourceElementIdentitySchemaVersion
-          === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+          === STEMMIO_ELEMENT_ID_SCHEMA_VERSION
         && state.sourceElementIdentityBindingSha256 === undefined
       );
       if (missingLegacyIdentityBinding && !adoptExternalConflict) {
@@ -1345,7 +1351,7 @@ export class ProjectFileRepository {
     assertWorkingCopyState(state, loaded, workingCopy);
     if (
       state.sourceElementIdentitySchemaVersion
-        === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+        === STEMMIO_ELEMENT_ID_SCHEMA_VERSION
     ) {
       const identity = inspectSourceElementIdentity(source.html);
       const diskBindingSha256 = identity.complete
@@ -1354,7 +1360,7 @@ export class ProjectFileRepository {
       if (diskBindingSha256 !== state.sourceElementIdentityBindingSha256) {
         throw new ProjectFileRepositoryError(
           "WORKING_COPY_CONFLICT",
-          "The Working Copy source element identity bindings changed outside PageRoot.",
+          "The Working Copy source element identity bindings changed outside Stemmio.",
           {
             workingCopyId: workingCopy.workingCopyId,
             recordedSha256: state.currentSha256,
@@ -1370,7 +1376,7 @@ export class ProjectFileRepository {
     if (state.saveState !== "saved") {
       throw new ProjectFileRepositoryError(
         "WORKING_COPY_CONFLICT",
-        "The Working Copy changed on disk while PageRoot still retains unsaved edits.",
+        "The Working Copy changed on disk while Stemmio still retains unsaved edits.",
         {
           workingCopyId: workingCopy.workingCopyId,
           recordedSha256,
@@ -1422,7 +1428,7 @@ export class ProjectFileRepository {
       differsFromBase: source.sha256 !== state.baseSha256,
       saveState: "saved",
       lastOpenedAt: nowIso(this.#clock),
-      // lastPersistedRevision stays at the last successful PageRoot write.
+      // lastPersistedRevision stays at the last successful Stemmio write.
       // Adopting disk bytes does not invent a new persisted edit. The
       // renderer then uses Math.max against its session revision so the
       // current window looks saved; a cold start hydrates from this disk
@@ -1461,7 +1467,7 @@ export class ProjectFileRepository {
       || transaction.documentId !== loaded.project.documentId
       || !workingCopy
       || (transaction.state !== "committed" && transaction.sourceRelativePath !== workingCopy.sourceRelativePath)
-      || transaction.identitySchemaVersion !== PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+      || transaction.identitySchemaVersion !== STEMMIO_ELEMENT_ID_SCHEMA_VERSION
       || !SHA256.test(String(transaction.expectedSourceSha256 || ""))
       || !SHA256.test(String(transaction.targetSourceSha256 || ""))
       || !Number.isSafeInteger(transaction.addedElementCount)
@@ -1541,7 +1547,7 @@ export class ProjectFileRepository {
       differsFromBase: source.sha256 !== state.baseSha256,
       saveState: "saved",
       lastSavedAt: nowIso(this.#clock),
-      sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+      sourceElementIdentitySchemaVersion: STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
       sourceElementIdentityBindingSha256:
         sourceElementIdentityBindingSha256(identity),
     };
@@ -1591,7 +1597,7 @@ export class ProjectFileRepository {
     assertWorkingCopyState(state, loaded, workingCopy);
     const identity = inspectSourceElementIdentity(source.html);
     const alreadyMigrated = state.sourceElementIdentitySchemaVersion
-      === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION;
+      === STEMMIO_ELEMENT_ID_SCHEMA_VERSION;
     if (alreadyMigrated) {
       if (!identity.complete) {
         throw new ProjectFileRepositoryError(
@@ -1611,11 +1617,11 @@ export class ProjectFileRepository {
     }
     const materialized = materializeSourceElementIdentity(source.html);
     const nextSha256 = sha256(materialized.buffer);
-    const recoveryId = `identity_${workingCopy.workingCopyId}_v${PAGEROOT_ELEMENT_ID_SCHEMA_VERSION}_${randomUUID().replaceAll("-", "")}`;
+    const recoveryId = `identity_${workingCopy.workingCopyId}_v${STEMMIO_ELEMENT_ID_SCHEMA_VERSION}_${randomUUID().replaceAll("-", "")}`;
     const recoveryPaths = sourceElementIdentityMigrationRecoveryPaths(
       loaded.paths,
       workingCopy.workingCopyId,
-      PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+      STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
       recoveryId,
     );
     await ensureProjectDirectory(
@@ -1632,7 +1638,7 @@ export class ProjectFileRepository {
       documentId: loaded.project.documentId,
       workingCopyId: workingCopy.workingCopyId,
       sourceRelativePath: workingCopy.sourceRelativePath,
-      identitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+      identitySchemaVersion: STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
       expectedSourceSha256: source.sha256,
       targetSourceSha256: nextSha256,
       previousRelativePath: path.relative(
@@ -1856,7 +1862,7 @@ export class ProjectFileRepository {
     if (!workspace) {
       throw new ProjectFileRepositoryError(
         "PROJECT_NOT_FOUND",
-        "No PageRoot project is registered for this HTML.",
+        "No Stemmio project is registered for this HTML.",
       );
     }
     return {
@@ -4132,7 +4138,7 @@ export class ProjectFileRepository {
     const requestedTargetElementIds = [...new Set(
       allRequestedTargetRefs
         .map((targetRef) => targetRef?.elementId)
-        .filter((elementId) => isValidPagerootElementId(elementId)),
+        .filter((elementId) => isValidStemmioElementId(elementId)),
     )].sort();
     const requestedTargetCount = new Set(
       allRequestedTargetRefs.map((targetRef, index) => {
@@ -4203,7 +4209,7 @@ export class ProjectFileRepository {
     if (!information) {
       throw new ProjectFileRepositoryError(
         "PROJECTS_ROOT_NOT_FOUND",
-        "The configured PageRoot project directory is unavailable.",
+        "The configured Stemmio project directory is unavailable.",
       );
     }
     return information;
@@ -4397,7 +4403,7 @@ export class ProjectFileRepository {
 
   // Recovery has one authority: a Registry pending-import record. A copied
   // half-finished directory cannot gain management merely because it contains
-  // a plausible .pageroot/recovery/import.json.
+  // a plausible .stemmio/recovery/import.json.
   async #recoverPublishedImports() {
     const registry = await this.#readRegistry();
     const recovered = [];
@@ -4678,7 +4684,7 @@ export class ProjectFileRepository {
     const allocated = await this.#allocateProjectRoot(stem);
     const stagingRoot = path.join(
       this.#projectsRoot,
-      `.${allocated.directoryName}.pageroot-import-${randomUUID()}`,
+      importTemporaryName(`${allocated.directoryName}-${randomUUID()}`),
     );
     const paths = projectPaths(stagingRoot);
     let published = false;
@@ -4791,7 +4797,7 @@ export class ProjectFileRepository {
         lastPersistedRevision: 0,
         lastSavedAt: createdAt,
         lastOpenedAt: createdAt,
-        sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+        sourceElementIdentitySchemaVersion: STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
         sourceElementIdentityBindingSha256:
           sourceElementIdentityBindingSha256(identifiedWorkingCopy.identity),
       };
@@ -4917,12 +4923,12 @@ export class ProjectFileRepository {
         { projectRootPath: root },
       );
     }
-    if (!(await directoryInformation(paths.controlRoot, ".pageroot", {
+    if (!(await directoryInformation(paths.controlRoot, PROJECT_CONTROL_DIRECTORY_NAME, {
       projectRootPath: root,
     }))) {
       throw new ProjectFileRepositoryError(
         "PROJECT_CONTROL_NOT_FOUND",
-        "The project folder no longer contains its PageRoot identity.",
+        "The project folder no longer contains its Stemmio identity.",
         { projectRootPath: root },
       );
     }
@@ -4988,7 +4994,7 @@ export class ProjectFileRepository {
         // invalid/unavailable project rather than being mistaken for absence.
         try {
           const project = assertProjectIdentity(await readJsonFile(
-            path.join(candidatePath, ".pageroot", "project.json"), "project.json",
+            projectControlPath(candidatePath, "project.json"), "project.json",
             { projectRootPath: candidatePath },
           ));
           const paths = incompletePathsByProjectId.get(project.projectId) || [];
@@ -5086,7 +5092,7 @@ export class ProjectFileRepository {
     if (!record) {
       throw new ProjectFileRepositoryError(
         "REGISTERED_PROJECT_UNAVAILABLE",
-        "This project is no longer registered for PageRoot writes.",
+        "This project is no longer registered for Stemmio writes.",
         { projectId: id },
       );
     }
@@ -5096,7 +5102,7 @@ export class ProjectFileRepository {
     ) {
       throw new ProjectFileRepositoryError(
         "REGISTERED_PROJECT_PATH_MISMATCH",
-        "The supplied project path is not the registered PageRoot project root.",
+        "The supplied project path is not the registered Stemmio project root.",
         {
           projectId: id,
           registeredProjectRootPath: record.registeredProjectRootPath,
@@ -5148,7 +5154,7 @@ export class ProjectFileRepository {
         // can import that HTML as a fresh V1 instead of migrating or repairing
         // pre-v4 state.
         if (!pathInside(record.registeredProjectRootPath, exactSourcePath)) {
-          const candidate = await readJsonFile(path.join(path.dirname(exactSourcePath), ".pageroot", "project.json"), "project.json").catch(() => null);
+          const candidate = await readJsonFile(projectControlPath(path.dirname(exactSourcePath), "project.json"), "project.json").catch(() => null);
           if (candidate?.projectId !== projectId) continue;
         }
         if (invalidRegisteredProjectError(cause)) continue;
@@ -5419,7 +5425,7 @@ export class ProjectFileRepository {
     if (!workingCopy) {
       throw new ProjectFileRepositoryError(
         "WORKING_COPY_UNAVAILABLE",
-        "The Working Copy HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
+        "The Working Copy HTML is temporarily unavailable; Stemmio did not write outside its registered path.",
         { workingCopyId: requestedWorkingCopyId },
       );
     }
@@ -5471,7 +5477,7 @@ export class ProjectFileRepository {
     });
     const target = await this.#targetForExactPath(loaded, exactSourcePath, source, { readOnly });
     // An unlisted user HTML inside a project root is still an external file:
-    // PageRoot must never infer a Working Copy merely from its location.
+    // Stemmio must never infer a Working Copy merely from its location.
     return target;
   }
 
@@ -5675,13 +5681,13 @@ export class ProjectFileRepository {
     if (!currentState) {
       throw new ProjectFileRepositoryError(
         "WORKING_COPY_STATE_NOT_FOUND",
-        "The Working Copy state is missing; PageRoot did not modify its HTML.",
+        "The Working Copy state is missing; Stemmio did not modify its HTML.",
       );
     }
     assertWorkingCopyState(currentState, loaded, loaded.workingCopy);
     if (
       currentState.sourceElementIdentitySchemaVersion
-        === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+        === STEMMIO_ELEMENT_ID_SCHEMA_VERSION
     ) {
       nextHtml = materializeIdentityPreservingSave(
         loaded.source.html,
@@ -5799,7 +5805,7 @@ export class ProjectFileRepository {
       }
       throw new ProjectFileRepositoryError(
         "WORKING_COPY_CONFLICT",
-        "The Working Copy changed on disk while PageRoot still retains unsaved edits.",
+        "The Working Copy changed on disk while Stemmio still retains unsaved edits.",
         {
           expectedSourceSha256: expected,
           actualSourceSha256: cas.actualSha256,
@@ -5829,7 +5835,7 @@ export class ProjectFileRepository {
       ),
       lastSavedAt: nowIso(this.#clock),
       ...(currentState.sourceElementIdentitySchemaVersion
-        === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+        === STEMMIO_ELEMENT_ID_SCHEMA_VERSION
         ? {
             sourceElementIdentityBindingSha256:
               sourceElementIdentityBindingSha256(nextHtml),
@@ -6398,7 +6404,7 @@ export class ProjectFileRepository {
     }
     throw new ProjectFileRepositoryError(
       "PROMOTION_PATH_ALLOCATION_EXHAUSTED",
-      "PageRoot could not allocate a collision-free Version Working Copy path.",
+      "Stemmio could not allocate a collision-free Version Working Copy path.",
     );
   }
 
@@ -7398,7 +7404,7 @@ export class ProjectFileRepository {
         changeEvents: [], deletedCommentIds: [], appliedOperationIds: [], updatedAt: transaction.createdAt,
       } : null;
       if (retainedDraft) await atomicWriteProjectJson(loaded.paths.projectRootPath,
-        path.join(loaded.paths.projectRootPath, ".pageroot", draftRelativePathFor(nextWorkingCopy)), retainedDraft, "retained Working Copy draft");
+        projectControlPath(loaded.paths.projectRootPath, draftRelativePathFor(nextWorkingCopy)), retainedDraft, "retained Working Copy draft");
       const statePath = workingCopyStatePath(loaded.paths, nextWorkingCopy);
       await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -7422,7 +7428,7 @@ export class ProjectFileRepository {
           ? {}
           : {
               sourceElementIdentitySchemaVersion:
-                PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+                STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
               sourceElementIdentityBindingSha256:
                 sourceElementIdentityBindingSha256(prepared.html),
             }),
@@ -7589,7 +7595,7 @@ export class ProjectFileRepository {
         "prepared",
         "committed",
         // Legacy eight-state park journals remain readable so a crash in an
-        // older PageRoot can still recover complete old or complete new bytes.
+        // older Stemmio can still recover complete old or complete new bytes.
         "next-staged",
         "parking",
         "source-parked",
@@ -7664,7 +7670,7 @@ export class ProjectFileRepository {
         ),
         lastSavedAt: savedAt,
         ...(currentState.sourceElementIdentitySchemaVersion
-          === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+          === STEMMIO_ELEMENT_ID_SCHEMA_VERSION
           ? {
               sourceElementIdentityBindingSha256:
                 sourceElementIdentityBindingSha256(source.html),
@@ -7706,7 +7712,7 @@ export class ProjectFileRepository {
     };
 
     // Existing v4 save records did not have a private recovery directory.
-    // Retain their previous recovery behavior so a newer PageRoot can safely
+    // Retain their previous recovery behavior so a newer Stemmio can safely
     // reopen a project that was saved by the earlier PR head.
     if (!usesRecoveryDirectory) {
       const source = await readHtmlFile(sourcePath, "Working Copy", {
@@ -7761,7 +7767,7 @@ export class ProjectFileRepository {
       );
     }
     if (source?.sha256 === target) {
-      // `committed` means PageRoot published its new source and metadata, not
+      // `committed` means Stemmio published its new source and metadata, not
       // that the parked old inode has become irrelevant. An external editor
       // can retain an FD to previous.html across a crash at this point, so
       // preserve and surface its late write before treating the save as done.
@@ -7775,7 +7781,7 @@ export class ProjectFileRepository {
         }, "save transaction");
         throw new ProjectFileRepositoryError(
           "SAVE_RECOVERY_CONFLICT",
-          "The Working Copy changed through an already-open external file after PageRoot saved it; the external bytes were retained for recovery.",
+          "The Working Copy changed through an already-open external file after Stemmio saved it; the external bytes were retained for recovery.",
           {
             workingCopyId: workingCopy.workingCopyId,
             expectedSourceSha256: expected,
@@ -7867,7 +7873,7 @@ export class ProjectFileRepository {
       && ["prepared", "next-staged", "parking"].includes(transaction.state)
     ) {
       // Visible bytes are neither the expected old source nor the prepared
-      // replacement. PageRoot never mixes those histories: keep both complete
+      // replacement. Stemmio never mixes those histories: keep both complete
       // sequences and fail closed.
       throw new ProjectFileRepositoryError(
         "SAVE_RECOVERY_CONFLICT",
@@ -7902,7 +7908,7 @@ export class ProjectFileRepository {
   async #recoverRequestRuntime(loaded) {
     const runtimeAnchor = loaded.runtime.activeRequest;
     // Request / Attempt files are writable by the external Agent. They are
-    // evidence to validate against PageRoot-owned runtime state, never a
+    // evidence to validate against Stemmio-owned runtime state, never a
     // source from which reopening may infer new active-work authority.
     if (!runtimeAnchor) return null;
     const workingCopy = loaded.manifest.workingCopies.find(
@@ -7928,7 +7934,7 @@ export class ProjectFileRepository {
     if (!record) {
       throw new ProjectFileRepositoryError(
         "REQUEST_RUNTIME_ANCHOR_MISSING",
-        "The active Request record is unavailable; PageRoot will not infer replacement Request authority.",
+        "The active Request record is unavailable; Stemmio will not infer replacement Request authority.",
         {
           requestId: runtimeAnchor.requestId,
           attemptId: runtimeAnchor.attemptId,

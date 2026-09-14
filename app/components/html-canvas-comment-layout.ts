@@ -127,7 +127,7 @@ export function measureCommentTargetLayouts(options: {
           resolution?.resolution ?? "orphaned"
         ) as HtmlCanvasTargetResolution;
         if (resolution?.target?.type !== "element") return missing(targetResolution);
-        targetElement = querySourceElement(documentNode, resolution.target.pagerootId);
+        targetElement = querySourceElement(documentNode, resolution.target.stemmioId);
       }
       if (!targetElement) return missing(targetResolution);
       const visualElement = entry.visualHint
@@ -316,7 +316,7 @@ export function layoutCommentMarkers(options: {
         )
         : null;
       if (resolution?.target?.type === "element") {
-        targetElement = querySourceElement(documentNode, resolution.target.pagerootId);
+        targetElement = querySourceElement(documentNode, resolution.target.stemmioId);
       }
     } catch {
       targetElement = null;

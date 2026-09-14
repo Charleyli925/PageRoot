@@ -4,8 +4,8 @@ import { agentProviderError, defineAgentProvider } from "./agent-provider-contra
 import { openAiCompatibleVendorAdapter } from "./openai-compatible-vendor-adapters.mjs";
 import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
 import {
-  PAGEROOT_PROVIDER_ID,
-  PAGEROOT_RUNTIME_ID,
+  STEMMIO_PROVIDER_ID,
+  STEMMIO_RUNTIME_ID,
   DEFAULT_OPENAI_COMPATIBLE_REASONING,
   httpAgentTestOverrideEnabled,
   normalizeOpenAiCompatibleReasoning,
@@ -20,7 +20,7 @@ import { HTTP_AGENT_INPUT_POLICY_REVISION } from "../../../shared/agent-input-po
 const HTTP_AGENT_CAPABILITY_REVISION = `${SUPPORTED_AGENT_MODELS_REVISION}:${HTTP_AGENT_INPUT_POLICY_REVISION}`;
 
 const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,159}$/u;
-const PREFLIGHT_HTML = "<!DOCTYPE html><html><head><title>PageRoot preflight</title></head><body><p data-pageroot-id=\"preflight\">ready</p></body></html>";
+const PREFLIGHT_HTML = "<!DOCTYPE html><html><head><title>Stemmio preflight</title></head><body><p data-stemmio-probe=\"preflight\">ready</p></body></html>";
 
 function fail(code, message, options) { throw agentProviderError(code, message, options); }
 function cleanText(value, maxLength = 160) {
@@ -28,16 +28,16 @@ function cleanText(value, maxLength = 160) {
 }
 function localModelId(modelId) {
   const value = String(modelId || "");
-  return value.startsWith(`${PAGEROOT_PROVIDER_ID}:`)
-    ? value.slice(`${PAGEROOT_PROVIDER_ID}:`.length)
+  return value.startsWith(`${STEMMIO_PROVIDER_ID}:`)
+    ? value.slice(`${STEMMIO_PROVIDER_ID}:`.length)
     : value;
 }
 
 function credentialFromEnvironment(environment = {}) {
-  const apiKey = cleanText(environment.PAGEROOT_API_KEY, 512);
+  const apiKey = cleanText(environment.STEMMIO_API_KEY, 512);
   const resolved = resolveOpenAiCompatibleVendor(
-    environment.PAGEROOT_API_VENDOR,
-    environment.PAGEROOT_API_BASE_URL,
+    environment.STEMMIO_API_VENDOR,
+    environment.STEMMIO_API_BASE_URL,
   );
   if (!apiKey || !resolved) return null;
   const fenced = httpAgentTestOverrideEnabled(environment);
@@ -47,7 +47,7 @@ function credentialFromEnvironment(environment = {}) {
     apiKey,
     vendorId: resolved.id,
     baseUrl: testUrl || resolved.baseUrl,
-    credentialGeneration: Number(environment.PAGEROOT_API_CREDENTIAL_GENERATION || 0),
+    credentialGeneration: Number(environment.STEMMIO_API_CREDENTIAL_GENERATION || 0),
   });
 }
 
@@ -55,7 +55,7 @@ function publicCustomModel(modelId) {
   const id = localModelId(modelId);
   if (!SAFE_MODEL_ID.test(id)) return null;
   return Object.freeze({
-    id: `${PAGEROOT_PROVIDER_ID}:${id}`,
+    id: `${STEMMIO_PROVIDER_ID}:${id}`,
     providerModelId: id,
     displayName: id,
     isDefault: true,
@@ -81,7 +81,7 @@ function modelsForCredential(credential, environment, selection) {
   return models;
 }
 
-function resolvedPagerootReasoning(selection, model) {
+function resolvedStemmioReasoning(selection, model) {
   const requested = normalizeOpenAiCompatibleReasoning(selection?.reasoning?.requested);
   if (requested && requested !== "auto") {
     if (!(model?.reasoningChoices || []).some((choice) => choice.id === requested)) {
@@ -92,7 +92,7 @@ function resolvedPagerootReasoning(selection, model) {
   return Object.freeze({ requested: null, applied: null, resolution: "provider-default" });
 }
 
-function resolvedPagerootSelection(selection, { evidence } = {}) {
+function resolvedStemmioSelection(selection, { evidence } = {}) {
   const models = evidence?.models || [];
   const requestedId = selection?.requestedModelId || null;
   const selected = requestedId
@@ -100,14 +100,14 @@ function resolvedPagerootSelection(selection, { evidence } = {}) {
     : models.find((model) => model.isDefault) || models[0];
   if (!selected) {
     fail(requestedId ? "AGENT_SELECTION_UNSUPPORTED" : "AGENT_MODEL_ID_REQUIRED",
-      requestedId ? "当前配置不能使用这个模型。" : "请选择一个 PageRoot 支持的模型。", { status: 409 });
+      requestedId ? "当前配置不能使用这个模型。" : "请选择一个 Stemmio 支持的模型。", { status: 409 });
   }
   return Object.freeze({
-    providerId: PAGEROOT_PROVIDER_ID,
-    runtimeId: PAGEROOT_RUNTIME_ID,
+    providerId: STEMMIO_PROVIDER_ID,
+    runtimeId: STEMMIO_RUNTIME_ID,
     requestedModelId: requestedId,
     resolvedModelId: selected.id,
-    reasoning: resolvedPagerootReasoning(selection, selected),
+    reasoning: resolvedStemmioReasoning(selection, selected),
   });
 }
 
@@ -211,8 +211,8 @@ export function createOpenAiCompatibleProvider({
   policyLoader = loadExecutionPolicy,
 } = {}) {
   return defineAgentProvider({
-    providerId: PAGEROOT_PROVIDER_ID,
-    runtimeId: PAGEROOT_RUNTIME_ID,
+    providerId: STEMMIO_PROVIDER_ID,
+    runtimeId: STEMMIO_RUNTIME_ID,
     displayName: "源页 Agent",
     securityProfile: "client-mediated",
     capabilityRevision: HTTP_AGENT_CAPABILITY_REVISION,
@@ -258,7 +258,7 @@ export function createOpenAiCompatibleProvider({
         models,
         vendorId: credential.vendorId,
       });
-      const resolved = resolvedPagerootSelection(selection || {}, { evidence });
+      const resolved = resolvedStemmioSelection(selection || {}, { evidence });
       try {
         await completeChat({
           fetchImpl,
@@ -352,10 +352,10 @@ export function createOpenAiCompatibleProvider({
         modelBudget: model ? Object.freeze({ ...model }) : null,
         policy,
         environment: Object.freeze({
-          PAGEROOT_API_KEY: String(credential?.apiKey || ""),
-          PAGEROOT_API_BASE_URL: String(credential?.baseUrl || ""),
-          PAGEROOT_API_VENDOR: String(credential?.vendorId || ""),
-          PAGEROOT_API_CREDENTIAL_GENERATION: String(credential?.credentialGeneration || 0),
+          STEMMIO_API_KEY: String(credential?.apiKey || ""),
+          STEMMIO_API_BASE_URL: String(credential?.baseUrl || ""),
+          STEMMIO_API_VENDOR: String(credential?.vendorId || ""),
+          STEMMIO_API_CREDENTIAL_GENERATION: String(credential?.credentialGeneration || 0),
         }),
         cancellationSignal,
         onEvent,
@@ -384,7 +384,7 @@ export function createOpenAiCompatibleProvider({
       };
       return messages[code] || "模型接口错误。本轮 Request 已保留。";
     },
-    resolveSelection: resolvedPagerootSelection,
+    resolveSelection: resolvedStemmioSelection,
   });
 }
 

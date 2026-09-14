@@ -245,7 +245,7 @@ export function agentDeliveryIsManaged(value) {
 const SHIPPED_MANAGED_BINDINGS = Object.freeze([
   Object.freeze({ providerId: "qoder", runtimeId: "acp", legacyDriver: LEGACY_QODER_ACP_MODE }),
   Object.freeze({ providerId: "codex", runtimeId: "acp", legacyDriver: null }),
-  Object.freeze({ providerId: "pageroot", runtimeId: "http", legacyDriver: null }),
+  Object.freeze({ providerId: "stemmio", runtimeId: "http", legacyDriver: null }),
 ]);
 
 function shippedManagedBinding(selection) {

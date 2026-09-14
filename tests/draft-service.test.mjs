@@ -85,7 +85,7 @@ test("active draft snapshot exposes only one authoritative aggregate", () => {
   });
 });
 
-// A newer PageRoot may add members to the stored Draft. An older build must
+// A newer Stemmio may add members to the stored Draft. An older build must
 // carry them through its snapshot instead of deleting them on the next write.
 test("unknown draft members survive an older build's snapshot", () => {
   const snapshot = activeDraftSnapshot(draft(7, {

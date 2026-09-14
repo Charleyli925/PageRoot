@@ -20,7 +20,7 @@ const REQUEST_ID = "req_0001";
 const ATTEMPT_ID = "attempt_001";
 
 async function fixture() {
-  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-supplement-"));
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-supplement-"));
   const createdAt = "2026-07-28T04:43:15.000Z";
   const storageDirectoryName = projectStorageDirectoryName({
     displayName: "补充记录项目",

@@ -38,7 +38,7 @@ export async function resolveFixedStructureSample(frame, sample) {
     );
   }
   const target = matches.first();
-  const sourceId = await target.getAttribute("data-pageroot-id");
+  const sourceId = await target.getAttribute("data-stemmio-id");
   if (!sourceId) {
     throw new FixedStructureSampleError(
       `Fixed ${sample.id} sample has no source identity.`,

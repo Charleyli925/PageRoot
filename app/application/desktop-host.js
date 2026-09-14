@@ -11,14 +11,14 @@ const REQUIRED_DESKTOP_CAPABILITIES = Object.freeze({
 });
 
 const REQUIRED_DESKTOP_HOST_FUNCTIONS = Object.freeze([
-  ["htmlAIProjects", "getActiveProject"],
-  ["htmlAIProjects", "openHtml"],
-  ["htmlAIPreview", "createSession"],
-  ["htmlAIPreview", "revokeSession"],
-  ["htmlAIAppLifecycle", "onPrepareClose"],
-  ["htmlAIAppLifecycle", "onCloseAborted"],
-  ["htmlAIAppLifecycle", "reportReady"],
-  ["htmlAIAppLifecycle", "reportBlocked"],
+  ["stemmioProjects", "getActiveProject"],
+  ["stemmioProjects", "openHtml"],
+  ["stemmioPreview", "createSession"],
+  ["stemmioPreview", "revokeSession"],
+  ["stemmioAppLifecycle", "onPrepareClose"],
+  ["stemmioAppLifecycle", "onCloseAborted"],
+  ["stemmioAppLifecycle", "reportReady"],
+  ["stemmioAppLifecycle", "reportBlocked"],
 ]);
 
 export function assertDesktopHost(host) {
@@ -26,10 +26,10 @@ export function assertDesktopHost(host) {
     throw new TypeError("桌面运行环境未初始化：窗口主机不可用。");
   }
   if (
-    !isRecord(host.htmlAIRuntime)
-    || !isRecord(host.htmlAIRuntime.capabilities)
+    !isRecord(host.stemmioRuntime)
+    || !isRecord(host.stemmioRuntime.capabilities)
     || Object.entries(REQUIRED_DESKTOP_CAPABILITIES).some(
-      ([name, value]) => host.htmlAIRuntime.capabilities[name] !== value,
+      ([name, value]) => host.stemmioRuntime.capabilities[name] !== value,
     )
   ) {
     throw new TypeError("桌面运行环境未初始化：能力声明缺失或无效。");

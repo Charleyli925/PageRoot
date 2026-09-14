@@ -34,7 +34,7 @@ export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
 
 const MAX_STATE_BYTES = 16 * 1024;
 const MOTION_VALUES = new Set(["system", "reduced"]);
-const AGENT_PROVIDER_IDS = new Set(["pageroot", "qoder", "codex"]);
+const AGENT_PROVIDER_IDS = new Set(["stemmio", "qoder", "codex"]);
 const WORKSPACE_KEYS = new Set(Object.keys(WORKSPACE_PREFERENCE_DEFAULTS));
 
 // Main owns the only durable preference writer so Settings and Agent updates

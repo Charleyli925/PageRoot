@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/conversation-index.v1.schema.json",
-  "title": "PageRoot AI conversation index v1",
+  "$id": "https://stemmio.local/schemas/conversation-index.v1.schema.json",
+  "title": "Stemmio AI conversation index v1",
   "$comment": "One index per project. It maps each Document to its Conversations and to the single current Conversation for that Document. Reading a Document's conversation list never scans directories and never returns another Document's entry. Forward compatible: unknown members are preserved through read, edit and write.",
   "type": "object",
   "required": [

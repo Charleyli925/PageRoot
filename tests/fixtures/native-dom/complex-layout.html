@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta http-equiv="refresh" content="120; url=https://example.invalid/should-never-run">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PageRoot native DOM editing matrix</title>
+  <title>Stemmio native DOM editing matrix</title>
   <style>
     :root {
       color-scheme: light;
@@ -63,7 +63,7 @@
     <header>
       <small>01 / NATIVE DOM</small>
       <h1 data-native-case="heading-inline" data-native-mode="native-editable">真实 <strong>DOM</strong> 光标要像 <em>Word</em> 一样自然&nbsp;🙂</h1>
-      <p class="lede" data-native-case="paragraph-entities" data-native-mode="native-editable">浏览器负责光标、选区与输入法；PageRoot 只把 <strong>必要文字</strong> 映射回源文件，保留 &amp;、&nbsp; 和原始标签。</p>
+      <p class="lede" data-native-case="paragraph-entities" data-native-mode="native-editable">浏览器负责光标、选区与输入法；Stemmio 只把 <strong>必要文字</strong> 映射回源文件，保留 &amp;、&nbsp; 和原始标签。</p>
     </header>
 
     <section class="grid" aria-label="Grid editing cases">
@@ -109,7 +109,7 @@
     </section>
 
     <section>
-      <p class="rtl" dir="rtl" data-native-case="rtl-copy" data-native-mode="native-editable">مرحبا PageRoot 中文 mixed direction 123</p>
+      <p class="rtl" dir="rtl" data-native-case="rtl-copy" data-native-mode="native-editable">مرحبا Stemmio 中文 mixed direction 123</p>
       <div class="scroller">
         <p data-native-case="scroll-copy" data-native-mode="native-editable">滚动容器中的长文字需要保持 scrollTop、scrollLeft 和原始折行；输入时不能刷新整个 iframe，也不能跳回容器顶部。</p>
       </div>

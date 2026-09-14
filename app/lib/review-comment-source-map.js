@@ -23,7 +23,7 @@ export function prepareReviewCommentSourceProjection(sourceHtml, enabled = true)
     html: sourceHtml,
     sourceIndex,
     projected: Boolean(
-      sourceIndex.pagerootIdentity?.complete && sourceIndex.pagerootIdentity?.valid,
+      sourceIndex.stemmioIdentity?.complete && sourceIndex.stemmioIdentity?.valid,
     ),
   };
 }

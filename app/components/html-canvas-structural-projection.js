@@ -42,7 +42,7 @@ export function isVerifiedStructuralProjectionPlan(plan) {
 }
 
 export function isStructuralInPlaceEnabled(globalObject = globalThis) {
-  return globalObject.__PAGEROOT_DISABLE_STRUCTURAL_IN_PLACE__ !== true;
+  return globalObject.__STEMMIO_DISABLE_STRUCTURAL_IN_PLACE__ !== true;
 }
 
 export function isUnsupportedInPlaceTag(tagName) {
@@ -89,21 +89,21 @@ function parentHasSignificantMixedContent(index, parentId) {
 
 function sourceElement(index, elementId) {
   if (!elementId) return null;
-  const element = index.byPagerootId.get(elementId);
+  const element = index.byStemmioId.get(elementId);
   return element?.type === "element" ? element : null;
 }
 
-function parentPagerootId(index, element) {
+function parentStemmioId(index, element) {
   if (!element?.parentId) return null;
   const parent = index.byNodeId.get(element.parentId);
-  return parent?.type === "element" ? parent.pagerootId ?? null : null;
+  return parent?.type === "element" ? parent.stemmioId ?? null : null;
 }
 
 function addedRoots(delta, afterIndex) {
   const added = new Set(delta.addedElementIds);
   return delta.addedElementIds.filter((elementId) => {
     const element = sourceElement(afterIndex, elementId);
-    const parentId = parentPagerootId(afterIndex, element);
+    const parentId = parentStemmioId(afterIndex, element);
     return Boolean(element) && !added.has(parentId || "");
   });
 }
@@ -112,7 +112,7 @@ function removedRoots(delta, beforeIndex) {
   const removed = new Set(delta.removedElementIds);
   return delta.removedElementIds.filter((elementId) => {
     const element = sourceElement(beforeIndex, elementId);
-    const parentId = parentPagerootId(beforeIndex, element);
+    const parentId = parentStemmioId(beforeIndex, element);
     return Boolean(element) && !removed.has(parentId || "");
   });
 }
@@ -125,31 +125,31 @@ export function resolveDeleteSelectionLanding(beforeIndex, removedRootElementId)
     : null;
   if (
     next?.type === "element"
-    && next.pagerootId
+    && next.stemmioId
     && !isUnsupportedInPlaceTag(next.tagName)
     && !["html", "head", "body"].includes(next.tagName)
   ) {
-    return next.pagerootId;
+    return next.stemmioId;
   }
   const previous = target.previousElementSiblingId
     ? beforeIndex.byNodeId.get(target.previousElementSiblingId)
     : null;
   if (
     previous?.type === "element"
-    && previous.pagerootId
+    && previous.stemmioId
     && !isUnsupportedInPlaceTag(previous.tagName)
     && !["html", "head", "body"].includes(previous.tagName)
   ) {
-    return previous.pagerootId;
+    return previous.stemmioId;
   }
-  const parentId = parentPagerootId(beforeIndex, target);
+  const parentId = parentStemmioId(beforeIndex, target);
   const parent = sourceElement(beforeIndex, parentId);
   if (
-    parent?.pagerootId
+    parent?.stemmioId
     && !isUnsupportedInPlaceTag(parent.tagName)
     && !["html", "head", "body"].includes(parent.tagName)
   ) {
-    return parent.pagerootId;
+    return parent.stemmioId;
   }
   return null;
 }
@@ -224,7 +224,7 @@ export function decideStructuralProjection(context) {
     }
     const rootId = roots[0];
     const afterRoot = sourceElement(context.afterIndex, rootId);
-    const parentId = parentPagerootId(context.afterIndex, afterRoot);
+    const parentId = parentStemmioId(context.afterIndex, afterRoot);
     if (!afterRoot || !parentId || subtreeHasUnsupportedTag(context.afterIndex, rootId)) {
       return { kind: "candidate", reason: "insert-host-unsupported" };
     }
@@ -238,7 +238,7 @@ export function decideStructuralProjection(context) {
     const nextSibling = afterRoot.nextElementSiblingId
       ? context.afterIndex.byNodeId.get(afterRoot.nextElementSiblingId)
       : null;
-    const beforeId = nextSibling?.type === "element" ? nextSibling.pagerootId ?? null : null;
+    const beforeId = nextSibling?.type === "element" ? nextSibling.stemmioId ?? null : null;
     return {
       kind: "in-place",
       reason: "verified-insert",
@@ -270,7 +270,7 @@ export function decideStructuralProjection(context) {
     }
     const rootId = roots[0];
     const beforeRoot = sourceElement(context.beforeIndex, rootId);
-    const parentId = parentPagerootId(context.beforeIndex, beforeRoot);
+    const parentId = parentStemmioId(context.beforeIndex, beforeRoot);
     if (!beforeRoot || subtreeHasUnsupportedTag(context.beforeIndex, rootId)) {
       return { kind: "candidate", reason: "delete-host-unsupported" };
     }
@@ -304,8 +304,8 @@ export function decideStructuralProjection(context) {
   }
   const afterMoved = sourceElement(context.afterIndex, movedId);
   const beforeMoved = sourceElement(context.beforeIndex, movedId);
-  const destParentId = parentPagerootId(context.afterIndex, afterMoved);
-  const sourceParentId = parentPagerootId(context.beforeIndex, beforeMoved);
+  const destParentId = parentStemmioId(context.afterIndex, afterMoved);
+  const sourceParentId = parentStemmioId(context.beforeIndex, beforeMoved);
   if (
     !afterMoved
     || !beforeMoved
@@ -325,7 +325,7 @@ export function decideStructuralProjection(context) {
   const nextSibling = afterMoved.nextElementSiblingId
     ? context.afterIndex.byNodeId.get(afterMoved.nextElementSiblingId)
     : null;
-  const beforeId = nextSibling?.type === "element" ? nextSibling.pagerootId ?? null : null;
+  const beforeId = nextSibling?.type === "element" ? nextSibling.stemmioId ?? null : null;
   return {
     kind: "in-place",
     reason: sourceParentId === destParentId ? "verified-same-parent-move" : "verified-cross-parent-move",

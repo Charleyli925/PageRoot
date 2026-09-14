@@ -12,9 +12,9 @@ import type {
 } from "../../lib/review-projection-facts.js";
 import { reviewSectionChangeOperation } from "../../lib/review-section-operation.js";
 import {
-  isValidPagerootElementId,
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-} from "../../lib/pageroot-element-identity.js";
+  isValidStemmioElementId,
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+} from "../../lib/stemmio-element-identity.js";
 import {
   REVIEW_BASE_ATTRIBUTE,
   REVIEW_BOOTSTRAP_ATTRIBUTE,
@@ -184,7 +184,7 @@ export function createReviewSignatureCache(): ReviewSignatureCache {
 
 export function reviewAttributeRole(attribute: Attr): ReviewAttributeRole {
   const name = attribute.name.toLowerCase();
-  if (name.startsWith("data-pageroot-")) return "disposable";
+  if (name.startsWith("data-stemmio-")) return "disposable";
   if (REVIEW_STABLE_IDENTITY_ATTRIBUTE_NAMES.has(name)) return "stable-identity";
   if (PRESENTATION_ATTRIBUTE_NAMES.has(name)) return "presentation";
   return "structural";
@@ -195,14 +195,14 @@ export function explicitStableElementIdentity(
   usePersistentIdentity = true,
   ambiguousPersistentIds: ReadonlySet<string> = new Set(),
 ): string | null {
-  const claimsPersistentIdentity = element.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+  const claimsPersistentIdentity = element.hasAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
   if (claimsPersistentIdentity) {
-    const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
+    const stemmioId = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
     if (
       usePersistentIdentity
-      && isValidPagerootElementId(pagerootId)
-      && !ambiguousPersistentIds.has(pagerootId)
-    ) return `pageroot:${pagerootId}`;
+      && isValidStemmioElementId(stemmioId)
+      && !ambiguousPersistentIds.has(stemmioId)
+    ) return `stemmio:${stemmioId}`;
     return null;
   }
   for (const name of [
@@ -224,8 +224,8 @@ export function hasAmbiguousPersistentIdentity(
   element: Element,
   ambiguousPersistentIds: ReadonlySet<string>,
 ): boolean {
-  const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
-  return isValidPagerootElementId(pagerootId) && ambiguousPersistentIds.has(pagerootId);
+  const stemmioId = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
+  return isValidStemmioElementId(stemmioId) && ambiguousPersistentIds.has(stemmioId);
 }
 
 export function stableElementIdentity(
@@ -266,7 +266,7 @@ export function exactSubtreeSignature(element: Element, signatures: ReviewSignat
   if (cached !== undefined) return cached;
   const value = element.outerHTML
     .replace(REVIEW_COMMENT_MARKUP_ATTRIBUTE_PATTERN, "")
-    .replace(/\sdata-pageroot-[^=\s]*="[^"]*"/gu, "")
+    .replace(/\sdata-stemmio-[^=\s]*="[^"]*"/gu, "")
     .replace(/\s+/gu, " ")
     .replace(/>\s+</gu, "><")
     .trim();
@@ -380,7 +380,7 @@ export function closestPanelContainer(element: Element): Element | null {
   let candidate: Element | null = element;
   while (candidate && candidate !== element.ownerDocument.body) {
     if (
-      candidate.getAttribute("data-pageroot-review-panel-container") === "true"
+      candidate.getAttribute("data-stemmio-review-panel-container") === "true"
       || isPanelContainer(candidate)
     ) return candidate;
     candidate = candidate.parentElement;
@@ -480,22 +480,22 @@ export function panelDescriptors(document: Document): PanelDescriptor[] {
 }
 
 export function setPanelDescriptorKey(descriptor: PanelDescriptor, key: string) {
-  descriptor.panel.setAttribute("data-pageroot-review-panel-key", key);
-  descriptor.panel.setAttribute("data-pageroot-review-panel-container", "true");
-  descriptor.panel.setAttribute("data-pageroot-review-panel-group", descriptor.groupKey);
+  descriptor.panel.setAttribute("data-stemmio-review-panel-key", key);
+  descriptor.panel.setAttribute("data-stemmio-review-panel-container", "true");
+  descriptor.panel.setAttribute("data-stemmio-review-panel-group", descriptor.groupKey);
   if (descriptor.activeClasses.length) {
     descriptor.panel.setAttribute(
-      "data-pageroot-review-panel-active-classes",
+      "data-stemmio-review-panel-active-classes",
       descriptor.activeClasses.join(" "),
     );
   }
   if (descriptor.control) {
-    descriptor.control.setAttribute("data-pageroot-review-panel-key", key);
-    descriptor.control.setAttribute("data-pageroot-review-panel-control", "true");
-    descriptor.control.setAttribute("data-pageroot-review-panel-group", descriptor.groupKey);
+    descriptor.control.setAttribute("data-stemmio-review-panel-key", key);
+    descriptor.control.setAttribute("data-stemmio-review-panel-control", "true");
+    descriptor.control.setAttribute("data-stemmio-review-panel-group", descriptor.groupKey);
     if (descriptor.activeClasses.length) {
       descriptor.control.setAttribute(
-        "data-pageroot-review-panel-active-classes",
+        "data-stemmio-review-panel-active-classes",
         descriptor.activeClasses.join(" "),
       );
     }
@@ -503,21 +503,21 @@ export function setPanelDescriptorKey(descriptor: PanelDescriptor, key: string) 
 }
 
 export function annotatePanelPaths(document: Document) {
-  document.querySelectorAll<HTMLElement>("[data-pageroot-review-panel-key]")
+  document.querySelectorAll<HTMLElement>("[data-stemmio-review-panel-key]")
     .forEach((element) => {
       const keys: string[] = [];
       let candidate: Element | null = element;
       while (candidate && candidate !== document.body) {
         if (
-          candidate.getAttribute("data-pageroot-review-panel-container") === "true"
+          candidate.getAttribute("data-stemmio-review-panel-container") === "true"
           || candidate === element
         ) {
-          const key = candidate.getAttribute("data-pageroot-review-panel-key");
+          const key = candidate.getAttribute("data-stemmio-review-panel-key");
           if (key && !keys.includes(key)) keys.unshift(key);
         }
         candidate = candidate.parentElement;
       }
-      element.setAttribute("data-pageroot-review-panel-path", keys.join(" "));
+      element.setAttribute("data-stemmio-review-panel-path", keys.join(" "));
     });
 }
 
@@ -572,8 +572,8 @@ export function actionDescriptors(document: Document): ActionDescriptor[] {
   )];
   const ordinals = new Map<string, number>();
   return actions.map((element, index) => {
-    const panelKey = element.closest("[data-pageroot-review-panel-key]")
-      ?.getAttribute("data-pageroot-review-panel-key") || "";
+    const panelKey = element.closest("[data-stemmio-review-panel-key]")
+      ?.getAttribute("data-stemmio-review-panel-key") || "";
     const kind = `${element.tagName.toLowerCase()}:${element.getAttribute("role") || ""}:${element.getAttribute("type") || ""}`;
     const ordinalGroup = `${panelKey || "page"}:${kind}`;
     const ordinal = (ordinals.get(ordinalGroup) || 0) + 1;
@@ -634,16 +634,16 @@ export function annotateActionPairs(before: Document, after: Document) {
     const match = (ranked[0]?.score || 0) >= 45 ? ranked[0].candidate : null;
     pairIndex += 1;
     const key = `action-${pairIndex}`;
-    beforeAction.element.setAttribute("data-pageroot-review-action-key", key);
+    beforeAction.element.setAttribute("data-stemmio-review-action-key", key);
     if (match) {
       usedAfter.add(match);
-      match.element.setAttribute("data-pageroot-review-action-key", key);
+      match.element.setAttribute("data-stemmio-review-action-key", key);
     }
   });
   afterActions.forEach((descriptor) => {
     if (usedAfter.has(descriptor)) return;
     pairIndex += 1;
-    descriptor.element.setAttribute("data-pageroot-review-action-key", `action-${pairIndex}`);
+    descriptor.element.setAttribute("data-stemmio-review-action-key", `action-${pairIndex}`);
   });
 }
 
@@ -652,8 +652,8 @@ export function panelPathForElement(element: Element | null): string[] {
   const path: string[] = [];
   let candidate: Element | null = element;
   while (candidate && candidate !== element.ownerDocument.body) {
-    if (candidate.getAttribute("data-pageroot-review-panel-container") === "true") {
-      const key = candidate.getAttribute("data-pageroot-review-panel-key");
+    if (candidate.getAttribute("data-stemmio-review-panel-container") === "true") {
+      const key = candidate.getAttribute("data-stemmio-review-panel-key");
       if (key && !path.includes(key)) path.unshift(key);
     }
     candidate = candidate.parentElement;
@@ -739,17 +739,17 @@ export function sectionChangeMarks(pair: SectionPair) {
   const marks: { textOperation: string; structureTone: string }[] = [];
   const collect = (element: Element) => {
     marks.push({
-      textOperation: element.hasAttribute("data-pageroot-review-text")
-        ? element.getAttribute("data-pageroot-review-text-operation") || ""
+      textOperation: element.hasAttribute("data-stemmio-review-text")
+        ? element.getAttribute("data-stemmio-review-text-operation") || ""
         : "",
-      structureTone: element.getAttribute("data-pageroot-review-structure") || "",
+      structureTone: element.getAttribute("data-stemmio-review-structure") || "",
     });
   };
   [pair.before, pair.after].forEach((root) => {
     if (!root) return;
     collect(root);
     root
-      .querySelectorAll("[data-pageroot-review-text],[data-pageroot-review-structure]")
+      .querySelectorAll("[data-stemmio-review-text],[data-stemmio-review-structure]")
       .forEach(collect);
   });
   return marks;
@@ -913,8 +913,8 @@ export function clearReservedReviewMarkup(document: Document) {
   document.querySelectorAll("*").forEach((element) => {
     [...element.attributes].forEach((attribute) => {
       if (
-        attribute.name.startsWith("data-pageroot-review-")
-        || attribute.name === "data-pageroot-outline-id"
+        attribute.name.startsWith("data-stemmio-review-")
+        || attribute.name === "data-stemmio-outline-id"
       ) {
         element.removeAttribute(attribute.name);
       }

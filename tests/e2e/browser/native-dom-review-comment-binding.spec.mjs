@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
 
-const COMMENT_STABLE_ID = "pr1_11111111111141118111111111111111";
-const COMMENT_STABLE_ID_B = "pr1_22222222222242228222222222222222";
+const COMMENT_STABLE_ID = "sm1_11111111111141118111111111111111";
+const COMMENT_STABLE_ID_B = "sm1_22222222222242228222222222222222";
 
 const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["class", "comment-host"],
@@ -57,14 +57,14 @@ async function parsedReviewCommentLayouts(page, {
     const receive = (event) => {
       const message = event.data;
       if (
-        message?.source === "pageroot-ai-review"
+        message?.source === "stemmio-ai-review"
         && message.type === "review-comment-channel"
       ) {
         commentPort = event.ports?.[0] || null;
         commentPort?.start?.();
       }
       if (
-        message?.source === "pageroot-ai-review"
+        message?.source === "stemmio-ai-review"
         && message.type === "comment-layout"
       ) messages.push(message);
     };
@@ -72,7 +72,7 @@ async function parsedReviewCommentLayouts(page, {
     try {
       const challenge = "a".repeat(32);
       postMessage({
-        source: "pageroot-ai-review-parent",
+        source: "stemmio-ai-review-parent",
         sessionId,
         type: "request-review-comment-channel",
         challenge,
@@ -84,7 +84,7 @@ async function parsedReviewCommentLayouts(page, {
       if (!commentPort) return { channel: false, layouts: messages };
       const expectedCommentKeys = new Set(commentTargets.map(({ key }) => key));
       commentPort.postMessage({
-        source: "pageroot-ai-review-comment-targets",
+        source: "stemmio-ai-review-comment-targets",
         sessionId,
         side,
         type: "comment-targets",
@@ -134,22 +134,22 @@ test("private visual capability observes the actual stable host after authored r
   const bootstrap = generatedReviewBootstrap(
     [],
     "after",
-    ["pr1_11111111111141118111111111111111"],
+    ["sm1_11111111111141118111111111111111"],
   );
-  await page.setContent(`<!doctype html><script>${bootstrap}</script><main data-pageroot-id="pr1_11111111111141118111111111111111">old</main><script>document.querySelector('main').textContent = 'runtime new'</script>`);
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><main data-stemmio-id="sm1_11111111111141118111111111111111">old</main><script>document.querySelector('main').textContent = 'runtime new'</script>`);
   const result = await page.evaluate(async () => {
     let port;
     const listener = (event) => {
       if (event.data?.type === "review-visual-channel") port = event.ports[0];
     };
     addEventListener("message", listener);
-    postMessage({ source: "pageroot-ai-review-parent", sessionId: "review-session", type: "request-review-visual-channel", challenge: "b".repeat(32) }, "*");
+    postMessage({ source: "stemmio-ai-review-parent", sessionId: "review-session", type: "request-review-visual-channel", challenge: "b".repeat(32) }, "*");
     const until = Date.now() + 3000;
     while (!port && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10));
     if (!port) return null;
     const observations = await new Promise((resolve) => {
       port.onmessage = (event) => resolve(event.data.observations);
-      port.postMessage({ type: "observe", sessionId: "review-session", side: "after", sourceHash: "sha256:test", generation: 0, candidates: [{ stableId: "pr1_11111111111141118111111111111111", present: true }] });
+      port.postMessage({ type: "observe", sessionId: "review-session", side: "after", sourceHash: "sha256:test", generation: 0, candidates: [{ stableId: "sm1_11111111111141118111111111111111", present: true }] });
     });
     removeEventListener("message", listener);
     return observations;
@@ -272,13 +272,13 @@ test("path-only review comments fail closed when a same-tag parser decoy shifts 
 test("a pre-author Stable ID binding survives a same-tag parser decoy", {
   tag: ["@gate-smoke","@smoke-review"],
 }, async ({ page }) => {
-  const stableId = "pr1_11111111111141118111111111111111";
+  const stableId = "sm1_11111111111141118111111111111111";
   const binding = {
     sourceNodeId: COMMENT_STABLE_ID,
     path: [1, 0, 0],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
-    identityAttributes: [["data-pageroot-id", stableId]],
+    identityAttributes: [["data-stemmio-id", stableId]],
     identityText: "",
   };
   const result = await parsedReviewCommentLayouts(page, {
@@ -290,7 +290,7 @@ test("a pre-author Stable ID binding survives a same-tag parser decoy", {
       main.append(decoy);
       const actualTarget = document.createElement("div");
       actualTarget.className = "comment-host";
-      actualTarget.setAttribute("data-pageroot-id", ${JSON.stringify(stableId)});
+      actualTarget.setAttribute("data-stemmio-id", ${JSON.stringify(stableId)});
       main.append(actualTarget);
     `,
   });

@@ -30,7 +30,7 @@ test("desktop and Bridge share one HTML budget with an explicit JSON envelope bu
   for (const source of [main, projectFiles, bridge]) {
     assert.match(source, /product-contract\.mjs/u);
   }
-  assert.doesNotMatch(main, /PageRootV2/);
+  assert.doesNotMatch(main, /StemmioV2/);
   assert.doesNotMatch(main, /YuanYe/);
   assert.doesNotMatch(main, /HTML AI 工作台/);
   const packageJson = JSON.parse(packageText);
@@ -121,7 +121,7 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
     readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/MVP_PRD.md", import.meta.url), "utf8"),
   ]);
-  assert.match(repository, /# PageRoot HTML Candidate Rules/);
+  assert.match(repository, /# Stemmio HTML Candidate Rules/);
   assert.match(
     repository,
     /Read every frozen input in input-manifest.json readOrder before editing/,
@@ -134,10 +134,10 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
     repository,
     /Write exactly one complete, parseable HTML document to the output path stated in PROMPT.md/,
   );
-  assert.match(repository, /Treat every existing data-pageroot-id as an opaque authored-source identity/);
+  assert.match(repository, /Treat every existing data-stemmio-id as an opaque authored-source identity/);
   assert.match(repository, /Modify authored source HTML, not the current Runtime DOM/);
   assert.match(repository, /targets-plus-required-dependencies allows only their minimal direct dependencies/);
-  assert.doesNotMatch(bridge, /# PageRoot 通用执行规则/);
+  assert.doesNotMatch(bridge, /# Stemmio 通用执行规则/);
   assert.equal(
     (repository.match(/只修改用户明确要求的区域/g) ?? []).length,
     0,
@@ -157,7 +157,7 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
   assert.match(protocol, /`USER_SUPPLEMENT\.json` 只能由受控 helper 追加/);
   assert.match(protocol, /Prompt 只引用\s*这份通用合同，不重复 Stable ID 或 Runtime 规则/);
   assert.match(protocol, /新项目首次打开时默认创建包含“项目目标、目标受众、内容与事实规则、视觉与表达、AI 修改边界”五段/);
-  assert.match(protocol, /^# PageRoot Change Request 协议$/m);
+  assert.match(protocol, /^# Stemmio Change Request 协议$/m);
   assert.match(protocol, /v3 Attempt \/ finalizer CLI `--workspace` \/ `--project-id` 是历史归档/);
   assert.match(protocol, /finalize-attempt\.mjs --project-root/);
   assert.match(protocol, /record-user-supplement\.mjs --project-root/);

@@ -49,14 +49,14 @@ async function run(root, command, args) {
 }
 
 async function createRepository(t) {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), "pageroot-task-workflow-"));
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "stemmio-task-workflow-"));
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const origin = path.join(temporary, "origin.git");
   const repository = path.join(temporary, "repo");
   await run(temporary, "git", ["init", "--bare", origin]);
   await run(temporary, "git", ["init", "-b", "main", repository]);
-  await run(repository, "git", ["config", "user.name", "PageRoot Test"]);
-  await run(repository, "git", ["config", "user.email", "pageroot@example.invalid"]);
+  await run(repository, "git", ["config", "user.name", "Stemmio Test"]);
+  await run(repository, "git", ["config", "user.email", "stemmio@example.invalid"]);
   await writeFile(path.join(repository, "README.md"), "# fixture\n", "utf8");
   await writeFile(path.join(repository, "package.json"), "{\"version\":\"1.2.3\"}\n", "utf8");
   await run(repository, "git", ["add", "README.md", "package.json"]);

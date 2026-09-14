@@ -7,7 +7,7 @@ import {
   identifiedHtmlBuffer,
   loadFixture,
   replaceEditableIslandTextByCase,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 async function activateAtLeadingText(page, frame, caseId) {
   const target = frame.locator(caseSelector(caseId));
@@ -270,7 +270,7 @@ test("mixed island formatting wraps selected sibling text without leaving the ho
   });
   const mixedParent = frame.locator(caseSelector("mixed-parent"));
   const initialDocument = await frame.evaluate(() => {
-    const key = "__PAGEROOT_FORMAT_DOCUMENT_TOKEN__";
+    const key = "__STEMMIO_FORMAT_DOCUMENT_TOKEN__";
     window[key] ||= crypto.randomUUID();
     return window[key];
   });
@@ -304,7 +304,7 @@ test("mixed island formatting wraps selected sibling text without leaving the ho
   await expect.poll(() => mixedParent.evaluate((element) => (
     element.ownerDocument.activeElement === element
   ))).toBe(true);
-  expect(await frame.evaluate(() => window.__PAGEROOT_FORMAT_DOCUMENT_TOKEN__))
+  expect(await frame.evaluate(() => window.__STEMMIO_FORMAT_DOCUMENT_TOKEN__))
     .toBe(initialDocument);
 
   let expected = replaceExactOnce(
@@ -314,11 +314,11 @@ test("mixed island formatting wraps selected sibling text without leaving the ho
   );
   await expect.poll(async () => (
     (await exportCurrentHtml(page)).toString("utf8").replace(
-      / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+      / data-stemmio-id="sm1_[a-f0-9]{32}"/gu,
       "",
     )
   )).toBe(expected.toString("utf8").replace(
-    / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+    / data-stemmio-id="sm1_[a-f0-9]{32}"/gu,
     "",
   ));
   await expect(page.locator(".toast.show")).toHaveCount(0);
@@ -336,7 +336,7 @@ test("mixed island formatting wraps selected sibling text without leaving the ho
   await expect.poll(() => mixedParent.evaluate((element) => (
     element.ownerDocument.activeElement === element
   ))).toBe(true);
-  expect(await frame.evaluate(() => window.__PAGEROOT_FORMAT_DOCUMENT_TOKEN__))
+  expect(await frame.evaluate(() => window.__STEMMIO_FORMAT_DOCUMENT_TOKEN__))
     .toBe(initialDocument);
 
   expected = replaceExactOnce(
@@ -346,11 +346,11 @@ test("mixed island formatting wraps selected sibling text without leaving the ho
   );
   await expect.poll(async () => (
     (await exportCurrentHtml(page)).toString("utf8").replace(
-      / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+      / data-stemmio-id="sm1_[a-f0-9]{32}"/gu,
       "",
     )
   )).toBe(expected.toString("utf8").replace(
-    / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+    / data-stemmio-id="sm1_[a-f0-9]{32}"/gu,
     "",
   ));
   await expect(page.locator(".toast.show")).toHaveCount(0);

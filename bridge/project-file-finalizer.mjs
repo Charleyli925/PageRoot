@@ -8,6 +8,11 @@ import {
 } from "./lifecycle-core.mjs";
 import { prepareCandidateSourceIdentity } from "./project-file-repository/candidate-identity.mjs";
 import { PROJECT_FILE_SCHEMA_VERSION } from "./project-file-repository.mjs";
+import {
+  PROJECT_CONTROL_DIRECTORY_NAME,
+  projectControlPath,
+  projectRegistryPath,
+} from "../shared/project-storage-contract.mjs";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
@@ -348,7 +353,7 @@ function validateRequest(record, { requestId, attemptId }) {
   ) {
     throw new ProjectFileFinalizerError(
       "REQUEST_IDENTITY_MISMATCH",
-      "The Request is not a valid frozen PageRoot project-file Request.",
+      "The Request is not a valid frozen Stemmio project-file Request.",
     );
   }
   const expectedInput = `requests/${requestId}/input/base/index.html`;
@@ -642,12 +647,12 @@ async function validateRegistryAuthority({
 }) {
   const configuredRoot = normalizedPath(projectsRoot || path.dirname(projectRoot));
   const expectedRegistryPath = normalizedPath(
-    registryPath || path.join(configuredRoot, ".pageroot-registry.json"),
+    registryPath || projectRegistryPath(configuredRoot),
   );
   if (!samePath(path.dirname(projectRoot), configuredRoot)) {
     throw new ProjectFileFinalizerError(
       "UNREGISTERED_PROJECT_ROOT",
-      "The finalizer only accepts a direct child of the configured PageRoot project directory.",
+      "The finalizer only accepts a direct child of the configured Stemmio project directory.",
     );
   }
   await regularDirectory(configuredRoot, "configured project directory");
@@ -795,15 +800,15 @@ export async function finalizeProjectFileAttempt({
   const request = safeId(requestId, "requestId");
   const attempt = safeId(attemptId, "attemptId");
   await regularDirectory(root, "project root");
-  const controlRoot = path.join(root, ".pageroot");
-  await regularDirectory(controlRoot, ".pageroot", { projectRoot: root });
+  const controlRoot = projectControlPath(root);
+  await regularDirectory(controlRoot, PROJECT_CONTROL_DIRECTORY_NAME, { projectRoot: root });
   const identity = await readJson(path.join(controlRoot, "project.json"), "project.json", {
     projectRoot: root,
   });
   if (identity.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
     throw new ProjectFileFinalizerError(
       "UNSUPPORTED_PROJECT_SCHEMA",
-      "project.json is not a supported PageRoot project-file identity.",
+      "project.json is not a supported Stemmio project-file identity.",
     );
   }
   const registryAuthority = await validateRegistryAuthority({

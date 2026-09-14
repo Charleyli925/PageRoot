@@ -78,8 +78,8 @@ test("missing authority leaves both summary markers unknown despite stale row fl
 });
 
 test("legacy comment targets decode once and serialize compatible aliases from the single source anchor", () => {
-  const elementId = "pr1_11111111111141118111111111111111";
-  const otherId = "pr1_22222222222242229222222222222222";
+  const elementId = "sm1_11111111111141118111111111111111";
+  const otherId = "sm1_22222222222242229222222222222222";
   const oldTarget = {
     targetId: "target_legacy", elementId, selector: "p", label: "正文", level: "subregion",
     resolution: "exact", fingerprint: { tagName: "p", stableAttributes: {}, ancestorFingerprint: [], futureFingerprint: "keep" },
@@ -119,11 +119,11 @@ test("legacy comment targets decode once and serialize compatible aliases from t
 });
 
 test("sourceAnchor wins over a conflicting legacy target; body runtime hints stay distinct from global comments", () => {
-  const bodyId = "pr1_11111111111141118111111111111111";
+  const bodyId = "sm1_11111111111141118111111111111111";
   const source = { targetId: "target_body", elementId: bodyId, selector: "body", level: "module", label: "旧标签", resolution: "orphaned", futureAnchor: "retained" };
   const hint = { runtimeGenerated: true, kind: "table", label: "财务数据表", relativePath: "table:nth-of-type(1)" };
   const [runtime, global] = comments.commentsFromRecords([
-    { commentId: "comment_runtime", text: "改表格", sourceAnchor: source, target: { ...source, elementId: "pr1_22222222222242229222222222222222", visualHint: hint }, futureComment: true },
+    { commentId: "comment_runtime", text: "改表格", sourceAnchor: source, target: { ...source, elementId: "sm1_22222222222242229222222222222222", visualHint: hint }, futureComment: true },
     { commentId: "comment_global", text: "改全页", target: source },
   ]);
   assert.equal(runtime.sourceAnchor.elementId, bodyId);

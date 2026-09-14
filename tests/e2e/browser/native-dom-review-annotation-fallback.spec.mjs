@@ -28,22 +28,22 @@ test("canonical annotation overflow rebuilds clean pages with comments and paire
   await page.addScriptTag({ content: fixtureJavaScript });
   const result = await page.evaluate(() => {
     const api = globalThis.ReviewFallbackFixture;
-    const id = (index) => `pr1_00000000000040008000${String(index).padStart(12, "0")}`;
-    const before = `<!doctype html><html data-pageroot-id="${id(1)}"><head data-pageroot-id="${id(2)}"></head>
-      <body data-pageroot-id="${id(3)}"><nav data-pageroot-id="${id(4)}">
-      <button data-pageroot-id="${id(5)}" role="tab" aria-controls="details-panel">Details</button></nav>
-      <section data-pageroot-id="${id(6)}" id="details-panel" role="tabpanel">
-      <p data-pageroot-id="${id(7)}" id="comment-host">Alpha old statement.</p>
-      <button data-pageroot-id="${id(8)}" id="paired-action">Do action</button></section></body></html>`;
+    const id = (index) => `sm1_00000000000040008000${String(index).padStart(12, "0")}`;
+    const before = `<!doctype html><html data-stemmio-id="${id(1)}"><head data-stemmio-id="${id(2)}"></head>
+      <body data-stemmio-id="${id(3)}"><nav data-stemmio-id="${id(4)}">
+      <button data-stemmio-id="${id(5)}" role="tab" aria-controls="details-panel">Details</button></nav>
+      <section data-stemmio-id="${id(6)}" id="details-panel" role="tabpanel">
+      <p data-stemmio-id="${id(7)}" id="comment-host">Alpha old statement.</p>
+      <button data-stemmio-id="${id(8)}" id="paired-action">Do action</button></section></body></html>`;
     const after = before.replace("old statement", "new statement");
     let injected = false;
     let partialMarkers = 0;
     const originalSet = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function(name, value) {
       originalSet.call(this, name, value);
-      if (injected || name !== "data-pageroot-review-marker") return;
+      if (injected || name !== "data-stemmio-review-marker") return;
       injected = true;
-      partialMarkers = this.ownerDocument.querySelectorAll("span[data-pageroot-review-text]").length;
+      partialMarkers = this.ownerDocument.querySelectorAll("span[data-stemmio-review-text]").length;
       let facts = [];
       for (let index = 0; index < 25; index += 1) {
         facts = api.appendTrustedReviewProjectionFact(facts, {
@@ -69,11 +69,11 @@ test("canonical annotation overflow rebuilds clean pages with comments and paire
       const doc = parser.parseFromString(html, "text/html");
       return {
         text: doc.getElementById("comment-host")?.textContent,
-        wrappers: doc.querySelectorAll("span[data-pageroot-review-text]").length,
-        markers: doc.querySelectorAll("[data-pageroot-review-marker],[data-pageroot-outline-id]").length,
-        panel: doc.getElementById("details-panel")?.getAttribute("data-pageroot-review-panel-key"),
-        action: doc.getElementById("paired-action")?.getAttribute("data-pageroot-review-action-key"),
-        sourceIds: doc.querySelectorAll("[data-pageroot-id]").length,
+        wrappers: doc.querySelectorAll("span[data-stemmio-review-text]").length,
+        markers: doc.querySelectorAll("[data-stemmio-review-marker],[data-stemmio-outline-id]").length,
+        panel: doc.getElementById("details-panel")?.getAttribute("data-stemmio-review-panel-key"),
+        action: doc.getElementById("paired-action")?.getAttribute("data-stemmio-review-action-key"),
+        sourceIds: doc.querySelectorAll("[data-stemmio-id]").length,
       };
     };
     return {
@@ -116,8 +116,8 @@ test("formal Review projection still rejects the exact-atom bootstrap budget", {
     const doc = new DOMParser().parseFromString(original, "text/html");
     for (let index = 0; index < 4097; index += 1) {
       const element = doc.createElement("p");
-      element.setAttribute("data-pageroot-review-marker", `change-${index}`);
-      element.setAttribute("data-pageroot-review-projection-facts", JSON.stringify([{
+      element.setAttribute("data-stemmio-review-marker", `change-${index}`);
+      element.setAttribute("data-stemmio-review-projection-facts", JSON.stringify([{
         id: `fact-${index}`, type: "structure", semanticOwnerId: `owner-${index}`,
         geometryOwnerId: `geometry-${index}`, scope: "element", operation: "insert", tone: "added",
       }]));

@@ -173,7 +173,7 @@ test("delivery report keeps retrying transient async metadata inside its deadlin
 test("package delivery arguments expose the bounded default and an override", () => {
   const options = parseArguments([
     "--kind", "formal",
-    "--artifact", "release/PageRoot.dmg",
+    "--artifact", "release/Stemmio.dmg",
     "--version", "0.9.8",
     "--architecture", "arm64",
     "--deadline-ms", "12345",
@@ -182,7 +182,7 @@ test("package delivery arguments expose the bounded default and an override", ()
   assert.equal(
     parseArguments([
       "--kind", "formal",
-      "--artifact", "release/PageRoot.dmg",
+      "--artifact", "release/Stemmio.dmg",
       "--version", "0.9.8",
       "--architecture", "arm64",
     ]).deadlineMs,
@@ -280,8 +280,8 @@ test("delivery Markdown reports exact package bytes, every PR and direct commits
   const report = createPackageDeliverySnapshot({
     kind: "developer-preview",
     artifact: {
-      file: "PageRoot-Developer-Preview-0.9.69993-arm64.dmg",
-      path: "output/developer-preview/release/PageRoot-Developer-Preview-0.9.69993-arm64.dmg",
+      file: "Stemmio-Developer-Preview-0.9.69993-arm64.dmg",
+      path: "output/developer-preview/release/Stemmio-Developer-Preview-0.9.69993-arm64.dmg",
       version: "0.9.69993",
       architecture: "arm64",
       size: 123,
@@ -318,7 +318,7 @@ test("delivery Markdown reports exact package bytes, every PR and direct commits
     generatedAt: "2026-08-04T06:00:00.000Z",
   });
   const markdown = renderPackageDeliveryMarkdown(report);
-  assert.match(markdown, /PageRoot-Developer-Preview-0\.9\.69993-arm64\.dmg/u);
+  assert.match(markdown, /Stemmio-Developer-Preview-0\.9\.69993-arm64\.dmg/u);
   assert.match(markdown, /2 个提交、2 个文件（\+120 \/ -4）/u);
   assert.match(markdown, /\[#84\]\(https:\/\/github\.com\/Charleyli925\/PageRoot\/pull\/84\)/u);
   assert.match(markdown, /开放 · 可审查 · 合并受阻 · 检查失败/u);
@@ -355,7 +355,7 @@ test("installer workflows generate a live delivery report after package verifica
   assert.match(release, /package-delivery-report\.mjs/u);
   assert.match(agentGuide, /docs\/CODEX_WORKFLOW\.md/u);
   assert.match(codexWorkflow, /every associated Pull Request/u);
-  assert.match(codexWorkflow, /latest head of every[\s\S]*applicable PageRoot Pull Request/u);
+  assert.match(codexWorkflow, /latest head of every[\s\S]*applicable Stemmio Pull Request/u);
   assert.match(releasing, /Mandatory installer delivery report/u);
   assert.match(releasing, /Default source set for a latest installer/u);
   assert.match(releasing, /Any selected unmerged Pull Request[\s\S]*Developer Preview/u);

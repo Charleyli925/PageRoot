@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
 import { tmpdir } from "node:os";
-import { closePageRootGracefully, expect, launchPageRoot, managedWorkingCopyPath, removeIsolatedUserData, stopPageRoot,
+import { closeStemmioGracefully, expect, launchStemmio, managedWorkingCopyPath, removeIsolatedUserData, stopStemmio,
   waitForProjectReady, waitForRuntimeHandoffSettled } from "./electron-native-harness.mjs";
 import { executeFrozenSelection, frozenDigest, frozenFrameAccess, frozenInitialRuntimeDecision,
   readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay } from "./real-html/frozen-selection.mjs";
@@ -37,8 +37,8 @@ async function waitInitialRuntime(page, expected, sourceRevision) {
   return { decision, generation: handoff.activeFrameGeneration };
 }
 
-const manifestPath = process.env.PAGEROOT_FROZEN_MANIFEST;
-const manifestDigest = process.env.PAGEROOT_FROZEN_MANIFEST_SHA256;
+const manifestPath = process.env.STEMMIO_FROZEN_MANIFEST;
+const manifestDigest = process.env.STEMMIO_FROZEN_MANIFEST_SHA256;
 const plan = readFrozenSelection(readFileSync(manifestPath), manifestDigest);
 const version = workspaceSourceFingerprint();
 expect(version.workspaceSourceSha256, "FROZEN_SOURCE_VERSION_MISMATCH")
@@ -76,7 +76,7 @@ if (plan.operation === "mixed") {
     mixedCheckpointOperations(plan), plan.targets[0].selectedId) };
 }
 try {
-  session = await launchPageRoot({ activeSourcePath: importPath });
+  session = await launchStemmio({ activeSourcePath: importPath });
   const page = session.page;
   await waitForProjectReady(page);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true });
@@ -92,7 +92,7 @@ try {
   if (plan.operation === "mixed") {
     // A fresh import owns one declared Working Copy. Read its exact draft file,
     // never search projects or infer a comment's target from rendered text.
-    const control = path.join(path.dirname(workingPath), ".pageroot");
+    const control = path.join(path.dirname(workingPath), ".stemmio");
     const manifest = JSON.parse(readFileSync(path.join(control, "manifest.json")));
     expect(manifest.workingCopies).toHaveLength(1);
     const working = manifest.workingCopies[0];
@@ -153,9 +153,9 @@ try {
     inspectorCache.verify();
     const started = performance.now();
     try {
-      await closePageRootGracefully(session.electronApp, page);
+      await closeStemmioGracefully(session.electronApp, page);
       session.electronApp = null;
-      session = await launchPageRoot({ isolatedUserData: session.isolatedUserData });
+      session = await launchStemmio({ isolatedUserData: session.isolatedUserData });
       await waitForProjectReady(session.page);
       report.reopen.initialRuntime = await waitInitialRuntime(session.page, plan.initialRuntime, `sha256:${expectedFinal.sha256}`);
       inspectorCache = await boundFrozenInspectorCache(session.page);
@@ -174,13 +174,13 @@ try {
           report: report.mixed, expectedFinal, calls: report.calls });
       } else if (plan.scope === "core-structure-path-race") {
         for (const copy of report.structure.copies) {
-          await expect(reopenedFrame.locator(`[data-pageroot-id="${copy.originalId}"]`)).toHaveCount(1);
-          await expect(reopenedFrame.locator(`[data-pageroot-id="${copy.copyId}"]`)).toHaveCount(1);
+          await expect(reopenedFrame.locator(`[data-stemmio-id="${copy.originalId}"]`)).toHaveCount(1);
+          await expect(reopenedFrame.locator(`[data-stemmio-id="${copy.copyId}"]`)).toHaveCount(1);
         }
         await expect(reopenedEditor.locator('iframe[data-runtime-slot-role="candidate"]')).toHaveCount(0);
       } else if (plan.operation === "structure") {
         expect(await reopenedTarget.textContent()).toBe(report.structure.originalText);
-        const reopenedCopy = reopenedFrame.locator(`[data-pageroot-id="${report.structure.copyId}"]`);
+        const reopenedCopy = reopenedFrame.locator(`[data-stemmio-id="${report.structure.copyId}"]`);
         if (report.structure.reopenCopyPresent) {
           await expect(reopenedCopy).toHaveCount(1);
           await expect(reopenedCopy).toContainText(report.structure.restoredMarker.trim());
@@ -228,7 +228,7 @@ try {
   }
   if (session) {
     try {
-      if (session.electronApp) await stopPageRoot(session.electronApp, session.isolatedUserData);
+      if (session.electronApp) await stopStemmio(session.electronApp, session.isolatedUserData);
       else removeIsolatedUserData(session.isolatedUserData);
       report.cleanup = "PASS";
     }

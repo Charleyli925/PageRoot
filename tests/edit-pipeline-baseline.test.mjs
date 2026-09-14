@@ -28,7 +28,7 @@ import {
 } from "../app/lib/source-structure-edit.js";
 
 function elementId(sequence) {
-  return `pr1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
+  return `sm1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
 }
 
 const IDS = {
@@ -45,7 +45,7 @@ const IDS = {
 };
 
 function attr(id) {
-  return `data-pageroot-id="${id}"`;
+  return `data-stemmio-id="${id}"`;
 }
 
 function baselineHtml() {
@@ -90,8 +90,8 @@ function identityFacts(html) {
   return {
     html,
     sourceSha256: index.sourceSha256,
-    pagerootIds: [...index.byPagerootId.keys()].sort(),
-    complete: index.pagerootIdentity?.complete === true,
+    stemmioIds: [...index.byStemmioId.keys()].sort(),
+    complete: index.stemmioIdentity?.complete === true,
   };
 }
 
@@ -119,7 +119,7 @@ function withCounters(run) {
 
 function applyIslandText(state, operationId, elementId, text, nextInnerHtml) {
   const index = buildSourceIndex(state.html);
-  const element = index.byPagerootId.get(elementId);
+  const element = index.byStemmioId.get(elementId);
   const forwardPlan = planEditableIslandPatch(index, {
     type: "replace-editable-island",
     targetRef: createTargetRef(index, element, { level: "subregion" }),
@@ -134,8 +134,8 @@ function applyIslandText(state, operationId, elementId, text, nextInnerHtml) {
     target: target(state, elementId),
     text,
     contentHtml: forwardPlan.metadata.nextInnerHtml,
-    ...(forwardPlan.metadata.createdPagerootIds?.length
-      ? { createdPagerootIds: forwardPlan.metadata.createdPagerootIds }
+    ...(forwardPlan.metadata.createdStemmioIds?.length
+      ? { createdStemmioIds: forwardPlan.metadata.createdStemmioIds }
       : {}),
   }));
 }
@@ -290,9 +290,9 @@ test("kernel text, space, blank-line, style and structure actions keep identity 
   const after = identityFacts(deleted.html);
   assert.equal(after.complete, true);
   assert.equal(after.sourceSha256, deleted.sourceSha256);
-  assert.ok(after.pagerootIds.includes(IDS.paragraph));
-  assert.equal(after.pagerootIds.includes(IDS.first), false);
-  assert.match(deleted.html, /B<br data-pageroot-id="[^"]+">more/u);
+  assert.ok(after.stemmioIds.includes(IDS.paragraph));
+  assert.equal(after.stemmioIds.includes(IDS.first), false);
+  assert.match(deleted.html, /B<br data-stemmio-id="[^"]+">more/u);
   assert.match(deleted.html, /color: blue/u);
   assert.equal(before.html, html);
 

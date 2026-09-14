@@ -16,16 +16,16 @@ const SOURCE_SHA = `sha256:${"ab".repeat(32)}`;
 
 test("default projects root uses the product breadcrumb and custom roots stay user-visible", () => {
   assert.equal(
-    formatProjectsRootLabel("/Users/demo/Documents/PageRoot/项目", {
+    formatProjectsRootLabel("/Users/demo/Documents/Stemmio/项目", {
       homedir: "/Users/demo",
     }),
-    "文稿 › PageRoot › 项目",
+    "文稿 › Stemmio › 项目",
   );
   assert.equal(
-    formatProjectsRootLabel("/tmp/pageroot-e2e/project-files", {
+    formatProjectsRootLabel("/tmp/stemmio-e2e/project-files", {
       homedir: "/Users/demo",
     }),
-    "tmp › pageroot-e2e › project-files",
+    "tmp › stemmio-e2e › project-files",
   );
   assert.equal(
     formatProjectsRootLabel("/Users/demo/Work/HTML 项目", {
@@ -42,14 +42,14 @@ test("the open dialog always starts from the projects root and never reuses dial
   };
   assert.equal(
     await resolveOpenDialogDefaultPath({
-      projectsRoot: "/Users/demo/Documents/PageRoot/项目",
+      projectsRoot: "/Users/demo/Documents/Stemmio/项目",
       documentsRoot: "/Users/demo/Documents",
       lstat: async () => directory,
     }),
-    "/Users/demo/Documents/PageRoot/项目",
+    "/Users/demo/Documents/Stemmio/项目",
   );
   const missingRoot = await resolveOpenDialogDefaultPath({
-    projectsRoot: "/Users/demo/Documents/PageRoot/项目",
+    projectsRoot: "/Users/demo/Documents/Stemmio/项目",
     documentsRoot: "/Users/demo/Documents",
     lstat: async () => {
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -57,7 +57,7 @@ test("the open dialog always starts from the projects root and never reuses dial
   });
   assert.equal(missingRoot, "/Users/demo/Documents");
   const symlinkedRoot = await resolveOpenDialogDefaultPath({
-    projectsRoot: "/Users/demo/Documents/PageRoot/项目",
+    projectsRoot: "/Users/demo/Documents/Stemmio/项目",
     documentsRoot: "/Users/demo/Documents",
     lstat: async () => ({
       isDirectory: () => false,
@@ -107,10 +107,10 @@ test("public descriptors never include paths, keys or HTML", () => {
       kind: "new-external",
       sourceFileName: "产品首页.html",
       visibleV1FileName: "产品首页-V1.html",
-    }, { projectsRootLabel: "文稿 › PageRoot › 项目" }),
+    }, { projectsRootLabel: "文稿 › Stemmio › 项目" }),
   });
   assert.equal(fresh.visibleV1FileName, "产品首页-V1.html");
-  assert.equal(fresh.projectsRootLabel, "文稿 › PageRoot › 项目");
+  assert.equal(fresh.projectsRootLabel, "文稿 › Stemmio › 项目");
   assert.doesNotMatch(JSON.stringify(fresh), /\/Users|importSourceKey/u);
 });
 
@@ -165,7 +165,7 @@ test("prepared store is idempotent for commit replay and trash is one-shot", () 
     publicFacts: {
       sourceFileName: "page.html",
       visibleV1FileName: "page-V1.html",
-      projectsRootLabel: "文稿 › PageRoot › 项目",
+      projectsRootLabel: "文稿 › Stemmio › 项目",
     },
   });
   assert.equal(descriptor.classification, "new-external");
@@ -177,7 +177,7 @@ test("prepared store is idempotent for commit replay and trash is one-shot", () 
   });
   const receipt = store.completeCommit("req_intent", {
     imported: true,
-    managedPath: "/tmp/PageRoot/项目/page/page-V1.html",
+    managedPath: "/tmp/Stemmio/项目/page/page-V1.html",
     project: { name: "page-V1.html", html: "<html></html>" },
   });
   assert.equal(store.completeCommit("req_intent", { imported: false }), receipt);

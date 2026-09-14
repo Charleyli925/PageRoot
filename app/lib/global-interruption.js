@@ -26,7 +26,7 @@ export function globalInterruptionPresentation(interruption) {
     case "import-trash-failed":
       return {
         kind: interruption.kind,
-        title: "已导入 PageRoot",
+        title: "已导入 Stemmio",
         message: `已保存为${interruption.fileName || "项目内的 V1 文件"}，原文件未能移至废纸篓，仍留在原来的位置。`,
         tone: "warning",
         dismissMs: 8_000,
@@ -49,7 +49,7 @@ export function globalInterruptionPresentation(interruption) {
       return {
         kind: interruption.kind,
         title: "无法接收外部 HTML",
-        message: interruption.detail || "当前 PageRoot 版本缺少外部文件打开通道。",
+        message: interruption.detail || "当前 Stemmio 版本缺少外部文件打开通道。",
         tone: "error",
         dismissMs: null,
         actionId: null,

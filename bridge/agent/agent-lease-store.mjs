@@ -76,7 +76,7 @@ export async function acquireAgentLease(input) {
   if (!directoryInformation?.isDirectory()
     || directoryInformation.isSymbolicLink()
     || (directoryInformation.mode & 0o022) !== 0) {
-    failAgentRuntime("AGENT_LEASE_UNSAFE", "Agent 启动租约目录不安全，PageRoot 没有启动 Qoder。", {
+    failAgentRuntime("AGENT_LEASE_UNSAFE", "Agent 启动租约目录不安全，Stemmio 没有启动 Qoder。", {
       status: 409,
     });
   }
@@ -98,7 +98,7 @@ export async function acquireAgentLease(input) {
         { status: 409 },
       );
     }
-    failAgentRuntime("AGENT_LEASE_UNAVAILABLE", "Agent 启动租约无法安全建立，PageRoot 没有启动 Qoder。", {
+    failAgentRuntime("AGENT_LEASE_UNAVAILABLE", "Agent 启动租约无法安全建立，Stemmio 没有启动 Qoder。", {
       status: 409,
     });
   }

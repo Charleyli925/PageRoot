@@ -5,7 +5,7 @@ import { assertDesktopHost } from "../app/application/desktop-host.js";
 
 function desktopHost() {
   return {
-    htmlAIRuntime: {
+    stemmioRuntime: {
       capabilities: {
         sourceEditing: "enabled",
         projectOpening: "desktop-dialog",
@@ -14,9 +14,9 @@ function desktopHost() {
         interactivePreview: "independent-url",
       },
     },
-    htmlAIProjects: { getActiveProject() {}, openHtml() {} },
-    htmlAIPreview: { createSession() {}, revokeSession() {} },
-    htmlAIAppLifecycle: {
+    stemmioProjects: { getActiveProject() {}, openHtml() {} },
+    stemmioPreview: { createSession() {}, revokeSession() {} },
+    stemmioAppLifecycle: {
       onPrepareClose() {},
       onCloseAborted() {},
       reportReady() {},
@@ -31,12 +31,12 @@ test("desktop host assertion accepts the complete preload contract", () => {
 
 test("desktop host assertion fails closed for a malformed manifest", () => {
   const host = desktopHost();
-  host.htmlAIRuntime.capabilities.projectOpening = "other";
+  host.stemmioRuntime.capabilities.projectOpening = "other";
   assert.throws(() => assertDesktopHost(host), /能力声明缺失或无效/u);
 });
 
 test("desktop host assertion reports missing required preload functions", () => {
   const host = desktopHost();
-  delete host.htmlAIPreview.createSession;
-  assert.throws(() => assertDesktopHost(host), /htmlAIPreview\.createSession/u);
+  delete host.stemmioPreview.createSession;
+  assert.throws(() => assertDesktopHost(host), /stemmioPreview\.createSession/u);
 });

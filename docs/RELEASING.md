@@ -11,7 +11,7 @@ Do not push a release tag manually. A tag is an output of successful candidate v
 
 An unqualified request for the "latest installer" or "latest developer test
 installer" means current `origin/main` plus the latest code from every
-applicable PageRoot PR in the current development scope that the developer has
+applicable Stemmio PR in the current development scope that the developer has
 not explicitly excluded. A PR being open, draft, or closed without merge does
 not exclude it. Merged changes arrive through `main`; unmerged heads are
 combined on a temporary `integration/` branch without changing the source PRs.
@@ -83,17 +83,17 @@ personal test package. It verifies packaged contents and performs one isolated
 startup from a staged copy outside the checkout and every ancestor
 `node_modules`, while its automatic update checks and installation path stay
 disabled. The packaged verifier derives the required production-module closure
-from imports in every PageRoot-owned packaged JavaScript file; adding a runtime
+from imports in every Stemmio-owned packaged JavaScript file; adding a runtime
 import without its declared, locked and copied closure fails before launch.
 Its Actions artifact is retained for seven days and its
 `developer-preview.json` always says `releaseEligible: false`.
 
 The first Preview launch uses only its new roots (`~/Library/Application
-Support/PageRoot Developer Preview`, `~/Documents/PageRoot Developer Preview`
-and `~/Library/Logs/PageRoot Developer Preview`). Existing PageRoot data is not
+Support/Stemmio Developer Preview`, `~/Documents/Stemmio Developer Preview`
+and `~/Library/Logs/Stemmio Developer Preview`). Existing Stemmio data is not
 scanned, migrated, copied, opened or deleted. Later Preview installs reuse this
 new data. Source development and E2E use separate isolated roots; the formal
-PageRoot release keeps its existing name, directories, signature and updater
+Stemmio release keeps its existing name, directories, signature and updater
 behavior.
 
 This step is optional. A request to make a formal candidate or publish a
@@ -102,7 +102,7 @@ depend on its result or reuse its DMG. See
 `docs/DEVELOPER_PREVIEW_PLAYBOOK.md` for the exact trigger, installation and
 failure boundaries.
 
-Developer previews use a separate package identity: `PageRoot Developer
+Developer previews use a separate package identity: `Stemmio Developer
 Preview`, a `.developer-preview` Bundle ID suffix, and a DMG name that includes
 `Developer-Preview`. Their effective version is derived from the latest stable
 tag and committed first-parent order: after `v0.9.5`, the first two readable
@@ -167,7 +167,7 @@ directly in the repository settings:
 - `APPLE_ID`: the Apple ID used for notarization.
 - `APPLE_APP_SPECIFIC_PASSWORD`: a current app-specific password created for
   CI notarization.
-- `PAGEROOT_POSTHOG_TOKEN`: the `phc_…` Project token from the PageRoot
+- `STEMMIO_POSTHOG_TOKEN`: the `phc_…` Project token from the Stemmio
   PostHog project. Do not use a project secret API key.
 
 Never paste those values into source, issues, Pull Requests, logs or chat. The

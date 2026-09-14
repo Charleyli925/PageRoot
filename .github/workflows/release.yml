@@ -1,5 +1,5 @@
 name: Release
-run-name: Publish PageRoot ${{ inputs.version }}
+run-name: Publish Stemmio ${{ inputs.version }}
 
 on:
   workflow_dispatch:
@@ -97,7 +97,7 @@ jobs:
         run: >-
           node scripts/package-delivery-report.mjs
           --kind formal
-          --artifact "output/downloaded-release-candidate/PageRoot-${VERSION}-arm64.dmg"
+          --artifact "output/downloaded-release-candidate/Stemmio-${VERSION}-arm64.dmg"
           --version "$VERSION"
           --architecture arm64
           --repository "$GITHUB_REPOSITORY"
@@ -106,7 +106,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: PageRoot-release-publication-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-release-publication-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/ci-evidence
             output/package-delivery
@@ -130,7 +130,7 @@ jobs:
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" "$GITHUB_SHA" -m "PageRoot ${VERSION}"
+            git tag -a "$TAG" "$GITHUB_SHA" -m "Stemmio ${VERSION}"
             git push origin "refs/tags/$TAG"
           fi
       - name: Publish immutable GitHub Release
@@ -140,9 +140,9 @@ jobs:
         run: |
           CANDIDATE_DIRECTORY="output/downloaded-release-candidate"
           gh release create "v${VERSION}" \
-            "$CANDIDATE_DIRECTORY/PageRoot-${VERSION}-arm64.dmg" \
-            "$CANDIDATE_DIRECTORY/PageRoot-${VERSION}-arm64.zip" \
-            "$CANDIDATE_DIRECTORY/PageRoot-${VERSION}-arm64.zip.blockmap" \
+            "$CANDIDATE_DIRECTORY/Stemmio-${VERSION}-arm64.dmg" \
+            "$CANDIDATE_DIRECTORY/Stemmio-${VERSION}-arm64.zip" \
+            "$CANDIDATE_DIRECTORY/Stemmio-${VERSION}-arm64.zip.blockmap" \
             "$CANDIDATE_DIRECTORY/latest-mac.yml" \
             "$CANDIDATE_DIRECTORY/SHA256SUMS.txt" \
             "$CANDIDATE_DIRECTORY/update-manifest.json" \
@@ -151,4 +151,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --notes-file output/release-metadata/release-notes.md \
-            --title "PageRoot ${VERSION}"
+            --title "Stemmio ${VERSION}"

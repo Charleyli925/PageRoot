@@ -8,7 +8,7 @@ import path from "node:path";
  * ledger rules here makes them cheap to test without opening a window.
  */
 
-const ID = /^pr1_[0-9a-f]{32}$/u;
+const ID = /^sm1_[0-9a-f]{32}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
 const SHA1 = /^[a-f0-9]{40}$/u;
 const TAG = /^[a-z][a-z0-9-]*$/u;
@@ -245,7 +245,7 @@ export function clipboardSourceExpectation(marker, selectedText) {
   const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const escapeHtml = value => value.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
   const segments = selectedText.split("\n");
-  const breakPattern = '<br data-pageroot-id="pr1_[0-9a-f]{32}">';
+  const breakPattern = '<br data-stemmio-id="sm1_[0-9a-f]{32}">';
   return {
     lineBreakCount: segments.length - 1,
     pattern: new RegExp(`${escapeRegex(marker)}${segments.map(value => escapeRegex(escapeHtml(value))).join(breakPattern)}`, "u"),

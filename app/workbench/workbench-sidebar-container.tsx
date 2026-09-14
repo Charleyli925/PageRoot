@@ -192,7 +192,7 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
     void Promise.allSettled([
       capability.commands.refreshRecents(),
       capability.commands.refreshRegistered(),
-      window.htmlAIProjects?.listRecoveryJournals?.().then((result) => {
+      window.stemmioProjects?.listRecoveryJournals?.().then((result) => {
         if (active) {
           setRecoveryJournals(result.entries);
           setRecoveryNextCursor(result.nextCursor || null);
@@ -228,11 +228,11 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
           onOpenRegistered(project);
           return;
         }
-        void window.htmlAIProjects?.readRecoveryJournal?.({
+        void window.stemmioProjects?.readRecoveryJournal?.({
           projectId: journal.projectId,
           documentId: journal.documentId,
           expectedJournalSha256: journal.journalSha256,
-        }).then((recovered) => recovered && window.htmlAIProjects?.exportHtmlCopy?.({
+        }).then((recovered) => recovered && window.stemmioProjects?.exportHtmlCopy?.({
           html: recovered.html,
           sourcePath: journal.sourcePath,
           suggestedName: localFileNameFromSourcePath(journal.sourcePath),
@@ -241,7 +241,7 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
       onLoadMoreRecovery={() => {
         if (!recoveryNextCursor || recoveryLoading) return;
         setRecoveryLoading(true);
-        void window.htmlAIProjects?.listRecoveryJournals?.({
+        void window.stemmioProjects?.listRecoveryJournals?.({
           cursor: recoveryNextCursor,
         }).then((result) => {
           setRecoveryJournals((current) => {

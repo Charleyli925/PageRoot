@@ -85,7 +85,7 @@ export default function WorkbenchDocumentSurfaceCache({
   useEffect(() => {
     const prior = priorVisibleTokenRef.current;
     if (prior && cacheTokenKey(prior) !== cacheTokenKey(visibleToken)) {
-      performance.mark("pageroot:tab-cache:handoff-complete", {
+      performance.mark("stemmio:tab-cache:handoff-complete", {
         detail: Object.freeze(prior),
       });
       onHandoffComplete(prior);
@@ -118,7 +118,7 @@ export default function WorkbenchDocumentSurfaceCache({
         marked = true;
         readyTokenKeyRef.current = observedTokenKey;
         setPresentedToken(observedToken);
-        performance.mark("pageroot:tab-cache:visible-ready", {
+        performance.mark("stemmio:tab-cache:visible-ready", {
           detail: Object.freeze(observedToken),
         });
       } else {
@@ -126,7 +126,7 @@ export default function WorkbenchDocumentSurfaceCache({
       }
       if (!scrollableMarked && surface.dataset.scrollableReady === "true") {
         scrollableMarked = true;
-        performance.mark("pageroot:tab-cache:scrollable-ready", {
+        performance.mark("stemmio:tab-cache:scrollable-ready", {
           detail: Object.freeze(observedToken),
         });
       }

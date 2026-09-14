@@ -1,6 +1,6 @@
 # Open-source boundary
 
-This repository is the complete public source boundary required to build and test PageRoot.
+This repository is the complete public source boundary required to build and test Stemmio.
 
 ## Included
 

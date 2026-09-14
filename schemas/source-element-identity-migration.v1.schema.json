@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pageroot.local/schemas/source-element-identity-migration.v1.schema.json",
-  "title": "PageRoot source element identity migration transaction v1",
+  "$id": "https://stemmio.local/schemas/source-element-identity-migration.v1.schema.json",
+  "title": "Stemmio source element identity migration transaction v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -37,11 +37,11 @@
     "targetSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "previousRelativePath": {
       "type": "string",
-      "pattern": "^\\.pageroot/recovery/identity_work_ver_\\d{4,}_v1_[a-f0-9]{32}/previous\\.html$"
+      "pattern": "^\\.stemmio/recovery/identity_work_ver_\\d{4,}_v1_[a-f0-9]{32}/previous\\.html$"
     },
     "nextRelativePath": {
       "type": "string",
-      "pattern": "^\\.pageroot/recovery/identity_work_ver_\\d{4,}_v1_[a-f0-9]{32}/next\\.html$"
+      "pattern": "^\\.stemmio/recovery/identity_work_ver_\\d{4,}_v1_[a-f0-9]{32}/next\\.html$"
     },
     "recoveryId": {
       "type": "string",

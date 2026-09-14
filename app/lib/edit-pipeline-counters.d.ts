@@ -34,9 +34,9 @@ export declare function installEditPipelineTestHooks(
 
 declare global {
   interface Window {
-    __PAGEROOT_ENABLE_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
-    __PAGEROOT_DISABLE_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
-    __PAGEROOT_RESET_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
-    __PAGEROOT_READ_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
+    __STEMMIO_ENABLE_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
+    __STEMMIO_DISABLE_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
+    __STEMMIO_RESET_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
+    __STEMMIO_READ_EDIT_PIPELINE_COUNTERS__?: () => EditPipelineCounterSnapshot;
   }
 }

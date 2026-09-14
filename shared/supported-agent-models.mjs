@@ -1,4 +1,4 @@
-// PageRoot's native Agent is intentionally not a general-purpose model browser.
+// Stemmio's native Agent is intentionally not a general-purpose model browser.
 // `releaseChannel: "stable"` only controls product visibility. Real-protocol
 // acceptance lives in `agent-protocol-acceptance.mjs` and is never granted by
 // CI fixtures.
@@ -145,6 +145,6 @@ export function recommendedAgentModel(vendorId, options) {
 }
 
 export function betaAgentModelsEnabled(environment = {}) {
-  return environment.PAGEROOT_ENABLE_BETA_AGENT_MODELS === "1"
-    || environment.PAGEROOT_E2E === "1";
+  return environment.STEMMIO_ENABLE_BETA_AGENT_MODELS === "1"
+    || environment.STEMMIO_E2E === "1";
 }

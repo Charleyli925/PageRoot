@@ -20,7 +20,7 @@ export async function waitForIndependentProjection(editor, expectedProjection, e
 
 export async function invokeStructureCommand(page, command, options = {}) {
   return page.getByTestId("html-canvas-editor").evaluate((element, payload) => {
-    const commands = element.__PAGEROOT_E2E_STRUCTURE_COMMANDS__;
+    const commands = element.__STEMMIO_E2E_STRUCTURE_COMMANDS__;
     const run = commands?.[payload.command];
     if (typeof run !== "function") {
       throw new Error(`STRUCTURE_COMMAND_UNAVAILABLE:${payload.command}`);

@@ -28,9 +28,9 @@ import {
   runtimeGeneratedDiagnosticsIssue,
 } from "../electron/real-html/capability-driver.mjs";
 
-const CORRECT_ID = "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const WRONG_ID = "pr1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const PARENT_ID = "pr1_cccccccccccccccccccccccccccccccc";
+const CORRECT_ID = "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const WRONG_ID = "sm1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const PARENT_ID = "sm1_cccccccccccccccccccccccccccccccc";
 
 const HARNESS_TEST_OPTIONS = { tag: ["@gate-smoke", "@smoke-editing"] };
 
@@ -54,7 +54,7 @@ for (const mode of ["ended", "wrong-focus", "wrong-input", "observer-missing", "
     await page.setContent('<main data-editor data-e2e-copy-native-edit-ended="true"><iframe data-runtime-slot-role="active" data-frame-generation="2"></iframe></main><input id="wrong">');
     const editor = page.locator("[data-editor]");
     const frame = await (await editor.locator("iframe").elementHandle()).contentFrame();
-    await frame.setContent(`<p data-pageroot-id="${CORRECT_ID}">Fixed target</p>`);
+    await frame.setContent(`<p data-stemmio-id="${CORRECT_ID}">Fixed target</p>`);
     if (mode === "wrong-focus") await page.locator("#wrong").focus();
     if (mode === "wrong-input") await page.evaluate(() => document.addEventListener("keydown", () => {
       document.getElementById("wrong").focus();
@@ -244,8 +244,8 @@ async function capabilityFixture(
       [role="toolbar"] { position:fixed; inset:0 auto auto 0; width:260px; height:96px; z-index:10; }
     </style>
     <main data-runtime-root data-element-copy-availability="available" data-element-copy-reason="available">
-      <${targetTag} id="target" data-pageroot-id="${CORRECT_ID}">editable authored text</${targetTag}>
-      <p data-pageroot-id="${WRONG_ID}">other text</p>
+      <${targetTag} id="target" data-stemmio-id="${CORRECT_ID}">editable authored text</${targetTag}>
+      <p data-stemmio-id="${WRONG_ID}">other text</p>
       <div role="toolbar" aria-label="元素工具栏" hidden>
         <button aria-label="留评论"></button>
         <button aria-label="编辑"></button>
@@ -257,14 +257,14 @@ async function capabilityFixture(
   `);
   await page.locator("#target").evaluate((element, payload) => {
     window.__capabilityProbeClickCount = 0;
-    document.querySelectorAll("[data-pageroot-id]").forEach((target) => {
+    document.querySelectorAll("[data-stemmio-id]").forEach((target) => {
       target.addEventListener("click", (event) => {
         window.__capabilityProbeClickCount += 1;
         window.__capabilityProbeAltKey = event.altKey;
         document.querySelectorAll("[data-html-canvas-selected]")
           .forEach((candidate) => candidate.removeAttribute("data-html-canvas-selected"));
-        const nextId = payload.selectedId || target.getAttribute("data-pageroot-id");
-        document.querySelector(`[data-pageroot-id="${nextId}"]`)
+        const nextId = payload.selectedId || target.getAttribute("data-stemmio-id");
+        document.querySelector(`[data-stemmio-id="${nextId}"]`)
           ?.setAttribute("data-html-canvas-selected", "");
         document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
       });
@@ -298,12 +298,12 @@ function candidate(stableId = CORRECT_ID) {
 async function canonicalCapabilityFixture(page, selectedId = PARENT_ID, toolbarLabel = "元素工具栏") {
   await page.setContent(`
     <main data-runtime-root data-element-copy-availability="available" data-element-copy-reason="available">
-      <h1 data-pageroot-id="${PARENT_ID}" style="display:block;width:260px;height:90px">
-        <span id="target" data-pageroot-id="${CORRECT_ID}" style="display:block;width:220px;height:70px">
+      <h1 data-stemmio-id="${PARENT_ID}" style="display:block;width:260px;height:90px">
+        <span id="target" data-stemmio-id="${CORRECT_ID}" style="display:block;width:220px;height:70px">
           canonical child
         </span>
       </h1>
-      <p data-pageroot-id="${WRONG_ID}">unrelated sibling</p>
+      <p data-stemmio-id="${WRONG_ID}">unrelated sibling</p>
       <div role="toolbar" aria-label="${toolbarLabel}" hidden>
         <button aria-label="留评论"></button>
         <button aria-label="编辑"></button>
@@ -313,7 +313,7 @@ async function canonicalCapabilityFixture(page, selectedId = PARENT_ID, toolbarL
   `);
   await page.locator("#target").evaluate((target, operationId) => {
     target.addEventListener("click", () => {
-      document.querySelector(`[data-pageroot-id="${operationId}"]`)
+      document.querySelector(`[data-stemmio-id="${operationId}"]`)
         ?.setAttribute("data-html-canvas-selected", "subregion");
       document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
     });
@@ -329,24 +329,24 @@ async function canonicalCapabilityFixture(page, selectedId = PARENT_ID, toolbarL
 function canonicalSourceElements({ childParentId = PARENT_ID, duplicateParent = false } = {}) {
   const rows = [
     {
-      pagerootId: PARENT_ID,
-      pagerootIdentityStatus: "valid",
+      stemmioId: PARENT_ID,
+      stemmioIdentityStatus: "valid",
       parentId: null,
       tagName: "h1",
       sourceOrder: 0,
       sourceEditable: true,
     },
     {
-      pagerootId: CORRECT_ID,
-      pagerootIdentityStatus: "valid",
+      stemmioId: CORRECT_ID,
+      stemmioIdentityStatus: "valid",
       parentId: childParentId,
       tagName: "span",
       sourceOrder: 1,
       sourceEditable: false,
     },
     {
-      pagerootId: WRONG_ID,
-      pagerootIdentityStatus: "valid",
+      stemmioId: WRONG_ID,
+      stemmioIdentityStatus: "valid",
       parentId: null,
       tagName: "p",
       sourceOrder: 2,
@@ -360,11 +360,11 @@ function canonicalSourceElements({ childParentId = PARENT_ID, duplicateParent = 
 for (const mode of ["padding", "canvas-through-parent", "wrong-hit", "wrong-landing", "outside-point"]) {
   test(`frozen fixed point preserves identity: ${mode}`, HARNESS_TEST_OPTIONS, async ({ page }) => {
     const canvas = mode !== "padding";
-    await page.setContent(`<div data-pageroot-id="${PARENT_ID}" style="padding:10px"><${canvas ? "canvas" : "div"}
-      data-pageroot-id="${CORRECT_ID}" style="width:200px;height:80px;display:block;${canvas ? "pointer-events:none" : ""}"></${canvas ? "canvas" : "div"}></div>
-      <p data-pageroot-id="${WRONG_ID}">Other</p>`);
+    await page.setContent(`<div data-stemmio-id="${PARENT_ID}" style="padding:10px"><${canvas ? "canvas" : "div"}
+      data-stemmio-id="${CORRECT_ID}" style="width:200px;height:80px;display:block;${canvas ? "pointer-events:none" : ""}"></${canvas ? "canvas" : "div"}></div>
+      <p data-stemmio-id="${WRONG_ID}">Other</p>`);
     await page.evaluate(({ correct, wrong, mode }) => document.addEventListener("click", () => {
-      document.querySelector(`[data-pageroot-id="${mode === "wrong-landing" ? wrong : correct}"]`).setAttribute("data-html-canvas-selected", "part");
+      document.querySelector(`[data-stemmio-id="${mode === "wrong-landing" ? wrong : correct}"]`).setAttribute("data-html-canvas-selected", "part");
     }), { correct: CORRECT_ID, wrong: WRONG_ID, mode });
     const target = { clickId: CORRECT_ID, selectedId: CORRECT_ID, clickTag: canvas ? "canvas" : "div", selectedTag: canvas ? "canvas" : "div",
       selectionPoint: { x: mode === "outside-point" ? 300 : 10, y: 10,
@@ -397,7 +397,7 @@ test("frozen executor selects one exact target and supports only the pre-reviewe
     });
     expect(result.state).toBe("PASS");
     expect(new Set(selectors)).toEqual(new Set([
-      `[data-pageroot-id="${CORRECT_ID}"]`, `[data-pageroot-id="${selectedId}"]`,
+      `[data-stemmio-id="${CORRECT_ID}"]`, `[data-stemmio-id="${selectedId}"]`,
       "[data-html-canvas-selected]",
     ]));
     expect(calls.filter((call) => call.kind === "pointer-click")).toHaveLength(1);
@@ -432,8 +432,8 @@ test("frozen executor rejects mapping drift, duplicate or absent identity withou
 });
 
 test("frozen target switch verifies its known prior identity instead of relying on Escape reset", HARNESS_TEST_OPTIONS, async ({ page }) => {
-  await page.setContent(`<button id="toolbar">Copy</button><span data-pageroot-id="${WRONG_ID}" data-html-canvas-selected="part">Original</span>
-    <span data-pageroot-id="${CORRECT_ID}">Copy</span>`);
+  await page.setContent(`<button id="toolbar">Copy</button><span data-stemmio-id="${WRONG_ID}" data-html-canvas-selected="part">Original</span>
+    <span data-stemmio-id="${CORRECT_ID}">Copy</span>`);
   await page.evaluate(() => document.addEventListener("click", event => {
     if (!event.target.matches("span")) return;
     document.querySelector("[data-html-canvas-selected]")?.removeAttribute("data-html-canvas-selected");
@@ -455,9 +455,9 @@ test("frozen target switch verifies its known prior identity instead of relying 
 });
 
 test("frozen text accepts the current document and native caret but rejects stale document and wrong landing", HARNESS_TEST_OPTIONS, async ({ page }) => {
-  await page.setContent(`<p contenteditable="true" data-pageroot-id="${CORRECT_ID}">Synthetic</p>
-    <p contenteditable="true" data-pageroot-id="${WRONG_ID}">Other</p>`);
-  const locator = page.locator(`[data-pageroot-id="${CORRECT_ID}"]`);
+  await page.setContent(`<p contenteditable="true" data-stemmio-id="${CORRECT_ID}">Synthetic</p>
+    <p contenteditable="true" data-stemmio-id="${WRONG_ID}">Other</p>`);
+  const locator = page.locator(`[data-stemmio-id="${CORRECT_ID}"]`);
   const handle = await locator.elementHandle();
   const documentHandle = await page.evaluateHandle(() => document);
   const oldDocument = await page.evaluateHandle(() => document.implementation.createHTMLDocument("old"));
@@ -478,7 +478,7 @@ test("frozen text accepts the current document and native caret but rejects stal
   await locator.press("ArrowLeft");
   await expect(requireFrozenTextFocus(handle, CORRECT_ID, { atEnd: true }))
     .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
-  await page.locator(`[data-pageroot-id="${WRONG_ID}"]`).click();
+  await page.locator(`[data-stemmio-id="${WRONG_ID}"]`).click();
   await expect(requireFrozenTextFocus(handle, CORRECT_ID))
     .rejects.toMatchObject({ code: "FROZEN_TEXT_FOCUS_MISMATCH" });
   await handle.evaluate((element) => element.remove());
@@ -574,14 +574,14 @@ test("capability discovery rejects DOM-only ancestry, duplicate source identity,
 test("capability discovery rejects source-only ancestry and verification mapping drift", HARNESS_TEST_OPTIONS, async ({ page }) => {
   await page.setContent(`
     <main data-runtime-root data-element-copy-availability="available" data-element-copy-reason="available">
-      <h1 data-pageroot-id="${PARENT_ID}">detached operation target</h1>
-      <span id="target" data-pageroot-id="${CORRECT_ID}">probe child in source only</span>
+      <h1 data-stemmio-id="${PARENT_ID}">detached operation target</h1>
+      <span id="target" data-stemmio-id="${CORRECT_ID}">probe child in source only</span>
       <div role="toolbar" aria-label="元素工具栏" hidden><button aria-label="编辑"></button></div>
     </main>
   `);
   await page.locator("#target").evaluate((target, operationId) => {
     target.addEventListener("click", () => {
-      document.querySelector(`[data-pageroot-id="${operationId}"]`)
+      document.querySelector(`[data-stemmio-id="${operationId}"]`)
         ?.setAttribute("data-html-canvas-selected", "subregion");
       document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
     });
@@ -744,7 +744,7 @@ test("capability probe closes A's toolbar before the next exact click on B", HAR
 test("capability probe fails closed before clicking when the prior overlay cannot clear", HARNESS_TEST_OPTIONS, async ({ page }) => {
   await capabilityFixture(page, CORRECT_ID, "p", { resetOnEscape: false });
   await page.evaluate((stableId) => {
-    document.querySelector(`[data-pageroot-id="${stableId}"]`)
+    document.querySelector(`[data-stemmio-id="${stableId}"]`)
       ?.setAttribute("data-html-canvas-selected", "");
     document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
   }, CORRECT_ID);
@@ -796,7 +796,7 @@ test("capability probe rejects stale and wrongly selected Stable IDs", HARNESS_T
     page,
     frame: page,
     editor,
-    candidate: candidate("pr1_cccccccccccccccccccccccccccccccc"),
+    candidate: candidate("sm1_cccccccccccccccccccccccccccccccc"),
   })).rejects.toMatchObject({
     code: "CAPABILITY_PROBE_STALE_STABLE_ID",
     details: { count: 0 },
@@ -894,7 +894,7 @@ test("capability probe rejects an iframe host overlay that appears on pointer mo
   const iframeElement = await page.locator("iframe").elementHandle();
   const child = await iframeElement.contentFrame();
   await child.setContent(`
-    <p id="target" data-pageroot-id="${CORRECT_ID}" style="display:block;width:240px;height:80px">
+    <p id="target" data-stemmio-id="${CORRECT_ID}" style="display:block;width:240px;height:80px">
       iframe authored target
     </p>
   `);
@@ -963,10 +963,10 @@ async function installIframeCapabilityHintFixture(page, {
   const iframeElement = await page.locator("iframe").elementHandle();
   const child = await iframeElement.contentFrame();
   await child.setContent(`
-    <p id="target" data-pageroot-id="${CORRECT_ID}" style="display:block;width:240px;height:80px">
+    <p id="target" data-stemmio-id="${CORRECT_ID}" style="display:block;width:240px;height:80px">
       iframe authored target
     </p>
-    <p data-pageroot-id="${WRONG_ID}">wrong target</p>
+    <p data-stemmio-id="${WRONG_ID}">wrong target</p>
   `);
   await page.evaluate((nextSelectedId) => {
     window.__capabilityHintClickCount = 0;
@@ -978,7 +978,7 @@ async function installIframeCapabilityHintFixture(page, {
       const childDocument = iframe?.contentDocument;
       childDocument?.querySelectorAll("[data-html-canvas-selected]")
         .forEach((element) => element.removeAttribute("data-html-canvas-selected"));
-      childDocument?.querySelector(`[data-pageroot-id="${nextSelectedId}"]`)
+      childDocument?.querySelector(`[data-stemmio-id="${nextSelectedId}"]`)
         ?.setAttribute("data-html-canvas-selected", "subregion");
       document.querySelector('[role="toolbar"]')?.removeAttribute("hidden");
     });
@@ -1108,11 +1108,11 @@ test("capability probe reports a same-ID wrong DOM tag instead of echoing the fr
 
 test("capability census keeps only the currently reachable authored tab content", HARNESS_TEST_OPTIONS, async ({ page }) => {
   await page.setContent(`
-    <section id="tab-a"><p data-pageroot-id="${CORRECT_ID}">A</p></section>
-    <section id="tab-b" hidden><p data-pageroot-id="${WRONG_ID}">B</p></section>
+    <section id="tab-a"><p data-stemmio-id="${CORRECT_ID}">A</p></section>
+    <section id="tab-b" hidden><p data-stemmio-id="${WRONG_ID}">B</p></section>
   `);
-  const sourceElements = [CORRECT_ID, WRONG_ID].map((pagerootId) => ({
-    pagerootId,
+  const sourceElements = [CORRECT_ID, WRONG_ID].map((stemmioId) => ({
+    stemmioId,
     sourceEditable: true,
   }));
   const first = await collectVisibleAuthoredCandidates(page, sourceElements, "tab-a");
@@ -1132,7 +1132,7 @@ test("capability census keeps only the currently reachable authored tab content"
 test("Runtime-generated discovery trusts controller diagnostics and freezes one target per kind", HARNESS_TEST_OPTIONS, async ({ page }) => {
   await page.setContent(`
     <main data-runtime-root>
-      <section data-pageroot-id="${CORRECT_ID}">
+      <section data-stemmio-id="${CORRECT_ID}">
         <table id="runtime-table"><tbody><tr><td>runtime</td></tr></tbody></table>
         <table id="same-kind-runtime-table"><tbody><tr><td>runtime 2</td></tr></tbody></table>
       </section>
@@ -1179,7 +1179,7 @@ test("Runtime-generated discovery trusts controller diagnostics and freezes one 
 test("Runtime-generated discovery rejects incomplete diagnostics and authored visual targets", HARNESS_TEST_OPTIONS, async ({ page }) => {
   await page.setContent(`
     <main data-runtime-root>
-      <section data-pageroot-id="${CORRECT_ID}">
+      <section data-stemmio-id="${CORRECT_ID}">
         <table id="authored-table"><tbody><tr><td>authored</td></tr></tbody></table>
         <table id="incomplete-runtime-table"><tbody><tr><td>runtime</td></tr></tbody></table>
       </section>
@@ -1229,7 +1229,7 @@ test("Runtime-generated discovery rejects stale diagnostics when Escape cannot c
       data-selection-runtime-kind="table"
       data-selection-runtime-path="table"
     >
-      <section data-pageroot-id="${CORRECT_ID}">
+      <section data-stemmio-id="${CORRECT_ID}">
         <table><tbody><tr><td>stale</td></tr></tbody></table>
       </section>
     </main>

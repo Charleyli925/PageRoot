@@ -70,11 +70,11 @@ test("candidate assessment ignores script changes while checking document health
 });
 
 test("candidate assessment reports bounded stable-element impact", () => {
-  const targetId = "pr1_00000000000040008000000000000000";
-  const outsideId = "pr1_11111111111141118000000000000000";
+  const targetId = "sm1_00000000000040008000000000000000";
+  const outsideId = "sm1_11111111111141118000000000000000";
   const baseHtml = `<!doctype html><html><head><title>Impact</title></head><body>
-<main><p data-pageroot-id="${targetId}">评论目标</p></main>
-<aside data-pageroot-id="${outsideId}">评论目标之外</aside>
+<main><p data-stemmio-id="${targetId}">评论目标</p></main>
+<aside data-stemmio-id="${outsideId}">评论目标之外</aside>
 </body></html>`;
   const outputHtml = baseHtml
     .replace("评论目标</p>", "评论目标已修改</p>")
@@ -97,18 +97,18 @@ test("candidate assessment reports bounded stable-element impact", () => {
 
 test("candidate impact scope includes descendants, additions, deletions, page comments and overlaps", () => {
   const ids = {
-    section: "pr1_00000000000040008000000000000000",
-    heading: "pr1_11111111111141118000000000000000",
-    paragraph: "pr1_22222222222242228000000000000000",
-    outside: "pr1_33333333333343338000000000000000",
-    first: "pr1_44444444444444448000000000000000",
-    second: "pr1_55555555555545558000000000000000",
-    added: "pr1_66666666666646668000000000000000",
+    section: "sm1_00000000000040008000000000000000",
+    heading: "sm1_11111111111141118000000000000000",
+    paragraph: "sm1_22222222222242228000000000000000",
+    outside: "sm1_33333333333343338000000000000000",
+    first: "sm1_44444444444444448000000000000000",
+    second: "sm1_55555555555545558000000000000000",
+    added: "sm1_66666666666646668000000000000000",
   };
   const baseHtml = `<!doctype html><html><head><title>Scope</title></head><body>
-<section data-pageroot-id="${ids.section}"><h2 data-pageroot-id="${ids.heading}">标题</h2><p data-pageroot-id="${ids.paragraph}">正文</p></section>
-<aside data-pageroot-id="${ids.outside}">旁支</aside>
-<ul><li data-pageroot-id="${ids.first}">第一项</li><li data-pageroot-id="${ids.second}">第二项</li></ul>
+<section data-stemmio-id="${ids.section}"><h2 data-stemmio-id="${ids.heading}">标题</h2><p data-stemmio-id="${ids.paragraph}">正文</p></section>
+<aside data-stemmio-id="${ids.outside}">旁支</aside>
+<ul><li data-stemmio-id="${ids.first}">第一项</li><li data-stemmio-id="${ids.second}">第二项</li></ul>
 </body></html>`;
   const assess = (outputHtml, targets, options = {}) => assessHtmlCandidate({
     baseHtml: options.baseHtml ?? baseHtml,
@@ -128,7 +128,7 @@ test("candidate impact scope includes descendants, additions, deletions, page co
   const addedInside = assess(
     baseHtml.replace(
       "</section>",
-      `<em data-pageroot-id="${ids.added}">新增</em></section>`,
+      `<em data-stemmio-id="${ids.added}">新增</em></section>`,
     ),
     [ids.section],
   );
@@ -137,7 +137,7 @@ test("candidate impact scope includes descendants, additions, deletions, page co
 
   const deletedInside = assess(
     baseHtml.replace(
-      `<p data-pageroot-id="${ids.paragraph}">正文</p>`,
+      `<p data-stemmio-id="${ids.paragraph}">正文</p>`,
       "",
     ),
     [ids.section],
@@ -147,8 +147,8 @@ test("candidate impact scope includes descendants, additions, deletions, page co
 
   const insertedBeforeSiblings = assess(
     baseHtml.replace(
-      `<li data-pageroot-id="${ids.first}">第一项</li>`,
-      `<li data-pageroot-id="${ids.added}">插入项</li><li data-pageroot-id="${ids.first}">第一项</li>`,
+      `<li data-stemmio-id="${ids.first}">第一项</li>`,
+      `<li data-stemmio-id="${ids.added}">插入项</li><li data-stemmio-id="${ids.first}">第一项</li>`,
     ),
     [ids.first],
   );
@@ -170,10 +170,10 @@ test("candidate impact scope includes descendants, additions, deletions, page co
   assert.equal(overlappingTargets.outsideTargetCount, 0);
 
   const manyIds = Array.from({ length: 101 }, (_, index) => (
-    `pr1_${String(index + 1).padStart(12, "0")}40008${String(index + 1).padStart(15, "0")}`
+    `sm1_${String(index + 1).padStart(12, "0")}40008${String(index + 1).padStart(15, "0")}`
   ));
   const manyChangesBase = `<!doctype html><html><head><title>Many</title></head><body>${manyIds
-    .map((id, index) => `<p data-pageroot-id="${id}">item-${index}</p>`)
+    .map((id, index) => `<p data-stemmio-id="${id}">item-${index}</p>`)
     .join("")}</body></html>`;
   const manyChanges = assess(
     manyChangesBase.replace(/>(item-\d+)</gu, ">changed-$1<"),
@@ -188,15 +188,15 @@ test("candidate impact scope includes descendants, additions, deletions, page co
 });
 
 test("candidate impact stays linear and bounded near the HTML size limit", () => {
-  const bodyId = "pr1_4444444444444444b444444444444444";
+  const bodyId = "sm1_4444444444444444b444444444444444";
   const elementId = (index) => (
-    `pr1_${String(index).padStart(12, "0")}40008${String(index).padStart(15, "0")}`
+    `sm1_${String(index).padStart(12, "0")}40008${String(index).padStart(15, "0")}`
   );
   const filler = "x".repeat(640);
   const rows = Array.from({ length: 12_000 }, (_, index) => (
-    `<p data-pageroot-id="${elementId(index + 1)}" data-fixture="${filler}">row-${index}</p>`
+    `<p data-stemmio-id="${elementId(index + 1)}" data-fixture="${filler}">row-${index}</p>`
   )).join("");
-  const baseHtml = `<!doctype html><html><head><title>Large</title></head><body data-pageroot-id="${bodyId}">${rows}</body></html>`;
+  const baseHtml = `<!doctype html><html><head><title>Large</title></head><body data-stemmio-id="${bodyId}">${rows}</body></html>`;
   const outputHtml = baseHtml.replace("row-11999", "row-11999 changed");
   assert.ok(Buffer.byteLength(baseHtml, "utf8") > 8 * 1024 * 1024);
   enableCandidateImpactCounters();
@@ -230,12 +230,12 @@ test("candidate impact stays linear and bounded near the HTML size limit", () =>
 });
 
 test("candidate impact scope crosses unlabelled source wrappers", () => {
-  const sectionId = "pr1_00000000000040008000000000000000";
-  const childId = "pr1_11111111111141118000000000000000";
-  const outsideId = "pr1_22222222222242228000000000000000";
+  const sectionId = "sm1_00000000000040008000000000000000";
+  const childId = "sm1_11111111111141118000000000000000";
+  const outsideId = "sm1_22222222222242228000000000000000";
   const baseHtml = `<!doctype html><html><head><title>Wrapper</title></head><body>
-<section data-pageroot-id="${sectionId}"><div><p data-pageroot-id="${childId}">正文</p></div></section>
-<aside data-pageroot-id="${outsideId}">旁支</aside>
+<section data-stemmio-id="${sectionId}"><div><p data-stemmio-id="${childId}">正文</p></div></section>
+<aside data-stemmio-id="${outsideId}">旁支</aside>
 </body></html>`;
   const outputHtml = baseHtml.replace("正文", "更新后的正文");
   const assessment = assessHtmlCandidate({

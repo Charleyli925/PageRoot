@@ -95,14 +95,14 @@ test("Request publication rechecks source bytes after freezing its input bundle"
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
   const runtime = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "runtime-state.json",
   ));
   assert.equal(runtime.activeRequest, null);
   await assert.rejects(
     readFile(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "requests",
       "req_source_boundary",
       "request.json",
@@ -181,7 +181,7 @@ test("request preparation fault injection restores one immutable active Request"
     );
     const publicRequestPath = path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "requests",
       "req_fault_recovery",
       "request.json",
@@ -212,13 +212,13 @@ test("request preparation fault injection restores one immutable active Request"
     assert.equal(workspace.activeRequest.status, "processing", failpoint);
     const requestRoots = (await readdir(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "requests",
     ), { withFileTypes: true })).filter((entry) => entry.isDirectory());
     assert.deepEqual(requestRoots.map((entry) => entry.name), ["req_fault_recovery"], failpoint);
     const frozenAttachmentPath = path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "requests",
       "req_fault_recovery",
       "input",
@@ -232,7 +232,7 @@ test("request preparation fault injection restores one immutable active Request"
     assert.equal(
       await lstat(path.join(
         imported.target.projectRootPath,
-        ".pageroot",
+        ".stemmio",
         "recovery",
         "request-freeze",
         "req_fault_recovery",
@@ -243,7 +243,7 @@ test("request preparation fault injection restores one immutable active Request"
     assert.equal(
       await lstat(path.join(
         imported.target.projectRootPath,
-        ".pageroot",
+        ".stemmio",
         "recovery",
         "request-freeze",
         "req_fault_recovery.json",
@@ -307,7 +307,7 @@ test("project recovery publishes a verified staged Request after a process-like 
     (error) => error instanceof ProjectFileRepositoryError
       && error.code === "INJECTED_FAILPOINT",
   );
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const stagingRoot = path.join(controlRoot, "recovery", "request-freeze", requestId);
   const markerPath = `${stagingRoot}.json`;
   const publishedRequestRoot = path.join(controlRoot, "requests", requestId);
@@ -368,7 +368,7 @@ test("request recovery keeps the original runtime input-manifest anchor", async 
     request: requestFor("runtime anchor"),
     prompt: "# Runtime anchor\n",
   });
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const runtimePath = path.join(controlRoot, "runtime-state.json");
   const requestPath = path.join(controlRoot, "requests", prepared.requestId, "request.json");
   const runtimeBefore = await json(runtimePath);
@@ -404,7 +404,7 @@ test("request recovery binds Request identity to its sealed runtime anchor", asy
     request: requestFor("runtime identity anchor"),
     prompt: "# Runtime identity anchor\n",
   });
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const runtimePath = path.join(controlRoot, "runtime-state.json");
   const requestPath = path.join(controlRoot, "requests", prepared.requestId, "request.json");
   const runtimeBefore = await json(runtimePath);
@@ -435,7 +435,7 @@ test("request recovery never recreates runtime authority from Agent-owned Reques
     request: requestFor("must retain the runtime seal"),
     prompt: "# Runtime seal\n",
   });
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const runtimePath = path.join(controlRoot, "runtime-state.json");
   const requestPath = path.join(controlRoot, "requests", prepared.requestId, "request.json");
   const inputManifestPath = path.join(controlRoot, "requests", prepared.requestId, "input-manifest.json");
@@ -445,7 +445,7 @@ test("request recovery never recreates runtime authority from Agent-owned Reques
   await writeFile(runtimePath, JSON.stringify(runtime), "utf8");
 
   // An external Agent may alter every file it can see in its Request tree.
-  // Its new digest must not become runtime authority when PageRoot reopens.
+  // Its new digest must not become runtime authority when Stemmio reopens.
   const launderedManifest = Buffer.from('{"agent":"replacement bundle"}\n', "utf8");
   await writeFile(inputManifestPath, launderedManifest);
   const record = await json(requestPath);
@@ -538,7 +538,7 @@ test("a Request freezes comments, targets and project rules alongside its exact 
   assert.equal(
     await lstat(path.join(
       saved.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "requests",
       "req_unknown_provider",
     )).then(() => true, () => false),
@@ -554,7 +554,7 @@ test("a Request freezes comments, targets and project rules alongside its exact 
   });
   const requestRoot = path.join(
     saved.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     prepared.requestId,
   );
@@ -709,7 +709,7 @@ test("attachments-only comments freeze every byte before Request authority is pu
   });
   const requestRoot = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     prepared.requestId,
   );
@@ -816,7 +816,7 @@ test("invalid comment attachments stop before request.json and Runtime authority
     if (item.kind === "length") attachment.byteLength += 1;
     const requestRoot = path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "requests",
       `req_invalid_${item.kind}`,
     );
@@ -855,7 +855,7 @@ test("invalid comment attachments stop before request.json and Runtime authority
     );
     const runtime = await json(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "runtime-state.json",
     ));
     assert.equal(runtime.activeRequest, null, item.name);
@@ -878,7 +878,7 @@ test("an existing unknown-provider Request remains readable and durably cancella
   });
   const requestPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     prepared.requestId,
     "request.json",

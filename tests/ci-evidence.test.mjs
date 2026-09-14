@@ -17,7 +17,7 @@ test("CI failure fingerprints ignore transient runner paths, SHAs and timestamps
     output: [
       "Error: Timed out after 30s",
       "at /repo/one/tests/example.spec.mjs:42",
-      "temporary /private/var/folders/ab/cd/T/pageroot-123/file",
+      "temporary /private/var/folders/ab/cd/T/stemmio-123/file",
       `source ${"a".repeat(40)} at 2026-07-24T06:20:00.000Z`,
     ].join("\n"),
   });
@@ -28,12 +28,12 @@ test("CI failure fingerprints ignore transient runner paths, SHAs and timestamps
     output: [
       "Error: Timed out after 45s",
       "at /different/repo/tests/example.spec.mjs:42",
-      "temporary /var/folders/xy/zz/T/pageroot-999/file",
+      "temporary /var/folders/xy/zz/T/stemmio-999/file",
       `source ${"b".repeat(40)} at 2026-07-24T07:30:00.000Z`,
     ].join("\n"),
   });
   assert.equal(first.signature, second.signature);
-  assert.match(first.signature, /^pageroot-ci-v1:[0-9a-f]{20}$/u);
+  assert.match(first.signature, /^stemmio-ci-v1:[0-9a-f]{20}$/u);
   assert.doesNotMatch(first.normalizedExcerpt, /private\/var|2026-07-24|a{40}/u);
 });
 

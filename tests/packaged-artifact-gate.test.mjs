@@ -39,7 +39,7 @@ test("a packaged Mach-O may be re-signed but not replaced", async (t) => {
     t.skip("Mach-O signing is macOS-only");
     return;
   }
-  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-macho-contract-"));
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-macho-contract-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "source-true");
   const packagedPath = path.join(temporaryRoot, "packaged-true");
@@ -53,7 +53,7 @@ test("a packaged Mach-O may be re-signed but not replaced", async (t) => {
     "--sign",
     "-",
     "--identifier",
-    "app.pageroot.synthetic-packaged-runtime",
+    "app.stemmio.synthetic-packaged-runtime",
     "--entitlements",
     entitlementsPath,
     packagedPath,
@@ -72,7 +72,7 @@ test("a packaged Mach-O may be re-signed but not replaced", async (t) => {
     "--sign",
     "-",
     "--identifier",
-    "app.pageroot.synthetic-packaged-runtime",
+    "app.stemmio.synthetic-packaged-runtime",
     "--entitlements",
     entitlementsPath,
     replacementPath,
@@ -148,12 +148,12 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(gateRunner, /require a clean Git worktree/);
   assert.match(gateRunner, /Clean source changed while the gate was running/);
   assert.match(gateRunner, /requires a trusted source-gate decision from CI/);
-  assert.match(gateRunner, /PAGEROOT_SOURCE_GATE_TREE/);
+  assert.match(gateRunner, /STEMMIO_SOURCE_GATE_TREE/);
   assert.match(packageJson.scripts["desktop:pack"], /build-package\.mjs --arch arm64/);
   assert.match(
     packageBuilder,
     /--\$\{architecture\}/u,
-    "electron-builder must never publish before PageRoot verifies the complete release asset set",
+    "electron-builder must never publish before Stemmio verifies the complete release asset set",
   );
   assert.ok(packageJson.build.extraResources.some((entry) => entry.to === "build-info.json"));
   assert.ok(packageJson.build.extraResources.some((entry) => entry.to === "app-update.yml"));
@@ -196,24 +196,24 @@ test("release commands use one automated artifact lane with full tests and packa
   );
 
   const layout = expectedArtifactLayout({ productRoot, packageJson, arch: "arm64" });
-  assert.match(layout.appPath, /release\/mac-arm64\/PageRoot\.app$/);
+  assert.match(layout.appPath, /release\/mac-arm64\/Stemmio\.app$/);
   assert.equal(
     path.basename(layout.dmgPath),
-    "PageRoot-" + packageJson.version + "-arm64.dmg",
+    "Stemmio-" + packageJson.version + "-arm64.dmg",
   );
   assert.equal(
     path.basename(layout.zipPath),
-    "PageRoot-" + packageJson.version + "-arm64.zip",
+    "Stemmio-" + packageJson.version + "-arm64.zip",
   );
   assert.equal(
     path.basename(layout.blockmapPath),
-    "PageRoot-" + packageJson.version + "-arm64.zip.blockmap",
+    "Stemmio-" + packageJson.version + "-arm64.zip.blockmap",
   );
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
 });
 
 test("the packaged verifier rejects retired Codex App Server resources", async (t) => {
-  const resourcesPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-codex-package-"));
+  const resourcesPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-codex-package-"));
   t.after(() => rm(resourcesPath, { recursive: true, force: true }));
   await mkdir(path.join(resourcesPath, "bridge/agent/providers"), { recursive: true });
   await mkdir(path.join(resourcesPath, "bridge/agent/runtimes"), { recursive: true });
@@ -258,12 +258,12 @@ test("app-only profiles keep dry-run unsigned without weakening Candidate signat
 });
 
 test("release packaging notarizes, staples and validates the final DMG", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-dmg-notarize-"));
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-dmg-notarize-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-  const dmgPath = path.join(temporaryRoot, "PageRoot-0.9.1-arm64.dmg");
+  const dmgPath = path.join(temporaryRoot, "Stemmio-0.9.1-arm64.dmg");
   await writeFile(dmgPath, "final dmg bytes");
   const environment = {
-    PAGEROOT_REQUIRE_NOTARIZATION: "1",
+    STEMMIO_REQUIRE_NOTARIZATION: "1",
     APPLE_ID: "release@example.invalid",
     APPLE_APP_SPECIFIC_PASSWORD: "fixture-password",
     APPLE_TEAM_ID: "TEAM123456",
@@ -303,7 +303,7 @@ test("release packaging notarizes, staples and validates the final DMG", async (
   await assert.rejects(
     notarizeAndStapleDmg({
       dmgPath,
-      environment: { PAGEROOT_REQUIRE_NOTARIZATION: "1" },
+      environment: { STEMMIO_REQUIRE_NOTARIZATION: "1" },
       commandRunner: async () => assert.fail("must fail before invoking xcrun"),
     }),
     /DMG notarization credentials are missing/u,
@@ -319,9 +319,9 @@ test("release packaging notarizes, staples and validates the final DMG", async (
 });
 
 test("DMG stapling refreshes only its final latest-mac metadata entry", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-dmg-metadata-"));
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-dmg-metadata-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-  const dmgPath = path.join(temporaryRoot, "PageRoot-0.9.1-arm64.dmg");
+  const dmgPath = path.join(temporaryRoot, "Stemmio-0.9.1-arm64.dmg");
   await writeFile(dmgPath, "stapled-final-dmg");
   const updateInfoPath = path.join(temporaryRoot, "latest-mac.yml");
   await writeFile(
@@ -329,13 +329,13 @@ test("DMG stapling refreshes only its final latest-mac metadata entry", async (t
     [
       "version: 0.9.1",
       "files:",
-      "  - url: PageRoot-0.9.1-arm64.zip",
+      "  - url: Stemmio-0.9.1-arm64.zip",
       "    sha512: exact-zip-digest",
       "    size: 1234",
-      "  - url: PageRoot-0.9.1-arm64.dmg",
+      "  - url: Stemmio-0.9.1-arm64.dmg",
       "    sha512: stale-dmg-digest",
       "    size: 42",
-      "path: PageRoot-0.9.1-arm64.zip",
+      "path: Stemmio-0.9.1-arm64.zip",
       "sha512: exact-zip-digest",
       "",
     ].join("\n"),
@@ -347,13 +347,13 @@ test("DMG stapling refreshes only its final latest-mac metadata entry", async (t
     updated,
     new RegExp("    sha512: " + result.sha512 + "\\n    size: " + result.size + "\\n", "u"),
   );
-  assert.match(updated, /PageRoot-0\.9\.1-arm64\.zip\n    sha512: exact-zip-digest\n    size: 1234/u);
+  assert.match(updated, /Stemmio-0\.9\.1-arm64\.zip\n    sha512: exact-zip-digest\n    size: 1234/u);
   assert.doesNotMatch(updated, /stale-dmg-digest/u);
 });
 
 test("retired editor guard rejects dependencies, bundled code, and legacy editing surfaces", () => {
   for (const contents of [
-    "const nativeEditing = true; data-pageroot-runtime-node",
+    "const nativeEditing = true; data-stemmio-runtime-node",
     "replace-editable-island",
     "planEditableIslandPatch()",
     "plainTextFlow",
@@ -380,7 +380,7 @@ test("retired editor guard rejects dependencies, bundled code, and legacy editin
     ["source package.json", '{"dependencies":{"text-flow":"1.0.0"}}'],
     ["source package-lock.json", '{"packages":{"node_modules/textflow":{}}}'],
     ["source package alias", '{"dependencies":{"legacy-editor":"npm:text-flow@1.0.0"}}'],
-    ["app.asar renderer", "<pageroot-text-editor>"],
+    ["app.asar renderer", "<stemmio-text-editor>"],
     ["app.asar renderer", "data-html-canvas-text-flow"],
   ]) {
     assert.throws(
@@ -408,7 +408,7 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   });
   const result = await verifySyntheticAppBundle(fixture);
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 48);
+  assert.equal(result.asarFileCount, 49);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.deepEqual(result.applicationUpdate, {
@@ -416,7 +416,7 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
     repo: "PageRoot",
     provider: "github",
     releaseType: "release",
-    updaterCacheDirName: "pageroot-updater",
+    updaterCacheDirName: "stemmio-updater",
   });
   assert.equal(result.telemetry.enabled, true);
   assert.equal(result.provenance.commitSha, "a".repeat(40));
@@ -561,10 +561,10 @@ test("the app-bundle gate reports each mutated closure boundary", async (t) => {
         path.join(resourcesPath, "app-update.yml"),
         [
           "owner: attacker",
-          "repo: PageRoot",
+          "repo: Stemmio",
           "provider: github",
           "releaseType: release",
-          "updaterCacheDirName: pageroot-updater",
+          "updaterCacheDirName: stemmio-updater",
           "",
         ].join("\n"),
       ),

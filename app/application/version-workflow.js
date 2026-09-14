@@ -503,7 +503,7 @@ export class VersionWorkflow {
         throw new Error("当前候选缺少经核对的 Candidate 身份，不能重放采用操作。");
       }
       const readyTarget = this.#readyOpenTarget(ready);
-      perfMark("pageroot:accept:promote-start");
+      perfMark("stemmio:accept:promote-start");
       const activationRequest = pending?.request || {
         ...readyTarget,
         candidateId: readyCandidate.candidateId,
@@ -536,7 +536,7 @@ export class VersionWorkflow {
         activatedPayload = await this.#bridgeClient.activateReadyVersion(activationRequest);
       }
       const activatedOpenTarget = this.#activatedOpenTarget(ready, activatedPayload);
-      perfMark("pageroot:accept:promote-end");
+      perfMark("stemmio:accept:promote-end");
       if (!this.#isNavigationCurrent(operation) || !this.#isCurrentReadyRun(ready)) {
         this.#clearPendingActivation(operationKey);
         return stale(this.#runIdentity(ready));
@@ -1293,7 +1293,7 @@ export class VersionWorkflow {
     operation,
     activationOperationId = null,
   }) {
-    perfMark("pageroot:accept:open-start");
+    perfMark("stemmio:accept:open-start");
     const completion = this.#committedPayload(run, payload);
     if (payload.openTarget && payload.openTarget.versionId !== completion.versionId) {
       return blocked("VERSION_ACTIVATION_SUPERSEDED", "当前稿已进入后续版本，原有采纳结果保留在历史中。");
@@ -1334,7 +1334,7 @@ export class VersionWorkflow {
       this.#assertVersionFileIdentity(payload, run, completion.versionId);
       this.#assertSourceIdentity(payload, run, { allowSourceTransition: true });
     }
-    perfMark("pageroot:accept:read-end");
+    perfMark("stemmio:accept:read-end");
     const content = source.content;
     const versionSha256 = source.versionSha256;
     const sourceSha256 = source.sourceSha256;
@@ -1350,7 +1350,7 @@ export class VersionWorkflow {
     ) {
       throw new Error("版本快照、源 HTML 与完成记录的 Hash 不一致，已停止打开。");
     }
-    perfMark("pageroot:accept:hash-end");
+    perfMark("stemmio:accept:hash-end");
     if (!validTimestamp(lastModifiedAt)) {
       throw new Error("当前源 HTML 缺少独立的最后修改时间，已停止打开。");
     }
@@ -1467,7 +1467,7 @@ export class VersionWorkflow {
         )
         : stale(this.#runIdentity(run));
     }
-    perfMark("pageroot:accept:commit-end");
+    perfMark("stemmio:accept:commit-end");
 
     // Durable promotion and complete Session publication are the user-facing
     // cut. Canvas verification remains mandatory, but it warms the sole edit
@@ -1482,7 +1482,7 @@ export class VersionWorkflow {
     });
 
     await this.#canvasPort.verifyRendered(content, versionSha256, context);
-    perfMark("pageroot:accept:canvas-verified");
+    perfMark("stemmio:accept:canvas-verified");
     if (!this.#isNavigationActive(operation) || !this.#projectSession.matches(context)) {
       return stale(context);
     }
@@ -1517,7 +1517,7 @@ export class VersionWorkflow {
         reason: this.#codecs.errorMessage(cause, refreshFallback),
       });
     });
-    perfMark("pageroot:accept:refresh-end");
+    perfMark("stemmio:accept:refresh-end");
 
     this.#projectWorkflow.scheduleProjectListRefreshAfterSettlement(context);
 

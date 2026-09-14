@@ -1241,7 +1241,7 @@ Source visual truth:
 
 Implementation evidence:
 
-- `docs/assets/pageroot-welcome-hero.png`
+- `docs/assets/stemmio-welcome-hero.png`
 - `output/design-qa/2026-07-29-welcome-badge/desktop-1080x900.png`
 - `output/design-qa/2026-07-29-welcome-badge/compact-720x1000.png`
 - `output/design-qa/2026-07-29-welcome-badge/badge-region-desktop.png`

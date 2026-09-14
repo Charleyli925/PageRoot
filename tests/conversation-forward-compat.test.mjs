@@ -29,8 +29,8 @@ const documentId = "doc_forward_compat";
 const sourceSha256 = `sha256:${"a".repeat(64)}`;
 
 async function projectContext() {
-  const root = await mkdtemp(path.join(tmpdir(), "pageroot-forward-compat-"));
-  return { projectRoot: path.join(root, ".pageroot"), projectId, documentId };
+  const root = await mkdtemp(path.join(tmpdir(), "stemmio-forward-compat-"));
+  return { projectRoot: path.join(root, ".stemmio"), projectId, documentId };
 }
 
 async function injectMember(filePath, mutate) {
@@ -81,7 +81,7 @@ test("a conversation preserves an unknown member across a disk read-edit-write r
   assert.equal(edited.contexts[0].futureContextMember, 7);
   // Authoritative wins: revision is the stored-count + 1, never the stale 999.
   assert.equal(edited.revision, 1000);
-  assert.equal(edited.schemaVersion, "2.0.0");
+  assert.equal(edited.schemaVersion, "3.0.0");
 
   const reread = await readConversation(context, conversation.conversationId);
   assert.deepEqual(reread.futureRootMember, { note: "from a newer build" });
@@ -118,7 +118,8 @@ test("an unknown member on a stored message survives a round trip", async () => 
       messageId: "message_seededforward12",
       turnId: "turn_seededforward12",
       sequence: 1,
-      actor: "qoder",
+      actor: "agent",
+      providerId: "qoder",
       kind: "text",
       status: "completed",
       text: "保留我",

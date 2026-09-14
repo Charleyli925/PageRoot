@@ -91,11 +91,11 @@ Conversation records remain readable through the ordinary conversation routes.
 
 Product discovery accepts a protected standalone `@qoder-ai/qodercli` package
 at version 1.1.27 or newer. It intentionally rejects the executable embedded in
-Qoder.app and ordinary `PAGEROOT_QODER_ACP_COMMAND` overrides. Tests may inject
-a synthetic executable only with both `PAGEROOT_E2E=1` and
-`PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND=1`. The 源页 HTTP Agent may use a
-loopback `127.0.0.1` chat endpoint only with both `PAGEROOT_E2E=1` and
-`PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL=1`. The readiness probe runs before
+Qoder.app and ordinary `STEMMIO_QODER_ACP_COMMAND` overrides. Tests may inject
+a synthetic executable only with both `STEMMIO_E2E=1` and
+`STEMMIO_QODER_ACP_ALLOW_TEST_COMMAND=1`. The 源页 HTTP Agent may use a
+loopback `127.0.0.1` chat endpoint only with both `STEMMIO_E2E=1` and
+`STEMMIO_HTTP_AGENT_ALLOW_TEST_BASE_URL=1`. The readiness probe runs before
 Request creation; a failed CLI/version/login/model-list check must leave no new
 Request, and a successful ticket is reused by the immediately following
 submission instead of probing twice. Same-Request retry is allowed only while the current
@@ -146,7 +146,7 @@ trusted-local-Agent choice; see `docs/SECURITY_MODEL.md`, ADR 0032 and ADR 0039.
 
 `npm run spike:qoder-acp` is a development-only compatibility probe. It
 requires an independently installed, signed-in Qoder CLI with ACP v1 support;
-set `PAGEROOT_QODER_ACP_COMMAND` to an absolute executable path when it is not
+set `STEMMIO_QODER_ACP_COMMAND` to an absolute executable path when it is not
 on `PATH`. The command creates a synthetic v4 Request under an isolated
 temporary Project File, drives Qoder over ACP, runs the official finalizer and
 verifies that the result is a pending-review Candidate while the Working Copy
@@ -166,8 +166,8 @@ Private real-HTML execution is currently migrating to reviewed local manifests.
 The old `local-html-corpus.mjs` entry allows read-only `capability-preflight-only`
 and rejects automatic-discovery qualification. The frozen micro entry
 is `node tests/e2e/electron/frozen-html-operation.mjs`, with the local manifest
-path and independent SHA-256 supplied through `PAGEROOT_FROZEN_MANIFEST` and
-`PAGEROOT_FROZEN_MANIFEST_SHA256`. Reviewed plans choose either one selection or
+path and independent SHA-256 supplied through `STEMMIO_FROZEN_MANIFEST` and
+`STEMMIO_FROZEN_MANIFEST_SHA256`. Reviewed plans choose either one selection or
 the fixed native text chain (activate, type, Backspace, save, undo, redo).
 The `core-text-format` scope adds explicit unbold preparation, bold and restart
 verification on the same frozen target. Its manifest fixes the expected history
@@ -322,25 +322,25 @@ Developer ID, notarize, tag or publish. Its checkpoint is always
 checkpoint verifier.
 
 Desktop development and every automated test also leave live usage telemetry
-disabled unless `PAGEROOT_TELEMETRY_DEV=1` is explicitly set. Telemetry tests
+disabled unless `STEMMIO_TELEMETRY_DEV=1` is explicitly set. Telemetry tests
 inject a fake fetch implementation and synthetic project token, so local test
 runs never send product events. A distribution package embeds only the public
-PostHog project ingestion token generated from `PAGEROOT_POSTHOG_TOKEN`; never
+PostHog project ingestion token generated from `STEMMIO_POSTHOG_TOKEN`; never
 use a personal or project secret API key.
 
 Electron product suites run their BrowserWindow hidden by default and keep
 background timers and frame commits enabled, so local automation does not
-activate PageRoot or cover other applications. Background mode still keeps the
+activate Stemmio or cover other applications. Background mode still keeps the
 macOS Dock icon: click it to bring the window forward, inspect the run, and
 minimize it again. Every E2E mode suppresses automatically triggered native
 dialogs and logs them instead of popping up, including
-`PAGEROOT_E2E_FOREGROUND=1` visual debugging. The hosted-macOS environment
+`STEMMIO_E2E_FOREGROUND=1` visual debugging. The hosted-macOS environment
 preflight uses a visible inactive accessory window because that suite must
 prove WindowServer painting without stealing keyboard focus.
 
 Draft Pull Request opens, updates and reopens first freeze one impact plan in a lightweight Job. Ubuntu Node/Browser and any selected macOS Electron/AI lane then consume that exact plan in parallel. Within each runtime, capability tags and changed specs are discovered together, deduplicated by project, file and full title path, then executed once from a Playwright test list. The reconciliation evidence distinguishes passed, failed, skipped and not-executed tests; missing selectors or planned tests fail closed. Draft failures and cancellations upload `output/playwright`. Local `gate:edit` remains Node-only. Returning to Draft skips the full matrix. Ready or a PR opened already Ready starts the complete source matrix: `branch-policy`, `candidate-context`, `baseline-policy`, `linux-deps` / `macos-deps`, Linux Node/Browser, both macOS Electron lanes, optional credential-free Release Dry Run, and `release-gate`. `codex-review` posts at most one `@codex review` comment for the current head and writes an informational thread snapshot; it is `continue-on-error` and is not a merge hard gate. Linux builds and shares only the Web renderer used by Node and Browser, and those jobs skip the Electron binary download. Each macOS job restores one OS/lockfile `node_modules` cache populated by `macos-deps`, builds the Electron renderer locally, runs the hosted-window preflight, then owns either the native Electron suite or the AI suite. Playwright and Electron downloads remain cached by lockfile identity. Clean successes upload only flaky evidence; full Playwright diagnostics upload on failure. The native Electron and AI lanes do not retry product tests. Hosted-window preflight is `@infra-sensitive` and may retry once in CI. `release-gate` downloads flaky evidence and refuses attestation when a product suite is flaky, retried, or the same SHA has an untriaged product failure. Dependency, Playwright and Electron downloads are cached by lockfile identity.
 
-After merge, `main-integrity` verifies the merged PR, exact Tree Hash and package/lockfile version against the fresh source-gate attestation, resolving the pull request from the squash subject’s trailing `(#N)` before the commit association lookup. It does not rerun Node or Browser smoke. A missing PR association fails closed. An explicit emergency bypass requires `PAGEROOT_EMERGENCY_MAIN_BYPASS=1` plus `--emergency-reason` and writes an audit record; it is not a silent warn-pass.
+After merge, `main-integrity` verifies the merged PR, exact Tree Hash and package/lockfile version against the fresh source-gate attestation, resolving the pull request from the squash subject’s trailing `(#N)` before the commit association lookup. It does not rerun Node or Browser smoke. A missing PR association fails closed. An explicit emergency bypass requires `STEMMIO_EMERGENCY_MAIN_BYPASS=1` plus `--emergency-reason` and writes an audit record; it is not a silent warn-pass.
 
 Critical workflow commands write machine-readable evidence and normalized failure signatures under `output/ci-evidence/`. The full taxonomy, same-SHA rerun rule, two-strike policy and operating metrics are in `docs/RELEASE_PIPELINE_GOVERNANCE.md`.
 The CI-evidence contract test enumerates every stage used by the active source,
@@ -355,7 +355,7 @@ acceptance. CI Electron AI, fake ACP servers and local HTTP fixtures stay
 `ci-synthetic` in `shared/agent-protocol-acceptance.mjs` and must be listed as
 未验收 on the source-gate and Candidate `agentProtocol` record. Before claiming real-protocol acceptance, run
 `npm run smoke:agent-vendors:real` with the four
-`PAGEROOT_SMOKE_<VENDOR>_API_KEY` secrets (and optional matching `_MODEL`
+`STEMMIO_SMOKE_<VENDOR>_API_KEY` secrets (and optional matching `_MODEL`
 overrides). It calls each real `/models` and `/chat/completions` endpoint, never
 prints a Token, and must pass for DeepSeek, 智谱, 阿里通义, and OpenAI. Qoder and
 Codex need a clean-machine install, official login, first round and review.

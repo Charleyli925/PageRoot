@@ -34,7 +34,7 @@ export function reportInternalFailure({
           ? productErrorMessage(cause, "内部错误")
           : String(cause);
     console.warn(
-      "[pageroot:internal-failure]",
+      "[stemmio:internal-failure]",
       record.area,
       record.operation,
       record.code,

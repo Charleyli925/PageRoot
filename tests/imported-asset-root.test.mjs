@@ -74,7 +74,7 @@ test("preview asset substitution keeps the authorized project path when no origi
 });
 
 test("live imported asset source falls back to the original directory after the HTML is gone", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-imported-asset-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-imported-asset-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const originalDirectory = path.join(temporaryRoot, "原稿");
   const projectDirectory = path.join(temporaryRoot, "项目");

@@ -167,7 +167,7 @@ function copyOpenConfirmation(value) {
       : "",
     projectsRootLabel: typeof value.projectsRootLabel === "string"
       ? value.projectsRootLabel
-      : "文稿 › PageRoot › 项目",
+      : "文稿 › Stemmio › 项目",
     projectName: typeof value.projectName === "string" ? value.projectName : "",
     currentBasedOnVersionId: value.currentBasedOnVersionId || null,
     currentBasedOnOrdinal: Number(value.currentBasedOnOrdinal) || 0,
@@ -2213,7 +2213,7 @@ export class ProjectWorkflow {
           || String(reconciledTarget.versionId || "") !== String(openTarget.versionId)
         ) {
           throw sourceLocatorUnknown(
-            "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+            "当前工作文件身份无法核对，Stemmio 没有切换路径。",
             operationId,
           );
         }
@@ -2335,7 +2335,7 @@ export class ProjectWorkflow {
       const reason = projectErrorMessage(
         this.#codecs,
         cause,
-        "当前工作文件暂时无法核对位置，PageRoot 没有切换路径。",
+        "当前工作文件暂时无法核对位置，Stemmio 没有切换路径。",
       );
       this.#emit({
         type: "project-source-locator-failed",
@@ -2820,7 +2820,7 @@ export class ProjectWorkflow {
     ) || null;
     try {
       if (typeof this.#projectOpenPort.acceptExternal !== "function") {
-        const reason = "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。";
+        const reason = "当前 Stemmio 版本缺少外部文件打开通道，请重新安装最新版本。";
         this.#emit({
           type: "external-project-open-unavailable",
           requestId: request.requestId,
@@ -3460,7 +3460,7 @@ export class ProjectWorkflow {
       });
       const outcome = rejected(
         "EXTERNAL_OPEN_COMMIT_UNAVAILABLE",
-        "当前 PageRoot 版本缺少导入确认通道，请重新安装最新版本。",
+        "当前 Stemmio 版本缺少导入确认通道，请重新安装最新版本。",
       );
       this.#emitPreparedOpenFailure(confirmation, outcome.reason, {
         retryable: true,

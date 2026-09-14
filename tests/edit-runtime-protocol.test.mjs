@@ -64,7 +64,7 @@ function remoteEchartsHtml(url, extraScript = "") {
 }
 
 test("direct protocol serves one reusable disposable-frame resource session", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await mkdir(path.join(temporaryRoot, "vendor"));
@@ -126,31 +126,31 @@ test("direct protocol serves one reusable disposable-frame resource session", as
   assert.equal(session.documentBasePath, "/");
 
   const stylesheet = await handler(new Request(
-    "pageroot-edit-runtime://" + SESSION_ID + "/report.css",
+    "stemmio-edit-runtime://" + SESSION_ID + "/report.css",
   ));
   assert.equal(stylesheet.status, 200);
   assert.equal(stylesheet.headers.get("content-type"), "text/css; charset=utf-8");
   assert.match(await stylesheet.text(), /display: block/u);
 
-  const bootstrapUrl = "pageroot-edit-runtime://" + SESSION_ID
-    + "/.pageroot/bootstrap/" + EXECUTION_ID + ".js";
+  const bootstrapUrl = "stemmio-edit-runtime://" + SESSION_ID
+    + "/.stemmio/bootstrap/" + EXECUTION_ID + ".js";
   const bootstrap = await handler(new Request(bootstrapUrl));
   assert.equal(bootstrap.status, 200);
   assert.match(await bootstrap.text(), /proveParsedSource/u);
   assert.equal((await handler(new Request(bootstrapUrl))).status, 200);
 
   const firstAuthor = await handler(new Request(
-    "pageroot-edit-runtime://" + SESSION_ID + "/.pageroot/author/0.js",
+    "stemmio-edit-runtime://" + SESSION_ID + "/.stemmio/author/0.js",
   ));
   assert.equal(await firstAuthor.text(), "window.echarts={init(){}};");
   assert.equal(
     (await handler(new Request(
-      "pageroot-edit-runtime://" + SESSION_ID + "/.pageroot/author/0.js",
+      "stemmio-edit-runtime://" + SESSION_ID + "/.stemmio/author/0.js",
     ))).status,
     200,
   );
   const secondAuthor = await handler(new Request(
-    "pageroot-edit-runtime://" + SESSION_ID + "/.pageroot/author/1.js",
+    "stemmio-edit-runtime://" + SESSION_ID + "/.stemmio/author/1.js",
   ));
   assert.match(await secondAuthor.text(), /echarts\.init/u);
 
@@ -159,7 +159,7 @@ test("direct protocol serves one reusable disposable-frame resource session", as
 });
 
 test("direct protocol freezes scripts relative to a contained authored base", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-base-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-base-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const html = [
@@ -186,7 +186,7 @@ test("direct protocol freezes scripts relative to a contained authored base", as
   const session = await controller.createSession({ html, sourcePath });
   assert.equal(session.documentBasePath, "/assets/");
   const authorScript = await handler(new Request(
-    `pageroot-edit-runtime://${session.sessionId}/.pageroot/author/0.js`,
+    `stemmio-edit-runtime://${session.sessionId}/.stemmio/author/0.js`,
   ));
   assert.equal(await authorScript.text(), "window.baseReady=true;");
 
@@ -200,7 +200,7 @@ test("direct protocol freezes scripts relative to a contained authored base", as
 });
 
 test("direct protocol keeps CSP instead of keyword-rejecting fetch and workers", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-csp-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-csp-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const html = HTML.replace(
@@ -234,7 +234,7 @@ test("direct protocol keeps CSP instead of keyword-rejecting fetch and workers",
 });
 
 test("direct protocol admits ordinary and visual programs", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-custom-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-custom-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "custom.html");
   const canvasHtml = [
@@ -270,7 +270,7 @@ test("direct protocol admits ordinary and visual programs", async (t) => {
 });
 
 test("direct protocol never serves a capture HTML document", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-document-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-document-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await mkdir(path.join(temporaryRoot, "vendor"));
@@ -294,16 +294,16 @@ test("direct protocol never serves a capture HTML document", async (t) => {
   const session = await controller.createSession({ html: HTML, sourcePath });
   assert.equal(typeof controller.runtimeDocumentUrl, "undefined");
   assert.equal(
-    (await handler(new Request(`pageroot-edit-runtime://${session.sessionId}/index.html`))).status,
+    (await handler(new Request(`stemmio-edit-runtime://${session.sessionId}/index.html`))).status,
     404,
   );
   assert.equal(
-    (await handler(new Request(`pageroot-edit-runtime://${session.sessionId}/`))).status,
+    (await handler(new Request(`stemmio-edit-runtime://${session.sessionId}/`))).status,
     404,
   );
   assert.equal(await readFile(sourcePath, "utf8"), HTML);
 
-  const bootstrapUrl = `pageroot-edit-runtime://${session.sessionId}/.pageroot/bootstrap/${session.executionId}.js`;
+  const bootstrapUrl = `stemmio-edit-runtime://${session.sessionId}/.stemmio/bootstrap/${session.executionId}.js`;
   const bootstrap = await handler(new Request(bootstrapUrl));
   assert.equal(bootstrap.status, 200);
   assert.match(await bootstrap.text(), /proveParsedSource/u);
@@ -311,7 +311,7 @@ test("direct protocol never serves a capture HTML document", async (t) => {
 });
 
 test("direct protocol streams a headerless allowlisted ECharts response within the fixed byte cap", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-remote-stream-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-remote-stream-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
@@ -342,7 +342,7 @@ test("direct protocol streams a headerless allowlisted ECharts response within t
 });
 
 test("remote ECharts follows at most four allowlisted redirects with no-store transport", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-redirects-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-redirects-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
@@ -379,7 +379,7 @@ test("remote ECharts follows at most four allowlisted redirects with no-store tr
 });
 
 test("remote ECharts rejects a redirect outside the CDN allowlist before fetching it", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-redirect-block-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-redirect-block-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
@@ -425,7 +425,7 @@ test("exact ECharts redirects cannot change the immutable version identity", asy
 });
 
 test("the three exact ECharts 5.4.3 core URLs use pinned exact packaged bytes", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-bundled-543-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-bundled-543-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const urls = [
@@ -467,7 +467,7 @@ test("the three exact ECharts 5.4.3 core URLs use pinned exact packaged bytes", 
 });
 
 test("exact packaged bytes take priority before the exact immutable disk cache", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-exact-first-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-exact-first-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   let fetches = 0;
@@ -513,7 +513,7 @@ test("exact packaged bytes take priority before the exact immutable disk cache",
 });
 
 test("near matches, plugins and nonstandard paths stay on their exact remote bytes", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-near-match-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-near-match-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const cases = [
@@ -564,7 +564,7 @@ test("near matches, plugins and nonstandard paths stay on their exact remote byt
 });
 
 test("an unavailable packaged version waits for that exact immutable remote version", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-exact-remote-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-exact-remote-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const exactUrl = "https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js";
@@ -593,7 +593,7 @@ test("an unavailable packaged version waits for that exact immutable remote vers
 });
 
 test("pinned packaged ECharts bytes fail closed when their integrity changes", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-integrity-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-integrity-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const bundledPath = path.join(temporaryRoot, "echarts.min.js");
@@ -615,7 +615,7 @@ test("pinned packaged ECharts bytes fail closed when their integrity changes", a
 });
 
 test("a non-compatible remote load may outlive local preparation but remains remotely bounded", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-slow-remote-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-slow-remote-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const html = remoteEchartsHtml(
@@ -642,7 +642,7 @@ test("a non-compatible remote load may outlive local preparation but remains rem
 });
 
 test("separate runtime sessions do not retain a hidden script-preparation cache", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-no-cache-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-no-cache-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
@@ -671,7 +671,7 @@ test("separate runtime sessions do not retain a hidden script-preparation cache"
 });
 
 test("an active reusable resource session survives the orphan cleanup window", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-reuse-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-reuse-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const inlineHtml = [
@@ -697,14 +697,14 @@ test("an active reusable resource session survives the orphan cleanup window", a
   const session = await controller.createSession({ html: inlineHtml, sourcePath });
   currentTime += 20;
   const bootstrap = await handler(new Request(
-    `pageroot-edit-runtime://${session.sessionId}/.pageroot/bootstrap/${session.executionId}.js`,
+    `stemmio-edit-runtime://${session.sessionId}/.stemmio/bootstrap/${session.executionId}.js`,
   ));
   assert.equal(bootstrap.status, 200);
   assert.equal(controller.sessionCount(), 1);
 });
 
 test("direct protocol cancels a headerless ECharts stream as soon as it exceeds the fixed byte cap", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-remote-cap-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-remote-cap-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
@@ -738,7 +738,7 @@ test("direct protocol cancels a headerless ECharts stream as soon as it exceeds 
 });
 
 test("direct protocol aborts a stalled headerless ECharts stream by the remote library deadline", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-remote-timeout-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-remote-timeout-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
@@ -767,7 +767,7 @@ test("direct protocol aborts a stalled headerless ECharts stream by the remote l
 });
 
 test("direct protocol streams bounded declared assets and never buffers an oversized asset in Main", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-assets-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-assets-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const html = HTML.replace(
@@ -810,7 +810,7 @@ test("direct protocol streams bounded declared assets and never buffers an overs
   const session = await controller.createSession({ html, sourcePath });
 
   const small = await handler(new Request(
-    `pageroot-edit-runtime://${session.sessionId}/small.png`,
+    `stemmio-edit-runtime://${session.sessionId}/small.png`,
   ));
   assert.equal(small.status, 200);
   assert.equal(await small.text(), "streamed asset");
@@ -818,14 +818,14 @@ test("direct protocol streams bounded declared assets and never buffers an overs
   assert.match(fetchedFileUrls[0], /^file:/u);
 
   const oversized = await handler(new Request(
-    `pageroot-edit-runtime://${session.sessionId}/oversized.png`,
+    `stemmio-edit-runtime://${session.sessionId}/oversized.png`,
   ));
   assert.equal(oversized.status, 404);
   assert.equal(fetchedFileUrls.length, 1);
 });
 
 test("direct protocol never serves executable bytes from the generic declared-asset route", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-script-asset-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-script-asset-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const scriptPath = path.join(temporaryRoot, "extra.js");
@@ -860,14 +860,14 @@ test("direct protocol never serves executable bytes from the generic declared-as
   const session = await controller.createSession({ html: inlineHtml, sourcePath });
 
   const response = await handler(new Request(
-    `pageroot-edit-runtime://${session.sessionId}/extra.js`,
+    `stemmio-edit-runtime://${session.sessionId}/extra.js`,
   ));
   assert.equal(response.status, 404);
   assert.equal(assetFetches, 0);
 });
 
 test("direct protocol bounds declared-asset discovery by the shared preparation deadline", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-assets-timeout-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-assets-timeout-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   const fixedEchartsBytes = Buffer.from("window.echarts={init(){}};");
@@ -901,7 +901,7 @@ test("direct protocol bounds declared-asset discovery by the shared preparation 
 });
 
 test("direct protocol keeps an incomplete injected source-root resolver inside the shared preparation deadline", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-source-root-timeout-"));
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-edit-runtime-source-root-timeout-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
 

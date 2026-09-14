@@ -117,7 +117,9 @@ export const REQUIRED_SHARED_FILES = [
   "draft-aggregate.mjs",
   "editable-island.mjs",
   "native-edit-capability.mjs",
-  "pageroot-element-identity.mjs",
+  "stemmio-element-identity.mjs",
+  "product-identity.mjs",
+  "project-storage-contract.mjs",
   "provenance.mjs",
   "semantic-identity-delta.mjs",
   "semantic-structure-plan.mjs",
@@ -135,7 +137,7 @@ export const REQUIRED_SHARED_FILES = [
   "task-spec.mjs",
 ];
 const REQUIRED_LEGAL_RESOURCES = [
-  "PageRoot 用户声明与免责声明.txt",
+  "源页 用户声明与免责声明.txt",
   "LICENSE",
   "NOTICE",
   "PRIVACY.md",
@@ -185,6 +187,7 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/agent-login-url.mjs",
+  "desktop/runtime-project-storage-contract.mjs",
   "shared/agent-vendor-key-url.mjs",
   "shared/agent-configuration-preferences.mjs",
   "app/domain/edit-runtime-contract.js",
@@ -203,7 +206,7 @@ const RETIRED_EDITOR_ARTIFACTS = [
   },
   {
     name: "legacy editing surface",
-    pattern: /pageroot-text-(?:editor|ghost)|data-(?:html-canvas|pageroot)-text-flow/iu,
+    pattern: /stemmio-text-(?:editor|ghost)|data-(?:html-canvas|stemmio)-text-flow/iu,
   },
 ];
 const RUNTIME_TEXT_EXTENSIONS = new Set([
@@ -438,7 +441,7 @@ export async function assertSignedMachOContentEqual({
     ["--verify", "--strict", "--verbose=4", packagedPath],
     `${label} signature verification`,
   );
-  const comparisonRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-macho-compare-"));
+  const comparisonRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-macho-compare-"));
   const sourceCopy = path.join(comparisonRoot, "source");
   const packagedCopy = path.join(comparisonRoot, "packaged");
   try {
@@ -459,7 +462,7 @@ export async function assertSignedMachOContentEqual({
           "--sign",
           "-",
           "--identifier",
-          "app.pageroot.packaged-codex-verifier",
+          "app.stemmio.packaged-codex-verifier",
           "--entitlements",
           entitlementsPath,
           filePath,
@@ -576,7 +579,7 @@ async function assertUsageTelemetryConfig({
   } else {
     assert.equal(config.projectToken, "", "disabled telemetry must not carry a token");
   }
-  if (process.env.PAGEROOT_REQUIRE_TELEMETRY_CONFIG === "1") {
+  if (process.env.STEMMIO_REQUIRE_TELEMETRY_CONFIG === "1") {
     assert.equal(config.enabled, true, "release telemetry configuration is disabled");
   }
   return config;
@@ -1019,7 +1022,7 @@ export async function verifyAppBundle({
     }
     if (
       effectiveSignaturePolicy === "developer-id"
-      && process.env.PAGEROOT_REQUIRE_NOTARIZATION === "1"
+      && process.env.STEMMIO_REQUIRE_NOTARIZATION === "1"
     ) {
       runCommand(
         "/usr/bin/xcrun",
@@ -1072,7 +1075,7 @@ async function verifyDmg({
 
   runCommand("/usr/bin/hdiutil", ["verify", dmgPath], "DMG verification");
   if (
-    process.env.PAGEROOT_REQUIRE_NOTARIZATION === "1"
+    process.env.STEMMIO_REQUIRE_NOTARIZATION === "1"
     && commandExists("/usr/bin/xcrun")
   ) {
     runCommand(
@@ -1081,7 +1084,7 @@ async function verifyDmg({
       "DMG notarization ticket validation",
     );
   }
-  const mountPoint = await mkdtemp(path.join(os.tmpdir(), "html-ai-workbench-dmg-"));
+  const mountPoint = await mkdtemp(path.join(os.tmpdir(), "stemmio-workbench-dmg-"));
   let mounted = false;
   try {
     runCommand(
@@ -1187,7 +1190,7 @@ async function verifyUpdateAssets({
   if (process.platform !== "darwin" || !commandExists("/usr/bin/ditto")) {
     return { extracted: false, reason: "ditto is unavailable" };
   }
-  const extractionRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-update-zip-"));
+  const extractionRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-update-zip-"));
   try {
     runCommand(
       "/usr/bin/ditto",

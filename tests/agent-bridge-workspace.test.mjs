@@ -24,7 +24,7 @@ async function assertManagedSourceIdentity(value) {
   const managedSourceHtml = await readFile(value.ensured.sourcePath, "utf8");
   assert.notEqual(managedSourceHtml, value.sourceHtml);
   const managedSourceIds = [...managedSourceHtml.matchAll(
-    /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+    /data-stemmio-id="(sm1_[0-9a-f]{32})"/gu,
   )].map((match) => match[1]);
   assert.equal(managedSourceIds.length, 6);
   assert.equal(new Set(managedSourceIds).size, managedSourceIds.length);
@@ -49,17 +49,17 @@ async function createCommand(environment, { hang = false, pidFile = null } = {})
 
 async function createManagedRequest(t, { hang = false } = {}) {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: hang ? "pageroot-agent-cancel-" : "pageroot-agent-complete-",
+    prefix: hang ? "stemmio-agent-cancel-" : "stemmio-agent-complete-",
   });
   const pidFile = path.join(environment.root, "agent.pid");
   const command = await createCommand(environment, { hang, pidFile });
   const sourceHtml = html(hang ? "Cancel ACP" : "Complete ACP");
   const externalSourcePath = await environment.createSource("agent.html", sourceHtml);
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: path.join(environment.root, "project-files"),
-    PAGEROOT_E2E: "1",
-    PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
-    PAGEROOT_QODER_ACP_COMMAND: command,
+    STEMMIO_PROJECT_FILES_ROOT: path.join(environment.root, "project-files"),
+    STEMMIO_E2E: "1",
+    STEMMIO_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+    STEMMIO_QODER_ACP_COMMAND: command,
   });
   const workspace = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(externalSourcePath)}`,
@@ -260,7 +260,7 @@ test("workspace Agent Bridge completes Qoder ACP into pending review without ado
     + `&versionId=${encodeURIComponent(ready.body.versionId)}`,
   );
   assert.equal(candidate.response.status, 200, JSON.stringify(candidate.body));
-  assert.match(candidate.body.content, /data-pageroot-qoder-acp="e2e"/u);
+  assert.match(candidate.body.content, /data-stemmio-qoder-acp="e2e"/u);
   assert.equal(candidate.body.sha256, sha256(Buffer.from(candidate.body.content)));
 
   const workspace = await value.bridge.requestJson(
@@ -342,10 +342,10 @@ test("Bridge crash fences an interrupted Qoder Request from restart and clipboar
 
   const retryCommand = await createCommand(value.environment);
   const restarted = await value.environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: path.join(value.environment.root, "project-files"),
-    PAGEROOT_E2E: "1",
-    PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
-    PAGEROOT_QODER_ACP_COMMAND: retryCommand,
+    STEMMIO_PROJECT_FILES_ROOT: path.join(value.environment.root, "project-files"),
+    STEMMIO_E2E: "1",
+    STEMMIO_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+    STEMMIO_QODER_ACP_COMMAND: retryCommand,
   });
   const statusPath = `/status?sourcePath=${encodeURIComponent(value.ensured.sourcePath)}`
     + `&requestId=${encodeURIComponent(value.request.requestId)}`
@@ -388,7 +388,7 @@ test("Bridge crash fences an interrupted Qoder Request from restart and clipboar
   assert.equal(cancelled.body.status, "cancelled");
   const requestsRoot = path.join(
     value.ensured.projectRoot,
-    ".pageroot",
+    ".stemmio",
     "requests",
   );
   const requestDirectories = await readdir(requestsRoot);
@@ -398,28 +398,28 @@ test("Bridge crash fences an interrupted Qoder Request from restart and clipboar
 
 test("public Agent catalog exposes installable Qoder and Codex without paths", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-agent-catalog-",
+    prefix: "stemmio-agent-catalog-",
   });
   const home = path.join(environment.root, "home");
   const bin = path.join(environment.root, "bin");
   await mkdir(home, { recursive: true });
   await mkdir(bin, { recursive: true });
   const bridge = await environment.start({
-    HTML_AI_AGENTS_ROOT: path.join(environment.root, "agents"),
+    STEMMIO_AGENTS_ROOT: path.join(environment.root, "agents"),
     HOME: home,
     PATH: bin,
     NPM_CONFIG_PREFIX: path.join(environment.root, "missing-prefix"),
-    PAGEROOT_E2E: "1",
-    PAGEROOT_AGENT_INSTALL_STUB_FETCH: "1",
+    STEMMIO_E2E: "1",
+    STEMMIO_AGENT_INSTALL_STUB_FETCH: "1",
   });
   const listed = await bridge.requestJson("/agent/providers");
   assert.equal(listed.response.status, 200, JSON.stringify(listed.body));
-  const pageroot = listed.body.providers.find((item) => item.providerId === "pageroot");
+  const stemmio = listed.body.providers.find((item) => item.providerId === "stemmio");
   const qoder = listed.body.providers.find((item) => item.providerId === "qoder");
   const codex = listed.body.providers.find((item) => item.providerId === "codex");
   const serialized = JSON.stringify(listed.body);
-  assert.equal(pageroot.installable, false);
-  assert.equal(pageroot.runtimeId, "http");
+  assert.equal(stemmio.installable, false);
+  assert.equal(stemmio.runtimeId, "http");
   assert.equal(qoder.installable, true);
   assert.equal(codex.installable, true);
   assert.equal(codex.runtimeId, "acp");
@@ -431,8 +431,8 @@ test("public Agent catalog exposes installable Qoder and Codex without paths", a
   const unknownInstall = await bridge.postJson("/agent/install", { providerId: "unknown-agent" });
   assert.equal(unknownInstall.response.status, 404, JSON.stringify(unknownInstall.body));
   assert.equal(unknownInstall.body.error.code, "AGENT_PROVIDER_UNSUPPORTED");
-  const pagerootLogin = await bridge.postJson("/agent/login", { providerId: "pageroot" });
-  assert.equal(pagerootLogin.body.error?.code, "AGENT_LOGIN_UNSUPPORTED");
+  const stemmioLogin = await bridge.postJson("/agent/login", { providerId: "stemmio" });
+  assert.equal(stemmioLogin.body.error?.code, "AGENT_LOGIN_UNSUPPORTED");
   const qoderLogin = await bridge.postJson("/agent/login", { providerId: "qoder" });
   assert.equal(qoderLogin.response.status, 202, JSON.stringify(qoderLogin.body));
   assert.equal(qoderLogin.body.ok, true);

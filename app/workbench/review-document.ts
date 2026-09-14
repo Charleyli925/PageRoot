@@ -181,22 +181,22 @@ function attachChangeMarkerMetadata(
   const attachRoots = (roots: Array<Element | null>) => roots.forEach((root) => {
     if (!root) return;
     [root, ...(includeDescendants
-      ? root.querySelectorAll("[data-pageroot-review-text-anchors]")
+      ? root.querySelectorAll("[data-stemmio-review-text-anchors]")
       : [])]
-      .filter((element) => element.hasAttribute("data-pageroot-review-text-anchors"))
+      .filter((element) => element.hasAttribute("data-stemmio-review-text-anchors"))
       .forEach((element) => {
-        element.setAttribute("data-pageroot-review-anchor-change", changeId);
+        element.setAttribute("data-stemmio-review-anchor-change", changeId);
       });
     const markerElements = [root, ...(includeDescendants ? root.querySelectorAll("*") : [])]
       .filter((element) => (
-      element.hasAttribute("data-pageroot-review-text")
-      || element.hasAttribute("data-pageroot-review-structure")
+      element.hasAttribute("data-stemmio-review-text")
+      || element.hasAttribute("data-stemmio-review-structure")
       || element.hasAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE)
     ));
     markerElements.forEach((element, index) => {
       let facts = reviewProjectionFactsForElement(element);
-      const textMarker = element.hasAttribute("data-pageroot-review-text");
-      const textOperation = element.getAttribute("data-pageroot-review-text-operation");
+      const textMarker = element.hasAttribute("data-stemmio-review-text");
+      const textOperation = element.getAttribute("data-stemmio-review-text-operation");
       const normalizedTextOperation = textOperation === "none"
         || textOperation === "insert"
         || textOperation === "delete"
@@ -211,20 +211,20 @@ function attachChangeMarkerMetadata(
             : "文本调整"
         : "";
       if (textMarker) {
-        const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+        const semanticOwnerId = element.getAttribute("data-stemmio-review-semantic-owner")
           || `fallback-owner-${changeId}-text-${index + 1}`;
-        const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
-        const textGroup = element.getAttribute("data-pageroot-review-text-group")
+        const geometryOwnerId = element.getAttribute("data-stemmio-review-geometry-owner") || "";
+        const textGroup = element.getAttribute("data-stemmio-review-text-group")
           || `text-marker-${index + 1}`;
-        const displayGroupId = element.getAttribute("data-pageroot-review-display-group")
+        const displayGroupId = element.getAttribute("data-stemmio-review-display-group")
           || `display-${semanticOwnerId}`;
-        const displayOwnerId = element.getAttribute("data-pageroot-review-display-owner-ref")
-          || element.getAttribute("data-pageroot-review-display-owner")
+        const displayOwnerId = element.getAttribute("data-stemmio-review-display-owner-ref")
+          || element.getAttribute("data-stemmio-review-display-owner")
           ?.split(/\s+/u).find(Boolean)
           || `display-owner-${semanticOwnerId}`;
-        const displayScope = element.getAttribute("data-pageroot-review-display-scope")
+        const displayScope = element.getAttribute("data-stemmio-review-display-scope")
           || "paragraph";
-        const geometryMode = element.getAttribute("data-pageroot-review-geometry-mode")
+        const geometryMode = element.getAttribute("data-stemmio-review-geometry-mode")
           || "text-content";
         facts = appendTrustedReviewProjectionFact(facts, {
           id: textGroup,
@@ -232,7 +232,7 @@ function attachChangeMarkerMetadata(
           semanticOwnerId,
           ...(geometryOwnerId ? { geometryOwnerId } : {}),
           scope: "text",
-          tone: element.getAttribute("data-pageroot-review-text") === "removed"
+          tone: element.getAttribute("data-stemmio-review-text") === "removed"
             ? "removed"
             : "added",
           textGroup,
@@ -244,20 +244,20 @@ function attachChangeMarkerMetadata(
           summary: textSummary,
         });
       }
-      if (element.hasAttribute("data-pageroot-review-structure")) {
-        const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+      if (element.hasAttribute("data-stemmio-review-structure")) {
+        const semanticOwnerId = element.getAttribute("data-stemmio-review-semantic-owner")
           || `fallback-owner-${changeId}-structure-${index + 1}`;
-        const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
-        const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
-        const displayGroupId = element.getAttribute("data-pageroot-review-display-group")
+        const geometryOwnerId = element.getAttribute("data-stemmio-review-geometry-owner") || "";
+        const structureChange = element.getAttribute("data-stemmio-review-structure") || "changed";
+        const displayGroupId = element.getAttribute("data-stemmio-review-display-group")
           || `display-${semanticOwnerId}`;
-        const displayOwnerId = element.getAttribute("data-pageroot-review-display-owner-ref")
-          || element.getAttribute("data-pageroot-review-display-owner")
+        const displayOwnerId = element.getAttribute("data-stemmio-review-display-owner-ref")
+          || element.getAttribute("data-stemmio-review-display-owner")
           ?.split(/\s+/u).find(Boolean)
           || `display-owner-${semanticOwnerId}`;
-        const displayScope = element.getAttribute("data-pageroot-review-display-scope")
+        const displayScope = element.getAttribute("data-stemmio-review-display-scope")
           || "container";
-        const geometryMode = element.getAttribute("data-pageroot-review-geometry-mode")
+        const geometryMode = element.getAttribute("data-stemmio-review-geometry-mode")
           || "element-box";
         if (!facts.some((fact) => (
           fact.type === "structure"
@@ -285,12 +285,12 @@ function attachChangeMarkerMetadata(
       const summary = textFact?.summary
         || structureFact?.summary
         || helper;
-      element.setAttribute("data-pageroot-review-marker", changeId);
-      element.setAttribute("data-pageroot-review-marker-types", markerTypes.join(" "));
-      element.setAttribute("data-pageroot-review-summary", summary);
+      element.setAttribute("data-stemmio-review-marker", changeId);
+      element.setAttribute("data-stemmio-review-marker-types", markerTypes.join(" "));
+      element.setAttribute("data-stemmio-review-summary", summary);
       element.setAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE, serializeReviewProjectionFacts(facts));
-      element.setAttribute("data-pageroot-review-active", "false");
-      if (index === 0) element.setAttribute("data-pageroot-review-primary", "true");
+      element.setAttribute("data-stemmio-review-active", "false");
+      if (index === 0) element.setAttribute("data-stemmio-review-primary", "true");
     });
   });
   attachRoots([pair.before, pair.after]);
@@ -328,8 +328,8 @@ function reviewFocusGroupsForDocuments(
   const localPath = (element: Element | null) => {
     if (!element) return "root";
     const path: string[] = [];
-    const stableElement = element.closest("[data-pageroot-id]");
-    const stable = stableElement?.getAttribute("data-pageroot-id") || "";
+    const stableElement = element.closest("[data-stemmio-id]");
+    const stable = stableElement?.getAttribute("data-stemmio-id") || "";
     let candidate: Element | null = element;
     while (
       candidate?.parentElement
@@ -416,9 +416,9 @@ function reviewFocusGroupsForDocuments(
     ["before", beforeDocument],
     ["after", afterDocument],
   ] as const).forEach(([side, document]) => {
-    document.querySelectorAll(`[${REVIEW_PROJECTION_FACTS_ATTRIBUTE}][data-pageroot-review-marker]`)
+    document.querySelectorAll(`[${REVIEW_PROJECTION_FACTS_ATTRIBUTE}][data-stemmio-review-marker]`)
       .forEach((element) => {
-        const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+        const changeId = element.getAttribute("data-stemmio-review-marker") || "";
         reviewProjectionFactsForElement(element).forEach((fact) => {
           const displayGroupId = fact.displayGroupId || `display-fact-${fact.id}`;
           const displayOwnerId = fact.displayOwnerId
@@ -462,8 +462,8 @@ function reviewFocusGroupsForDocuments(
             element,
             geometryMode,
             locality: sharedStyleGroup ? styleLocality(element) : displayGroupId,
-            stableId: element.closest("[data-pageroot-id]")
-              ?.getAttribute("data-pageroot-id") || "",
+            stableId: element.closest("[data-stemmio-id]")
+              ?.getAttribute("data-stemmio-id") || "",
             contentCue: (element.textContent || "").replace(/\s+/gu, " ").trim().slice(0, 80),
           });
         });
@@ -493,7 +493,7 @@ function reviewFocusGroupsForDocuments(
           entries.map((entry) => entry.stableId).filter(Boolean),
         )].sort();
         const presentationOwner = entries[0]?.element.ownerDocument.querySelector(
-          `[data-pageroot-review-display-owner~="${entries[0]?.ownerId || ""}"]`,
+          `[data-stemmio-review-display-owner~="${entries[0]?.ownerId || ""}"]`,
         );
         return {
           id: `region-${side}-${shortHash(`${group.displayGroupId}\u001f${regionLocality}`)}`,
@@ -543,16 +543,16 @@ function visualStableIdsForChange(pair: SectionPair, changeId: string) {
   const stableIds = new Set<string>();
   [pair.before, pair.after].forEach((root) => {
     if (!root) return;
-    [root, ...root.querySelectorAll(`[data-pageroot-review-marker="${changeId}"]`)]
-      .filter((element) => element.getAttribute("data-pageroot-review-marker") === changeId)
+    [root, ...root.querySelectorAll(`[data-stemmio-review-marker="${changeId}"]`)]
+      .filter((element) => element.getAttribute("data-stemmio-review-marker") === changeId)
       .forEach((element) => {
-        const stableHost = element.closest("[data-pageroot-id]");
-        const stableId = stableHost?.getAttribute("data-pageroot-id") || "";
+        const stableHost = element.closest("[data-stemmio-id]");
+        const stableId = stableHost?.getAttribute("data-stemmio-id") || "";
         if (stableId) stableIds.add(stableId);
       });
   });
   if (!stableIds.size) {
-    const rootStableId = (pair.after || pair.before)?.getAttribute("data-pageroot-id") || "";
+    const rootStableId = (pair.after || pair.before)?.getAttribute("data-stemmio-id") || "";
     if (rootStableId) stableIds.add(rootStableId);
   }
   return [...stableIds];
@@ -563,12 +563,12 @@ function revealStepsForElement(element: Element | null): ReviewRevealStep[] {
   const steps: ReviewRevealStep[] = [];
   let candidate: Element | null = element;
   while (candidate && candidate !== element.ownerDocument.body) {
-    if (candidate.getAttribute("data-pageroot-review-panel-container") === "true") {
-      const key = candidate.getAttribute("data-pageroot-review-panel-key") || "";
+    if (candidate.getAttribute("data-stemmio-review-panel-container") === "true") {
+      const key = candidate.getAttribute("data-stemmio-review-panel-key") || "";
       if (key) steps.unshift({ kind: "panel", key });
     }
     if (candidate.tagName === "DETAILS") {
-      const stableId = candidate.getAttribute("data-pageroot-id") || "";
+      const stableId = candidate.getAttribute("data-stemmio-id") || "";
       if (stableId) steps.unshift({ kind: "details", stableId });
     }
     candidate = candidate.parentElement;
@@ -588,27 +588,27 @@ function presentationElement(
   evidenceStableIds: readonly string[],
 ): Element | null {
   if (!root) return null;
-  const selector = `[data-pageroot-review-marker="${changeId}"]`;
+  const selector = `[data-stemmio-review-marker="${changeId}"]`;
   const markers = [
     ...(root.matches(selector) ? [root] : []),
     ...root.querySelectorAll(selector),
   ];
   const preciseMarker = markers.find((element) => (
-    element.matches("[data-pageroot-review-text],[data-pageroot-review-structure]")
+    element.matches("[data-stemmio-review-text],[data-stemmio-review-structure]")
   ));
   if (preciseMarker) return preciseMarker;
   const stableHost = [
-    ...(root.hasAttribute("data-pageroot-id") ? [root] : []),
-    ...root.querySelectorAll("[data-pageroot-id]"),
+    ...(root.hasAttribute("data-stemmio-id") ? [root] : []),
+    ...root.querySelectorAll("[data-stemmio-id]"),
   ].find((element) => evidenceStableIds.includes(
-    element.getAttribute("data-pageroot-id") || "",
+    element.getAttribute("data-stemmio-id") || "",
   ));
   if (stableHost) return stableHost;
   return markers.find((element) => {
-      const stableId = element.closest("[data-pageroot-id]")?.getAttribute("data-pageroot-id") || "";
+      const stableId = element.closest("[data-stemmio-id]")?.getAttribute("data-stemmio-id") || "";
       return evidenceStableIds.includes(stableId);
     })
-    || markers.find((element) => element.getAttribute("data-pageroot-review-primary") === "true")
+    || markers.find((element) => element.getAttribute("data-stemmio-review-primary") === "true")
     || markers[0]
     || root;
 }
@@ -620,16 +620,16 @@ function reviewPresentationForChange(
 ): ReviewPresentation {
   const preciseStableIds = [...new Set([pair.before, pair.after].flatMap((root) => {
     if (!root) return [];
-    const selector = `[data-pageroot-review-marker="${changeId}"]`;
+    const selector = `[data-stemmio-review-marker="${changeId}"]`;
     return [
       ...(root.matches(selector) ? [root] : []),
       ...root.querySelectorAll(selector),
     ].flatMap((element) => {
-      if (!element.matches("[data-pageroot-review-text],[data-pageroot-review-structure]")) {
+      if (!element.matches("[data-stemmio-review-text],[data-stemmio-review-structure]")) {
         return [];
       }
-      const stableId = element.closest("[data-pageroot-id]")
-        ?.getAttribute("data-pageroot-id") || "";
+      const stableId = element.closest("[data-stemmio-id]")
+        ?.getAttribute("data-stemmio-id") || "";
       return stableId ? [stableId] : [];
     });
   }))];
@@ -651,7 +651,7 @@ function reviewPresentationForChange(
 }
 
 function hasPreannotatedStableDifference(pair: SectionPair): boolean {
-  const selector = "[data-pageroot-review-text],[data-pageroot-review-structure]";
+  const selector = "[data-stemmio-review-text],[data-stemmio-review-structure]";
   return [pair.before, pair.after].some((root) => Boolean(
     root && (root.matches(selector) || root.querySelector(selector)),
   ));
@@ -720,8 +720,8 @@ function* annotateReviewSourceFactSteps(
     visual.binding.identity === "supported"
     && visual.evidence.length === 0
     && stableSourceAnalysis.sourceKinds.length > 0
-    && !beforeDocument.querySelector("[data-pageroot-review-structure]")
-    && !afterDocument.querySelector("[data-pageroot-review-structure]")
+    && !beforeDocument.querySelector("[data-stemmio-review-structure]")
+    && !afterDocument.querySelector("[data-stemmio-review-structure]")
   ) {
     const diagnostics: ReviewDiagnostic[] = stableSourceAnalysis.sourceKinds.map((kind) => ({
       kind,
@@ -788,12 +788,12 @@ function* annotateReviewSourceFactSteps(
       : undefined;
     [pair.before, pair.after].forEach((element) => {
       if (!element) return;
-      element.setAttribute("data-pageroot-outline-id", outlineId);
-      element.setAttribute("data-pageroot-review-active", "false");
+      element.setAttribute("data-stemmio-outline-id", outlineId);
+      element.setAttribute("data-stemmio-review-active", "false");
       if (changeId) {
-        element.setAttribute("data-pageroot-review-id", changeId);
-        element.setAttribute("data-pageroot-review-types", types.join(" "));
-        element.setAttribute("data-pageroot-review-summary", helper);
+        element.setAttribute("data-stemmio-review-id", changeId);
+        element.setAttribute("data-stemmio-review-types", types.join(" "));
+        element.setAttribute("data-stemmio-review-summary", helper);
       }
     });
     if (changeId) {
@@ -1018,7 +1018,7 @@ function measureReviewAnalysisPhase(
 ) {
   try {
     globalThis.performance?.measure?.(
-      `pageroot:review-analysis:${phase}`,
+      `stemmio:review-analysis:${phase}`,
       { start: startedAt, end: endedAt },
     );
   } catch {
@@ -1049,7 +1049,7 @@ async function runYieldingAnalysis<T>(
 ): Promise<T> {
   REVIEW_ANALYSIS_PHASES.forEach((phase) => {
     try {
-      globalThis.performance?.clearMeasures?.(`pageroot:review-analysis:${phase}`);
+      globalThis.performance?.clearMeasures?.(`stemmio:review-analysis:${phase}`);
     } catch {
       // Diagnostics cannot own review analysis.
     }

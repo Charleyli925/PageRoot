@@ -10,8 +10,8 @@ import { parse, serialize } from "parse5";
 
 import { authoredDocumentBase } from "../app/domain/edit-runtime-contract.js";
 
-export const PREVIEW_PROTOCOL_SCHEME = "pageroot-preview";
-export const PREVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
+export const PREVIEW_PROTOCOL_SCHEME = "stemmio-preview";
+export const PREVIEW_BOOTSTRAP_PATH = "/.stemmio/preview-bootstrap.js";
 
 const DEFAULT_MAX_HTML_BYTES = 20 * 1024 * 1024;
 const DEFAULT_MAX_BOOTSTRAP_BYTES = 2 * 1024 * 1024;
@@ -20,7 +20,7 @@ const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_DECLARED_ASSETS = 256;
 const DEFAULT_MAX_DEPENDENCY_SCAN_BYTES = 2 * 1024 * 1024;
 const SESSION_ID_PATTERN = /^[a-f0-9]{32}$/u;
-const ASSET_REFERENCE_ORIGIN = "https://pageroot-preview.invalid";
+const ASSET_REFERENCE_ORIGIN = "https://stemmio-preview.invalid";
 const SCRIPT_EXTENSIONS = new Set([".js", ".mjs"]);
 const STYLE_EXTENSIONS = new Set([".css"]);
 const IMAGE_EXTENSIONS = new Set([
@@ -77,11 +77,11 @@ const PREVIEW_NAVIGATION_FALLBACK_CSP = [
   "object-src 'none'",
 ].join("; ");
 const PREVIEW_BOOTSTRAP_ATTRIBUTES = new Set([
-  "data-pageroot-ai-review-bootstrap",
-  "data-pageroot-preview-bootstrap",
+  "data-stemmio-ai-review-bootstrap",
+  "data-stemmio-preview-bootstrap",
 ]);
 const PREVIEW_NAVIGATION_FALLBACK_ATTRIBUTE =
-  "data-pageroot-preview-navigation-fallback";
+  "data-stemmio-preview-navigation-fallback";
 
 let schemePrivilegesRegistered = false;
 

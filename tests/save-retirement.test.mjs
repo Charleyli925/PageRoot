@@ -99,13 +99,13 @@ test("continuous ordinary saves retire journals without creating Versions and re
     const saved = await value.repository.saveWorkingCopy({ target, html: html(`edit ${revision}`),
       expectedSourceSha256: target.sourceSha256, editRevision: revision });
     target = saved.target;
-    assert.equal((await fs.readdir(path.join(target.projectRootPath, ".pageroot", "transactions")))
+    assert.equal((await fs.readdir(path.join(target.projectRootPath, ".stemmio", "transactions")))
       .filter((entry) => entry.startsWith("save_")).length, 0);
   }
   const reopened = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({ sourcePath: target.exactSourcePath });
   assert.equal(reopened.content, html("edit 8"));
   assert.equal(reopened.workingCopyState.lastPersistedRevision, 8);
-  assert.equal((await json(path.join(target.projectRootPath, ".pageroot", "manifest.json"))).versions.length, 1);
+  assert.equal((await json(path.join(target.projectRootPath, ".stemmio", "manifest.json"))).versions.length, 1);
 });
 
 test("unsupported publication sync retains the journal and allows subsequent save and reopen", async (t) => {
@@ -131,7 +131,7 @@ test("unsupported publication sync retains the journal and allows subsequent sav
       expectedSourceSha256: imported.target.sourceSha256, editRevision: 1 });
     assert.equal(saved.currentSha256, saved.target.sourceSha256);
   } finally { fs.open = originalOpen; syncBuiltinESMExports(); }
-  const control = path.join(imported.target.projectRootPath, ".pageroot");
+  const control = path.join(imported.target.projectRootPath, ".stemmio");
   const journals = (await fs.readdir(path.join(control, "transactions"))).filter((name) => name.startsWith("save_"));
   assert.equal(journals.length, 1);
   const journal = await json(path.join(control, "transactions", journals[0]));
@@ -152,7 +152,7 @@ test("stock cleanup is bounded and preserves legacy, rollback and stale-target j
     failpoint: async (name) => name === "save-committed" });
   await assert.rejects(repository.saveWorkingCopy({ target: imported.target, html: html("current"),
     expectedSourceSha256: imported.target.sourceSha256, editRevision: 1 }), { code: "INJECTED_FAILPOINT" });
-  const control = path.join(imported.target.projectRootPath, ".pageroot");
+  const control = path.join(imported.target.projectRootPath, ".stemmio");
   const transactions = path.join(control, "transactions");
   const [original] = (await fs.readdir(transactions)).filter((name) => name.startsWith("save_"));
   const record = await json(path.join(transactions, original));
@@ -191,7 +191,7 @@ test("stale stock ahead of an eligible journal does not consume the bounded veri
     failpoint: async (name) => name === "save-committed" });
   await assert.rejects(repository.saveWorkingCopy({ target: imported.target, html: html("current"),
     expectedSourceSha256: imported.target.sourceSha256, editRevision: 1 }), { code: "INJECTED_FAILPOINT" });
-  const control = path.join(imported.target.projectRootPath, ".pageroot");
+  const control = path.join(imported.target.projectRootPath, ".stemmio");
   const transactions = path.join(control, "transactions");
   const [original] = (await fs.readdir(transactions)).filter((name) => name.startsWith("save_"));
   const record = await json(path.join(transactions, original));
@@ -241,7 +241,7 @@ test("persistent unsupported directory sync permits two saves and reopening late
     }
     const reopened = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({ sourcePath: target.exactSourcePath });
     assert.equal(reopened.content, html("persistent 2"));
-    const control = path.join(target.projectRootPath, ".pageroot");
+    const control = path.join(target.projectRootPath, ".stemmio");
     assert.equal((await fs.readdir(path.join(control, "transactions"))).filter((name) => name.startsWith("save_")).length, 2);
     assert.deepEqual((await fs.readdir(path.join(control, "recovery"))).filter((name) => name.startsWith("save_")), []);
   } finally { fs.open = originalOpen; syncBuiltinESMExports(); }
@@ -271,6 +271,6 @@ test("source changed during retirement synchronization is retained as a real con
       expectedSourceSha256: imported.target.sourceSha256, editRevision: 1 }), { code: "SAVE_RECOVERY_CONFLICT" });
   } finally { fs.open = originalOpen; syncBuiltinESMExports(); }
   assert.equal(await fs.readFile(imported.target.exactSourcePath, "utf8"), external);
-  assert.equal((await fs.readdir(path.join(imported.target.projectRootPath, ".pageroot", "transactions")))
+  assert.equal((await fs.readdir(path.join(imported.target.projectRootPath, ".stemmio", "transactions")))
     .filter((name) => name.startsWith("save_")).length, 1);
 });

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/scope-report.v1.schema.json",
-  "title": "HTML AI enforced scope report v1",
+  "$id": "https://stemmio.local/schemas/scope-report.v1.schema.json",
+  "title": "Stemmio enforced scope report v1",
   "description": "A deterministic report proving whether one AI output changed only the frozen Request targets plus lifecycle-owned metadata.",
   "type": "object",
   "additionalProperties": false,

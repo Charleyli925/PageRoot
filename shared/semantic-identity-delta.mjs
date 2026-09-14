@@ -13,7 +13,7 @@ export const SEMANTIC_OPERATION_SCHEMA_VERSION = 1;
 
 const OPERATION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{7,95}$/u;
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
-const ELEMENT_ID_PATTERN = /^pr1_[a-f0-9]{12}4[a-f0-9]{3}[89ab][a-f0-9]{15}$/u;
+const ELEMENT_ID_PATTERN = /^sm1_[a-f0-9]{12}4[a-f0-9]{3}[89ab][a-f0-9]{15}$/u;
 const COMMON_OPERATION_KEYS = new Set([
   "schemaVersion",
   "operationId",
@@ -24,13 +24,13 @@ const COMMON_OPERATION_KEYS = new Set([
 const OPERATION_FIELDS = new Map([
   ["setText", {
     required: ["target", "text"],
-    optional: ["contentHtml", "createdPagerootIds"],
+    optional: ["contentHtml", "createdStemmioIds"],
   }],
   ["replaceTextRange", { required: ["target", "range", "text"], optional: [] }],
   ["setAttribute", { required: ["target", "name", "value"], optional: [] }],
   ["setStyle", {
     required: ["target", "property", "value", "important"],
-    optional: ["range", "createdPagerootIds"],
+    optional: ["range", "createdStemmioIds"],
   }],
   ["insertElement", { required: ["parent", "before", "html"], optional: [] }],
   ["deleteElement", { required: ["target"], optional: [] }],
@@ -101,14 +101,14 @@ function assertTextRange(value) {
   }
 }
 
-function assertCreatedPagerootIds(value) {
+function assertCreatedStemmioIds(value) {
   if (
     !Array.isArray(value)
     || value.length === 0
     || new Set(value).size !== value.length
     || value.some((elementId) => !ELEMENT_ID_PATTERN.test(elementId))
   ) {
-    fail("SEMANTIC_CREATED_IDENTITY_INVALID", "createdPagerootIds must contain unique stable element IDs.");
+    fail("SEMANTIC_CREATED_IDENTITY_INVALID", "createdStemmioIds must contain unique stable element IDs.");
   }
 }
 
@@ -163,11 +163,11 @@ export function assertSemanticOperationContract(operation) {
     ) {
       fail("SEMANTIC_TEXT_INVALID", "setText requires string text and optional string contentHtml.");
     }
-    if (operation.createdPagerootIds !== undefined) {
+    if (operation.createdStemmioIds !== undefined) {
       if (operation.contentHtml === undefined) {
         fail("SEMANTIC_CREATED_IDENTITY_INVALID", "setText created IDs require explicit contentHtml.");
       }
-      assertCreatedPagerootIds(operation.createdPagerootIds);
+      assertCreatedStemmioIds(operation.createdStemmioIds);
     }
   } else if (operation.type === "replaceTextRange") {
     assertTextRange(operation.range);
@@ -192,8 +192,8 @@ export function assertSemanticOperationContract(operation) {
       fail("SEMANTIC_STYLE_INVALID", "setStyle requires property/value strings and an explicit important boolean.");
     }
     if (operation.range !== undefined) assertTextRange(operation.range);
-    if (operation.createdPagerootIds !== undefined) {
-      assertCreatedPagerootIds(operation.createdPagerootIds);
+    if (operation.createdStemmioIds !== undefined) {
+      assertCreatedStemmioIds(operation.createdStemmioIds);
     }
   } else if (["insertElement", "replaceSubtree"].includes(operation.type)) {
     if (typeof operation.html !== "string" || operation.html.length === 0) {
@@ -561,7 +561,7 @@ function assertAllowedForwardTransition(beforeSnapshot, afterSnapshot, operation
     const beforeDescendants = descendants(before, target.elementId);
     const afterDescendants = descendants(after, target.elementId);
     const expectedAdded = new Set(
-      Array.isArray(operation.createdPagerootIds) ? operation.createdPagerootIds : [],
+      Array.isArray(operation.createdStemmioIds) ? operation.createdStemmioIds : [],
     );
     assertSubset(removed, beforeDescendants, "SEMANTIC_IDENTITY_TEXT_REMOVAL", "setText removed identity outside its target.");
     assertSubset(added, afterDescendants, "SEMANTIC_IDENTITY_TEXT_ADDITION", "setText added identity outside its target.");
@@ -584,7 +584,7 @@ function assertAllowedForwardTransition(beforeSnapshot, afterSnapshot, operation
 
   if (operation.type === "setStyle") {
     const expectedAdded = operation.range
-      ? new Set(Array.isArray(operation.createdPagerootIds) ? operation.createdPagerootIds : [])
+      ? new Set(Array.isArray(operation.createdStemmioIds) ? operation.createdStemmioIds : [])
       : new Set();
     assertSet(removed, new Set(), "SEMANTIC_IDENTITY_STYLE_REMOVAL", "setStyle cannot remove element IDs.");
     assertSet(added, expectedAdded, "SEMANTIC_IDENTITY_STYLE_ADDITION", "Range-style wrapper IDs do not match semantic evidence.");

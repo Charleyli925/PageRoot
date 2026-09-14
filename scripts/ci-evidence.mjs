@@ -111,7 +111,7 @@ export function failureFingerprint({
 }) {
   const normalized = normalizeFailureText(output, repositoryRoot);
   const digest = createHash("sha256")
-    .update("pageroot-ci-failure-v1\0")
+    .update("stemmio-ci-failure-v1\0")
     .update(suite)
     .update("\0")
     .update(stage)
@@ -120,7 +120,7 @@ export function failureFingerprint({
     .digest("hex")
     .slice(0, 20);
   return Object.freeze({
-    signature: `pageroot-ci-v1:${digest}`,
+    signature: `stemmio-ci-v1:${digest}`,
     normalizedExcerpt: normalized,
   });
 }

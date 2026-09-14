@@ -60,7 +60,7 @@
     {
       "id": "external-agent-may-still-run",
       "owner": "runs",
-      "reason": "用户结束已交给外部 Agent 的任务，但 PageRoot 无法保证外部进程停止",
+      "reason": "用户结束已交给外部 Agent 的任务，但 Stemmio 无法保证外部进程停止",
       "removalCondition": "完成外部 Agent 仍可能运行的封闭 GlobalInterruption 设计",
       "siteIds": [
         "ai-run-cancelled-agent-may-run"
@@ -138,12 +138,12 @@
       "class": "N5",
       "owner": "import",
       "file": "app/workbench.tsx",
-      "title": "已导入 PageRoot（仅废纸篓失败）",
+      "title": "已导入 Stemmio（仅废纸篓失败）",
       "dedupeKey": "external-html-imported",
       "disposition": "background-result",
       "wave": "PR-D",
       "reason": "导入成功已静默；仅在用户要求删除原文件但移入废纸篓失败时保留",
-      "fingerprint": "N5|已导入 PageRoot（仅废纸篓失败）|external-html-imported|background-result",
+      "fingerprint": "N5|已导入 Stemmio（仅废纸篓失败）|external-html-imported|background-result",
       "allowlistId": "import-trash-failed"
     },
     {

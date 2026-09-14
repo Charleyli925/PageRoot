@@ -47,7 +47,7 @@ function removeTemporaryRoot(directory) {
   const resolved = path.resolve(directory);
   if (
     path.dirname(resolved) !== path.resolve(tmpdir())
-    || !path.basename(resolved).startsWith("pageroot-native-e2e-census-")
+    || !path.basename(resolved).startsWith("stemmio-native-e2e-census-")
   ) {
     throw new Error(`Refusing to remove non-census directory: ${directory}`);
   }
@@ -81,7 +81,7 @@ async function waitForCdpEndpoint(port, processLog) {
     if (ready) return endpoint;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Installed PageRoot did not expose CDP within 30 seconds.\n${processLog.join("")}`);
+  throw new Error(`Installed Stemmio did not expose CDP within 30 seconds.\n${processLog.join("")}`);
 }
 
 async function currentEditorFrame(page) {
@@ -92,13 +92,13 @@ async function currentEditorFrame(page) {
     .locator('iframe[title*="HTML"]');
   const handle = await iframe.elementHandle();
   const frame = await handle?.contentFrame();
-  if (!frame) throw new Error("Installed PageRoot did not expose its editing iframe.");
+  if (!frame) throw new Error("Installed Stemmio did not expose its editing iframe.");
   return { frame, iframe };
 }
 
 async function sourceTextInventory(frame) {
   return frame.evaluate(() => {
-    const sourceAttribute = "data-pageroot-id";
+    const sourceAttribute = "data-stemmio-id";
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const inventory = [];
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -122,8 +122,8 @@ async function sourceTextInventory(frame) {
 
 async function suppressAuthoredClickActions(frame) {
   await frame.evaluate(() => {
-    if (window.__pageRootCensusClickGuard) return;
-    window.__pageRootCensusClickGuard = true;
+    if (window.__stemmioCensusClickGuard) return;
+    window.__stemmioCensusClickGuard = true;
     document.documentElement.style.setProperty("scroll-behavior", "auto", "important");
     document.body.style.setProperty("scroll-behavior", "auto", "important");
     const stopAuthoredAction = (event) => {
@@ -155,12 +155,12 @@ async function withCurrentStableEditorFrame(page, operation) {
       await page.waitForTimeout(50);
     }
   }
-  throw lastError || new Error("Could not obtain a stable PageRoot editor frame.");
+  throw lastError || new Error("Could not obtain a stable Stemmio editor frame.");
 }
 
 async function textHitForOrdinal(frame, ordinal) {
   return frame.evaluate(async (wantedOrdinal) => {
-    const sourceAttribute = "data-pageroot-id";
+    const sourceAttribute = "data-stemmio-id";
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let currentOrdinal = 0;
     let wanted = null;
@@ -210,7 +210,7 @@ async function textHitForOrdinal(frame, ordinal) {
 
 async function resultForOrdinal(frame, ordinal) {
   return frame.evaluate((wantedOrdinal) => {
-    const sourceAttribute = "data-pageroot-id";
+    const sourceAttribute = "data-stemmio-id";
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let currentOrdinal = 0;
     let wanted = null;
@@ -333,14 +333,14 @@ async function main() {
   const screenshotPath = path.resolve(
     args.get("screenshot") || path.join(path.dirname(outputPath), "installed-census.png"),
   );
-  const executable = path.join(appPath, "Contents/MacOS/PageRoot");
-  if (!existsSync(executable)) throw new Error(`PageRoot executable is missing: ${executable}`);
+  const executable = path.join(appPath, "Contents/MacOS/Stemmio");
+  if (!existsSync(executable)) throw new Error(`Stemmio executable is missing: ${executable}`);
   mkdirSync(path.dirname(outputPath), { recursive: true });
   mkdirSync(path.dirname(screenshotPath), { recursive: true });
 
   const originalSha = sha256(htmlPath);
   const originalSize = statSync(htmlPath).size;
-  const temporaryRoot = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-census-"));
+  const temporaryRoot = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-census-"));
   const isolatedUserData = path.join(temporaryRoot, "user-data");
   const workspace = path.join(temporaryRoot, "workspace");
   const sourceDirectory = path.join(temporaryRoot, "source");
@@ -359,20 +359,20 @@ async function main() {
       { encoding: "utf8" },
     );
     if (launch.status !== 0) {
-      throw new Error(`Could not launch installed PageRoot through macOS: ${launch.stderr || launch.stdout}`);
+      throw new Error(`Could not launch installed Stemmio through macOS: ${launch.stderr || launch.stdout}`);
     }
     const processLog = [launch.stderr || "", launch.stdout || ""];
     const endpoint = await waitForCdpEndpoint(debuggingPort, processLog);
     browser = await chromium.connectOverCDP(endpoint);
     const context = browser.contexts()[0];
     const page = context?.pages()[0] || await context?.waitForEvent("page", { timeout: 15_000 });
-    if (!page) throw new Error("Installed PageRoot opened no renderer page.");
+    if (!page) throw new Error("Installed Stemmio opened no renderer page.");
     await page.waitForLoadState("domcontentloaded");
-    const runtime = await page.evaluate(() => window.htmlAIRuntime);
-    const activeProject = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+    const runtime = await page.evaluate(() => window.stemmioRuntime);
+    const activeProject = await page.evaluate(() => window.stemmioProjects?.getActiveProject());
     if (activeProject?.sourcePath !== htmlPath) {
       throw new Error(
-        `Installed PageRoot restored a different disk project: ${activeProject?.sourcePath || "none"}`,
+        `Installed Stemmio restored a different disk project: ${activeProject?.sourcePath || "none"}`,
       );
     }
     const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();

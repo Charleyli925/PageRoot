@@ -16,7 +16,10 @@
 
 import { defaultManagedAgentDelivery, normalizeAgentDelivery } from "./agent-delivery.mjs";
 
-const CONVERSATION_SCHEMA_VERSION = "2.0.0";
+// Conversation v3 is the first Stemmio-owned writer contract.  Older v2
+// records are intentionally unsupported: accepting them here would silently
+// turn a historical PageRoot actor contract into a current record.
+const CONVERSATION_SCHEMA_VERSION = "3.0.0";
 const LEGACY_CONVERSATION_SCHEMA_VERSION = "1.0.0";
 const CONVERSATION_INDEX_SCHEMA_VERSION = "1.0.0";
 const CONVERSATION_DRAFT_SCHEMA_VERSION = "2.0.0";
@@ -53,7 +56,7 @@ const TURN_STATUSES = new Set([
   "failed",
   "cancelled",
 ]);
-const MESSAGE_ACTORS = new Set(["user", "agent", "pageroot"]);
+const MESSAGE_ACTORS = new Set(["user", "agent", "stemmio"]);
 const MESSAGE_KINDS = new Set([
   "text",
   "progress",
@@ -201,7 +204,7 @@ function nonNegativeInteger(value, label) {
   return number;
 }
 
-// Forward compatibility. A newer PageRoot may add members to any of these
+// Forward compatibility. A newer Stemmio may add members to any of these
 // records. Every known member stays strictly validated, and every unknown
 // member is carried through read -> modify -> write unchanged so an older build
 // never silently deletes a newer build's data. Preserved members take no part
@@ -535,15 +538,6 @@ function cleanMessage(raw, label) {
       "INVALID_CONVERSATION_MESSAGE",
       `${label} must be an object.`,
     );
-  }
-  if (raw.actor === "qoder") {
-    const { modelId, reasoningEffort: _reasoningEffort, ...rest } = raw;
-    raw = {
-      ...rest,
-      actor: "agent",
-      providerId: "qoder",
-      ...(modelId ? { actualModelId: `qoder:${modelId}` } : {}),
-    };
   }
   for (const key of Object.keys(raw)) {
     if (FORBIDDEN_MESSAGE_KEYS.has(key)) {
@@ -1125,7 +1119,7 @@ export function sealConversationTurn(
   });
 }
 
-// PageRoot's own facts do not belong to an Agent round trip, so they seal
+// Stemmio's own facts do not belong to an Agent round trip, so they seal
 // immediately through their own single-message turn. The caller supplies both
 // identities because this module stays pure and never generates one.
 export function appendConversationFact(
@@ -1154,7 +1148,7 @@ export function appendConversationFact(
       messages: [{
         ...rest,
         messageId,
-        actor: "pageroot",
+        actor: "stemmio",
         kind,
         status: "completed",
         text,

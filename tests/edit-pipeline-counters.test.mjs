@@ -14,7 +14,7 @@ import { applyPatchPlan, planInlineStylePatch } from "../app/lib/source-patch-en
 import { createTargetRef } from "../app/lib/target-resolver.js";
 
 function elementId(sequence) {
-  return `pr1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
+  return `sm1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
 }
 
 const IDS = {
@@ -26,7 +26,7 @@ const IDS = {
 };
 
 function managedHtml() {
-  return `<!doctype html><html data-pageroot-id="${IDS.html}"><head data-pageroot-id="${IDS.head}"><title data-pageroot-id="${IDS.title}">Demo</title></head><body data-pageroot-id="${IDS.body}"><p data-pageroot-id="${IDS.paragraph}">Hello</p></body></html>`;
+  return `<!doctype html><html data-stemmio-id="${IDS.html}"><head data-stemmio-id="${IDS.head}"><title data-stemmio-id="${IDS.title}">Demo</title></head><body data-stemmio-id="${IDS.body}"><p data-stemmio-id="${IDS.paragraph}">Hello</p></body></html>`;
 }
 
 test("edit-pipeline counters stay silent until a test enables them", () => {
@@ -43,7 +43,7 @@ test("edit-pipeline counters stay silent until a test enables them", () => {
   const index = buildSourceIndex(html);
   const plan = planInlineStylePatch(index, {
     type: "set-inline-style",
-    targetRef: createTargetRef(index, index.byPagerootId.get(IDS.paragraph), { level: "subregion" }),
+    targetRef: createTargetRef(index, index.byStemmioId.get(IDS.paragraph), { level: "subregion" }),
     property: "color",
     value: "red",
     expectedSourceSha256: index.sourceSha256,
@@ -103,16 +103,16 @@ test("unknown counter kinds and source payloads are ignored", () => {
 test("edit-pipeline test hooks install enable, reset and read without source payloads", () => {
   const target = {};
   installEditPipelineTestHooks(target);
-  target.__PAGEROOT_ENABLE_EDIT_PIPELINE_COUNTERS__();
-  target.__PAGEROOT_RESET_EDIT_PIPELINE_COUNTERS__();
+  target.__STEMMIO_ENABLE_EDIT_PIPELINE_COUNTERS__();
+  target.__STEMMIO_RESET_EDIT_PIPELINE_COUNTERS__();
   recordEditPipelineCount("fullPatchApply", {
     caller: "applyPatchPlan",
     html: "<p>secret</p>",
   });
-  const snapshot = target.__PAGEROOT_READ_EDIT_PIPELINE_COUNTERS__();
+  const snapshot = target.__STEMMIO_READ_EDIT_PIPELINE_COUNTERS__();
   assert.equal(snapshot.fullPatchApplies, 1);
   assert.equal(Object.hasOwn(snapshot.events[0], "html"), false);
-  target.__PAGEROOT_DISABLE_EDIT_PIPELINE_COUNTERS__();
+  target.__STEMMIO_DISABLE_EDIT_PIPELINE_COUNTERS__();
   recordEditPipelineCount("fullPatchApply", { caller: "applyPatchPlan" });
-  assert.equal(target.__PAGEROOT_READ_EDIT_PIPELINE_COUNTERS__().fullPatchApplies, 0);
+  assert.equal(target.__STEMMIO_READ_EDIT_PIPELINE_COUNTERS__().fullPatchApplies, 0);
 });

@@ -9,6 +9,7 @@ import {
   rm,
 } from "node:fs/promises";
 import path from "node:path";
+import { nonReplaceTemporaryName } from "./runtime-project-storage-contract.mjs";
 
 import { PRODUCT_MAX_HTML_BYTES } from "./product-contract.mjs";
 
@@ -137,7 +138,7 @@ export async function atomicWriteRecoveryJournalFile(filePath, content, {
   await ensureOwnedDirectory(parent);
   const temporary = path.join(
     parent,
-    `.pageroot-recovery-${process.pid}-${randomUUID()}.tmp`,
+    nonReplaceTemporaryName(`recovery-${process.pid}-${randomUUID()}.tmp`),
   );
   let published = false;
   try {

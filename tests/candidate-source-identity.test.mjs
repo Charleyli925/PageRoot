@@ -11,18 +11,18 @@ import {
 } from "../bridge/project-file-repository/working-copy.mjs";
 
 const IDS = {
-  html: "pr1_11111111111141118111111111111111",
-  head: "pr1_22222222222242229222222222222222",
-  title: "pr1_3333333333334333a333333333333333",
-  body: "pr1_4444444444444444b444444444444444",
-  main: "pr1_55555555555545558555555555555555",
-  section: "pr1_66666666666646669666666666666666",
-  first: "pr1_7777777777774777a777777777777777",
-  second: "pr1_8888888888884888b888888888888888",
+  html: "sm1_11111111111141118111111111111111",
+  head: "sm1_22222222222242229222222222222222",
+  title: "sm1_3333333333334333a333333333333333",
+  body: "sm1_4444444444444444b444444444444444",
+  main: "sm1_55555555555545558555555555555555",
+  section: "sm1_66666666666646669666666666666666",
+  first: "sm1_7777777777774777a777777777777777",
+  second: "sm1_8888888888884888b888888888888888",
 };
 
 function attribute(id) {
-  return `data-pageroot-id="${id}"`;
+  return `data-stemmio-id="${id}"`;
 }
 
 function baseHtml() {
@@ -39,7 +39,7 @@ test("Candidate identity keeps retained IDs, allows delete and move, and assigns
   assert.equal(identity.complete, true);
   assert.equal(identity.claimedIds.has(IDS.first), false);
   assert.equal(identity.claimedIds.has(IDS.second), true);
-  assert.equal(identity.claimedIds.has("pr1_99999999999949998999999999999999"), true);
+  assert.equal(identity.claimedIds.has("sm1_99999999999949998999999999999999"), true);
   assert.equal(prepared.identityReport.retainedElementCount, 7);
   assert.equal(prepared.identityReport.deletedElementCount, 1);
   assert.equal(prepared.identityReport.addedElementCount, 1);
@@ -56,12 +56,12 @@ test("Candidate identity rejects duplicate and forged IDs", () => {
   assert.throws(
     () => prepareCandidateSourceIdentity(baseHtml(), duplicate),
     (error) => error?.code === "CANDIDATE_SOURCE_IDENTITY_INVALID"
-      && error.details.issueCodes.includes("PAGEROOT_ID_DUPLICATE_VALUE"),
+      && error.details.issueCodes.includes("STEMMIO_ID_DUPLICATE_VALUE"),
   );
 
   const forged = baseHtml().replace(
     IDS.second,
-    "pr1_99999999999949998999999999999999",
+    "sm1_99999999999949998999999999999999",
   );
   assert.throws(
     () => prepareCandidateSourceIdentity(baseHtml(), forged),
@@ -118,7 +118,7 @@ test("Candidate identity rejects an equal-cardinality repeated exact-source grou
     (error) => error?.code === "CANDIDATE_SOURCE_IDENTITY_LOST"
       && error.details.suspicious.some(
         (issue) => issue.evidence === "exact-source-group"
-          && issue.pagerootIds.length === 2
+          && issue.stemmioIds.length === 2
           && issue.outputOccurrenceCount === 2,
       ),
   );
@@ -153,7 +153,7 @@ test("Candidate identity rejects an ambiguous stable-slot group when every old I
     (error) => error?.code === "CANDIDATE_SOURCE_IDENTITY_LOST"
       && error.details.suspicious.some(
         (issue) => issue.evidence === "stable-slot-group"
-          && issue.pagerootIds.length === 2
+          && issue.stemmioIds.length === 2
           && issue.outputOccurrenceCount === 2,
       ),
   );

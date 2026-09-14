@@ -147,7 +147,7 @@ export async function runAcpProcessTask({
   scheduler,
 } = {}) {
   if (cancellationSignal?.aborted) {
-    throw acpPolicyError("ACP_CANCELLED", "The PageRoot ACP task was cancelled.");
+    throw acpPolicyError("ACP_CANCELLED", "The Stemmio ACP task was cancelled.");
   }
   const { child, processGroup } = await spawnAcpChild({
     command,
@@ -274,7 +274,7 @@ export async function probeAcpProcess({
   scheduler,
 } = {}) {
   if (cancellationSignal?.aborted) {
-    throw acpPolicyError("ACP_CANCELLED", "The PageRoot ACP probe was cancelled.");
+    throw acpPolicyError("ACP_CANCELLED", "The Stemmio ACP probe was cancelled.");
   }
   const probeCwd = assertAbsolutePath(cwd, "ACP probe cwd");
   const { child, processGroup } = await spawnAcpChild({

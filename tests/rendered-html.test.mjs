@@ -71,7 +71,7 @@ test("server-renders the public workbench without retired hosting or editor surf
   assert.match(html, /\saria-label=["'][^"']+["']/iu);
   assert.doesNotMatch(
     html,
-    /codex-preview|_sites-preview|react-loading-skeleton|data-lexical-editor|pageroot-text-editor/iu,
+    /codex-preview|_sites-preview|react-loading-skeleton|data-lexical-editor|stemmio-text-editor/iu,
   );
 });
 

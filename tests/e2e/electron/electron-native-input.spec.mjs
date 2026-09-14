@@ -5,7 +5,7 @@ import {
   addCanvasComment,
   caseSelector,
   clickEditHistoryMenu,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture,
   currentEditorFrame,
   documentToken,
@@ -14,7 +14,7 @@ import {
   geometrySnapshot,
   installInputRecorder,
   keyShortcut,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   managedWorkingCopyPath,
   mkdtempSync,
@@ -32,7 +32,7 @@ import {
   replayApplePinyinStyledWrapperCommit,
   retiredNativeHostState,
   setTextSelection,
-  stopPageRoot,
+  stopStemmio,
   tmpdir,
   waitForRuntimeHandoffSettled,
   withBomAndCrLf,
@@ -42,7 +42,7 @@ import {
 function sourceFidelityExpected(managedSource, replacement) {
   const managedText = managedSource.toString("utf8");
   const spanId = managedText.match(
-    /<span title='single-quoted' data-order-b="2" data-order-a='1' data-pageroot-id="(pr1_[a-f0-9]{32})">SOURCE_FIDELITY_TOKEN_001<\/span>/u,
+    /<span title='single-quoted' data-order-b="2" data-order-a='1' data-stemmio-id="(sm1_[a-f0-9]{32})">SOURCE_FIDELITY_TOKEN_001<\/span>/u,
   )?.[1];
   if (!spanId) {
     throw new Error("The identified source-fidelity span is missing from the managed Working Copy.");
@@ -50,7 +50,7 @@ function sourceFidelityExpected(managedSource, replacement) {
   return replaceEditableIslandBytes(
     managedSource,
     "source-fidelity",
-    `<span title='single-quoted' data-order-b="2" data-order-a='1' data-pageroot-id="${spanId}">${replacement}</span>`,
+    `<span title='single-quoted' data-order-b="2" data-order-a='1' data-stemmio-id="${spanId}">${replacement}</span>`,
   );
 }
 
@@ -58,7 +58,7 @@ test("Electron shows continuous source text immediately without rebuilding the i
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {
   const fixture = createSourceFixture("continuous-source-text.html");
-  const { electronApp, page, isolatedUserData } = await launchPageRoot({
+  const { electronApp, page, isolatedUserData } = await launchStemmio({
     activeSourcePath: fixture.sourcePath,
   });
   try {
@@ -118,7 +118,7 @@ test("Electron shows continuous source text immediately without rebuilding the i
     await expect(resumedFrame.locator(caseSelector("list-item")))
       .not.toHaveAttribute("contenteditable", "true");
   } finally {
-    await stopPageRoot(electronApp, isolatedUserData);
+    await stopStemmio(electronApp, isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -133,7 +133,7 @@ test("Runtime handoff settlement samples fixed slots, retires the old document a
   <main data-native-case="runtime-handoff-settlement">合成 handoff 样本</main>
 </body></html>`,
   );
-  const { electronApp, page, isolatedUserData } = await launchPageRoot({
+  const { electronApp, page, isolatedUserData } = await launchStemmio({
     activeSourcePath: fixture.sourcePath,
   });
   try {
@@ -259,7 +259,7 @@ test("Runtime handoff settlement samples fixed slots, retires the old document a
     expect(timeoutError.message).toContain('"candidateFramesAbsent":false');
     expect(timeoutError.message).toContain('"activeFrameCount":1');
   } finally {
-    await stopPageRoot(electronApp, isolatedUserData);
+    await stopStemmio(electronApp, isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -268,7 +268,7 @@ test("Electron fixed real-input sample covers mouse, keyboard, deletion and Ente
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const fixture = createSourceFixture("editable-island-lane.html");
-  const { electronApp, page, isolatedUserData } = await launchPageRoot({
+  const { electronApp, page, isolatedUserData } = await launchStemmio({
     activeSourcePath: fixture.sourcePath,
   });
   try {
@@ -315,21 +315,21 @@ test("Electron fixed real-input sample covers mouse, keyboard, deletion and Ente
       .not.toContain("__REAL_DELETE__X");
 
     await page.keyboard.insertText("__REAL_ENTER_BEFORE__");
-    const breakIdsBefore = await controlledTarget.locator("br[data-pageroot-id]")
+    const breakIdsBefore = await controlledTarget.locator("br[data-stemmio-id]")
       .evaluateAll((elements) => elements.map(
-        (element) => element.getAttribute("data-pageroot-id"),
+        (element) => element.getAttribute("data-stemmio-id"),
       ).filter(Boolean));
     await page.keyboard.press("Enter");
     await page.keyboard.insertText("__REAL_ENTER_LINE__");
     await expect.poll(() => controlledTarget.textContent())
       .toContain("__REAL_ENTER_LINE__");
     await expect.poll(async () => (
-      (await controlledTarget.locator("br[data-pageroot-id]").evaluateAll((elements) => (
-        elements.map((element) => element.getAttribute("data-pageroot-id")).filter(Boolean)
+      (await controlledTarget.locator("br[data-stemmio-id]").evaluateAll((elements) => (
+        elements.map((element) => element.getAttribute("data-stemmio-id")).filter(Boolean)
       ))).filter((id) => !breakIdsBefore.includes(id)).length
     )).toBe(1);
     await expect.poll(() => readPublishedWorkingCopy(managedSourcePath, "utf8"))
-      .toMatch(/__REAL_ENTER_BEFORE__[\s\S]*<br\s+[^>]*data-pageroot-id="pr1_[0-9a-f]{32}"[^>]*>[\s\S]*__REAL_ENTER_LINE__/u);
+      .toMatch(/__REAL_ENTER_BEFORE__[\s\S]*<br\s+[^>]*data-stemmio-id="sm1_[0-9a-f]{32}"[^>]*>[\s\S]*__REAL_ENTER_LINE__/u);
     expect(await documentToken(frame)).toBe(initialDocument);
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
       .toHaveAttribute("data-frame-generation", initialGeneration);
@@ -358,25 +358,25 @@ test("Electron fixed real-input sample covers mouse, keyboard, deletion and Ente
         .textContent()
     )).toContain("电观察器保护");
   } finally {
-    await stopPageRoot(electronApp, isolatedUserData);
+    await stopStemmio(electronApp, isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
 
 test("Electron autosaves one authorized disk patch and reopens the same forward result", async () => {
   test.setTimeout(90_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "native-source-fidelity.html");
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "Electron磁盘原位_OK";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
   writeFileSync(sourcePath, original);
 
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   let firstApp = null;
   let reopenedApp = null;
   try {
-    const firstLaunch = await launchPageRoot({
+    const firstLaunch = await launchStemmio({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
@@ -440,10 +440,10 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
     await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
       .toBe(replacement);
 
-    await closePageRootGracefully(firstApp, firstLaunch.page);
+    await closeStemmioGracefully(firstApp, firstLaunch.page);
     firstApp = null;
 
-    const reopened = await launchPageRoot({ isolatedUserData });
+    const reopened = await launchStemmio({ isolatedUserData });
     reopenedApp = reopened.electronApp;
     const { frame: reopenedFrame } = await loadedDiskFrame(
       reopened.page,
@@ -463,15 +463,15 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
     expect(readFileSync(sourcePath)).toEqual(original);
     expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
 
-    await closePageRootGracefully(reopenedApp, reopened.page);
+    await closeStemmioGracefully(reopenedApp, reopened.page);
     reopenedApp = null;
   } finally {
-    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
-    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
+    if (firstApp) await stopStemmio(firstApp, isolatedUserData, { cleanup: false });
+    if (reopenedApp) await stopStemmio(reopenedApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
-      "pageroot-native-source-e2e-",
+      "stemmio-native-source-e2e-",
     );
   }
 });
@@ -480,7 +480,7 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   test.setTimeout(120_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "managed-line-break.html");
   const original = Buffer.from(
     "<!doctype html><html><head><title>Line break</title></head><body>"
@@ -489,10 +489,10 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     "utf8",
   );
   writeFileSync(sourcePath, original);
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   let activeApp = null;
   try {
-    let launched = await launchPageRoot({ isolatedUserData, activeSourcePath: sourcePath });
+    let launched = await launchStemmio({ isolatedUserData, activeSourcePath: sourcePath });
     activeApp = launched.electronApp;
     const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
     let { editor, frame } = await loadedDiskFrame(
@@ -504,14 +504,14 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     const target = await activateNativeEdit(frame, "managed-line-break");
     await setTextSelection(frame, "managed-line-break", "Alpha".length);
     await target.evaluate((element) => {
-      element.ownerDocument.defaultView.__pagerootManagedLineBreakHost = element;
+      element.ownerDocument.defaultView.__stemmioManagedLineBreakHost = element;
     });
     await target.press("Enter");
     await expect.poll(() => frame.locator(
       `${caseSelector("managed-line-break")} > br`,
     ).count()).toBeGreaterThan(0);
     await expect.poll(() => readPublishedWorkingCopy(managedSourcePath, "utf8"))
-      .toMatch(/<br data-pageroot-id="pr1_/u);
+      .toMatch(/<br data-stemmio-id="sm1_/u);
     await expect(editor).not.toHaveAttribute("data-edit-block-detail", /.+/u);
     await expect(editor).toHaveAttribute(
       "data-native-commit-path",
@@ -523,15 +523,15 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
       .toHaveCount(0);
     const savedHtml = readFileSync(managedSourcePath, "utf8");
     const identifiedBreaks = savedHtml.match(
-      /<br data-pageroot-id="pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}">/gu,
+      /<br data-stemmio-id="sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}">/gu,
     ) ?? [];
     expect(identifiedBreaks.length).toBeGreaterThan(0);
-    expect(savedHtml).not.toMatch(/<br(?! data-pageroot-id=)/u);
+    expect(savedHtml).not.toMatch(/<br(?! data-stemmio-id=)/u);
     await expect(frame.locator(
       `${caseSelector("managed-line-break")} > br`,
-    )).toHaveAttribute("data-pageroot-id", /^pr1_/u);
+    )).toHaveAttribute("data-stemmio-id", /^sm1_/u);
     expect(await target.evaluate((element) => (
-      element.ownerDocument.defaultView.__pagerootManagedLineBreakHost === element
+      element.ownerDocument.defaultView.__stemmioManagedLineBreakHost === element
     ))).toBe(true);
     await target.press("End");
     await launched.page.keyboard.insertText("Omega");
@@ -542,13 +542,13 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     await expect.poll(() => readPublishedWorkingCopy(managedSourcePath, "utf8"))
       .toContain("Omega");
     const finalSavedHtml = readFileSync(managedSourcePath, "utf8");
-    expect(finalSavedHtml.match(/data-pageroot-id=/gu)?.length)
-      .toBe(savedHtml.match(/data-pageroot-id=/gu)?.length);
+    expect(finalSavedHtml.match(/data-stemmio-id=/gu)?.length)
+      .toBe(savedHtml.match(/data-stemmio-id=/gu)?.length);
     expect(readFileSync(sourcePath)).toEqual(original);
 
-    await closePageRootGracefully(activeApp, launched.page);
+    await closeStemmioGracefully(activeApp, launched.page);
     activeApp = null;
-    launched = await launchPageRoot({ isolatedUserData });
+    launched = await launchStemmio({ isolatedUserData });
     activeApp = launched.electronApp;
     ({ frame } = await loadedDiskFrame(
       launched.page,
@@ -561,9 +561,9 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
       .toContainText("Omega");
     expect(readFileSync(managedSourcePath, "utf8")).toBe(finalSavedHtml);
   } finally {
-    if (activeApp) await stopPageRoot(activeApp, isolatedUserData, { cleanup: false });
+    if (activeApp) await stopStemmio(activeApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
-    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
+    removeValidatedTemporaryDirectory(sourceDirectory, "stemmio-native-source-e2e-");
   }
 });
 
@@ -571,29 +571,29 @@ test("Electron keeps full-identity text formatting in one Runtime editing transa
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   test.setTimeout(120_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-format-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-format-e2e-"));
   const sourcePath = path.join(sourceDirectory, "full-identity-format.html");
   const source = `<!doctype html>
-<html data-pageroot-id="pr1_00000000000040008000000000000001">
-<head data-pageroot-id="pr1_00000000000040008000000000000002">
-  <meta data-pageroot-id="pr1_00000000000040008000000000000003" charset="utf-8">
-  <title data-pageroot-id="pr1_00000000000040008000000000000004">Formatting</title>
+<html data-stemmio-id="sm1_00000000000040008000000000000001">
+<head data-stemmio-id="sm1_00000000000040008000000000000002">
+  <meta data-stemmio-id="sm1_00000000000040008000000000000003" charset="utf-8">
+  <title data-stemmio-id="sm1_00000000000040008000000000000004">Formatting</title>
 </head>
-<body data-pageroot-id="pr1_00000000000040008000000000000005">
-  <main data-pageroot-id="pr1_00000000000040008000000000000006">
-    <p data-pageroot-id="pr1_00000000000040008000000000000007" data-native-case="full-id-format">Alpha Beta</p>
-    <output data-pageroot-id="pr1_00000000000040008000000000000008" id="format-proof"></output>
+<body data-stemmio-id="sm1_00000000000040008000000000000005">
+  <main data-stemmio-id="sm1_00000000000040008000000000000006">
+    <p data-stemmio-id="sm1_00000000000040008000000000000007" data-native-case="full-id-format">Alpha Beta</p>
+    <output data-stemmio-id="sm1_00000000000040008000000000000008" id="format-proof"></output>
   </main>
-  <script data-pageroot-id="pr1_00000000000040008000000000000009">
+  <script data-stemmio-id="sm1_00000000000040008000000000000009">
     document.querySelector('#format-proof').textContent = 'Runtime formatting ready';
   </script>
 </body>
 </html>`;
   writeFileSync(sourcePath, source, "utf8");
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   let activeApp = null;
   try {
-    const launched = await launchPageRoot({ isolatedUserData, activeSourcePath: sourcePath });
+    const launched = await launchStemmio({ isolatedUserData, activeSourcePath: sourcePath });
     activeApp = launched.electronApp;
     const { editor, frame } = await loadedDiskFrame(
       launched.page,
@@ -691,13 +691,13 @@ test("Electron keeps full-identity text formatting in one Runtime editing transa
 
     const persisted = readFileSync(workingCopyPath, "utf8");
     expect(persisted).toMatch(
-      /<span[^>]*style="[^"]*font-weight:\s*700[^"]*font-style:\s*italic[^"]*font-size:\s*28px[^"]*color:\s*#123456[^"]*"[^>]*data-pageroot-id="pr1_/u,
+      /<span[^>]*style="[^"]*font-weight:\s*700[^"]*font-style:\s*italic[^"]*font-size:\s*28px[^"]*color:\s*#123456[^"]*"[^>]*data-stemmio-id="sm1_/u,
     );
     expect(persisted).toMatch(/padding-top:\s*12px/u);
   } finally {
-    if (activeApp) await stopPageRoot(activeApp, isolatedUserData, { cleanup: false });
+    if (activeApp) await stopStemmio(activeApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
-    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-format-e2e-");
+    removeValidatedTemporaryDirectory(sourceDirectory, "stemmio-native-format-e2e-");
   }
 });
 
@@ -705,17 +705,17 @@ test("Electron separates focused-field undo from current-open Canvas undo and re
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {
   test.setTimeout(120_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "persistent-source-history.html");
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "撤销历史已持久化";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
   writeFileSync(sourcePath, original);
 
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   let firstApp = null;
   try {
-    const firstLaunch = await launchPageRoot({
+    const firstLaunch = await launchStemmio({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
@@ -771,20 +771,20 @@ test("Electron separates focused-field undo from current-open Canvas undo and re
     expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
 
     const manifest = JSON.parse(readFileSync(
-      path.join(path.dirname(managedSourcePath), ".pageroot", "manifest.json"),
+      path.join(path.dirname(managedSourcePath), ".stemmio", "manifest.json"),
       "utf8",
     ));
     expect(manifest.versions.map((version) => version.versionId)).toEqual(["ver_0001"]);
     expect(readFileSync(sourcePath)).toEqual(original);
 
-    await closePageRootGracefully(firstApp, firstLaunch.page);
+    await closeStemmioGracefully(firstApp, firstLaunch.page);
     firstApp = null;
   } finally {
-    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
+    if (firstApp) await stopStemmio(firstApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
-      "pageroot-native-source-e2e-",
+      "stemmio-native-source-e2e-",
     );
   }
 });
@@ -793,7 +793,7 @@ test("Electron persists semantic identity edits, deletes target comments, and cl
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   test.setTimeout(240_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "semantic-identity-closure.html");
   writeFileSync(sourcePath, Buffer.from(
     "<!doctype html><html><head><title>Identity closure</title></head><body>"
@@ -803,11 +803,11 @@ test("Electron persists semantic identity edits, deletes target comments, and cl
       + "</body></html>",
     "utf8",
   ));
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   const commentText = "删除后必须保持孤立。";
   let activeApp = null;
   try {
-    let launched = await launchPageRoot({ isolatedUserData, activeSourcePath: sourcePath });
+    let launched = await launchStemmio({ isolatedUserData, activeSourcePath: sourcePath });
     activeApp = launched.electronApp;
     let { editor, frame } = await loadedDiskFrame(
       launched.page,
@@ -817,10 +817,10 @@ test("Electron persists semantic identity edits, deletes target comments, and cl
     const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
     const identified = readFileSync(managedSourcePath, "utf8");
     const targetId = identified.match(
-      /<p data-native-case='identity-target' data-pageroot-id="(pr1_[a-f0-9]{32})">/u,
+      /<p data-native-case='identity-target' data-stemmio-id="(sm1_[a-f0-9]{32})">/u,
     )?.[1];
     const descendantId = identified.match(
-      /<strong data-pageroot-id="(pr1_[a-f0-9]{32})">child<\/strong>/u,
+      /<strong data-stemmio-id="(sm1_[a-f0-9]{32})">child<\/strong>/u,
     )?.[1];
     expect(targetId).toBeTruthy();
     expect(descendantId).toBeTruthy();
@@ -838,11 +838,11 @@ test("Electron persists semantic identity edits, deletes target comments, and cl
     let persistedRevision = await expectCheckpointPersisted(launched.page, 0);
     await waitForRuntimeHandoffSettled(launched.page);
     let savedHtml = readFileSync(managedSourcePath, "utf8");
-    expect(savedHtml).toContain(`data-pageroot-id="${targetId}"`);
+    expect(savedHtml).toContain(`data-stemmio-id="${targetId}"`);
     // Native rich-text replacement preserves the authored empty wrapper; the
     // direct semantic setText descendant-retirement rule is covered by the
     // managed Repository contract test instead of being conflated with this UI path.
-    expect(savedHtml).toContain(`<strong data-pageroot-id="${descendantId}"></strong>`);
+    expect(savedHtml).toContain(`<strong data-stemmio-id="${descendantId}"></strong>`);
     expect(savedHtml).not.toContain(">child</strong>");
     await expect(comment).toHaveAttribute("data-resolution", "exact");
 
@@ -856,14 +856,14 @@ test("Electron persists semantic identity edits, deletes target comments, and cl
     targets = frame.locator(caseSelector("identity-target"));
     await expect(targets).toHaveCount(2);
     const duplicateIds = await targets.evaluateAll((elements) => elements.map(
-      (element) => element.getAttribute("data-pageroot-id"),
+      (element) => element.getAttribute("data-stemmio-id"),
     ));
     expect(duplicateIds[0]).toBe(targetId);
-    expect(duplicateIds[1]).toMatch(/^pr1_[a-f0-9]{32}$/u);
+    expect(duplicateIds[1]).toMatch(/^sm1_[a-f0-9]{32}$/u);
     expect(duplicateIds[1]).not.toBe(targetId);
 
     await targets.nth(1).click();
-    expect(await frame.locator("[data-html-canvas-selected]").getAttribute("data-pageroot-id"))
+    expect(await frame.locator("[data-html-canvas-selected]").getAttribute("data-stemmio-id"))
       .toBe(duplicateIds[1]);
     await editor.getByRole("button", { name: "上移", exact: true }).click();
     persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
@@ -871,7 +871,7 @@ test("Electron persists semantic identity edits, deletes target comments, and cl
     frame = await currentEditorFrame(launched.page);
     targets = frame.locator(caseSelector("identity-target"));
     expect(await targets.evaluateAll((elements) => elements.map(
-      (element) => element.getAttribute("data-pageroot-id"),
+      (element) => element.getAttribute("data-stemmio-id"),
     ))).toEqual([duplicateIds[1], duplicateIds[0]]);
 
     await targets.nth(1).click();
@@ -889,13 +889,13 @@ test("Electron persists semantic identity edits, deletes target comments, and cl
     await expect(targets).toHaveCount(1);
     await expect(comment).toHaveCount(0);
     savedHtml = readFileSync(managedSourcePath, "utf8");
-    expect(savedHtml).not.toContain(`data-pageroot-id="${targetId}"`);
-    expect(savedHtml).toContain(`data-pageroot-id="${duplicateIds[1]}"`);
+    expect(savedHtml).not.toContain(`data-stemmio-id="${targetId}"`);
+    expect(savedHtml).toContain(`data-stemmio-id="${duplicateIds[1]}"`);
     expect(savedHtml).not.toContain("data-runtime-only");
 
-    await closePageRootGracefully(activeApp, launched.page);
+    await closeStemmioGracefully(activeApp, launched.page);
     activeApp = null;
-    launched = await launchPageRoot({ isolatedUserData });
+    launched = await launchStemmio({ isolatedUserData });
     activeApp = launched.electronApp;
     ({ editor, frame } = await loadedDiskFrame(
       launched.page,
@@ -911,9 +911,9 @@ test("Electron persists semantic identity edits, deletes target comments, and cl
     await launched.page.waitForTimeout(300);
     expect(readFileSync(managedSourcePath)).toEqual(reopenedBytes);
   } finally {
-    if (activeApp) await stopPageRoot(activeApp, isolatedUserData, { cleanup: false });
+    if (activeApp) await stopStemmio(activeApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
-    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
+    removeValidatedTemporaryDirectory(sourceDirectory, "stemmio-native-source-e2e-");
   }
 });
 
@@ -921,7 +921,7 @@ test("Electron keeps the active text selection and comment anchors stable after 
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {
   test.setTimeout(90_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "history-selection-comments.html");
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "无感撤回";
@@ -934,10 +934,10 @@ test("Electron keeps the active text selection and comment anchors stable after 
   const original = withBomAndCrLf(Buffer.from(tallFixture, "utf8"));
   writeFileSync(sourcePath, original);
 
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   let electronApp = null;
   try {
-    const launched = await launchPageRoot({
+    const launched = await launchStemmio({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
@@ -986,10 +986,10 @@ test("Electron keeps the active text selection and comment anchors stable after 
 
     await commentCard.evaluate((element) => {
       element.setAttribute("data-history-qa-card", "true");
-      window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__ = [];
-      window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = true;
+      window.__STEMMIO_HISTORY_VISUAL_SAMPLES__ = [];
+      window.__STEMMIO_HISTORY_VISUAL_SAMPLING__ = true;
       const initialEditor = document.querySelector('[data-testid="html-canvas-editor"]');
-      window.__PAGEROOT_HISTORY_FRAME__ = initialEditor?.querySelector(
+      window.__STEMMIO_HISTORY_FRAME__ = initialEditor?.querySelector(
         'iframe[data-runtime-slot-role="active"]',
       ) || null;
       const sample = () => {
@@ -999,19 +999,19 @@ test("Electron keeps the active text selection and comment anchors stable after 
           'iframe[data-runtime-slot-role="active"]',
         ) || null;
         const stage = document.querySelector(".review-scroll-stage");
-        window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__.push(card && editor && frame && stage
+        window.__STEMMIO_HISTORY_VISUAL_SAMPLES__.push(card && editor && frame && stage
           ? {
               top: card.getBoundingClientRect().top,
               resolution: card.getAttribute("data-resolution"),
               recovery: card.textContent.includes("原位置已变化"),
-              sameFrame: frame === window.__PAGEROOT_HISTORY_FRAME__,
+              sameFrame: frame === window.__STEMMIO_HISTORY_FRAME__,
               generation: frame.getAttribute("data-frame-generation"),
               verified: editor.getAttribute("data-render-verified"),
               visibility: getComputedStyle(frame).visibility,
               scrollTop: stage.scrollTop,
             }
           : null);
-        if (window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__) {
+        if (window.__STEMMIO_HISTORY_VISUAL_SAMPLING__) {
           requestAnimationFrame(sample);
         }
       };
@@ -1036,8 +1036,8 @@ test("Electron keeps the active text selection and comment anchors stable after 
     await expect(commentCard.getByText("原位置已变化")).toHaveCount(0);
 
     const visualSamples = await launched.page.evaluate(() => {
-      window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = false;
-      return window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__;
+      window.__STEMMIO_HISTORY_VISUAL_SAMPLING__ = false;
+      return window.__STEMMIO_HISTORY_VISUAL_SAMPLES__;
     });
     expect(visualSamples.every(Boolean)).toBe(true);
     expect(visualSamples.some((sample) => (
@@ -1059,12 +1059,12 @@ test("Electron keeps the active text selection and comment anchors stable after 
     expect(sampledScrollTops.every((scrollTop) => scrollTop === 240)).toBe(true);
   } finally {
     if (electronApp) {
-      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+      await stopStemmio(electronApp, isolatedUserData, { cleanup: false });
     }
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
-      "pageroot-native-source-e2e-",
+      "stemmio-native-source-e2e-",
     );
   }
 });
@@ -1074,16 +1074,16 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {
   test.setTimeout(90_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "apple-pinyin-styled-wrapper.html");
   const original = fixtureBuffer("complex-layout.html");
   writeFileSync(sourcePath, original);
 
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   let firstApp = null;
   let reopenedApp = null;
   try {
-    const firstLaunch = await launchPageRoot({
+    const firstLaunch = await launchStemmio({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
@@ -1094,7 +1094,7 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     );
     const managedOriginal = readFileSync(managedSourcePath);
     const styledWrapper = managedOriginal.toString("utf8").match(
-      /<em data-pageroot-id="pr1_[a-f0-9]{32}">Word<\/em>/u,
+      /<em data-stemmio-id="sm1_[a-f0-9]{32}">Word<\/em>/u,
     )?.[0];
     if (!styledWrapper) {
       throw new Error("The identified styled wrapper is missing from the managed Working Copy.");
@@ -1120,7 +1120,7 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       .toContain("<em");
     const committedHtml = await frame.locator(caseSelector("heading-inline")).innerHTML();
     expect(committedHtml).toMatch(
-      /你好<em\b[^>]*data-pageroot-id="pr1_[a-f0-9]{32}"[^>]*><\/em>/u,
+      /你好<em\b[^>]*data-stemmio-id="sm1_[a-f0-9]{32}"[^>]*><\/em>/u,
     );
     expect(committedHtml).not.toContain("<i>");
     expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
@@ -1155,11 +1155,11 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
       .toContain("你好<em");
 
-    await closePageRootGracefully(firstApp, firstLaunch.page);
+    await closeStemmioGracefully(firstApp, firstLaunch.page);
     firstApp = null;
     const projectRoot = path.dirname(managedSourcePath);
     const manifest = JSON.parse(
-      readFileSync(path.join(projectRoot, ".pageroot", "manifest.json"), "utf8"),
+      readFileSync(path.join(projectRoot, ".stemmio", "manifest.json"), "utf8"),
     );
     const workingCopy = manifest.workingCopies.find(
       (entry) => entry.workingCopyId === "work_ver_0001",
@@ -1170,7 +1170,7 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       readFileSync(
         path.join(
           projectRoot,
-          ".pageroot",
+          ".stemmio",
           "drafts",
           `${workingCopy.workingCopyId}.json`,
         ),
@@ -1178,12 +1178,12 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       ),
     );
     const runtimeState = JSON.parse(
-      readFileSync(path.join(projectRoot, ".pageroot", "runtime-state.json"), "utf8"),
+      readFileSync(path.join(projectRoot, ".stemmio", "runtime-state.json"), "utf8"),
     );
     expect(draft.draftRevision).toBeGreaterThan(0);
     expect(draft.changeEvents.length).toBeGreaterThan(0);
     expect(runtimeState.activeWorkingCopyId).toBe(workingCopy.workingCopyId);
-    const reopened = await launchPageRoot({ isolatedUserData });
+    const reopened = await launchStemmio({ isolatedUserData });
     reopenedApp = reopened.electronApp;
     const { frame: reopenedFrame } = await loadedDiskFrame(
       reopened.page,
@@ -1198,22 +1198,22 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     expect(readFileSync(sourcePath).equals(original)).toBe(true);
     expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
 
-    await closePageRootGracefully(reopenedApp, reopened.page);
+    await closeStemmioGracefully(reopenedApp, reopened.page);
     reopenedApp = null;
   } finally {
-    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
-    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
+    if (firstApp) await stopStemmio(firstApp, isolatedUserData, { cleanup: false });
+    if (reopenedApp) await stopStemmio(reopenedApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
-      "pageroot-native-source-e2e-",
+      "stemmio-native-source-e2e-",
     );
   }
 });
 
 test("Electron Chromium commits a composition without leaving interim pinyin", async () => {
   const fixture = createSourceFixture("chromium-composition.html");
-  const { electronApp, page, isolatedUserData } = await launchPageRoot({
+  const { electronApp, page, isolatedUserData } = await launchStemmio({
     activeSourcePath: fixture.sourcePath,
   });
   try {
@@ -1236,7 +1236,7 @@ test("Electron Chromium commits a composition without leaving interim pinyin", a
     expect(events.some(({ type }) => type === "compositionstart")).toBe(true);
     expect(events.some(({ type }) => type === "compositionend")).toBe(true);
   } finally {
-    await stopPageRoot(electronApp, isolatedUserData);
+    await stopStemmio(electronApp, isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });

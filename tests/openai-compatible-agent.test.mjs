@@ -38,7 +38,7 @@ import {
   SUPPORTED_AGENT_MODELS_REVISION,
 } from "../shared/supported-agent-models.mjs";
 
-const HTML = "<!DOCTYPE html><html><head><title>ok</title></head><body><p data-pageroot-id=\"one\">ok</p></body></html>";
+const HTML = "<!DOCTYPE html><html><head><title>ok</title></head><body><p data-stemmio-id=\"one\">ok</p></body></html>";
 const TRUST = "trusted-local-agent-v1";
 
 test("HTTP public progress is visible before completion while interleaved HTML stays private and byte exact", async () => {
@@ -161,10 +161,10 @@ function createVirtualTimer() {
 
 function selection(modelId = "deepseek-v4-pro", reasoning = null) {
   return Object.freeze({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
-    requestedModelId: `pageroot:${modelId}`,
-    resolvedModelId: `pageroot:${modelId}`,
+    requestedModelId: `stemmio:${modelId}`,
+    resolvedModelId: `stemmio:${modelId}`,
     reasoning: reasoning
       ? Object.freeze({ requested: reasoning, applied: reasoning, resolution: "exact" })
       : Object.freeze({ requested: null, applied: null, resolution: "provider-default" }),
@@ -207,14 +207,14 @@ test("built-in vendors use one fixed, versioned support table and never expose r
 
 test("built-in catalogs contain only fixed models and are gated until real smoke promotion", () => {
   assert.deepEqual(publicModelsForVendor("deepseek", {}).map((model) => model.id), [
-    "pageroot:deepseek-v4-pro",
-    "pageroot:deepseek-v4-flash",
-    "pageroot:deepseek-v4-flash-vision-exp",
+    "stemmio:deepseek-v4-pro",
+    "stemmio:deepseek-v4-flash",
+    "stemmio:deepseek-v4-flash-vision-exp",
   ]);
-  assert.deepEqual(publicModelsForVendor("deepseek", { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" }).map((model) => model.id), [
-    "pageroot:deepseek-v4-pro",
-    "pageroot:deepseek-v4-flash",
-    "pageroot:deepseek-v4-flash-vision-exp",
+  assert.deepEqual(publicModelsForVendor("deepseek", { STEMMIO_ENABLE_BETA_AGENT_MODELS: "1" }).map((model) => model.id), [
+    "stemmio:deepseek-v4-pro",
+    "stemmio:deepseek-v4-flash",
+    "stemmio:deepseek-v4-flash-vision-exp",
   ]);
   assert.deepEqual(publicModelsForVendor("zhipu", {}).map((model) => model.id), []);
 });
@@ -232,8 +232,8 @@ test("capabilities are exact-table driven and Custom sends no private reasoning 
   assert.deepEqual(openAiCompatibleModelCapability("zhipu", "glm-anything-else").reasoningChoices.map(({ id }) => id), ["auto"]);
   assert.deepEqual(openaiCompatibleChatThinkingFields("custom", "private-model", "max"), {});
   assert.deepEqual(openaiCompatibleChatThinkingFields("openai", "gpt-5.4", "high"), { reasoning_effort: "high" });
-  assert.equal(openAiCompatibleVendorDisplayNameForPublicModel("pageroot:deepseek-v4-pro"), "DeepSeek");
-  assert.equal(openAiCompatibleVendorDisplayNameForPublicModel("pageroot:private-model"), "");
+  assert.equal(openAiCompatibleVendorDisplayNameForPublicModel("stemmio:deepseek-v4-pro"), "DeepSeek");
+  assert.equal(openAiCompatibleVendorDisplayNameForPublicModel("stemmio:private-model"), "");
 });
 
 test("vendor adapters keep request contracts separate and normalize structured failures", () => {
@@ -267,15 +267,15 @@ test("preflight validates the selected fixed model with chat/completions and nev
     },
   });
   const environment = {
-    PAGEROOT_API_KEY: "sk-test",
-    PAGEROOT_API_VENDOR: "deepseek",
-    PAGEROOT_API_BASE_URL: "https://api.deepseek.com/v1",
-    PAGEROOT_API_CREDENTIAL_GENERATION: "3",
-    PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1",
+    STEMMIO_API_KEY: "sk-test",
+    STEMMIO_API_VENDOR: "deepseek",
+    STEMMIO_API_BASE_URL: "https://api.deepseek.com/v1",
+    STEMMIO_API_CREDENTIAL_GENERATION: "3",
+    STEMMIO_ENABLE_BETA_AGENT_MODELS: "1",
   };
   const installation = provider.resolveInstallation({ environment });
   const evidence = await provider.preflight(installation, { environment, selection: selection() });
-  assert.deepEqual(evidence.models.map(({ id }) => id), ["pageroot:deepseek-v4-pro", "pageroot:deepseek-v4-flash", "pageroot:deepseek-v4-flash-vision-exp"]);
+  assert.deepEqual(evidence.models.map(({ id }) => id), ["stemmio:deepseek-v4-pro", "stemmio:deepseek-v4-flash", "stemmio:deepseek-v4-flash-vision-exp"]);
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /\/chat\/completions$/u);
   assert.doesNotMatch(calls[0].url, /\/models$/u);
@@ -370,7 +370,7 @@ test("HTTP sniffs headerless JSON and SSE without losing or duplicating the firs
 
 test("HTTP joins many small HTML deltas once at protocol completion", async () => {
   const fragments = Array.from({ length: 2_000 }, (_, index) => String(index % 10));
-  const opening = "<!DOCTYPE html><html><head><title>many</title></head><body><p data-pageroot-id=\"one\">";
+  const opening = "<!DOCTYPE html><html><head><title>many</title></head><body><p data-stemmio-id=\"one\">";
   const closing = "</p></body></html>";
   const expected = `${opening}${fragments.join("")}${closing}`;
   const content = [opening, ...fragments, closing];
@@ -623,10 +623,10 @@ test("Custom diagnosis validates saved configuration without requiring a models 
     },
   });
   const environment = {
-    PAGEROOT_API_KEY: "sk-diagnose",
-    PAGEROOT_API_VENDOR: "custom",
-    PAGEROOT_API_BASE_URL: "https://api.example.com/v1",
-    PAGEROOT_API_CREDENTIAL_GENERATION: "1",
+    STEMMIO_API_KEY: "sk-diagnose",
+    STEMMIO_API_VENDOR: "custom",
+    STEMMIO_API_BASE_URL: "https://api.example.com/v1",
+    STEMMIO_API_CREDENTIAL_GENERATION: "1",
   };
   const installation = provider.resolveInstallation({ environment });
   const diagnostic = await provider.diagnose(installation, { environment });
@@ -640,10 +640,10 @@ test("Custom diagnosis validates saved configuration without requiring a models 
 
 test("HTTP diagnosis distinguishes authentication and network failures", async () => {
   const environment = {
-    PAGEROOT_API_KEY: "sk-diagnose",
-    PAGEROOT_API_VENDOR: "deepseek",
-    PAGEROOT_API_BASE_URL: "https://api.deepseek.com/v1",
-    PAGEROOT_API_CREDENTIAL_GENERATION: "1",
+    STEMMIO_API_KEY: "sk-diagnose",
+    STEMMIO_API_VENDOR: "deepseek",
+    STEMMIO_API_BASE_URL: "https://api.deepseek.com/v1",
+    STEMMIO_API_CREDENTIAL_GENERATION: "1",
   };
   const authProvider = createOpenAiCompatibleProvider({
     fetchImpl: async () => jsonResponse(401, { error: { code: "invalid_api_key" } }),
@@ -669,17 +669,17 @@ test("Custom requires a manual Model ID and validates that exact ID", async () =
     completeChat: async (input) => { model = input.modelId; return HTML; },
   });
   const environment = {
-    PAGEROOT_API_KEY: "sk-custom",
-    PAGEROOT_API_VENDOR: "custom",
-    PAGEROOT_API_BASE_URL: "https://api.safe-example.com/v1",
-    PAGEROOT_API_CREDENTIAL_GENERATION: "1",
+    STEMMIO_API_KEY: "sk-custom",
+    STEMMIO_API_VENDOR: "custom",
+    STEMMIO_API_BASE_URL: "https://api.safe-example.com/v1",
+    STEMMIO_API_CREDENTIAL_GENERATION: "1",
   };
   const installation = provider.resolveInstallation({ environment });
   await assert.rejects(() => provider.preflight(installation, { environment }), { code: "AGENT_MODEL_ID_REQUIRED" });
   const customSelection = selection("html-editor-model");
   const evidence = await provider.preflight(installation, { environment, selection: customSelection });
   assert.equal(model, "html-editor-model");
-  assert.deepEqual(evidence.models.map(({ id }) => id), ["pageroot:html-editor-model"]);
+  assert.deepEqual(evidence.models.map(({ id }) => id), ["stemmio:html-editor-model"]);
 });
 
 test("credential/model updates are transactional and failed candidates preserve the old connection", async () => {
@@ -692,16 +692,16 @@ test("credential/model updates are transactional and failed candidates preserve 
     },
   });
   const coordinator = new AgentRuntimeCoordinator({
-    environment: { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" },
+    environment: { STEMMIO_ENABLE_BETA_AGENT_MODELS: "1" },
     providerRegistry: providerRegistry(provider),
   });
-  const connected = await coordinator.updateAgentConfiguration("pageroot", {
+  const connected = await coordinator.updateAgentConfiguration("stemmio", {
     apiKey: "sk-good", vendorId: "deepseek", selection: selection(),
   });
   const oldTicket = await coordinator.preflight({
     selection: connected.selection, trustPolicyAccepted: TRUST,
   });
-  await assert.rejects(() => coordinator.updateAgentConfiguration("pageroot", {
+  await assert.rejects(() => coordinator.updateAgentConfiguration("stemmio", {
     apiKey: "sk-bad", vendorId: "openai", selection: selection("gpt-5.4"),
   }), { code: "AGENT_AUTH_REQUIRED" });
   await assert.rejects(() => coordinator.redeemCommandTicket(oldTicket.preflightId, {
@@ -737,18 +737,18 @@ test("cancelling a candidate configuration leaves the old connection in place", 
     },
   };
   const coordinator = new AgentRuntimeCoordinator({
-    environment: { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" },
+    environment: { STEMMIO_ENABLE_BETA_AGENT_MODELS: "1" },
     providerRegistry: providerRegistry(provider),
   });
-  const connected = await coordinator.updateAgentConfiguration("pageroot", {
+  const connected = await coordinator.updateAgentConfiguration("stemmio", {
     apiKey: "sk-good", vendorId: "deepseek", selection: selection(),
   });
   hold = true;
-  const pending = coordinator.updateAgentConfiguration("pageroot", {
+  const pending = coordinator.updateAgentConfiguration("stemmio", {
     apiKey: "sk-next", vendorId: "openai", selection: selection("gpt-5.4"),
   });
   await Promise.resolve();
-  const cancelled = coordinator.cancelAgentConfiguration("pageroot", 2);
+  const cancelled = coordinator.cancelAgentConfiguration("stemmio", 2);
   assert.equal(cancelled.cancelled, true);
   assert.equal(cancelled.configured, true);
   release();
@@ -764,13 +764,13 @@ test("cancelling a candidate configuration leaves the old connection in place", 
 test("configuration digest changes across credential generations and contains no Token digest", async () => {
   const provider = createOpenAiCompatibleProvider({ completeChat: async () => HTML });
   const coordinator = new AgentRuntimeCoordinator({
-    environment: { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" },
+    environment: { STEMMIO_ENABLE_BETA_AGENT_MODELS: "1" },
     providerRegistry: providerRegistry(provider),
   });
-  const first = await coordinator.updateAgentConfiguration("pageroot", {
+  const first = await coordinator.updateAgentConfiguration("stemmio", {
     apiKey: "sk-one", vendorId: "deepseek", selection: selection(),
   });
-  const second = await coordinator.updateAgentConfiguration("pageroot", {
+  const second = await coordinator.updateAgentConfiguration("stemmio", {
     apiKey: "sk-two", vendorId: "deepseek", selection: selection(),
   });
   assert.notEqual(first.configuration.configurationDigest, second.configuration.configurationDigest);
@@ -780,7 +780,7 @@ test("configuration digest changes across credential generations and contains no
 });
 
 test("HTTP context rejects binary attachments and labels untrusted text with bytes and hash", async (t) => {
-  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "pageroot-http-context-")));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "stemmio-http-context-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const textPath = path.join(root, "requirements.txt");
   const imagePath = path.join(root, "reference.png");
@@ -822,7 +822,7 @@ test("complete-document budgets account for both input and expected full output"
 });
 
 test("HTTP serialization rejects changed frozen attachments instead of sending bytes under an old hash", async (t) => {
-  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "pageroot-frozen-context-")));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "stemmio-frozen-context-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const filePath = path.join(root, "requirements.txt");
   const before = Buffer.from("frozen");
@@ -836,12 +836,12 @@ test("HTTP serialization rejects changed frozen attachments instead of sending b
 
 test("HTTP launch uses the selected ticket model capability snapshot", () => {
   const provider = createOpenAiCompatibleProvider();
-  const selected = { id: "pageroot:deepseek-v4-pro", supportsCompleteHtml: true,
+  const selected = { id: "stemmio:deepseek-v4-pro", supportsCompleteHtml: true,
     contextWindow: 9_999, recommendedMaxInputTokens: 8_000, maxOutputTokens: 1_000 };
   const launch = provider.createRuntimeLaunch({
     ticket: { selection: { resolvedModelId: selected.id }, evidence: { models: [selected] } },
-    policy: {}, baseEnvironment: { PAGEROOT_API_KEY: "sk-synthetic", PAGEROOT_API_VENDOR: "deepseek",
-      PAGEROOT_API_BASE_URL: "https://api.deepseek.com/v1", PAGEROOT_API_CREDENTIAL_GENERATION: "1" },
+    policy: {}, baseEnvironment: { STEMMIO_API_KEY: "sk-synthetic", STEMMIO_API_VENDOR: "deepseek",
+      STEMMIO_API_BASE_URL: "https://api.deepseek.com/v1", STEMMIO_API_CREDENTIAL_GENERATION: "1" },
   });
   assert.equal(launch.modelBudget.contextWindow, 9_999);
   selected.contextWindow = 1;
@@ -850,7 +850,7 @@ test("HTTP launch uses the selected ticket model capability snapshot", () => {
 });
 
 test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate without covering Working Copy", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-http-candidate-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-http-candidate-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sourceRoot = path.join(root, "sources");
   const sourcePath = path.join(sourceRoot, "page.html");
@@ -865,7 +865,7 @@ test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate wit
   let callCount = 0;
   const fetchImpl = async () => {
     callCount += 1;
-    return jsonResponse(200, { choices: [{ finish_reason: "stop", message: { content: callCount === 1 ? HTML : callCount === 2 ? candidateHtml.replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(12)}4fff8${"f".repeat(15)}`) : candidateHtml } }] });
+    return jsonResponse(200, { choices: [{ finish_reason: "stop", message: { content: callCount === 1 ? HTML : callCount === 2 ? candidateHtml.replace(/sm1_[a-f0-9]+/u, `sm1_${"f".repeat(12)}4fff8${"f".repeat(15)}`) : candidateHtml } }] });
   };
   const registry = providerRegistry(
     createOpenAiCompatibleProvider({ fetchImpl }),
@@ -873,7 +873,7 @@ test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate wit
   );
   let authority = null;
   const coordinator = new AgentRuntimeCoordinator({
-    environment: { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" },
+    environment: { STEMMIO_ENABLE_BETA_AGENT_MODELS: "1" },
     providerRegistry: registry,
     resolveTask: async () => authority,
     leaseStore: {
@@ -881,13 +881,13 @@ test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate wit
       release: async () => true,
     },
   });
-  const connected = await coordinator.updateAgentConfiguration("pageroot", {
+  const connected = await coordinator.updateAgentConfiguration("stemmio", {
     apiKey: "sk-synthetic", vendorId: "deepseek", selection: selection("deepseek-v4-flash", "low"),
   });
   const preflight = await coordinator.preflight({ selection: connected.selection, trustPolicyAccepted: TRUST });
   const request = await repository.prepareRequest({
     target: imported.target,
-    requestId: "req_pageroot_http_candidate",
+    requestId: "req_stemmio_http_candidate",
     attemptId: "attempt_001",
     expectedSourceSha256: imported.target.sourceSha256,
     request: {
@@ -905,7 +905,7 @@ test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate wit
     },
     prompt: "Write one complete Candidate page.",
   });
-  const requestRoot = path.join(imported.target.projectRootPath, ".pageroot", "requests", request.requestId);
+  const requestRoot = path.join(imported.target.projectRootPath, ".stemmio", "requests", request.requestId);
   authority = {
     run: {
       projectId: imported.target.projectId,
@@ -916,7 +916,7 @@ test("Coordinator → adapter → HTTP runtime → finalizer seals Candidate wit
       status: "processing",
       requestPath: requestRoot,
       promptPath: path.join(requestRoot, "PROMPT.md"),
-      outputPath: path.join(imported.target.projectRootPath, ".pageroot", ...request.outputRelativePath.split("/")),
+      outputPath: path.join(imported.target.projectRootPath, ".stemmio", ...request.outputRelativePath.split("/")),
       completionPath: path.join(requestRoot, "attempts", request.attemptId, "completion.json"),
     },
     request: { request: { agentDelivery: request.request.agentDelivery } },
@@ -966,10 +966,10 @@ for (const kind of ["forged", "duplicate", "lost"]) {
     const { materializeSourceElementIdentity } = await import("../bridge/project-file-repository/working-copy.mjs");
     const base = materializeSourceElementIdentity("<!doctype html><html><head><title>T</title></head><body><p>Before</p></body></html>").html;
     const good = base.replace("Before", "After");
-    const ids = [...base.matchAll(/data-pageroot-id="([^"]+)"/gu)].map((m) => m[1]);
-    const bad = kind === "forged" ? good.replace(ids[0], `pr1_${"f".repeat(12)}4fff8${"f".repeat(15)}`)
+    const ids = [...base.matchAll(/data-stemmio-id="([^"]+)"/gu)].map((m) => m[1]);
+    const bad = kind === "forged" ? good.replace(ids[0], `sm1_${"f".repeat(12)}4fff8${"f".repeat(15)}`)
       : kind === "duplicate" ? good.replace(ids[1], ids[0])
-      : good.replace(` data-pageroot-id="${ids[0]}"`, "");
+      : good.replace(` data-stemmio-id="${ids[0]}"`, "");
     let calls = 0;
     const result = await completeIdentityCheckedHtml({
       baseHtml: base, messages: [{ role: "user", content: base }], beforeGeneration: async () => {},
@@ -990,7 +990,7 @@ for (const kind of ["forged", "duplicate", "lost"]) {
 test("identity correction is bounded and cancellation prevents further model calls", async () => {
   const { materializeSourceElementIdentity } = await import("../bridge/project-file-repository/working-copy.mjs");
   const base = materializeSourceElementIdentity("<!doctype html><html><head></head><body><p>X</p></body></html>").html;
-  const bad = base.replace(/pr1_[a-f0-9]+/u, `pr1_${"f".repeat(12)}4fff8${"f".repeat(15)}`);
+  const bad = base.replace(/sm1_[a-f0-9]+/u, `sm1_${"f".repeat(12)}4fff8${"f".repeat(15)}`);
   let calls = 0;
   await assert.rejects(completeIdentityCheckedHtml({
     baseHtml: base, messages: [], beforeGeneration: async () => {},

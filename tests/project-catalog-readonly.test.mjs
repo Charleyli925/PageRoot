@@ -56,9 +56,9 @@ test("each catalog query scans project identities once while validating every re
   for (let i = 0; i < 4; i++) projects.push(await importSource(f, `catalog-${i}.html`));
   await f.repository.initialize();
   const decoyRoot = path.join(f.projects, "unregistered-metadata");
-  await fs.mkdir(path.join(decoyRoot, ".pageroot"), { recursive: true });
-  const decoyIdentity = path.join(decoyRoot, ".pageroot", "project.json");
-  const project = JSON.parse(await fs.readFile(path.join(projects[0].target.projectRootPath, ".pageroot", "project.json"), "utf8"));
+  await fs.mkdir(path.join(decoyRoot, ".stemmio"), { recursive: true });
+  const decoyIdentity = path.join(decoyRoot, ".stemmio", "project.json");
+  const project = JSON.parse(await fs.readFile(path.join(projects[0].target.projectRootPath, ".stemmio", "project.json"), "utf8"));
   await fs.writeFile(decoyIdentity, JSON.stringify({ ...project, projectId: `project_${"a".repeat(32)}` }));
   const registryBefore = await fs.readFile(registryPath(f));
   for (let query = 0; query < 2; query++) {
@@ -67,7 +67,7 @@ test("each catalog query scans project identities once while validating every re
     assert.ok(observed.result.every((row) => row.availability === "ready" && row.sourceStatus === "unknown"));
     assert.equal(observed.directoryReads.filter((file) => file === f.projects).length, 1);
     assert.equal(observed.reads.filter((file) => file === decoyIdentity).length, 1);
-    const identityReads = observed.reads.filter((file) => file.endsWith("/.pageroot/project.json"));
+    const identityReads = observed.reads.filter((file) => file.endsWith("/.stemmio/project.json"));
     t.diagnostic(`query ${query + 1}: ${projects.length} Registry members, 5 visible directories, 1 census, ${identityReads.length} project identity reads including complete contract validation`);
   }
   assert.deepEqual(await fs.readFile(registryPath(f)), registryBefore);
@@ -82,13 +82,13 @@ test("census retains duplicate identities and isolates malformed, hidden and sym
   await fs.cp(healthy.target.projectRootPath, path.join(f.projects, ".hidden-copy"), { recursive: true });
   await fs.symlink(healthy.target.projectRootPath, path.join(f.projects, "linked-copy"));
   await fs.cp(duplicated.target.projectRootPath, path.join(f.projects, "duplicate-copy"), { recursive: true });
-  const malformed = path.join(f.projects, "malformed", ".pageroot");
+  const malformed = path.join(f.projects, "malformed", ".stemmio");
   await fs.mkdir(malformed, { recursive: true });
   await fs.writeFile(path.join(malformed, "project.json"), "{invalid");
   const incompleteCopy = path.join(f.projects, "incomplete-copy");
   await fs.cp(healthy.target.projectRootPath, incompleteCopy, { recursive: true });
-  await fs.writeFile(path.join(incompleteCopy, ".pageroot", "manifest.json"), "{}");
-  const runtimePath = path.join(damaged.target.projectRootPath, ".pageroot", "runtime-state.json");
+  await fs.writeFile(path.join(incompleteCopy, ".stemmio", "manifest.json"), "{}");
+  const runtimePath = path.join(damaged.target.projectRootPath, ".stemmio", "runtime-state.json");
   const runtime = JSON.parse(await fs.readFile(runtimePath, "utf8"));
   await fs.writeFile(runtimePath, JSON.stringify({ ...runtime, documentId: healthy.target.documentId }));
   const registryBefore = await fs.readFile(registryPath(f));

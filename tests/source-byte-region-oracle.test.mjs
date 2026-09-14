@@ -410,7 +410,7 @@ test("one declared region reports multiple disjoint byte runs independently", ()
 
 test("identity materialization is an excluded baseline, then each edit rebases from its accepted bytes", () => {
   const original = Buffer.from("<p>中文</p>", "utf8");
-  const acceptedBaseline = Buffer.from('<p data-pageroot-id="pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa">中文</p>', "utf8");
+  const acceptedBaseline = Buffer.from('<p data-stemmio-id="sm1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa">中文</p>', "utf8");
   const editOne = replaceBytes(acceptedBaseline, "中文", "中文🙂");
   const editOneRegion = regionForReplacement(acceptedBaseline, editOne, "中文", "中文🙂", 0, "text-one");
   const identity = createIdentityMaterializationBaseline(original, acceptedBaseline, { phase: "identity" });
@@ -425,8 +425,8 @@ test("identity materialization is an excluded baseline, then each edit rebases f
   assert.equal(first.identityMaterializationBaseline.baselineMatchesBefore, true);
   assert.equal(first.changedRanges.length, 1);
 
-  const editTwo = replaceBytes(editOne, "data-pageroot-id", "data-pageroot-key");
-  const editTwoRegion = regionForReplacement(editOne, editTwo, "data-pageroot-id", "data-pageroot-key", 0, "attribute-two");
+  const editTwo = replaceBytes(editOne, "data-stemmio-id", "data-stemmio-key");
+  const editTwoRegion = regionForReplacement(editOne, editTwo, "data-stemmio-id", "data-stemmio-key", 0, "attribute-two");
   const second = compareSourceByteRegions({
     before: editOne,
     after: editTwo,

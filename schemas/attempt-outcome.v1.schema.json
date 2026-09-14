@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/attempt-outcome.v1.schema.json",
-  "title": "HTML AI immutable Attempt outcome v1",
+  "$id": "https://stemmio.local/schemas/attempt-outcome.v1.schema.json",
+  "title": "Stemmio immutable Attempt outcome v1",
   "description": "The terminal, per-Attempt audit record. Success is the only branch that points to a committed Version; no-change, cancellation, failure and keeping an external source do not consume the candidate Version.",
   "oneOf": [
     {

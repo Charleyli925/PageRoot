@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/version-transaction.v1.schema.json",
-  "title": "HTML AI two-phase Version transaction v1",
+  "$id": "https://stemmio.local/schemas/version-transaction.v1.schema.json",
+  "title": "Stemmio two-phase Version transaction v1",
   "description": "A durable journal for preserving the prior source, publishing a non-overwriting active working copy, and aligning the immutable Version snapshot, commit marker, registry and project cache.",
   "type": "object",
   "additionalProperties": false,

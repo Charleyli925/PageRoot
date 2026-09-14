@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 export const AGENT_SESSION_CREDENTIAL_FILE_NAME = "agent-session-credential.v1.json";
 const SCHEMA_VERSION = 1;
 const MAX_BYTES = 16_384;
-const PROVIDER_ID = "pageroot";
+const PROVIDER_ID = "stemmio";
 const SAFE_VENDOR = /^(?:deepseek|zhipu|dashscope|openai|custom)$/u;
 const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,79}$/u;
 const HTTPS_ORIGIN = /^https:\/\//u;

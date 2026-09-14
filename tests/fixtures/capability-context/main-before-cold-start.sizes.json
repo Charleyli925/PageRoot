@@ -92,7 +92,7 @@
   "tests/document-session.test.mjs": 11618,
   "tests/document-workflow.test.mjs": 66934,
   "tests/html-canvas-capability-hover.test.mjs": 8691,
-  "tests/pageroot-element-identity.test.mjs": 10325,
+  "tests/stemmio-element-identity.test.mjs": 10325,
   "tests/project-plan.test.mjs": 6293,
   "tests/project-session.test.mjs": 6048,
   "tests/project-workflow.test.mjs": 116415,

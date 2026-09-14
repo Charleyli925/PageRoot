@@ -6,7 +6,7 @@ import electronConfig from "./playwright.config.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
-const smokeId = process.env.PAGEROOT_SMOKE_SUITE || "electron-smoke";
+const smokeId = process.env.STEMMIO_SMOKE_SUITE || "electron-smoke";
 
 export default defineConfig({
   ...electronConfig,

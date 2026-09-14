@@ -25,7 +25,7 @@ import {
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 
 function html(label) {
-  return `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head data-pageroot-id="pr1_22222222222242229222222222222222"><title data-pageroot-id="pr1_3333333333334333a333333333333333">${label}</title></head><body data-pageroot-id="pr1_4444444444444444b444444444444444"><h1 data-pageroot-id="pr1_55555555555545558555555555555555">${label}</h1></body></html>`;
+  return `<!doctype html><html data-stemmio-id="sm1_11111111111141118111111111111111"><head data-stemmio-id="sm1_22222222222242229222222222222222"><title data-stemmio-id="sm1_3333333333334333a333333333333333">${label}</title></head><body data-stemmio-id="sm1_4444444444444444b444444444444444"><h1 data-stemmio-id="sm1_55555555555545558555555555555555">${label}</h1></body></html>`;
 }
 
 async function postJson(bridge, pathname, body) {
@@ -34,12 +34,12 @@ async function postJson(bridge, pathname, body) {
 
 test("project-file PR1 import switches to V1 before the queued save and leaves external bytes untouched", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-bridge-",
+    prefix: "stemmio-project-file-bridge-",
   });
   const original = html("external V1");
   const sourcePath = await environment.createSource("external.htm", original);
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
@@ -92,7 +92,7 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.equal(saved.body.currentExactVersionId, null);
   assert.equal(await readFile(sourcePath, "utf8"), original);
   const manifest = JSON.parse(await readFile(
-    join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
+    join(ensured.body.projectRoot, ".stemmio", "manifest.json"),
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -105,12 +105,12 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
 
 test("the Bridge exposes every Registry member and opens one only by projectId", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-catalog-",
+    prefix: "stemmio-project-file-catalog-",
   });
   const aPath = await environment.createSource("A.html", html("A"));
   const bPath = await environment.createSource("B.html", html("B"));
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
 
   const ensure = async (sourcePath) => {
@@ -172,11 +172,11 @@ test("the Bridge exposes every Registry member and opens one only by projectId",
 
 test("the Bridge exposes content-free version summaries without rewriting a renamed Working Copy", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-version-summary-",
+    prefix: "stemmio-project-file-version-summary-",
   });
   const sourcePath = await environment.createSource("summary.html", html("summary"));
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
@@ -187,7 +187,7 @@ test("the Bridge exposes content-free version summaries without rewriting a rena
     projectStorageVersion: "4.0.0",
   });
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
-  const manifestPath = join(ensured.body.projectRoot, ".pageroot", "manifest.json");
+  const manifestPath = join(ensured.body.projectRoot, ".stemmio", "manifest.json");
   const manifestBeforeRename = await readFile(manifestPath);
   const renamed = join(ensured.body.projectRoot, "summary renamed.html");
   await rename(ensured.body.sourcePath, renamed);
@@ -222,7 +222,7 @@ test("the Bridge exposes content-free version summaries without rewriting a rena
 
 test("a new v4 import never enters or mutates the legacy v3 project main path", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-pre-v4-",
+    prefix: "stemmio-project-file-pre-v4-",
   });
   const original = html("pre-v4 external source");
   const sourcePath = await environment.createSource("pre-v4.html", original);
@@ -261,7 +261,7 @@ test("a new v4 import never enters or mutates the legacy v3 project main path", 
   const legacyProjectBefore = await readFile(legacyProjectPath);
   const legacyTreeBefore = await readdir(legacyProjectRoot, { recursive: true });
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
 
   const preview = await bridge.requestJson(
@@ -296,11 +296,11 @@ test("a new v4 import never enters or mutates the legacy v3 project main path", 
   assert.deepEqual(await readFile(legacyProjectPath), legacyProjectBefore);
   assert.deepEqual(await readdir(legacyProjectRoot, { recursive: true }), legacyTreeBefore);
   const manifest = JSON.parse(await readFile(
-    join(imported.body.projectRoot, ".pageroot", "manifest.json"),
+    join(imported.body.projectRoot, ".stemmio", "manifest.json"),
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
-  const newControlEntries = await readdir(join(imported.body.projectRoot, ".pageroot"));
+  const newControlEntries = await readdir(join(imported.body.projectRoot, ".stemmio"));
   assert.equal(newControlEntries.includes("project-state.v3.json"), false);
   assert.equal(newControlEntries.includes("source-history.json"), false);
   assert.equal(newControlEntries.includes("history"), false);
@@ -317,7 +317,7 @@ test("Bridge creates from history in the same current draft and exposes local sn
   const environment = await createBridgeTestEnvironment(t, { prefix: "stemmio-current-bridge-" });
   const projectsRoot = join(environment.root, "project-files");
   const sourcePath = await environment.createSource("history-bridge.html", html("initial"));
-  const bridge = await environment.start({ HTML_AI_PROJECT_FILES_ROOT: projectsRoot });
+  const bridge = await environment.start({ STEMMIO_PROJECT_FILES_ROOT: projectsRoot });
   const preview = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(sourcePath)}`);
   const ensured = await postJson(bridge, "/project/ensure", { sourcePath, expectedSourceSha256: preview.body.currentHtmlSha256, projectStorageVersion: "4.0.0" });
   assert.equal(ensured.response.status, 200);
@@ -372,7 +372,7 @@ test("Bridge reads immutable V1 and V2 after saving V2 in the single current dra
   const edited = html("local immutable V2");
   const sourcePath = await environment.createSource("history.html", original);
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(sourcePath)}`);
   const ensured = await postJson(bridge, "/project/ensure", {
@@ -400,7 +400,7 @@ test("Bridge reads immutable V1 and V2 after saving V2 in the single current dra
   assert.equal(saved.body.versionId, "ver_0002");
   assert.equal(saved.body.workingCopyId, target.workingCopyId);
 
-  const manifestPath = join(ensured.body.projectRoot, ".pageroot", "manifest.json");
+  const manifestPath = join(ensured.body.projectRoot, ".stemmio", "manifest.json");
   const manifestBefore = await readFile(manifestPath, "utf8");
   const manifest = JSON.parse(manifestBefore);
   assert.equal(manifest.workingCopies.length, 1);
@@ -433,7 +433,7 @@ test("Bridge reads immutable V1 and V2 after saving V2 in the single current dra
   assert.equal(await readFile(sourcePath, "utf8"), original);
 
   const versionOne = manifest.versions.find((version) => version.versionId === "ver_0001");
-  await writeFile(join(ensured.body.projectRoot, ".pageroot", versionOne.snapshotRelativePath), html("tampered V1"));
+  await writeFile(join(ensured.body.projectRoot, ".stemmio", versionOne.snapshotRelativePath), html("tampered V1"));
   const rejected = await readVersion("ver_0001");
   assert.equal(rejected.response.ok, false);
   assert.equal(rejected.body.error.code, "VERSION_HASH_MISMATCH");
@@ -442,7 +442,7 @@ test("Bridge reads immutable V1 and V2 after saving V2 in the single current dra
 
 test("project-file PROJECT.md remains available through the shared project-file inspector", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-rules-",
+    prefix: "stemmio-project-file-rules-",
   });
   const sourcePath = await environment.createSource("rules.html", html("external V1"));
   const bridge = await environment.start();
@@ -489,12 +489,12 @@ test("project-file PROJECT.md remains available through the shared project-file 
 
 test("project-file Request becomes a Candidate on finalization and a Version only on adoption", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-candidate-",
+    prefix: "stemmio-project-file-candidate-",
   });
   const original = html("external V1");
   const sourcePath = await environment.createSource("candidate.html", original);
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
@@ -509,7 +509,7 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   const taskText = "将标题改为 Candidate。确保标题保持可读；本轮不需要修改导航栏。";
   const runtimeSourceAnchor = {
     targetId: "target_candidate",
-    elementId: "pr1_11111111111141118111111111111111",
+    elementId: "sm1_11111111111141118111111111111111",
     label: "财务数据表",
     level: "subregion",
     selector: "main",
@@ -563,7 +563,7 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(
     await readFile(join(
       ensured.body.projectRoot,
-      ".pageroot",
+      ".stemmio",
       "requests",
       request.body.requestId,
       "input",
@@ -572,7 +572,7 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   projectRules);
   const frozenTask = JSON.parse(await readFile(join(
     ensured.body.projectRoot,
-    ".pageroot",
+    ".stemmio",
     "requests",
     request.body.requestId,
     "change-request.json",
@@ -594,9 +594,9 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(processingAiTask.body.requestId, request.body.requestId);
   assert.equal(processingAiTask.body.candidatePath, null);
   assert.match(processingAiTask.body.aiTaskRelativePath, /^AI任务\//u);
-  assert.equal(processingAiTask.body.aiTaskPath.includes("/.pageroot/"), false);
+  assert.equal(processingAiTask.body.aiTaskPath.includes("/.stemmio/"), false);
   const prompt = await readFile(
-    join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "PROMPT.md"),
+    join(ensured.body.projectRoot, ".stemmio", "requests", request.body.requestId, "PROMPT.md"),
     "utf8",
   );
   assert.match(prompt, /## 本轮目标/u);
@@ -613,11 +613,11 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.match(prompt, /财务数据表/u);
   assert.match(prompt, /table:nth-of-type\(1\)/u);
   assert.match(prompt, /项目（百万元） 2025Q1 2025Q2 2026Q2/u);
-  assert.doesNotMatch(prompt, /data-pageroot-id|data-html-ai-source-node-id/u);
+  assert.doesNotMatch(prompt, /data-stemmio-id|data-html-ai-source-node-id/u);
 
   const outputPath = join(
     ensured.body.projectRoot,
-    ".pageroot",
+    ".stemmio",
     ...request.body.outputRelativePath.split("/"),
   );
   const candidateHtml = html("Candidate V2");
@@ -643,7 +643,7 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(readyAiTask.response.status, 200, JSON.stringify(readyAiTask.body));
   assert.match(readyAiTask.body.candidatePath, /-V2-待审阅\.html$/u);
   assert.equal(await readFile(readyAiTask.body.candidatePath, "utf8"), candidateHtml);
-  const controlRoot = join(ensured.body.projectRoot, ".pageroot");
+  const controlRoot = join(ensured.body.projectRoot, ".stemmio");
   const candidateRecordPath = join(
     controlRoot,
     "requests",
@@ -670,7 +670,7 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(sealRejected.body.error.code, "CANDIDATE_AUTHORITY_MISMATCH");
   await writeFile(candidateRecordPath, candidateRecord);
   const beforeAdoption = JSON.parse(await readFile(
-    join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
+    join(ensured.body.projectRoot, ".stemmio", "manifest.json"),
     "utf8",
   ));
   assert.deepEqual(beforeAdoption.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -710,7 +710,7 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(wrongDecision.response.status, 409, JSON.stringify(wrongDecision.body));
   assert.equal(wrongDecision.body.error.code, "DECISION_IDENTITY_MISMATCH");
   const afterRejectedAdoptions = JSON.parse(await readFile(
-    join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
+    join(ensured.body.projectRoot, ".stemmio", "manifest.json"),
     "utf8",
   ));
   assert.deepEqual(
@@ -732,7 +732,7 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(adopted.body.versionId, "ver_0002");
   assert.equal(adopted.body.sourcePath, ensured.body.sourcePath);
   const afterAdoption = JSON.parse(await readFile(
-    join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
+    join(ensured.body.projectRoot, ".stemmio", "manifest.json"),
     "utf8",
   ));
   assert.deepEqual(afterAdoption.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
@@ -741,12 +741,12 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
 for (const legacyTerminal of [false, true]) {
 test(`Bridge reopens identical output with its original lifecycle (legacy terminal: ${legacyTerminal})`, async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-no-change-ai-task-",
+    prefix: "stemmio-project-file-no-change-ai-task-",
   });
   const original = html("no-change source");
   const sourcePath = await environment.createSource("no-change.html", original);
   let bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
@@ -776,7 +776,7 @@ test(`Bridge reopens identical output with its original lifecycle (legacy termin
   await writeFile(
     join(
       ensured.body.projectRoot,
-      ".pageroot",
+      ".stemmio",
       ...request.body.outputRelativePath.split("/"),
     ),
     original,
@@ -802,7 +802,7 @@ test(`Bridge reopens identical output with its original lifecycle (legacy termin
   assert.equal(replay.body.status, status.body.status);
   await bridge.stop();
   bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const reopened = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
@@ -821,9 +821,9 @@ test(`Bridge reopens identical output with its original lifecycle (legacy termin
     );
     assert.equal(review.body.content, original);
     assert.equal(review.body.candidate.status, "pending-review");
-    const candidate = JSON.parse(await readFile(join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "candidate.json"), "utf8"));
+    const candidate = JSON.parse(await readFile(join(ensured.body.projectRoot, ".stemmio", "requests", request.body.requestId, "candidate.json"), "utf8"));
     assert.equal(review.body.candidate.candidateId, candidate.candidateId);
-    const manifest = JSON.parse(await readFile(join(ensured.body.projectRoot, ".pageroot", "manifest.json"), "utf8"));
+    const manifest = JSON.parse(await readFile(join(ensured.body.projectRoot, ".stemmio", "manifest.json"), "utf8"));
     assert.equal(manifest.versions.length, 1);
     assert.equal(await readFile(ensured.body.sourcePath, "utf8"), original);
     return;
@@ -845,13 +845,13 @@ test(`Bridge reopens identical output with its original lifecycle (legacy termin
   assert.equal(
     await readFile(join(terminalAiTask.body.aiTaskPath, "PROMPT.md"), "utf8"),
     await readFile(
-      join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "PROMPT.md"),
+      join(ensured.body.projectRoot, ".stemmio", "requests", request.body.requestId, "PROMPT.md"),
       "utf8",
     ),
   );
   const requestPath = join(
     ensured.body.projectRoot,
-    ".pageroot",
+    ".stemmio",
     "requests",
     request.body.requestId,
     "request.json",
@@ -869,11 +869,11 @@ test(`Bridge reopens identical output with its original lifecycle (legacy termin
 
 test("a finalized but unusable Candidate remains an error and never creates a Version", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-validation-",
+    prefix: "stemmio-project-file-validation-",
   });
   const sourcePath = await environment.createSource("validation.html", html("external V1"));
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
@@ -902,12 +902,12 @@ test("a finalized but unusable Candidate remains an error and never creates a Ve
   assert.equal(request.response.status, 201, JSON.stringify(request.body));
   const outputPath = join(
     ensured.body.projectRoot,
-    ".pageroot",
+    ".stemmio",
     ...request.body.outputRelativePath.split("/"),
   );
   await writeFile(
     outputPath,
-    "<!doctype html><html data-pageroot-id=\"pr1_11111111111141118111111111111111\"><head data-pageroot-id=\"pr1_22222222222242229222222222222222\"><title data-pageroot-id=\"pr1_3333333333334333a333333333333333\">empty</title></head><body data-pageroot-id=\"pr1_4444444444444444b444444444444444\"></body></html>",
+    "<!doctype html><html data-stemmio-id=\"sm1_11111111111141118111111111111111\"><head data-stemmio-id=\"sm1_22222222222242229222222222222222\"><title data-stemmio-id=\"sm1_3333333333334333a333333333333333\">empty</title></head><body data-stemmio-id=\"sm1_4444444444444444b444444444444444\"></body></html>",
     "utf8",
   );
   await finalizeProjectFileAttempt({
@@ -929,15 +929,15 @@ test("a finalized but unusable Candidate remains an error and never creates a Ve
   assert.equal(terminalAiTask.body.status, "error");
   assert.equal(terminalAiTask.body.requestId, request.body.requestId);
   assert.equal(terminalAiTask.body.candidatePath, null);
-  assert.equal(terminalAiTask.body.aiTaskPath.includes("/.pageroot/"), false);
+  assert.equal(terminalAiTask.body.aiTaskPath.includes("/.stemmio/"), false);
   const manifest = JSON.parse(await readFile(
-    join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
+    join(ensured.body.projectRoot, ".stemmio", "manifest.json"),
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
   await assert.rejects(access(join(
     ensured.body.projectRoot,
-    ".pageroot",
+    ".stemmio",
     "requests",
     request.body.requestId,
     "candidate.json",
@@ -946,7 +946,7 @@ test("a finalized but unusable Candidate remains an error and never creates a Ve
 
 test("unmanaged HTML stays an import source and mutations fail closed without a v4 project", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-unmanaged-open-",
+    prefix: "stemmio-unmanaged-open-",
   });
   const original = html("unmanaged");
   const sourcePath = await environment.createSource("open.html", original);
@@ -993,7 +993,7 @@ test("unmanaged HTML stays an import source and mutations fail closed without a 
 
 test("v4 attachments and absent conflicts stay bound to the project root", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-v4-attachments-",
+    prefix: "stemmio-v4-attachments-",
   });
   const sourcePath = await environment.createSource("attach.html", html("attach"));
   const bridge = await environment.start();
@@ -1010,7 +1010,7 @@ test("v4 attachments and absent conflicts stay bound to the project root", async
   const commentId = "comment_attach";
   const attachmentId = "attachment_one";
   const fileName = "note.txt";
-  const payload = Buffer.from("pageroot-v4-attachment", "utf8");
+  const payload = Buffer.from("stemmio-v4-attachment", "utf8");
   const saved = await postJson(bridge, "/attachment", {
     sourcePath: workingPath,
     projectId: ensured.body.projectId,
@@ -1094,11 +1094,11 @@ test("v4 attachments and absent conflicts stay bound to the project root", async
 
 test("Bridge POST /managed-working-copy/reconcile rebinds a Finder rename by stable IDs", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-managed-reconcile-",
+    prefix: "stemmio-managed-reconcile-",
   });
   const sourcePath = await environment.createSource("bridge-rename.html", html("bridge V1"));
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+    STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
@@ -1149,15 +1149,15 @@ test("Bridge POST /managed-working-copy/reconcile rebinds a Finder rename by sta
 
 test("open-classification is read-only and returns A/B/C without source keys or original paths", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-open-classification-",
+    prefix: "stemmio-open-classification-",
   });
   const original = html("classify original");
   const sourcePath = await environment.createSource("classify-me.html", original);
   const projectFilesRoot = join(environment.root, "project-files");
   const bridge = await environment.start({
-    HTML_AI_PROJECT_FILES_ROOT: projectFilesRoot,
+    STEMMIO_PROJECT_FILES_ROOT: projectFilesRoot,
   });
-  const registryFile = join(projectFilesRoot, ".pageroot-registry.json");
+  const registryFile = join(projectFilesRoot, ".stemmio-registry.json");
 
   const beforeImport = await postJson(bridge, "/project/open-classification", { sourcePath });
   assert.equal(beforeImport.response.status, 200, JSON.stringify(beforeImport.body));
@@ -1220,7 +1220,7 @@ test("open-classification is read-only and returns A/B/C without source keys or 
 test("Bridge creates and queries a manual historical Version with a distinct source type", async (t) => {
   const environment = await createBridgeTestEnvironment(t, { prefix: "stemmio-history-create-" });
   const sourcePath = await environment.createSource("manual.html", html("initial"));
-  const bridge = await environment.start({ HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files") });
+  const bridge = await environment.start({ STEMMIO_PROJECT_FILES_ROOT: join(environment.root, "project-files") });
   const preview = await bridge.requestJson(`/workspace?sourcePath=${encodeURIComponent(sourcePath)}`);
   const ensured = await postJson(bridge, "/project/ensure", { sourcePath, expectedSourceSha256: preview.body.currentHtmlSha256, projectStorageVersion: "4.0.0" });
   assert.equal(ensured.response.status, 200);

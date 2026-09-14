@@ -2,14 +2,14 @@
 
 ## Destination and release configuration
 
-Packaged PageRoot builds send batches to the PostHog host embedded at packaging
+Packaged Stemmio builds send batches to the PostHog host embedded at packaging
 time. The current production region is US Cloud:
 
 ```text
 https://us.i.posthog.com/batch/
 ```
 
-Configure the repository Actions secret `PAGEROOT_POSTHOG_TOKEN` with the
+Configure the repository Actions secret `STEMMIO_POSTHOG_TOKEN` with the
 PostHog **Project token** beginning with `phc_`. Never use a personal API key or
 Project secret API key. `Release Candidate` refuses to package when the token
 is absent, writes a generated `usage-telemetry-config.json`, and verifies the
@@ -27,21 +27,21 @@ PostHog receives the following names. All events also carry
 
 | Event | Purpose | Main properties |
 | --- | --- | --- |
-| `pageroot app launched` | Active installations and launches | `launch_reason` |
-| `pageroot app session ended` | Completed session duration | `reason`, `duration_bucket` |
-| `pageroot project context opened` | Registered vs preview-only project use | `registered`, `view_mode` |
-| `pageroot module viewed` | Feature adoption | `module` |
-| `pageroot direct edit batch` | Aggregated direct editing | `edit_kind`, `property_group`, `edit_count` |
-| `pageroot source save batch` | Aggregated successful writes | `save_count` |
-| `pageroot source persistence changed` | Save failure or conflict | `from_state`, `to_state` |
-| `pageroot comment saved` | Comment workflow use without content | `target_level`, `has_text`, `attachment_count`, `has_image`, `has_file` |
-| `pageroot ai run state changed` | AI handoff funnel | `from_state`, `to_state`, `comment_count`, `edit_count` |
-| `pageroot operation finished` | Desktop operation reliability | `operation`, `result`, `error_code`, `duration_bucket` |
-| `pageroot notification presented` | Reminder volume and cause | `notice_code`, `tone`, `disposition`, `surface`, `has_action` |
-| `pageroot notification interacted` | Reminder action/dismiss behavior | `notice_code`, `interaction`, `surface` |
-| `pageroot interruption changed` | User-flow interruption and recovery | `interruption_code`, `phase`, `result`, `surface` |
-| `pageroot renderer fault` | UI failures grouped locally | `kind`, `fingerprint`, `fatal` |
-| `pageroot runtime fault` | Main/Bridge/renderer runtime health | `process`, `kind`, `reason_code`, `fingerprint`, `exit_code` |
+| `stemmio app launched` | Active installations and launches | `launch_reason` |
+| `stemmio app session ended` | Completed session duration | `reason`, `duration_bucket` |
+| `stemmio project context opened` | Registered vs preview-only project use | `registered`, `view_mode` |
+| `stemmio module viewed` | Feature adoption | `module` |
+| `stemmio direct edit batch` | Aggregated direct editing | `edit_kind`, `property_group`, `edit_count` |
+| `stemmio source save batch` | Aggregated successful writes | `save_count` |
+| `stemmio source persistence changed` | Save failure or conflict | `from_state`, `to_state` |
+| `stemmio comment saved` | Comment workflow use without content | `target_level`, `has_text`, `attachment_count`, `has_image`, `has_file` |
+| `stemmio ai run state changed` | AI handoff funnel | `from_state`, `to_state`, `comment_count`, `edit_count` |
+| `stemmio operation finished` | Desktop operation reliability | `operation`, `result`, `error_code`, `duration_bucket` |
+| `stemmio notification presented` | Reminder volume and cause | `notice_code`, `tone`, `disposition`, `surface`, `has_action` |
+| `stemmio notification interacted` | Reminder action/dismiss behavior | `notice_code`, `interaction`, `surface` |
+| `stemmio interruption changed` | User-flow interruption and recovery | `interruption_code`, `phase`, `result`, `surface` |
+| `stemmio renderer fault` | UI failures grouped locally | `kind`, `fingerprint`, `fatal` |
+| `stemmio runtime fault` | Main/Bridge/renderer runtime health | `process`, `kind`, `reason_code`, `fingerprint`, `exit_code` |
 
 Exact enum values and acceptance rules live in
 `desktop/usage-telemetry.mjs`. Adding a field requires updating the strict
@@ -74,8 +74,8 @@ false`; autocapture and session replay are not installed.
 After installing a telemetry-enabled candidate:
 
 1. Open PostHog’s live events view and filter event names beginning with
-   `pageroot`.
-2. Open About PageRoot, switch Canvas modes, perform one direct edit, allow it
+   `stemmio`.
+2. Open About Stemmio, switch Canvas modes, perform one direct edit, allow it
    to save, and trigger one safe notification test path.
 3. Confirm only enum/code/count fields appear. Search the event payload for the
    test HTML text, filename, path and comment text; each must be absent.

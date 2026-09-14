@@ -67,7 +67,7 @@ export function isVerifiedStructuralProjectionPlan(
 ): plan is VerifiedStructuralProjectionPlan;
 
 export function isStructuralInPlaceEnabled(
-  globalObject?: { __PAGEROOT_DISABLE_STRUCTURAL_IN_PLACE__?: unknown },
+  globalObject?: { __STEMMIO_DISABLE_STRUCTURAL_IN_PLACE__?: unknown },
 ): boolean;
 
 export function isUnsupportedInPlaceTag(tagName: string | null | undefined): boolean;

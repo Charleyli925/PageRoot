@@ -13,8 +13,8 @@ const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
 
 function httpRow(model) {
   return Object.freeze({
-    id: `pageroot:${model.modelId}`,
-    providerId: "pageroot",
+    id: `stemmio:${model.modelId}`,
+    providerId: "stemmio",
     vendorId: model.vendorId,
     modelId: model.modelId,
     productChannel: model.releaseChannel,

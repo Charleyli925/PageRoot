@@ -35,7 +35,7 @@ test("nested and symlinked Working Copy mappings are rejected before a save can 
   await writeFile(externalHtml, html("outside before"), "utf8");
   await symlink(outside, path.join(imported.target.projectRootPath, "escape"), "dir");
 
-  const manifestPath = path.join(imported.target.projectRootPath, ".pageroot", "manifest.json");
+  const manifestPath = path.join(imported.target.projectRootPath, ".stemmio", "manifest.json");
   const manifest = await json(manifestPath);
   manifest.workingCopies[0].sourceRelativePath = "escape/nested/target.html";
   await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
@@ -62,7 +62,7 @@ test("Registry and managed control paths reject symlinks", async (t) => {
   const imported = await importSource(rootLink, "root-link.html");
   const alias = path.join(rootLink.projects, "symlinked-project");
   await symlink(imported.target.projectRootPath, alias, "dir");
-  const registryPath = path.join(rootLink.projects, ".pageroot-registry.json");
+  const registryPath = path.join(rootLink.projects, ".stemmio-registry.json");
   const registry = await json(registryPath);
   registry.projects[imported.target.projectId].registeredProjectRootPath = alias;
   await writeFile(registryPath, JSON.stringify(registry), "utf8");
@@ -76,7 +76,7 @@ test("Registry and managed control paths reject symlinks", async (t) => {
 
   const controlLink = await fixture(t);
   const controlImported = await importSource(controlLink, "control-link.html");
-  const controlRoot = path.join(controlImported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(controlImported.target.projectRootPath, ".stemmio");
   const relocatedControlRoot = path.join(controlLink.root, "relocated-control-root");
   await rename(controlRoot, relocatedControlRoot);
   await symlink(relocatedControlRoot, controlRoot, "dir");
@@ -165,7 +165,7 @@ test("a failed lock release never replaces a committed import result", async (t)
   });
   assert.equal(next.imported, true);
   assert.equal(
-    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    (await readdir(value.projects)).includes(".stemmio-registry-write-lock"),
     false,
   );
 });
@@ -200,7 +200,7 @@ test("a live Registry write lock fails busy; a dead lock can be retired by its e
   });
   assert.equal(imported.imported, true);
   assert.equal(
-    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    (await readdir(value.projects)).includes(".stemmio-registry-write-lock"),
     false,
   );
 });
@@ -274,12 +274,12 @@ for (const shape of [
 
     assert.equal(imported.imported, true);
     assert.equal(
-      (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+      (await readdir(value.projects)).includes(".stemmio-registry-write-lock"),
       false,
     );
     assert.equal(
       (await readdir(value.projects)).some(
-        (entry) => entry.startsWith(".pageroot-lock-unresolvable-"),
+        (entry) => entry.startsWith(".stemmio-lock-unresolvable-"),
       ),
       false,
     );
@@ -310,7 +310,7 @@ test("an unresolvable Registry write lock inside its grace period still fails bu
       && error.code === "REGISTRY_BUSY",
   );
   assert.equal(
-    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    (await readdir(value.projects)).includes(".stemmio-registry-write-lock"),
     true,
   );
 });
@@ -337,7 +337,7 @@ test("an aged lock owned by a live process is never reclaimed", async (t) => {
       && error.code === "REGISTRY_BUSY",
   );
   assert.equal(
-    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    (await readdir(value.projects)).includes(".stemmio-registry-write-lock"),
     true,
   );
 });

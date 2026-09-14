@@ -6,7 +6,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>源页 · PageRoot</title>
+  <title>源页 · Stemmio</title>
   <style>
     :root {
       --paper: #fffdf8;
@@ -358,12 +358,12 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
         <div class="brand-row">
           <div class="brand-lockup">
             <img src="./${WELCOME_LOGO_RELATIVE_PATH}" alt="源页 Logo" />
-            <div><strong>源页</strong><small>PAGEROOT</small></div>
+            <div><strong>源页</strong><small>STEMMIO</small></div>
           </div>
         </div>
         <p class="eyebrow">Visual HTML × AI Agents</p>
         <h1><span>所见，即可落笔。</span><span>所改，止于所选。</span></h1>
-        <p class="intro">在真实 HTML 上直接修改，也可以指出位置、写下评论并交给 AI Agent。结果回来后，源页把修改前后并排呈现、逐处标出变化；看清之后，再由你决定打开哪一版。</p>
+        <p class="intro">在真实 HTML 上直接修改；需要 AI 帮忙时，选中页面内容并留下评论，在 AI 面板选择并连接你信任的 Agent。结果回来后，源页把修改前后并排呈现、逐处标出变化；看清之后，再由你决定是否采用。</p>
         <div class="hero-foot"><span>可视化直接编辑</span><span>AI Agent 无缝交接</span><span>修改前后对照审阅</span></div>
       </div>
       <aside class="source-card">
@@ -373,7 +373,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
         <div class="source-path">
           <span><i></i>不同变化分类标出，不用逐行找代码</span>
           <span><i></i>双页同步查看，原评论仍留在原位置</span>
-          <span><i></i>审阅之后，再由你决定打开哪一版</span>
+          <span><i></i>查看修改之后，再由你决定采用或不用这次</span>
         </div>
       </aside>
     </header>
@@ -388,7 +388,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
           <article class="promise"><span class="promise-index">01 / TYPE</span><h3>顺畅的文本编辑</h3><p>安全可编辑的文字，双击就能把光标放到点击位置。输入、删除、选择、粘贴和中文输入法都沿用熟悉的原生体验。</p></article>
           <article class="promise"><span class="promise-index">02 / TARGET</span><h3>指哪改哪的局部修改</h3><p>选中标题就只改标题，选中正文就只改正文。修改以最小源码 Patch 写回，其余 HTML 结构和格式保持不动。</p></article>
           <article class="promise"><span class="promise-index">03 / HANDOFF</span><h3>AI Agent 拿到完整上下文</h3><p>页面目标、评论、图片、文件、项目规则和冻结 HTML 会组成一项本地任务，不用再复制代码或重复说明位置。</p></article>
-          <article class="promise"><span class="promise-index">04 / REVIEW</span><h3>看清变化，再决定采用</h3><p>修改前与 AI 修改后并排审阅，文案、结构和视觉变化分别标出；看完可打开新版，也可回到修改前继续编辑。</p></article>
+          <article class="promise"><span class="promise-index">04 / REVIEW</span><h3>看清变化，再决定采用</h3><p>修改前与 AI 修改后并排审阅，文案、结构和视觉变化分别标出；点击“查看修改”后，再选择“采用修改”或“不用这次”。</p></article>
         </div>
       </section>
 
@@ -400,7 +400,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
           <div class="review-points">
             <span><b>01</b>文案、结构、视觉变化分开查看</span>
             <span><b>02</b>双页同步滚动，原评论原位可见</span>
-            <span><b>03</b>打开 AI 修改后，或回到修改前继续</span>
+            <span><b>03</b>查看修改后，选择采用或不用这次</span>
           </div>
         </div>
         <div class="review-demo" aria-label="修改前与 AI 修改后的双页审阅示意">
@@ -437,19 +437,19 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
         <div class="workflow-copy"><small>AI AGENT WORKFLOW</small><h2>你指出。<br />AI Agent 执行。<br />你审阅后决定。</h2><p>Claude Code、Codex、WorkBuddy、Qoder，以及其他能读取本地文件并执行命令的 AI Agent 都可以使用。</p></div>
         <div class="steps">
           <div class="step"><b>01</b><div><strong>在页面上选择和说明</strong><span>直接修改简单内容；复杂要求则锚定到页面、模块或文字，并附上图片和文件。</span></div></div>
-          <div class="step"><b>02</b><div><strong>源页冻结可执行任务</strong><span>准确 HTML、目标、评论、附件和项目规则被整理到受管本地文件，可选“Qoder CLI”或“复制任务”。</span></div></div>
-          <div class="step"><b>03</b><div><strong>交给你信任的 AI Agent</strong><span>受管 Qoder ACP 或你选择的本地 Agent 按任务路径和规则读取、修改并最终化。</span></div></div>
-          <div class="step"><b>04</b><div><strong>逐处审阅，再决定打开哪一版</strong><span>源页先校验并独立保留结果；你对照修改前后，可打开 AI 新版，也可回到修改前继续。</span></div></div>
+          <div class="step"><b>02</b><div><strong>在 AI 面板选择并连接 Agent</strong><span>准确 HTML、目标、评论、附件和项目规则会组成这一轮任务；受管 Agent 与“复制任务”都可以使用。</span></div></div>
+          <div class="step"><b>03</b><div><strong>冻结本轮，再交给 Agent</strong><span>发送前源页会冻结当前内容与评论；Agent 只能按这份明确任务读取、修改并返回候选结果。</span></div></div>
+          <div class="step"><b>04</b><div><strong>查看修改，明确决定</strong><span>源页先校验并独立保留结果；点击“查看修改”，对照前后页面后选择“采用修改”或“不用这次”。</span></div></div>
         </div>
       </section>
 
       <aside class="notice">
-        <div><strong>这张欢迎页本身，就是一次完整的 AI Agent 协作与审阅入口。</strong><span>双击即可直接编辑，也可以选中内容添加评论；AI 返回后，点击“审阅对比”即可从这张页面体验修改前后对照。</span></div>
+        <div><strong>这张欢迎页本身，就是一次完整的 AI Agent 协作与审阅入口。</strong><span>双击即可直接编辑；需要 AI 帮忙时，选中内容并留下评论，在 AI 面板选择并连接 Agent。AI 返回后，点击“查看修改”，确认后选择“采用修改”或“不用这次”。</span></div>
         <em>从左侧栏打开或切换 HTML</em>
       </aside>
     </div>
 
-    <footer><span>源页 · PageRoot</span><span>Visual intent in context. AI changes under review.</span></footer>
+    <footer><span>源页 · Stemmio</span><span>Visual intent in context. AI changes under review.</span></footer>
   </article>
 </body>
 </html>`;

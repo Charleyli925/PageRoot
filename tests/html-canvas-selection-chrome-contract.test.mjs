@@ -27,9 +27,9 @@ const capability = Object.freeze({
   targetElement: {},
   visualElement: {},
   selection,
-  sourceRef: { targetId: "target_1", elementId: "pr1_11111111111141118111111111111111" },
-  targetKey: "element:pr1_11111111111141118111111111111111",
-  visualKey: "element:pr1_11111111111141118111111111111111",
+  sourceRef: { targetId: "target_1", elementId: "sm1_11111111111141118111111111111111" },
+  targetKey: "element:sm1_11111111111141118111111111111111",
+  visualKey: "element:sm1_11111111111141118111111111111111",
   generation: 4,
   runtimeGenerated: false,
 });
@@ -187,7 +187,7 @@ test("selection chrome projection reuses equal geometry and invalidates changed 
   );
 });
 
-test("native editing keeps one selected outline without PageRoot edit chrome", async () => {
+test("native editing keeps one selected outline without Stemmio edit chrome", async () => {
   const editor = await readFile(new URL(
     "../app/components/HtmlCanvasEditor.tsx",
     import.meta.url,

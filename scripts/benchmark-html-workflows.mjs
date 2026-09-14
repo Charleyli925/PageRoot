@@ -20,11 +20,11 @@ import { fileURLToPath } from "node:url";
 import { _electron as electron } from "playwright";
 
 import {
-  launchPageRoot,
+  launchStemmio,
   openRailGlobalCommentComposer,
-  stopPageRoot,
-} from "../tests/e2e/electron/helpers/pageroot-app-fixture.mjs";
-import { currentEditorFrame } from "../tests/e2e/browser/pageroot-driver.mjs";
+  stopStemmio,
+} from "../tests/e2e/electron/helpers/stemmio-app-fixture.mjs";
+import { currentEditorFrame } from "../tests/e2e/browser/stemmio-driver.mjs";
 import {
   chooseClipboardDelivery,
   runOfficialFinalizer,
@@ -54,11 +54,11 @@ const outputRoot = path.resolve(
 );
 const screenshotsRoot = path.join(outputRoot, "screenshots");
 const sourceRoot = path.resolve(
-  options["html-dir"] || "/Users/lizexuan/Documents/PageRoot/测试用HTML",
+  options["html-dir"] || "/Users/lizexuan/Documents/Stemmio/测试用HTML",
 );
 const appPath = path.resolve(options.app || path.join(
   root,
-  "output/developer-preview/release/mac-arm64/PageRoot Developer Preview.app",
+  "output/developer-preview/release/mac-arm64/Stemmio Developer Preview.app",
 ));
 const appExecutableName = path.basename(appPath, ".app");
 const executablePath = path.join(
@@ -66,8 +66,8 @@ const executablePath = path.join(
   "Contents/MacOS",
   appExecutableName,
 );
-const qaToken = "【PageRoot 性能测试编辑】";
-const reviewMarker = "PageRoot-Real-HTML-Review-Performance-Marker";
+const qaToken = "【Stemmio 性能测试编辑】";
+const reviewMarker = "Stemmio-Real-HTML-Review-Performance-Marker";
 const results = {
   schemaVersion: 3,
   startedAt: new Date().toISOString(),
@@ -128,7 +128,7 @@ async function rendererPerformanceTimeline(since = 0) {
   return launched.page.evaluate((minimumStartTime) => ({
     timeOriginUnixMs: performance.timeOrigin,
     marks: performance.getEntriesByType("mark")
-      .filter((entry) => entry.name.startsWith("pageroot:"))
+      .filter((entry) => entry.name.startsWith("stemmio:"))
       .filter((entry) => entry.startTime >= minimumStartTime)
       .map((entry) => ({
         name: entry.name,
@@ -137,7 +137,7 @@ async function rendererPerformanceTimeline(since = 0) {
           ? JSON.parse(JSON.stringify(entry.detail))
           : null,
       })),
-    hydration: (window.__PAGEROOT_PERFORMANCE_TIMELINE__ || [])
+    hydration: (window.__STEMMIO_PERFORMANCE_TIMELINE__ || [])
       .filter((entry) => entry.startTime >= minimumStartTime)
       .map((entry) => JSON.parse(JSON.stringify(entry))),
   }), since);
@@ -175,7 +175,7 @@ function sha256(filePath) {
 
 function withoutStableIdentity(html) {
   return String(html).replace(
-    /\sdata-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+    /\sdata-stemmio-id="sm1_[a-f0-9]{32}"/gu,
     "",
   );
 }
@@ -195,7 +195,7 @@ results.sources = realSources.map((filePath) => ({
   expectsRenderedChart: expectsRenderedChart(readFileSync(filePath, "utf8")),
 }));
 
-const copiedSourceRoot = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-htmlperf-source-"));
+const copiedSourceRoot = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-htmlperf-source-"));
 const copiedSources = Array.from({ length: 21 }, (_, index) => {
   const original = realSources[index % realSources.length];
   const extension = path.extname(original);
@@ -265,7 +265,7 @@ async function rendererMemory(label) {
 }
 
 async function activeProject() {
-  return launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+  return launched.page.evaluate(() => window.stemmioProjects?.getActiveProject());
 }
 
 async function activeContentReady({ expectedStem = "", timeout = 45_000 } = {}) {
@@ -395,9 +395,9 @@ async function renderedSnapshot(frame) {
       // They are UI chrome, not authored charts, and waiting for their empty
       // transition shells made a fully visible page look unfinished forever.
       .filter((svg) => !svg.closest(
-        "[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]",
+        "[data-stemmio-review-projection-layer], [data-stemmio-review-transition-mask]",
       ) && !svg.matches(
-        "[data-pageroot-review-mask-layer], [data-pageroot-review-overlay-shape-svg]",
+        "[data-stemmio-review-mask-layer], [data-stemmio-review-overlay-shape-svg]",
       ))
       .filter(visibleRect)
       .filter((svg) => {
@@ -422,12 +422,12 @@ async function renderedSnapshot(frame) {
         signature: `${element.childElementCount}:${element.innerHTML.length}`,
       }));
     const runtimeVisualHosts = [...document.querySelectorAll(
-      "[data-pageroot-edit-runtime-host]",
+      "[data-stemmio-edit-runtime-host]",
     )]
       .filter(visibleRect)
       .map((element) => {
         const ownedNodes = element.querySelectorAll(
-          "[data-pageroot-edit-runtime-owned]",
+          "[data-stemmio-edit-runtime-owned]",
         ).length;
         return {
           ready: ownedNodes > 0,
@@ -874,10 +874,10 @@ async function switchTo(index) {
     const matching = (name) => performance.getEntriesByName(name, "mark")
       .filter((entry) => entry.startTime >= minimumStartTime)
       .find((entry) => entry.detail?.tabId === expectedTabId);
-    const visible = matching("pageroot:tab-cache:visible-ready");
-    const scrollable = matching("pageroot:tab-cache:scrollable-ready");
-    const completed = matching("pageroot:tab-cache:handoff-complete");
-    const runtimeHot = matching("pageroot:runtime-hot:visible-ready");
+    const visible = matching("stemmio:tab-cache:visible-ready");
+    const scrollable = matching("stemmio:tab-cache:scrollable-ready");
+    const completed = matching("stemmio:tab-cache:handoff-complete");
+    const runtimeHot = matching("stemmio:runtime-hot:visible-ready");
     return {
       visibleReadyMs: visible ? visible.startTime - minimumStartTime : null,
       scrollableReadyMs: scrollable ? scrollable.startTime - minimumStartTime : null,
@@ -1093,16 +1093,16 @@ async function exerciseReviewAndAccept() {
       afterRendered.fullContentReadyMs,
     ) : null;
   await waitUntil(async () => Promise.all([
-    before.locator("html").getAttribute("data-pageroot-review-filter"),
-    after.locator("html").getAttribute("data-pageroot-review-filter"),
+    before.locator("html").getAttribute("data-stemmio-review-filter"),
+    after.locator("html").getAttribute("data-stemmio-review-filter"),
   ]).then((values) => values.every(Boolean)), {
     timeout: 45_000,
     label: "review annotations ready",
   });
   results.review.annotationsReadyMs = round(performance.now() - openStarted);
   results.review.overlayCounts = {
-    before: await before.locator("[data-pageroot-review-overlay-box]").count(),
-    after: await after.locator("[data-pageroot-review-overlay-box]").count(),
+    before: await before.locator("[data-stemmio-review-overlay-box]").count(),
+    after: await after.locator("[data-stemmio-review-overlay-box]").count(),
   };
   const reviewMemory = await rendererMemory("review-dual-page");
   assert.equal(
@@ -1244,19 +1244,19 @@ async function openAfterAccept(source) {
 }
 
 try {
-  launched = await launchPageRoot({
+  launched = await launchStemmio({
     electronLauncher: packagedLauncher,
     firstWindowTimeout: 30_000,
-    userDataPrefix: "pageroot-native-e2e-htmlperf-",
+    userDataPrefix: "stemmio-native-e2e-htmlperf-",
   });
   await launched.page.waitForFunction(
-    () => Boolean(window.htmlAIRuntime?.getBridgeConnection?.()),
+    () => Boolean(window.stemmioRuntime?.getBridgeConnection?.()),
     undefined,
     { timeout: 30_000 },
   );
   results.startup = await launched.page.evaluate(() => ({
-    desktop: window.htmlAIRuntime?.getStartupTiming?.()
-      || window.htmlAIRuntime?.diagnostics?.startupTiming
+    desktop: window.stemmioRuntime?.getStartupTiming?.()
+      || window.stemmioRuntime?.diagnostics?.startupTiming
       || null,
     rendererTimeOriginUnixMs: performance.timeOrigin,
     paintEntries: performance.getEntriesByType("paint").map((entry) => ({
@@ -1264,7 +1264,7 @@ try {
       startTime: entry.startTime,
     })),
     marks: performance.getEntriesByType("mark")
-      .filter((entry) => entry.name.startsWith("pageroot:renderer:"))
+      .filter((entry) => entry.name.startsWith("stemmio:renderer:"))
       .map((entry) => ({ name: entry.name, startTime: entry.startTime })),
   }));
   const desktopStartupMarks = Object.fromEntries(
@@ -1420,7 +1420,7 @@ try {
     message: error instanceof Error ? error.message : String(error),
     stack: error instanceof Error ? error.stack : null,
     runtime: launched ? await launched.page.evaluate(async () => ({
-      activeProject: await window.htmlAIProjects?.getActiveProject?.() ?? null,
+      activeProject: await window.stemmioProjects?.getActiveProject?.() ?? null,
       projectState: document.querySelector("main.workbench")
         ?.getAttribute("data-project-state") ?? null,
       visibleText: (document.body?.innerText || "").slice(0, 4_000),
@@ -1447,7 +1447,7 @@ try {
     };
   });
   if (launched) {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData).catch((error) => {
+    await stopStemmio(launched.electronApp, launched.isolatedUserData).catch((error) => {
       results.cleanupError = String(error);
     });
   }

@@ -100,4 +100,15 @@ test("notice baselines and allowlist can only shrink after landing on main", asy
     }, current).join("\n"),
     new RegExp(`${first.id} changed without a class change or deletion`, "u"),
   );
+  assert.deepEqual(
+    noticeRatchetViolations({
+      ...current,
+      sites: current.sites.map((site, index) => (
+        index === 0
+          ? { ...site, fingerprint: site.fingerprint.replace("Stemmio", "源页") }
+          : site
+      )),
+    }, current),
+    [],
+  );
 });

@@ -273,7 +273,7 @@ test("retired production modules and imports stay outside the graph", () => {
   assert.match(
     retiredArtifactViolations({
       file: "app/workbench/review-document.ts",
-      source: 'export const attr = "data-pageroot-review-source-node-id";',
+      source: 'export const attr = "data-stemmio-review-source-node-id";',
     }).join("\n"),
     /Review cannot write parseKey identity/u,
   );
@@ -308,14 +308,14 @@ test("retired production modules and imports stay outside the graph", () => {
   assert.match(
     retiredArtifactViolations({
       file: "app/components/html-canvas-preview-sync.ts",
-      source: 'createElement("pageroot-text-fragment");',
+      source: 'createElement("stemmio-text-fragment");',
     }).join("\n"),
     /disposable text-fragment hosts cannot return/u,
   );
   assert.match(
     retiredArtifactViolations({
       file: "app/application/document-workflow.js",
-      source: 'this.#recoveryStore.write("html-ai-recovery:doc", {});',
+      source: 'this.#recoveryStore.write("stemmio-recovery:doc", {});',
     }).join("\n"),
     /document HTML recovery is Main journal only/u,
   );

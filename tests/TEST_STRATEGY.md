@@ -1,4 +1,4 @@
-# PageRoot 自动化测试策略
+# Stemmio 自动化测试策略
 
 目标不是增加测试数量，而是在尽量短的反馈时间内发现真实缺陷。所有活动门禁都必须无人值守：不等待真人点击、输入、观察、判断或把任务转交给外部模型。测试物料可以由确定性生成器产生，但判断标准必须由源码字节、Hash、状态机、DOM/几何或明确协议字段自动给出。
 
@@ -85,7 +85,7 @@ CI 可重试一次）。DOM 编辑兼容性扫描、Browser 三分片、native E
 默认 `retries: 0`。`release-gate` 读取各 lane 的 flaky evidence：产品测试必须
 `failed = 0`、`flaky = 0`、`retries = 0`。同一 SHA 若曾出现未归因的产品失败，
 不能通过重跑生成 attestation，除非失败步骤被分类为 `ci_environment`，或 PR 上存在
-未过期的 `pageroot-ci-triage` 记录。JSON reporter 仍写入
+未过期的 `stemmio-ci-triage` 记录。JSON reporter 仍写入
 `output/ci-evidence/`。完整 Playwright diagnostics 只在失败或取消时上传。
 
 ## 测试类型与去重
@@ -214,12 +214,12 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Workbench 订阅边界：`tests/workspace-controller.test.mjs` 对真实 Controller facet 计数，证明草稿/Agent narration/clock/bytes 只通知局部消费者；Shell 不含这些字段且引用稳定，评论结构、空/非空、run phase/error/lifecycle、规则 composition/save/restore 仍通知。Conversation facet 与实时 aggregate 引用一致，切文档拒绝旧响应，unsubscribe/dispose 不续发；草稿 flush 保留原文档与最后文本。类型合同禁止 shell 访问省略正文。`tests/ai-conversation-sidebar.test.mjs` 验证新文档载入前不显示旧消息与草稿，关闭输入锁保留正文。ProjectRules/Conversation Workflow 既有故障与 drain 测试继续拥有持久化边界；真实 IME、caret、滚动及侧栏 UI 仍须 Electron 验收，不能由订阅计数代替。
 - 通知合同：TypeScript 封闭 `GlobalInterruption` kind 联合拥有允许的中断事实；文案只来自 `globalInterruptionPresentation()`。Node 测试拥有产品错误清洗与工作区安全状态优先级。Browser 测试拥有 `aria-live`、键盘、按钮和 hover/focus pause。不得再扫描 Workbench AST 或内部 helper 名称来证明某个 `setToast` 调用是否合法；生产 `setToast` 创建调用必须保持为 0。
 - 源码字符串合同只保留显式 architecture/security/packaging/dependency/workflow boundary。应用架构形状由 `scripts/check-architecture.mjs` 唯一拥有，`tests/architecture-boundaries.test.mjs` 只执行该 checker；当前显式清单为层级 import/retired operation，Workbench Bridge 调用为 0、final runtime factory、aggregate Session observer、唯一 Session construction owner、typed drain owner、Controller 反向 UI import 和 generic Bridge escape，及 SourcePatch + SourceTransaction 发布、精确 source freeze 及 AI 请求绑定、Edit runtime projection 禁止、native user/system priority、DOM replacement 前 lease retirement，以及 pointer capability 不得引用 `isNativeDirectEditRoot`。该集还必须保留 View Bridge call、Controller React import、generic Bridge escape、duplicate Session owner、missing drain command 的负 fixture。业务测试不得读取、拼接 Workbench/Canvas 大文件或扫描 JSX/CSS/copy/callback 顺序；它们使用 Session、算法、Browser 或 Electron 的可观察结果。`tests/rendered-html.test.mjs` 是独立例外：它必须执行真实 `dist/server/index.js`/`worker.fetch`，只验证公开 SSR 入口与已退役托管/编辑器 surface，不读取生产实现源码。`tests/workbench-css.test.mjs` 拥有 Workbench 级联入口：`app/globals.css` 必须只含固定顺序的 `@import`，拼接后的 `app/styles/` 字节保留顶栏与 tooltip 的源码顺序合同。
-- 交付合同按 owner 分层：desktop-package.test.mjs 拥有 package.json allowlist、PageRoot 自有打包 JavaScript 导入推导的生产包闭包、Bridge/Schema/资源闭包、安装态启动目录隔离、CSP、entitlements、Info.plist 清理和固定包身份；任何被打包 Bridge provider 或其 shared runtime import 变更都必须选中该闭包 owner。packaged-artifact-gate.test.mjs 必须调用真实 verifier，拥有 app.asar、源码推导的 `node_modules`、Bridge、Schema、metadata、retired closure、签名 profile 和 DMG/ZIP 边界；packaged startup/runtime 必须复制 `.app` 到仓库外且无父级 `node_modules` 的临时目录后启动。预加载 IPC、更新、Preview、窗口、Bridge 生命周期、遥测和 Workbench 行为必须留在各自 Node 或 Electron owner，不能因它们被打包而回流到 package 测试。
+- 交付合同按 owner 分层：desktop-package.test.mjs 拥有 package.json allowlist、Stemmio 自有打包 JavaScript 导入推导的生产包闭包、Bridge/Schema/资源闭包、安装态启动目录隔离、CSP、entitlements、Info.plist 清理和固定包身份；任何被打包 Bridge provider 或其 shared runtime import 变更都必须选中该闭包 owner。packaged-artifact-gate.test.mjs 必须调用真实 verifier，拥有 app.asar、源码推导的 `node_modules`、Bridge、Schema、metadata、retired closure、签名 profile 和 DMG/ZIP 边界；packaged startup/runtime 必须复制 `.app` 到仓库外且无父级 `node_modules` 的临时目录后启动。预加载 IPC、更新、Preview、窗口、Bridge 生命周期、遥测和 Workbench 行为必须留在各自 Node 或 Electron owner，不能因它们被打包而回流到 package 测试。
 - Developer Preview、Release Dry Run、Candidate 和 Release 是四个显式 trust profile。公共 release fixture 每次创建独立 package/build-info/telemetry/application-update/identity 值和独立临时目录；它不签名、不调用 Apple 命令、不访问网络，也不能以无 profile 的宽泛对象混淆正式与非正式通道。fixture Hash 期望值必须继续由测试侧独立 crypto 计算，不能调用被测 evaluator。
 - Workflow 源码扫描只证明凭证、exact Tree、权限和阶段顺序等 release architecture 边界；普通步骤文案和已由 verifier/owner 覆盖的行为不得作为第二个字符串 oracle。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。裸文本片段结束会话后必须仍能把工具条/快捷键格式写入源码，不能把已拆除的 fragment 宿主当成失连而阻断。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
-- Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `PAGEROOT_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
+- Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `STEMMIO_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
 - 交互预览与 Edit 可丢弃 Script 页：Electron 用四类真实用例证明普通脚本
   持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及无法
   证明原地条件的语义结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。
@@ -251,7 +251,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   不会消耗额外尝试。
   桌面编辑画布还必须
   证明同目录图片通过同一条受控资源根加载成功，而 `script-src` 没有因此
-  获得 `pageroot-preview:` 权限。首次导入把原稿目录记在 desktop
+  获得 `stemmio-preview:` 权限。首次导入把原稿目录记在 desktop
   `html-projects.json` 里：Preview 会话、静态 Edit 资源 base 和可丢弃
   Script runtime 都从该目录解析相对资源，而不是从项目内 V1 目录；原稿 HTML
   被移入废纸篓后仍可使用同目录剩余文件。B 类“打开之前的项目”、重启后打开
@@ -303,7 +303,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   unverified 有内联状态与采纳提示，同时评论固定轨道、cleanup、Tab 与导航合同
   不回归。preload、IPC、package allowlist 与 artifact verifier 仍不存在
   Review capture owner。
-- Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs` 是兼容 re-export。能力实现分别在 `electron-app-launch.mjs`、`electron-project-fixture.mjs`、`electron-project-ready.mjs`、`electron-comment-driver.mjs`、`electron-legacy-project-fixture.mjs` 与 `electron-safe-cleanup.mjs`。它们只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
+- Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/stemmio-app-fixture.mjs` 是兼容 re-export。能力实现分别在 `electron-app-launch.mjs`、`electron-project-fixture.mjs`、`electron-project-ready.mjs`、`electron-comment-driver.mjs`、`electron-legacy-project-fixture.mjs` 与 `electron-safe-cleanup.mjs`。它们只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
   cleanup、诊断输出和已加载 frame；不包含产品断言、整条用户流程或自动重试。
   启动或 hydration 未就绪时，fixture 必须记录主 frame、Workbench/
   `data-project-state`、hydration stage、可见失败状态、主进程输出、活动窗口和隔离
@@ -365,7 +365,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   最多 20 标签切换、Review、采纳和采纳后再打开。它必须使用新打包 App、
   隔离 userData 和源文件字节级副本，并在结束时重新计算每个原文件 SHA。
   HTML 正文出现、受支持图表真实绘制、Project hydration、Canvas authority
-  和整页稳定是不同完成边界；不得用 `readyState`、PageRoot ready 或静态
+  和整页稳定是不同完成边界；不得用 `readyState`、Stemmio ready 或静态
   iframe 代替图表完成。结果保留 Desktop 启动 mark、同一 hydration
   operation 的 Bridge/Repository 阶段计时、iframe churn、逐进程内存、
   长任务和最多 50 条错误样本。对比两个提交时必须在同一机器串行运行，
@@ -424,7 +424,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   项目 ID 只以 HMAC 假名出现、编辑聚合、队列上限和失败重试。负向样本
   必须同时注入 HTML、评论、Prompt、附件名、文件路径和原始异常，最终
   批次及本地队列都不得出现这些值；测试永不访问真实 PostHog。
-- 开发者测试包：先证明正式 tag 后的提交序号被确定性映射为独立测试版本（例如 `0.9.5` 后依次为 `0.9.69991`、`0.9.69992`），再对独立名称/Bundle ID 的 Developer ID `.app` 做 app.asar、Bridge、Schema、资源、运行目录标识、版本和 DMG 静态校验，并从真实可执行文件做一次应用名/版本/首窗/Bridge/Workbench/正常退出冒烟；验证首次启动只创建新的 Preview 根目录且不读取旧 PageRoot 根目录，连续安装仍复用新根目录，Preview 更新检查/安装保持关闭；最后把 DMG Hash、tag-to-commit 范围、全部关联 PR 的实时状态/一句话摘要及无 PR 直接提交写入 JSON/Markdown 交付报告。GitHub 元数据缺失时交付失败，但不把可变 PR 状态嵌入 App 或正式字节凭证。
+- 开发者测试包：先证明正式 tag 后的提交序号被确定性映射为独立测试版本（例如 `0.9.5` 后依次为 `0.9.69991`、`0.9.69992`），再对独立名称/Bundle ID 的 Developer ID `.app` 做 app.asar、Bridge、Schema、资源、运行目录标识、版本和 DMG 静态校验，并从真实可执行文件做一次应用名/版本/首窗/Bridge/Workbench/正常退出冒烟；验证首次启动只创建新的 Preview 根目录且不读取旧 Stemmio 根目录，连续安装仍复用新根目录，Preview 更新检查/安装保持关闭；最后把 DMG Hash、tag-to-commit 范围、全部关联 PR 的实时状态/一句话摘要及无 PR 直接提交写入 JSON/Markdown 交付报告。GitHub 元数据缺失时交付失败，但不把可变 PR 状态嵌入 App 或正式字节凭证。
 - 发布 dry-run：只在相关 PR 路径变化时运行。第一台 macOS runner 用固定合成 PostHog 项目 token 生成启用态 telemetry metadata，同时从唯一 stable GitHub publish 契约生成 `app-update.yml`，与 build metadata 一起装入显式未签名（`identity=null`）App，复用正式 verifier 检查 app.asar、Bridge、Schema、资源、更新通道和身份字段，并创建 `releaseEligible: false` 的独立 checkpoint。第二台 clean runner 验证 archive/payload Hash、原样恢复 metadata、重建 `dist-desktop` renderer oracle、再次复用正式 verifier，再从真实可执行文件核对 `app.getName()`、版本和 `CFBundleIdentifier`。workflow 不引用 `secrets.*`，dry-run kind/目录/文件名均不能被正式 signed-App restore 接受。
 - 候选包：先在签名前生成 stable `app-update.yml`，并对 ad-hoc `.app` 校验 app.asar、Bridge、Schema、资源闭包、更新通道，再从真实可执行文件运行完整源码字节 oracle；通过后才做 Developer ID 签名，并在 Apple 请求前做一次 Hardened Runtime 启动。App 公证后冻结包含更新配置的 archive/payload/Tree Hash checkpoint，下一 job 只把同一 App 作为 `--prepackaged` 输入生成 DMG、ZIP、blockmap 和 `latest-mac.yml`，再校验 Team、App/DMG 公证票据、Gatekeeper、只读挂载与 ZIP 解包内容。
   新 job 会先从 checkpoint App 原样恢复 build-info、遥测与应用更新配置作为比较输入，
@@ -505,8 +505,8 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 保留动画期间直接双击的失败负例，以及宿主等待后的正常选词正例。
 `local-html-corpus.mjs` 当前只允许 `capability-preflight-only`；旧的现场发现资格入口
 以 `AUTOMATIC_DISCOVERY_EXECUTION_RETIRED` 终止，尚未迁移的行为不会假算为完成。
-微验收入口 `frozen-html-operation.mjs` 消费 `PAGEROOT_FROZEN_MANIFEST` 与独立传入的
-`PAGEROOT_FROZEN_MANIFEST_SHA256`，精确绑定工作稿种子字节、源码指纹和单行 A→B 目标。
+微验收入口 `frozen-html-operation.mjs` 消费 `STEMMIO_FROZEN_MANIFEST` 与独立传入的
+`STEMMIO_FROZEN_MANIFEST_SHA256`，精确绑定工作稿种子字节、源码指纹和单行 A→B 目标。
 清单另冻结初始 Runtime 预期；启动和重开都先等待其明确终态，再等待 handoff 完成。
 冻结执行器在初始 Runtime 就绪后限制 Playwright 自身 Inspector 网络响应缓存：总量 64 KiB、
 单响应 8 KiB、POST 诊断内容 1 KiB，保留请求/响应/失败事件，不以 Inspector body 作为源码证据。
@@ -586,7 +586,7 @@ iframe 内 elementFromPoint 成功就点击被宿主裁剪的坐标，也不查�
 
 长期要求：涉及编辑、格式化、选择、历史、页面切换、Runtime/iframe、加载恢复或保存重开的相关改动，必须在真实 Electron App 中使用用户指定的本地 HTML 语料进行验收；通用编辑或 Runtime 生命周期变更覆盖语料目录内全部 HTML。语料路径由本地工作区规则或环境配置提供，不写入公共仓库。此要求适用于以后所有相关任务，不只某次问题修复。合成物料仅用于可公开的确定性测试与边界覆盖，不能替代真实文档验收。
 
-`PAGEROOT_REAL_HTML_DIR` 指向该语料目录后，运行 `npm run test:real-html:electron`；缺少目录或空目录直接失败，完整结果与截图写入系统临时目录，不进入 Git。该入口先冻结文件 / 阶段 / 操作计划，再分为 A 文字编辑、B 元素结构、C Runtime/iframe、D 元素能力与行为覆盖、E 编辑到重建再续写的连续链路。A/B/C/D/E 均从恢复后的本地副本和独立 Electron session 开始，但 E 内部的多轮链路必须保持同一长会话。阶段之间不继承 Selection、编辑 session、Candidate 或 iframe generation；一个阶段失败不得阻止其他独立阶段继续取证。
+`STEMMIO_REAL_HTML_DIR` 指向该语料目录后，运行 `npm run test:real-html:electron`；缺少目录或空目录直接失败，完整结果与截图写入系统临时目录，不进入 Git。该入口先冻结文件 / 阶段 / 操作计划，再分为 A 文字编辑、B 元素结构、C Runtime/iframe、D 元素能力与行为覆盖、E 编辑到重建再续写的连续链路。A/B/C/D/E 均从恢复后的本地副本和独立 Electron session 开始，但 E 内部的多轮链路必须保持同一长会话。阶段之间不继承 Selection、编辑 session、Candidate 或 iframe generation；一个阶段失败不得阻止其他独立阶段继续取证。
 
 测试可信度出现疑问时必须冻结全量语料，先用极小合成案例分别验证 Native Edit 宿主解析、逻辑输入位置与 Candidate 观察器。每个判定必须成对证明正确事实可通过、故意错误会失败；任何失败先保留为单一最小复现并归因为产品或测试缺陷，再决定修改对象。三组判定稳定前不得修改断言后直接重跑全量，也不得进入 20/50/100 次压力测试；稳定后只恢复一次完整语料验收。
 

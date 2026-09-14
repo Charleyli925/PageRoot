@@ -10,10 +10,10 @@ export const REVIEW_TEXT_EVIDENCE_REMOVED_COLOR = "#d92d20";
 export const REVIEW_TEXT_EVIDENCE_ADDED_COLOR = "#239b56";
 
 export const REVIEW_TEXT_EVIDENCE_MARKER_CSS = `
-  html[data-pageroot-review-filter="all"] [data-pageroot-review-text="removed"],
-  html[data-pageroot-review-filter="text"] [data-pageroot-review-text="removed"],
-  html[data-pageroot-review-filter="all"] [data-pageroot-review-text="added"],
-  html[data-pageroot-review-filter="text"] [data-pageroot-review-text="added"] {
+  html[data-stemmio-review-filter="all"] [data-stemmio-review-text="removed"],
+  html[data-stemmio-review-filter="text"] [data-stemmio-review-text="removed"],
+  html[data-stemmio-review-filter="all"] [data-stemmio-review-text="added"],
+  html[data-stemmio-review-filter="text"] [data-stemmio-review-text="added"] {
     background: transparent !important;
     color: inherit !important;
     font: inherit !important;
@@ -57,10 +57,10 @@ function parseDeclarations(block) {
 export function reviewTextEvidenceMarkerBlocks(css) {
   const source = String(css || "");
   const blocks = [];
-  const pattern = /((?:[^{}]*\[data-pageroot-review-text="(?:added|removed)"\][^{}]*)+)\{([^}]+)\}/gu;
+  const pattern = /((?:[^{}]*\[data-stemmio-review-text="(?:added|removed)"\][^{}]*)+)\{([^}]+)\}/gu;
   let match = pattern.exec(source);
   while (match) {
-    const tones = [...match[1].matchAll(/\[data-pageroot-review-text="(added|removed)"\]/gu)]
+    const tones = [...match[1].matchAll(/\[data-stemmio-review-text="(added|removed)"\]/gu)]
       .map((item) => item[1]);
     const declarations = parseDeclarations(match[2]);
     [...new Set(tones)].forEach((tone) => {

@@ -6,7 +6,7 @@ import {
   fixtureBuffer,
   identifiedHtmlBuffer,
   loadFixture,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");

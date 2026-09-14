@@ -9,7 +9,7 @@ import {
   replaceEditableIslandBytes,
   selectionSnapshot,
   setTextSelection,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 const source = Buffer.from(`<!doctype html>
 <html lang="zh-CN">
@@ -74,7 +74,7 @@ const editableCases = [
 
 async function openFixture(page) {
   await page.goto("/");
-  return loadFixture(page, "pageroot-v2-editable-island.html", {
+  return loadFixture(page, "stemmio-v2-editable-island.html", {
     buffer: identifiedSource,
     identifiedWorkingCopy: false,
   });
@@ -86,8 +86,8 @@ async function authoredInnerHtml(target) {
     if (!(clone instanceof HTMLElement)) throw new Error("Expected HTMLElement.");
     const attributes = [
       "contenteditable",
-      "data-pageroot-id",
-      "data-pageroot-edit-runtime-source",
+      "data-stemmio-id",
+      "data-stemmio-edit-runtime-source",
       "data-html-ai-source-node-id",
     ];
     for (const node of [clone, ...clone.querySelectorAll("*")]) {

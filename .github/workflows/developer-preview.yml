@@ -61,13 +61,13 @@ jobs:
       - name: Explain preview trust boundary
         run: |
           {
-            echo "### PageRoot developer preview"
+            echo "### Stemmio developer preview"
             echo ""
             echo "- Built only because this workflow was dispatched explicitly."
             echo "- Signs with the repository's stable Developer ID Application credential (MAC_CSC_LINK/MAC_CSC_KEY_PASSWORD secrets) or an identity already installed on this runner; missing or failed signing stops the job and never falls back to ad-hoc."
             echo "- Notarization is not required for this personal test package."
             echo "- Is not eligible for a tag, GitHub Release, or updater publication."
-            echo "- Uses the distinct PageRoot Developer Preview name and a stable-tag-derived test version."
+            echo "- Uses the distinct Stemmio Developer Preview name and a stable-tag-derived test version."
             echo "- Starts with the isolated Preview data roots and keeps automatic update checks and installation disabled."
             echo "- Automated scope: latest packaged contents, basic artifact integrity, and one clean startup."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -75,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-developer-preview-${{ inputs.architecture }}-${{ github.sha }}-${{ github.run_attempt }}
+          name: Stemmio-developer-preview-${{ inputs.architecture }}-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             output/developer-preview/release/*.dmg
             output/developer-preview/developer-preview.json
@@ -90,7 +90,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-developer-preview-diagnostics-${{ github.run_attempt }}
+          name: Stemmio-developer-preview-diagnostics-${{ github.run_attempt }}
           path: |
             output/test-runs
             output/playwright

@@ -45,7 +45,7 @@ const ACTOR_LABELS = Object.freeze({
   user: "我",
   agent: "AI Agent",
   qoder: "Qoder CLI",
-  pageroot: "Stemmio",
+  stemmio: "Stemmio",
 });
 
 const MODE_PRESENTATION = Object.freeze({
@@ -204,7 +204,7 @@ export function sidebarRunProgress({
   if (projected.length === 0) return null;
   const failedStep = projected.find((step) => step.state === "failed") || null;
   const liveStep = projected.find((step) => step.state === "current") || null;
-  // ADR 0037: the Agent narrates, PageRoot states the stage. The prose is an
+  // ADR 0037: the Agent narrates, Stemmio states the stage. The prose is an
   // annotation on the stage actually running and never claims a stage is done.
   // Canonical visible-text events preserve the Agent's public message boundaries.
   // A blank-line split remains only for sessions recovered from the older cumulative
@@ -237,14 +237,14 @@ export function sidebarRunProgress({
     // full strength, and each stage carries its own detail, so nothing is repeated
     // above it.
     headline: failedStep?.label ?? null,
-    // Public Agent narration is projected separately from PageRoot's lifecycle
+    // Public Agent narration is projected separately from Stemmio's lifecycle
     // facts. It never grants Candidate authority.
     narration: narrationText || null,
     narrationUpdates: narrationUpdates.length > 0 ? Object.freeze(narrationUpdates) : null,
     narrationTruncated: agentTextTruncated === true,
-    // Once a Candidate decision exists, its signed PageRoot message is the sole
+    // Once a Candidate decision exists, its signed Stemmio message is the sole
     // settled-status line. Keeping the completed progress step beside it repeated
-    // the same fact and recreated the PageRoot message pile this UI removes.
+    // the same fact and recreated the Stemmio message pile this UI removes.
     liveLabel: decisionOwnsSettledStatus ? null : liveStep?.label ?? null,
     tone: failedStep ? "attention" : "quiet",
   });
@@ -254,7 +254,7 @@ const ACTOR_INITIALS = Object.freeze({
   user: "你",
   agent: "A",
   qoder: "Q",
-  pageroot: "P",
+  stemmio: "S",
 });
 
 /**
@@ -262,11 +262,11 @@ const ACTOR_INITIALS = Object.freeze({
  * speaking, and a full name in that square would only shrink the words beside it.
  */
 export function sidebarActorInitial(actor) {
-  return ACTOR_INITIALS[actor] ?? ACTOR_INITIALS.pageroot;
+  return ACTOR_INITIALS[actor] ?? ACTOR_INITIALS.stemmio;
 }
 
 export function sidebarActorLabel(actor) {
-  return ACTOR_LABELS[actor] ?? ACTOR_LABELS.pageroot;
+  return ACTOR_LABELS[actor] ?? ACTOR_LABELS.stemmio;
 }
 
 export function sidebarTimestampLabel(value, { now = Date.now() } = {}) {
@@ -300,13 +300,13 @@ export function sidebarMessageStream(messages) {
     ))
     .map((message) => ({
       messageId: String(message.messageId || ""),
-      actor: String(message.actor || "pageroot"),
+      actor: String(message.actor || "stemmio"),
       actorLabel: message.actor === "agent"
-        ? ({ qoder: "Qoder", codex: "Codex", pageroot: "Stemmio AI" }[message.providerId] || sidebarActorLabel(message.actor))
+        ? ({ qoder: "Qoder", codex: "Codex", stemmio: "Stemmio AI" }[message.providerId] || sidebarActorLabel(message.actor))
         : sidebarActorLabel(message.actor),
       kind: String(message.kind || "text"),
       status: String(message.status || "completed"),
-      text: message.actor === "pageroot" && message.text === "修改已准备好，尚未采用。"
+      text: message.actor === "stemmio" && message.text === "修改已准备好，尚未采用。"
         ? "修改已准备好。" : String(message.text || ""),
       truncated: message.truncated === true,
       sequence: Number(message.sequence) || 0,
@@ -332,7 +332,7 @@ export function sidebarTurnPresentation(messages = []) {
   const process = [];
   const primary = [];
   for (const message of messages) {
-    if (message.kind === "progress" || (message.actor === "pageroot" && LEGACY_EXECUTION_PROGRESS.has(message.text))) process.push(message);
+    if (message.kind === "progress" || (message.actor === "stemmio" && LEGACY_EXECUTION_PROGRESS.has(message.text))) process.push(message);
     else primary.push(message);
   }
   const timeline = [];
@@ -446,7 +446,7 @@ export function sidebarConversationGroups({
     const messageId = historyIdentity(message.messageId);
     groups.push({
       key,
-      label: `${current ? currentTurnLabel(timestamp, now) : historyDateLabel(timestamp)}${turn?.providerSelection?.providerId ? ` · ${{ qoder: "Qoder", codex: "Codex", pageroot: "HTTP 服务" }[turn.providerSelection.providerId] || "AI"}` : ""}`,
+      label: `${current ? currentTurnLabel(timestamp, now) : historyDateLabel(timestamp)}${turn?.providerSelection?.providerId ? ` · ${{ qoder: "Qoder", codex: "Codex", stemmio: "HTTP 服务" }[turn.providerSelection.providerId] || "AI"}` : ""}`,
       kind: current ? "current" : "history",
       messageIndices: [messageIndex],
       messageIds: messageId ? [messageId] : [],
@@ -684,7 +684,7 @@ export function sidebarActionBar({
 
   if (state === "processing" || state === "validating") {
     // The clipboard round is not being processed by the selected Agent at all: the user pasted
-    // the task into an Agent of their own and PageRoot is waiting for the file to
+    // the task into an Agent of their own and Stemmio is waiting for the file to
     // come back. Claiming an Agent is processing there would describe something that is not
     // happening, and the user would lose the one action they actually need — the
     // task back on the clipboard if the paste went wrong.
@@ -704,7 +704,7 @@ export function sidebarActionBar({
         kind: "progress",
         title: "任务已复制，等你的 AI 改完",
         detail: "粘贴给任意能读写本机文件的 AI。",
-        // Nothing here advances the round — PageRoot is waiting on an Agent it does
+        // Nothing here advances the round — Stemmio is waiting on an Agent it does
         // not drive — so neither action takes the accent. Re-copying is a remedy,
         // not the next step.
         actions: [
@@ -1007,9 +1007,9 @@ export function sidebarCopyTaskState({
 /**
  * The Composer's model line.
  *
- * PageRoot only names a model when it actually knows one. Saying "no models
+ * Stemmio only names a model when it actually knows one. Saying "no models
  * available" while nothing has been read would assert a fact about the user's
- * account that PageRoot has not established, and the unavailable cases already
+ * account that Stemmio has not established, and the unavailable cases already
  * explain themselves on the send button (PRD §10.2) — a second line there would
  * be noise. So the honest default is silence. The Agent name is a read-only
  * identity that opens Settings; this line is only the model.
@@ -1038,7 +1038,7 @@ export function sidebarAgentLine({
 /**
  * The Composer's thinking-depth line.
  *
- * Only PageRoot's native HTTP Agent exposes a real choice. Qoder and Codex stay
+ * Only Stemmio's native HTTP Agent exposes a real choice. Qoder and Codex stay
  * on provider-default reasoning, so this line is absent there.
  */
 export function sidebarReasoningLine({

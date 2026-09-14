@@ -4,7 +4,7 @@ import {
   caseSelector,
   fixtureBuffer,
   loadFixture as loadRawFixture,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 const loadFixture = (page, name, options = {}) => loadRawFixture(page, name, {
   ...options,

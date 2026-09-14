@@ -5,13 +5,13 @@ import {
   addCanvasComment,
   caseSelector,
   chooseClipboardDelivery,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture,
   documentToken,
   expectCheckpointPersisted,
   existsSync,
   fixtureBuffer,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   managedWorkingCopyPath,
   mkdirSync,
@@ -26,7 +26,7 @@ import {
   removeValidatedTemporaryDirectory,
   sendToMainRenderer,
   setTextSelection,
-  stopPageRoot,
+  stopStemmio,
   tmpdir,
   workspaceContainsDraftComment,
   writeFileSync,
@@ -35,7 +35,7 @@ import {
 function managedDraftComment(managedSourcePath, text) {
   const draftsRoot = path.join(
     path.dirname(managedSourcePath),
-    ".pageroot",
+    ".stemmio",
     "drafts",
   );
   if (!existsSync(draftsRoot)) return null;
@@ -54,9 +54,9 @@ async function retainedEditorDocumentToken(page) {
   return page.locator(
     '[data-testid="workbench-active-document-canvas"] iframe[title*="HTML"]',
   ).first().evaluate((frameElement) => {
-    const key = "__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__";
+    const key = "__STEMMIO_NATIVE_QA_DOCUMENT_TOKEN__";
     const view = frameElement.contentWindow;
-    if (!view) throw new Error("Retained PageRoot edit iframe has no active window.");
+    if (!view) throw new Error("Retained Stemmio edit iframe has no active window.");
     if (!view[key]) view[key] = crypto.randomUUID();
     return view[key];
   });
@@ -65,7 +65,7 @@ async function retainedEditorDocumentToken(page) {
 test("长期规则入口打开唯一规则标签并保留 HTML 画布", async () => {
   test.setTimeout(90_000);
   const fixture = createSourceFixture("project-rules-first-stage.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const { frame } = await loadedDiskFrame(
       launched.page,
@@ -148,7 +148,7 @@ test("长期规则入口打开唯一规则标签并保留 HTML 画布", async ()
     await expect.poll(() => documentToken(launched.page)).toBe(beforeDocumentToken);
     await expect(frame.locator(caseSelector("list-item"))).toBeVisible();
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -156,7 +156,7 @@ test("长期规则入口打开唯一规则标签并保留 HTML 画布", async ()
 test("selected-text comments persist stable identity and stay exact after text replacement", async () => {
   test.setTimeout(90_000);
   const fixture = createSourceFixture("stable-selected-text-comment.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   const commentText = "这三个字需要更直接。";
   try {
     const { editor, frame } = await loadedDiskFrame(
@@ -197,7 +197,7 @@ test("selected-text comments persist stable identity and stay exact after text r
       { timeout: 20_000 },
     ).not.toBeNull();
     const comment = managedDraftComment(managedSourcePath, commentText);
-    expect(comment.target.elementId).toMatch(/^pr1_[0-9a-f]{32}$/u);
+    expect(comment.target.elementId).toMatch(/^sm1_[0-9a-f]{32}$/u);
     expect(comment.target.expectedSourceSha256).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(comment.target.textLocator).toEqual({
       quote: ORIGINAL_LIST_TEXT.slice(0, 3),
@@ -213,7 +213,7 @@ test("selected-text comments persist stable identity and stay exact after text r
     await expect(card).toHaveAttribute("data-resolution", "exact", { timeout: 20_000 });
     await expect(card.getByText("原位置已变化")).toHaveCount(0);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -221,7 +221,7 @@ test("selected-text comments persist stable identity and stay exact after text r
 test("Electron preview shows the read-only comment marker and opens it on hover and keyboard focus", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(
-    path.join(tmpdir(), "pageroot-preview-comment-e2e-"),
+    path.join(tmpdir(), "stemmio-preview-comment-e2e-"),
   );
   const sourcePath = path.join(sourceDirectory, "commented-page.html");
   const commentText = "这个标题再简洁一些。";
@@ -244,7 +244,7 @@ test("Electron preview shows the read-only comment marker and opens it on hover 
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     const { frame: editFrame } = await loadedDiskFrame(
@@ -279,7 +279,7 @@ test("Electron preview shows the read-only comment marker and opens it on hover 
 
     // Comment text lives in the trusted host, never inside the previewed page.
     const previewFrame = launched.page.frames().find(
-      (frame) => /^pageroot-preview:/u.test(frame.url()),
+      (frame) => /^stemmio-preview:/u.test(frame.url()),
     );
     if (previewFrame) {
       await expect.poll(() => previewFrame.locator("html").evaluate(
@@ -317,11 +317,11 @@ test("Electron preview shows the read-only comment marker and opens it on hover 
     await expect(bubble).toBeHidden();
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeValidatedTemporaryDirectory(
       sourceDirectory,
-      "pageroot-preview-comment-e2e-",
+      "stemmio-preview-comment-e2e-",
     );
   }
 });
@@ -329,7 +329,7 @@ test("Electron preview shows the read-only comment marker and opens it on hover 
 test("Electron preview mounts the modification-only AI sidebar across reopen", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(
-    path.join(tmpdir(), "pageroot-ai-sidebar-e2e-"),
+    path.join(tmpdir(), "stemmio-ai-sidebar-e2e-"),
   );
   const sourcePath = path.join(sourceDirectory, "sidebar-page.html");
   writeFileSync(
@@ -346,7 +346,7 @@ test("Electron preview mounts the modification-only AI sidebar across reopen", a
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(launched.page, sourcePath, "sidebar-headline");
@@ -394,11 +394,11 @@ test("Electron preview mounts the modification-only AI sidebar across reopen", a
     await expect(launched.page.getByTestId("ai-conversation-input")).toHaveCount(0);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeValidatedTemporaryDirectory(
       sourceDirectory,
-      "pageroot-ai-sidebar-e2e-",
+      "stemmio-ai-sidebar-e2e-",
     );
   }
 });
@@ -407,7 +407,7 @@ test("Electron preview mounts the modification-only AI sidebar across reopen", a
 test("orphaned comments stay card-local and block send without a relink flow", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("orphaned-comments-resume-send.html");
-  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const firstLaunch = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   const firstComment = "把原列表项改成更简洁的表达。";
   const secondComment = "把原表格单元格改成更清楚的说明。";
   let activeLaunch = firstLaunch;
@@ -481,10 +481,10 @@ test("orphaned comments stay card-local and block send without a relink flow", a
     await expect(conflictBanner).toHaveCount(0, { timeout: 20_000 });
     await loadedDiskFrame(firstLaunch.page, managedSourcePath, "flex-copy");
 
-    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
+    await closeStemmioGracefully(firstLaunch.electronApp, firstLaunch.page);
     firstAppClosed = true;
 
-    activeLaunch = await launchPageRoot({
+    activeLaunch = await launchStemmio({
       isolatedUserData: firstLaunch.isolatedUserData,
     });
     await loadedDiskFrame(
@@ -530,9 +530,9 @@ test("orphaned comments stay card-local and block send without a relink flow", a
     await expect(recoveredComments).toHaveCount(0);
   } finally {
     if (activeLaunch !== firstLaunch) {
-      await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
+      await stopStemmio(activeLaunch.electronApp, firstLaunch.isolatedUserData);
     } else if (!firstAppClosed) {
-      await stopPageRoot(firstLaunch.electronApp, firstLaunch.isolatedUserData);
+      await stopStemmio(firstLaunch.electronApp, firstLaunch.isolatedUserData);
     } else {
       removeIsolatedUserData(firstLaunch.isolatedUserData);
     }
@@ -542,13 +542,13 @@ test("orphaned comments stay card-local and block send without a relink flow", a
 
 test("automatic update actions keep the sidebar product geometry and split About from Settings", async () => {
   const fixture = createSourceFixture("update-indicator.html");
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
     const sidebar = launched.page.locator(".workbench-global-sidebar");
-    const toolbarCleanupOutput = process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP
+    const toolbarCleanupOutput = process.env.STEMMIO_CAPTURE_TOOLBAR_CLEANUP
       ? path.resolve(
-        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+        process.env.STEMMIO_CAPTURE_TOOLBAR_CLEANUP_DIR
           || path.join(process.cwd(), "output", "design-qa", "toolbar-cleanup"),
       )
       : null;
@@ -645,7 +645,7 @@ test("automatic update actions keep the sidebar product geometry and split About
       { ...updateStatus, status: "available" },
     );
     await expect(launched.page.getByRole("button", {
-      name: "发现 PageRoot 9.9.9，下载更新",
+      name: "发现 Stemmio 9.9.9，下载更新",
     })).toBeVisible();
     const availableGeometry = await captureSidebarProduct();
 
@@ -695,7 +695,7 @@ test("automatic update actions keep the sidebar product geometry and split About
       { ...updateStatus, status: "downloaded" },
     );
     await expect(launched.page.getByRole("button", {
-      name: "PageRoot 9.9.9 已下载，重启更新",
+      name: "Stemmio 9.9.9 已下载，重启更新",
     })).toBeVisible();
     await expect(launched.page.getByRole("dialog", {
       name: "现在重启并安装更新？",
@@ -710,7 +710,7 @@ test("automatic update actions keep the sidebar product geometry and split About
       expect(geometry.sidebar).toEqual(noUpdateGeometry.sidebar);
     }
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -718,7 +718,7 @@ test("automatic update actions keep the sidebar product geometry and split About
 test("Electron shell keeps the global rail fixed while the context inspector swaps", async () => {
   test.setTimeout(90_000);
   const fixture = createSourceFixture("workbench-shell-geometry.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
     const stage = launched.page.locator(".review-scroll-stage");
@@ -869,7 +869,7 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     expect(editGeometry.comments).not.toBeNull();
     expect(Math.abs(editGeometry.comments.width - editGeometry.inspectorWidth))
       .toBeLessThanOrEqual(0.5);
-    if (process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP) {
+    if (process.env.STEMMIO_CAPTURE_TOOLBAR_CLEANUP) {
       const visibleToast = launched.page.locator(".toast.show");
       await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
       if (await visibleToast.isVisible().catch(() => false)) {
@@ -878,7 +878,7 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
       }
       const captureDirectory = path.resolve(
         process.cwd(),
-        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+        process.env.STEMMIO_CAPTURE_TOOLBAR_CLEANUP_DIR
           || path.join("output", "design-qa", "toolbar-cleanup"),
       );
       mkdirSync(captureDirectory, { recursive: true });
@@ -1096,20 +1096,20 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     expect(narrowCommentsGeometry.documentWidth - narrowCommentsGeometry.viewportWidth)
       .toBeLessThanOrEqual(1);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
 
 
 test("workspace failure keeps the current page visible with export and relaunch paths", async () => {
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "stemmio-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "workspace-recovery.html");
   writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   let electronApp = null;
   try {
-    const launched = await launchPageRoot({
+    const launched = await launchStemmio({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
@@ -1121,10 +1121,10 @@ test("workspace failure keeps the current page visible with export and relaunch 
         candidate.webContents.getURL() === rendererUrl
       ));
       if (!mainWindow) {
-        throw new Error("PageRoot main BrowserWindow is unavailable for workspace recovery.");
+        throw new Error("Stemmio main BrowserWindow is unavailable for workspace recovery.");
       }
       mainWindow.webContents.send(
-        "html-app:workspace-unavailable",
+        "stemmio-app:workspace-unavailable",
         {
           title: "本地项目资料暂时不可用",
           message: "当前页面内容仍保留。可先导出当前 HTML，再重新打开源页。",
@@ -1151,12 +1151,12 @@ test("workspace failure keeps the current page visible with export and relaunch 
       .locator('iframe[title*="本轮已锁定"]')).toBeVisible();
   } finally {
     if (electronApp) {
-      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+      await stopStemmio(electronApp, isolatedUserData, { cleanup: false });
     }
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
-      "pageroot-native-source-e2e-",
+      "stemmio-native-source-e2e-",
     );
   }
 });

@@ -1,7 +1,7 @@
 {
-  "name": "pageroot",
+  "name": "stemmio",
   "version": "0.9.8",
-  "description": "源页（PageRoot）— Editable islands with byte-exact source outside every edited region.",
+  "description": "源页（Stemmio）— Editable islands with byte-exact source outside every edited region.",
   "author": "源页",
   "license": "Apache-2.0",
   "private": true,
@@ -22,7 +22,7 @@
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "desktop:renderer": "vite build --config desktop/vite.config.ts",
-    "desktop:dev": "npm run desktop:renderer && PAGEROOT_RUNTIME_CHANNEL=source electron desktop/main.mjs",
+    "desktop:dev": "npm run desktop:renderer && STEMMIO_RUNTIME_CHANNEL=source electron desktop/main.mjs",
     "desktop:pack": "npm run desktop:renderer && node scripts/build-package.mjs --arch arm64",
     "ci:source-build": "npm run typecheck && npm run lint && npm run build",
     "architecture:check": "node scripts/check-architecture.mjs",
@@ -143,9 +143,9 @@
   },
   "type": "module",
   "build": {
-    "appId": "com.htmlai.workbench",
-    "productName": "PageRoot",
-    "artifactName": "PageRoot-${version}-${arch}.${ext}",
+    "appId": "com.stemmio.app",
+    "productName": "Stemmio",
+    "artifactName": "Stemmio-${version}-${arch}.${ext}",
     "afterPack": "desktop/after-pack.mjs",
     "asar": true,
     "forceCodeSigning": true,
@@ -207,6 +207,7 @@
       "desktop/edit-runtime-protocol.mjs",
       "desktop/edit-runtime-preparation-fence.mjs",
       "desktop/agent-login-url.mjs",
+      "desktop/runtime-project-storage-contract.mjs",
       "shared/agent-vendor-key-url.mjs",
       "shared/agent-configuration-preferences.mjs",
       "app/domain/edit-runtime-contract.js",
@@ -578,8 +579,16 @@
         "to": "shared/provenance.mjs"
       },
       {
-        "from": "shared/pageroot-element-identity.mjs",
-        "to": "shared/pageroot-element-identity.mjs"
+        "from": "shared/stemmio-element-identity.mjs",
+        "to": "shared/stemmio-element-identity.mjs"
+      },
+      {
+        "from": "shared/product-identity.mjs",
+        "to": "shared/product-identity.mjs"
+      },
+      {
+        "from": "shared/project-storage-contract.mjs",
+        "to": "shared/project-storage-contract.mjs"
       },
       {
         "from": "node_modules/acorn",
@@ -741,12 +750,13 @@
           "completion.v1.schema.json",
           "conversation.v1.schema.json",
           "conversation.v2.schema.json",
+          "conversation.v3.schema.json",
           "conversation-index.v1.schema.json",
           "conversation-draft.v1.schema.json",
           "conversation-draft.v2.schema.json",
           "current-version-transaction.v1.schema.json",
           "input-manifest.v1.schema.json",
-          "pageroot-element-identity.v1.schema.json",
+          "stemmio-element-identity.v1.schema.json",
           "preserved-draft.v1.schema.json",
           "project-state.v3.schema.json",
           "project-identity.v4.schema.json",
@@ -774,8 +784,8 @@
         "to": "app-update.yml"
       },
       {
-        "from": "PageRoot 用户声明与免责声明.txt",
-        "to": "PageRoot 用户声明与免责声明.txt"
+        "from": "源页 用户声明与免责声明.txt",
+        "to": "源页 用户声明与免责声明.txt"
       },
       {
         "from": "output/release-metadata/usage-telemetry-config.json",
@@ -825,7 +835,7 @@
       }
     ],
     "dmg": {
-      "title": "PageRoot ${version}",
+      "title": "Stemmio ${version}",
       "backgroundColor": "#f2f0ea",
       "window": {
         "width": 660,

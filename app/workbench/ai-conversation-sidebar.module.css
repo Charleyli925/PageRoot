@@ -149,20 +149,20 @@
 }
 
 /*
- * The brand mark is PageRoot's. The stages are PageRoot stating what the run did
+ * The brand mark is Stemmio's. The stages are Stemmio stating what the run did
  * (ADR 0037 §4), so that block wears the accent; the Agent gets a neutral square so
  * the two are never read as the same speaker.
  */
-.message[data-actor="pageroot"] .avatar {
+.message[data-actor="stemmio"] .avatar {
   background: transparent;
 }
 
-.pageRootAvatar,
+.stemmioAvatar,
 .agentAvatar {
   overflow: hidden;
 }
 
-.pageRootAvatar img,
+.stemmioAvatar img,
 .agentAvatar img {
   width: 100%;
   height: 100%;
@@ -175,7 +175,7 @@
   font-weight: 680;
 }
 
-.message[data-actor="pageroot"] .actor {
+.message[data-actor="stemmio"] .actor {
   color: #5147dc;
 }
 
@@ -788,8 +788,8 @@
   .send { white-space: normal; }
 }
 
-.turnGroup .message[data-actor="pageroot"] .messageMeta { display: none; }
-.turnGroup .message[data-actor="pageroot"] { font-weight: 400; }
+.turnGroup .message[data-actor="stemmio"] .messageMeta { display: none; }
+.turnGroup .message[data-actor="stemmio"] { font-weight: 400; }
 
 .close { margin-left: auto; width: 28px; height: 28px; flex: none; border: 0; border-radius: 6px; background: transparent; color: #666171; font-size: 20px; cursor: pointer; }
 .close:hover { background: #e9e7f0; }

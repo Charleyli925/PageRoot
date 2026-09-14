@@ -73,7 +73,7 @@ function boundedSemanticEvidence(value, label) {
   });
 }
 
-// Forward compatibility. A newer PageRoot may add members to any of these
+// Forward compatibility. A newer Stemmio may add members to any of these
 // records. Every known member stays strictly validated, and every unknown
 // member is carried through read -> modify -> write unchanged so an older
 // build never silently deletes a newer build's data. Preserved members take

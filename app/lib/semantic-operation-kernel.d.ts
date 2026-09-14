@@ -19,7 +19,7 @@ export type SemanticOperation = SemanticOperationEnvelope & (
     target: SemanticElementPrecondition;
     text: string;
     contentHtml?: string;
-    createdPagerootIds?: string[];
+    createdStemmioIds?: string[];
   }
   | {
     type: "replaceTextRange";
@@ -40,7 +40,7 @@ export type SemanticOperation = SemanticOperationEnvelope & (
     value: string;
     important: boolean;
     range?: { startOffset: number; endOffset: number; quote: string };
-    createdPagerootIds?: string[];
+    createdStemmioIds?: string[];
   }
   | {
     type: "insertElement";

@@ -15,10 +15,10 @@ function git(root, args) {
 }
 
 test("workspace provenance changes for untracked source bytes", () => {
-  const root = mkdtempSync(path.join(tmpdir(), "pageroot-provenance-"));
+  const root = mkdtempSync(path.join(tmpdir(), "stemmio-provenance-"));
   git(root, ["init", "-q"]);
   git(root, ["config", "user.email", "test@example.invalid"]);
-  git(root, ["config", "user.name", "PageRoot Test"]);
+  git(root, ["config", "user.name", "Stemmio Test"]);
   writeFileSync(path.join(root, "tracked.txt"), "tracked\n");
   git(root, ["add", "tracked.txt"]);
   git(root, ["commit", "-qm", "fixture"]);

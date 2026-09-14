@@ -29,9 +29,9 @@ const LOCATOR = {
   documentId: "doc_bbbbbbbbbbbbbbbb",
   workingCopyId: "work_ver_0001",
   versionId: "ver_0001",
-  sourcePath: "/tmp/PageRoot/项目/demo/page-V1.html",
+  sourcePath: "/tmp/Stemmio/项目/demo/page-V1.html",
   sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  projectRootPath: "/tmp/PageRoot/项目/demo",
+  projectRootPath: "/tmp/Stemmio/项目/demo",
 };
 
 test("old desktop state without activeManagedLocator stays inert", () => {
@@ -50,17 +50,17 @@ test("a valid locator round-trips and rebases with active/recent paths", () => {
   assert.equal(normalized.sourcePath, path.resolve(LOCATOR.sourcePath));
   assert.equal(normalized.projectRootPath, path.resolve(LOCATOR.projectRootPath));
 
-  const nextPath = "/tmp/PageRoot/项目/demo/Finder renamed.html";
+  const nextPath = "/tmp/Stemmio/项目/demo/Finder renamed.html";
   const rebased = rebaseActiveManagedLocator(normalized, {
     previousSourcePath: LOCATOR.sourcePath,
     nextSourcePath: nextPath,
     sourceSha256: LOCATOR.sourceSha256,
-    projectRootPath: "/tmp/PageRoot/项目/demo-renamed",
+    projectRootPath: "/tmp/Stemmio/项目/demo-renamed",
   });
   assert.equal(rebased.workingCopyId, "work_ver_0001");
   assert.equal(rebased.versionId, "ver_0001");
   assert.equal(rebased.sourcePath, path.resolve(nextPath));
-  assert.equal(rebased.projectRootPath, path.resolve("/tmp/PageRoot/项目/demo-renamed"));
+  assert.equal(rebased.projectRootPath, path.resolve("/tmp/Stemmio/项目/demo-renamed"));
 
   const unrelated = rebaseActiveManagedLocator(normalized, {
     previousSourcePath: "/tmp/other.html",
@@ -84,7 +84,7 @@ test("an OpenTarget can seed the restart locator cache", () => {
 });
 
 test("activated path spelling wins over OpenTarget aliases and rebases across /var", () => {
-  const aliasedRoot = "/var/folders/jx/example/T/pageroot/demo";
+  const aliasedRoot = "/var/folders/jx/example/T/stemmio/demo";
   const aliasedPath = `${aliasedRoot}/page-V1.html`;
   const activatedPath = `/private${aliasedPath}`;
   const locator = activeManagedLocatorForActivatedPath({

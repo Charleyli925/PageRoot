@@ -8,7 +8,7 @@ Dependabot checks monthly. Coupled React packages are updated together, and mino
 
 ## Temporary reviewed exceptions
 
-`echarts` 5.4.3 and 5.6.0 remain pinned because PageRoot resolves exact
+`echarts` 5.4.3 and 5.6.0 remain pinned because Stemmio resolves exact
 cdnjs/jsDelivr/unpkg minified URLs for those two authored versions to their
 same-version packaged bytes. GHSA-fgmj-fm8m-jvvx (CVE-2026-45249) is a
 Lines-series tooltip XSS fixed only in 6.1.0, a major bump that would miss those
@@ -81,13 +81,13 @@ all native Codex packages. Codex's adapter/native closure remains available only
 through the catalog-managed ACP installer under `userData/agents`, where its
 separate package identities and integrity pins are checked. `semver` is pinned
 at the package root so the updater closure has no hidden nested runtime copy.
-The dependency audit parses every PageRoot-owned JavaScript file selected for
+The dependency audit parses every Stemmio-owned JavaScript file selected for
 `app.asar`, Bridge or shared resources, derives its direct bare-package imports,
 expands their locked production and required peer dependencies, and requires
 that exact hoisted set in `extraResources`. It rejects missing, nested,
 undeclared or unreachable modules, so a new main-process import cannot be
 hidden by forgetting to update a second hand-maintained allowlist.
-The artifact verifier also walks every PageRoot-owned Resources subtree with
+The artifact verifier also walks every Stemmio-owned Resources subtree with
 `lstat`, rejects symlinks and all non-regular entries (including FIFOs and Unix
 sockets), rejects ASAR link entries, and byte-compares each allowlisted package
 against the clean source closure. A packaged Electron Helper then starts the

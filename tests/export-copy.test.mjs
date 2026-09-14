@@ -30,7 +30,7 @@ import { ProjectFileError, writeHtmlCopy } from "../desktop/project-files.mjs";
 import { readLastExportDirectory, recordLastExportDirectory } from "../desktop/ui-preferences.mjs";
 
 async function exportFixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-export-flow-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-export-flow-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const downloadsDirectory = path.join(root, "Downloads");
   const externalDirectory = path.join(root, "Exports");
@@ -38,7 +38,7 @@ async function exportFixture(t) {
   await Promise.all([downloadsDirectory, externalDirectory, projectsRoot].map((value) => mkdir(value)));
   return { root, downloadsDirectory, externalDirectory, projectsRoot,
     userDataPath: path.join(root, "preferences"),
-    html: '<!doctype html><html data-pageroot-id="id"><body>frozen export</body></html>',
+    html: '<!doctype html><html data-stemmio-id="id"><body>frozen export</body></html>',
     suggestedName: "用户项目-版本 2.html" };
 }
 
@@ -92,8 +92,8 @@ test("export excludes every managed project path and external aliases to its aut
   const value = await exportFixture(t);
   const active = path.join(value.projectsRoot, "active", "work.html");
   const other = path.join(value.projectsRoot, "other", "work.html");
-  const history = path.join(value.projectsRoot, "other", ".pageroot", "versions", "v1.html");
-  const metadata = path.join(value.projectsRoot, "other", ".pageroot", "manifest.json");
+  const history = path.join(value.projectsRoot, "other", ".stemmio", "versions", "v1.html");
+  const metadata = path.join(value.projectsRoot, "other", ".stemmio", "manifest.json");
   for (const filePath of [active, other, history, metadata]) {
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, `authority:${filePath}`);
@@ -165,7 +165,7 @@ test("Finder access accepts only bounded successful export receipts from this se
 });
 
 test("the default export name is a free numbered copy and never the source", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-name-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-export-name-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = path.join(directory, "页面.html");
   const firstCopyPath = path.join(directory, "页面-副本.html");
@@ -194,7 +194,7 @@ test("the default export name is a free numbered copy and never the source", asy
 });
 
 test("a dotted product version remains part of the export file name", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-version-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-export-version-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
 
   assert.equal(
@@ -224,7 +224,7 @@ test("the selected destination gets one canonical HTML extension", () => {
 });
 
 test("the default export name skips aliases and existing paths", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-alias-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-export-alias-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = path.join(directory, "source.htm");
   const hardLinkCopy = path.join(directory, "source-副本.htm");
@@ -243,7 +243,7 @@ test("the default export name skips aliases and existing paths", async (t) => {
 });
 
 test("the default export name also avoids a different active project", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-active-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-export-active-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = path.join(directory, "draft.html");
   const activePath = path.join(directory, "draft-副本.html");
@@ -280,7 +280,7 @@ test("macOS path comparison protects case and Unicode aliases", async () => {
 });
 
 test("existing inode identity protects hard links to the source", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-inode-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-export-inode-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = path.join(directory, "source.html");
   const aliasPath = path.join(directory, "alias.html");
@@ -295,7 +295,7 @@ test("existing inode identity protects hard links to the source", async (t) => {
 });
 
 test("selecting the source rejects without writing an unselected alternative", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-retry-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-export-retry-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = path.join(directory, "source.html");
   const defaultPath = path.join(directory, "source-副本.html");
@@ -310,7 +310,7 @@ test("selecting the source rejects without writing an unselected alternative", a
 });
 
 test("canceling the save dialog is a normal null result", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-cancel-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-export-cancel-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = path.join(directory, "source.html");
   await writeFile(sourcePath, "<html></html>", "utf8");

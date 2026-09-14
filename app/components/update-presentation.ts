@@ -55,27 +55,27 @@ export function updatePresentation({
     return {
       tone: "current",
       title: "当前已是最新版本",
-      detail: `PageRoot ${result.currentVersion} 已是最新的正式版本。`,
+      detail: `Stemmio ${result.currentVersion} 已是最新的正式版本。`,
     };
   }
   if (result.status === "available") {
     return {
       tone: "available",
-      title: `PageRoot ${result.latestVersion || "新版本"} 可以下载`,
+      title: `Stemmio ${result.latestVersion || "新版本"} 可以下载`,
       detail: "点击下载后仍可继续编辑；下载完成时再决定是否重启。",
     };
   }
   if (result.status === "downloading") {
     return {
       tone: "available",
-      title: `正在下载 PageRoot ${result.latestVersion || "新版本"}`,
+      title: `正在下载 Stemmio ${result.latestVersion || "新版本"}`,
       detail: "你可以继续编辑；下载完成后可在侧栏或设置中重启安装。",
     };
   }
   if (result.status === "downloaded") {
     return {
       tone: "ready",
-      title: `PageRoot ${result.latestVersion || "新版本"} 已准备好`,
+      title: `Stemmio ${result.latestVersion || "新版本"} 已准备好`,
       detail: "点击重启后会先写入当前编辑，然后安装新版本。",
     };
   }

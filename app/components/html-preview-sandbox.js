@@ -10,9 +10,9 @@ import {
   isEditRuntimeSessionId,
 } from "../domain/edit-runtime-contract.js";
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  isValidPagerootElementId,
-} from "../../shared/pageroot-element-identity.mjs";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  isValidStemmioElementId,
+} from "../../shared/stemmio-element-identity.mjs";
 
 export const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
 export const FRAME_VERIFICATION_ATTRIBUTE =
@@ -22,21 +22,21 @@ const INJECTED_BASE_ATTRIBUTE = "data-html-canvas-injected-base";
 const DISABLED_SCRIPT_ATTRIBUTE = "data-html-canvas-disabled-script";
 const ORIGINAL_SCRIPT_TYPE_ATTRIBUTE = "data-html-canvas-original-script-type";
 const DISABLED_REFRESH_ATTRIBUTE = "data-html-canvas-disabled-refresh";
-const DISPLAY_POLICY_ATTRIBUTE = "data-pageroot-display-policy";
+const DISPLAY_POLICY_ATTRIBUTE = "data-stemmio-display-policy";
 const MISSING_ATTRIBUTE_VALUE = "__html_canvas_missing__";
 export const EDIT_RUNTIME_CSP = [
   "default-src 'none'",
-  "script-src pageroot-edit-runtime:",
-  "style-src 'unsafe-inline' data: http: https: pageroot-edit-runtime:",
-  "img-src data: blob: http: https: pageroot-edit-runtime:",
-  "font-src data: http: https: pageroot-edit-runtime:",
-  "media-src data: blob: http: https: pageroot-edit-runtime:",
+  "script-src stemmio-edit-runtime:",
+  "style-src 'unsafe-inline' data: http: https: stemmio-edit-runtime:",
+  "img-src data: blob: http: https: stemmio-edit-runtime:",
+  "font-src data: http: https: stemmio-edit-runtime:",
+  "media-src data: blob: http: https: stemmio-edit-runtime:",
   "connect-src http: https:",
   "worker-src 'none'",
   "frame-src 'none'",
   "object-src 'none'",
   "form-action 'none'",
-  "base-uri pageroot-edit-runtime:",
+  "base-uri stemmio-edit-runtime:",
 ].join("; ");
 
 function escapeAttribute(value) {
@@ -185,10 +185,10 @@ export function prepareVerifiedFrameDocument(
 }
 
 function uniqueRuntimeMarker(element) {
-  // Runtime source proof is Stable-ID-only. PageRoot-owned injections such as
+  // Runtime source proof is Stable-ID-only. Stemmio-owned injections such as
   // the protocol <base> are not source objects and must not mint a second ID.
-  const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-  return isValidPagerootElementId(pagerootId) ? pagerootId : null;
+  const stemmioId = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
+  return isValidStemmioElementId(stemmioId) ? stemmioId : null;
 }
 
 function addFrameVerification(parsed, verificationToken, editorStyles) {
@@ -290,7 +290,7 @@ export function prepareDisposableRuntimeFrameDocument(
     const script = scriptNodes[ordinal];
     const scriptUrl = editRuntimeProtocolUrl(
       sessionId,
-      `/.pageroot/author/${descriptor.index}.js`,
+      `/.stemmio/author/${descriptor.index}.js`,
     );
     if (!scriptUrl) return null;
     script.src = scriptUrl;
@@ -301,7 +301,7 @@ export function prepareDisposableRuntimeFrameDocument(
   addRuntimeContentSecurityPolicy(parsed);
   const bootstrapUrl = editRuntimeProtocolUrl(
     sessionId,
-    `/.pageroot/bootstrap/${executionId}.js`,
+    `/.stemmio/bootstrap/${executionId}.js`,
   );
   if (!bootstrapUrl || !bootstrapUrl.startsWith(`${EDIT_RUNTIME_PROTOCOL_SCHEME}:`)) {
     return null;

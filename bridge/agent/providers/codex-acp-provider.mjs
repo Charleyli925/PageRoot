@@ -184,9 +184,9 @@ async function collectFiles(root) {
   return files;
 }
 
-function looksLikeBundledPageRootCodex(filePath) {
+function looksLikeBundledStemmioCodex(filePath) {
   const normalized = path.normalize(filePath);
-  return /[/\\]PageRoot\.app[/\\]Contents[/\\]Resources[/\\]/u.test(normalized)
+  return /[/\\]Stemmio\.app[/\\]Contents[/\\]Resources[/\\]/u.test(normalized)
     || /[/\\]extraResources[/\\]node_modules[/\\]@openai[/\\]codex/u.test(normalized);
 }
 
@@ -200,8 +200,8 @@ async function assertProtectedNativeBinary(nativeRoot) {
   const binary = files.find((filePath) => path.basename(filePath) === executableName)
     || files.find((filePath) => path.basename(filePath).startsWith("codex"));
   if (!binary) fail("CODEX_COMMAND_UNTRUSTED", "Codex native executable was not found.");
-  if (looksLikeBundledPageRootCodex(binary)) {
-    fail("CODEX_COMMAND_UNTRUSTED", "PageRoot will not use an executable bundled inside the application for ACP.");
+  if (looksLikeBundledStemmioCodex(binary)) {
+    fail("CODEX_COMMAND_UNTRUSTED", "Stemmio will not use an executable bundled inside the application for ACP.");
   }
   return Object.freeze({
     command: binary,
@@ -292,16 +292,16 @@ export async function resolveCodexAcpCommand({
   homeDirectory = os.homedir(),
   managedCandidates = async () => [],
 } = {}) {
-  const configured = cleanProviderText(environment.PAGEROOT_CODEX_ACP_COMMAND, 4_096);
+  const configured = cleanProviderText(environment.STEMMIO_CODEX_ACP_COMMAND, 4_096);
   const testOverride = configured
-    && environment.PAGEROOT_E2E === "1"
-    && environment.PAGEROOT_CODEX_ACP_ALLOW_TEST_COMMAND === "1";
+    && environment.STEMMIO_E2E === "1"
+    && environment.STEMMIO_CODEX_ACP_ALLOW_TEST_COMMAND === "1";
   if (configured && !testOverride) {
-    fail("CODEX_COMMAND_UNTRUSTED", "PAGEROOT_CODEX_ACP_COMMAND 只允许用于显式 E2E 测试。");
+    fail("CODEX_COMMAND_UNTRUSTED", "STEMMIO_CODEX_ACP_COMMAND 只允许用于显式 E2E 测试。");
   }
 
   // Collect every source before validating/selecting one. This keeps a stale
-  // global shim from masking a healthy PageRoot-managed installation and
+  // global shim from masking a healthy Stemmio-managed installation and
   // makes the source priority explicit: configured test path, managed, user.
   const [managedResult, userResult] = await Promise.all([
     typeof managedCandidates === "function"
@@ -399,7 +399,7 @@ export async function assertCodexAcpInstallationUnchanged(command) {
     || nativeClosureIncomplete
     || (nativeCurrent && identityChanged(nativeCurrent, command.nativeIdentity))
   ) {
-    fail("CODEX_COMMAND_CHANGED", "Codex ACP 在预检后发生变化，PageRoot 没有启动它。", {
+    fail("CODEX_COMMAND_CHANGED", "Codex ACP 在预检后发生变化，Stemmio 没有启动它。", {
       status: 409,
     });
   }
@@ -533,7 +533,7 @@ export function codexAcpFailure(code) {
     case "CODEX_COMMAND_NOT_FOUND":
       return "没有找到独立安装的 Codex ACP。请先安装 Codex，或改用复制任务。";
     case "CODEX_COMMAND_UNTRUSTED":
-      return "找到的 Codex ACP 不符合独立安装校验，PageRoot 没有启动它。";
+      return "找到的 Codex ACP 不符合独立安装校验，Stemmio 没有启动它。";
     case "CODEX_VERSION_UNSUPPORTED":
       return "当前 Codex ACP 版本不受支持。请更新后再试。";
     case "AGENT_CANCELLED":
@@ -543,7 +543,7 @@ export function codexAcpFailure(code) {
     case "AGENT_NETWORK_INTERRUPTED":
       return "Codex 连接中断，Request 与当前 HTML 均已保留。";
     case "ACP_AGENT_IDENTITY_MISMATCH":
-      return "ACP 进程没有证明自己是 Codex，PageRoot 已停止它。";
+      return "ACP 进程没有证明自己是 Codex，Stemmio 已停止它。";
     default:
       return "Codex 没有完成本轮任务。Request 与当前 HTML 均已保留。";
   }
@@ -552,25 +552,25 @@ export function codexAcpFailure(code) {
 export function codexAcpPreflightFailure(code) {
   switch (code) {
     case "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED":
-      return "Codex 预检进程未确认停止。PageRoot 尚未创建本轮 Request；为避免失去控制，本次不能继续，应用也不会退出。";
+      return "Codex 预检进程未确认停止。Stemmio 尚未创建本轮 Request；为避免失去控制，本次不能继续，应用也不会退出。";
     case "CODEX_AUTH_REQUIRED":
-      return "Codex 尚未登录。PageRoot 尚未创建本轮 Request；请先完成登录，再重试或改用复制任务。";
+      return "Codex 尚未登录。Stemmio 尚未创建本轮 Request；请先完成登录，再重试或改用复制任务。";
     case "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE":
-      return "Codex 账号当前没有可用额度。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
+      return "Codex 账号当前没有可用额度。Stemmio 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
     case "CODEX_COMMAND_NOT_FOUND":
-      return "没有找到独立安装的 Codex ACP。PageRoot 尚未创建本轮 Request；请先安装，或改用复制任务。";
+      return "没有找到独立安装的 Codex ACP。Stemmio 尚未创建本轮 Request；请先安装，或改用复制任务。";
     case "CODEX_COMMAND_UNTRUSTED":
-      return "找到的 Codex ACP 不符合独立安装校验。PageRoot 尚未创建本轮 Request，也没有启动该命令。";
+      return "找到的 Codex ACP 不符合独立安装校验。Stemmio 尚未创建本轮 Request，也没有启动该命令。";
     case "CODEX_COMMAND_CHANGED":
-      return "Codex ACP 在预检期间发生变化。PageRoot 尚未创建本轮 Request，也没有启动变化后的命令。";
+      return "Codex ACP 在预检期间发生变化。Stemmio 尚未创建本轮 Request，也没有启动变化后的命令。";
     case "CODEX_PREFLIGHT_TIMEOUT":
-      return "Codex ACP 预检超时。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+      return "Codex ACP 预检超时。Stemmio 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
     case "CODEX_EXECUTION_CONTRACT_UNSUPPORTED":
       return "当前 Codex 组件不支持完成修改所需的受限执行工具。修改要求已保留；请先使用其他服务，重复登录或重装相同组件无法修复。";
     case "CODEX_PROTOCOL_UNSUPPORTED":
-      return "当前 Codex 组件的模型目录无法识别。PageRoot 尚未创建本轮 Request；请更新受验证组件或改用其他服务。";
+      return "当前 Codex 组件的模型目录无法识别。Stemmio 尚未创建本轮 Request；请更新受验证组件或改用其他服务。";
     default:
-      return "Codex ACP 预检没有完成。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+      return "Codex ACP 预检没有完成。Stemmio 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
   }
 }
 
@@ -749,8 +749,8 @@ export async function probeCodexAcp(command, environment = process.env) {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
         clientInfo: {
-          name: "pageroot-agent-bridge",
-          title: "PageRoot Agent Bridge",
+          name: "stemmio-agent-bridge",
+          title: "Stemmio Agent Bridge",
           version: "1.0.0",
         },
       },
@@ -820,7 +820,7 @@ export async function probeCodexAcp(command, environment = process.env) {
     if (!(await terminateManagedProcess(child, { processGroup }))) {
       fail(
         "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
-        "Codex 预检进程未确认停止。PageRoot 尚未创建本轮 Request；为避免失去控制，本次不能继续，应用也不会退出。",
+        "Codex 预检进程未确认停止。Stemmio 尚未创建本轮 Request；为避免失去控制，本次不能继续，应用也不会退出。",
         { status: 503 },
       );
     }
@@ -846,8 +846,8 @@ async function initializeCodexAcpForDiagnosis(command, environment, {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
         clientInfo: {
-          name: "pageroot-agent-bridge",
-          title: "PageRoot Agent Bridge",
+          name: "stemmio-agent-bridge",
+          title: "Stemmio Agent Bridge",
           version: "1.0.0",
         },
       },
@@ -1156,7 +1156,7 @@ export function createCodexAcpProvider({
         useVerifiedJavaScriptRuntime: !clientTools && usesJavaScriptRuntime(installation),
         cancellationSignal,
         expectedAgentName: installation.source === "e2e-override"
-          ? /codex|pageroot-e2e/iu
+          ? /codex|stemmio-e2e/iu
           : /codex/iu,
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
         ...(inactivityTimeoutMs ? { inactivityTimeoutMs } : {}),
