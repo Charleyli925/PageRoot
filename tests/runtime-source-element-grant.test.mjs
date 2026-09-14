@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createBoundSourceElementProof,
   grantEditorCreatedSourceElements,
   revokeRemovedSourceElements,
+  sealEditorCreatedSourceElements,
 } from "../app/components/html-canvas-source-authority.js";
 import { buildSourceIndex } from "../app/lib/source-index.js";
 
@@ -68,11 +70,13 @@ function createNode({ id, tag = "p", connected = true, extraId = null }) {
 }
 
 function grant(options) {
+  const created = options.createdElements || [];
   return grantEditorCreatedSourceElements({
     sourceIndex: buildSourceIndex(html),
     expectedGeneration: 7,
     expectedExecutionId: "exec_grant",
     markerAttribute: "data-edit-runtime-source",
+    creationTicket: sealEditorCreatedSourceElements(created),
     ...options,
   });
 }
@@ -144,6 +148,67 @@ test("author-generated clones with a legal ID cannot steal the grant", () => {
     createdElements: [authorClone.node],
     allowedElementIds: [ids.created],
   }).reason, "created-identity-untrusted");
+});
+
+test("a unique author clone cannot receive a grant reserved for the pre-connect node", () => {
+  const editorOriginal = createNode({ id: ids.created, connected: false });
+  const authorClone = createNode({ id: "author", extraId: ids.created });
+  const { documentNode } = createSurface([authorClone]);
+  const authority = createAuthority();
+  assert.equal(grant({
+    authority,
+    documentNode,
+    createdElements: [authorClone.node],
+    allowedElementIds: [ids.created],
+    creationTicket: sealEditorCreatedSourceElements([editorOriginal.node]),
+  }).reason, "created-node-invalid");
+  assert.equal(grant({
+    authority,
+    documentNode,
+    createdElements: [authorClone.node],
+    allowedElementIds: [ids.created],
+    creationTicket: null,
+  }).reason, "created-node-invalid");
+  editorOriginal.node.ownerDocument = documentNode;
+  assert.equal(grant({
+    authority,
+    documentNode,
+    createdElements: [editorOriginal.node],
+    allowedElementIds: [ids.created],
+    creationTicket: sealEditorCreatedSourceElements([editorOriginal.node]),
+  }).reason, "created-node-invalid");
+});
+
+test("bound source proof keeps the before-index after the live index advances", () => {
+  const created = createNode({ id: ids.created });
+  const { documentNode } = createSurface([created]);
+  const authority = createAuthority();
+  assert.equal(grant({
+    authority,
+    documentNode,
+    createdElements: [created.node],
+    allowedElementIds: [ids.created],
+  }).ok, true);
+  const beforeIndex = buildSourceIndex(html);
+  const afterIndex = buildSourceIndex(
+    html.replace(`<p data-pageroot-id="${ids.created}">New</p>`, ""),
+  );
+  const beforeProof = createBoundSourceElementProof({
+    authority,
+    sourceIndex: beforeIndex,
+    expectedGeneration: 7,
+    expectedExecutionId: "exec_grant",
+    markerAttribute: "data-edit-runtime-source",
+  });
+  const afterProof = createBoundSourceElementProof({
+    authority,
+    sourceIndex: afterIndex,
+    expectedGeneration: 7,
+    expectedExecutionId: "exec_grant",
+    markerAttribute: "data-edit-runtime-source",
+  });
+  assert.equal(beforeProof(created.node), true);
+  assert.equal(afterProof(created.node), false);
 });
 
 test("revoking a deleted node does not restore later author reinsertion", () => {

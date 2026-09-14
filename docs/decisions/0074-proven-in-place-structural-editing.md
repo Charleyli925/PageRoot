@@ -53,8 +53,31 @@ edit authority to the exact nodes it created.
 | Editor-created node from this accepted transaction | May be granted through the parent-owned `RuntimeSourceElements` owner after identity, frame and local-structure proofs. |
 
 This is not a reopened initialization registry and not a scan of the live DOM
-for legal IDs. Duplicate, stale-frame, old-Document, forged-ID and
-author-created same-ID objects fail closed.
+for legal IDs. The executor seals the exact `Node` objects it created from the
+next source HTML *before* they connect. After `insertBefore`, grant may verify
+only that sealed ticket; a later `querySelector` of the live tree cannot
+nominate replacements. Duplicate, stale-frame, old-Document, forged-ID,
+disconnected, extra-identity and author-created same-ID objects fail closed.
+
+Customized built-in elements (`is="…"`) and autonomous custom elements stay on
+Candidate for this round: a `div` with `is` is still a `div` by tag name, but
+its `connectedCallback` can replace children with author clones that carry the
+legal IDs. Mixed-content parents that contain non-whitespace text or comments
+also stay on Candidate for insert and move, because element-sibling placement
+cannot prove the text/comment boundary. `html`/`head`/`body` remain
+non-targets for delete/move of themselves; `body` may be a proven destination
+parent for ordinary source children. `html` and `head` may not.
+
+Pre-mutation proof binds the current Document, current Runtime authority and
+the *before* SourceIndex. Post-mutation proof binds the accepted after-index,
+the actual local result and any new grant. The live `sourceIndexRef` is not a
+proof input; advancing it must not unprove a still-connected delete target.
+
+Observation attributes distinguish the plan from the result:
+`data-structural-projection-kind` is the plan, and
+`data-structural-projection-outcome` is `in-place`, `candidate` or `recovered`.
+A planned in-place that later recovers must not be counted as an in-place
+success.
 
 ### C. Distinct failures stay distinct
 

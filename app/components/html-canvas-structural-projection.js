@@ -1,7 +1,9 @@
+import { normalizeSourceText } from "../lib/source-index.js";
 import {
   SOURCE_ELEMENT_ATTRIBUTE,
   grantEditorCreatedSourceElements,
   revokeRemovedSourceElements,
+  sealEditorCreatedSourceElements,
   uniqueSourceElement,
 } from "./html-canvas-source-authority.js";
 
@@ -13,10 +15,26 @@ const UNSUPPORTED_IN_PLACE_TAGS = new Set([
   "meta", "svg", "math", "html", "head", "body", "frameset", "frame", "noscript",
 ]);
 
+const UNSUPPORTED_IN_PLACE_PARENT_TAGS = new Set(
+  [...UNSUPPORTED_IN_PLACE_TAGS].filter((tag) => tag !== "body"),
+);
+
 function freezePlan(plan) {
   const frozen = Object.freeze({ ...plan });
   VERIFIED_PLANS.add(frozen);
   return frozen;
+}
+
+export function applyStructuralProjectionObservation(element, observation) {
+  if (!element || !observation) return;
+  const kind = observation.kind || "";
+  const reason = observation.reason || "";
+  const planned = observation.planned || kind;
+  const outcome = observation.outcome || "";
+  if (kind) element.setAttribute("data-structural-projection-kind", kind);
+  if (reason) element.setAttribute("data-structural-projection-reason", reason);
+  if (planned) element.setAttribute("data-structural-projection-planned", planned);
+  if (outcome) element.setAttribute("data-structural-projection-outcome", outcome);
 }
 
 export function isVerifiedStructuralProjectionPlan(plan) {
@@ -30,6 +48,43 @@ export function isStructuralInPlaceEnabled(globalObject = globalThis) {
 export function isUnsupportedInPlaceTag(tagName) {
   const tag = String(tagName || "").toLowerCase();
   return !tag || UNSUPPORTED_IN_PLACE_TAGS.has(tag) || tag.includes("-");
+}
+
+export function isUnsupportedInPlaceParentTag(tagName) {
+  const tag = String(tagName || "").toLowerCase();
+  return !tag || UNSUPPORTED_IN_PLACE_PARENT_TAGS.has(tag) || tag.includes("-");
+}
+
+function attributeValue(element, name) {
+  const attribute = element?.attributesByName?.get?.(name)?.[0];
+  return String(attribute?.value || attribute?.rawValue || "").trim();
+}
+
+function hasCustomizedBuiltin(element) {
+  return Boolean(attributeValue(element, "is"));
+}
+
+function isUnsupportedInPlaceHost(element) {
+  return !element || isUnsupportedInPlaceTag(element.tagName) || hasCustomizedBuiltin(element);
+}
+
+function isUnsupportedInPlaceParent(element) {
+  return !element
+    || isUnsupportedInPlaceParentTag(element.tagName)
+    || hasCustomizedBuiltin(element);
+}
+
+function parentHasSignificantMixedContent(index, parentId) {
+  const parent = sourceElement(index, parentId);
+  if (!parent) return true;
+  return parent.childIds.some((childId) => {
+    const child = index.byNodeId.get(childId);
+    if (child?.type === "comment") return true;
+    if (child?.type === "text") {
+      return normalizeSourceText(child.value || "") !== "";
+    }
+    return false;
+  });
 }
 
 function sourceElement(index, elementId) {
@@ -102,12 +157,12 @@ export function resolveDeleteSelectionLanding(beforeIndex, removedRootElementId)
 function subtreeHasUnsupportedTag(index, rootId) {
   const root = sourceElement(index, rootId);
   if (!root) return true;
-  if (isUnsupportedInPlaceTag(root.tagName)) return true;
+  if (isUnsupportedInPlaceHost(root)) return true;
   const rootRange = root.range;
   if (!rootRange) {
     return root.childElementIds.some((childId) => {
       const child = index.byNodeId.get(childId);
-      return child?.type === "element" && isUnsupportedInPlaceTag(child.tagName);
+      return child?.type === "element" && isUnsupportedInPlaceHost(child);
     });
   }
   return index.elements.some((element) => (
@@ -115,7 +170,7 @@ function subtreeHasUnsupportedTag(index, rootId) {
     && element.range
     && element.range.startOffset >= rootRange.startOffset
     && element.range.endOffset <= rootRange.endOffset
-    && isUnsupportedInPlaceTag(element.tagName)
+    && isUnsupportedInPlaceHost(element)
   ));
 }
 
@@ -174,8 +229,11 @@ export function decideStructuralProjection(context) {
       return { kind: "candidate", reason: "insert-host-unsupported" };
     }
     const parent = sourceElement(context.afterIndex, parentId);
-    if (!parent || isUnsupportedInPlaceTag(parent.tagName)) {
+    if (isUnsupportedInPlaceParent(parent)) {
       return { kind: "candidate", reason: "insert-parent-unsupported" };
+    }
+    if (parentHasSignificantMixedContent(context.afterIndex, parentId)) {
+      return { kind: "candidate", reason: "insert-mixed-content" };
     }
     const nextSibling = afterRoot.nextElementSiblingId
       ? context.afterIndex.byNodeId.get(afterRoot.nextElementSiblingId)
@@ -258,8 +316,11 @@ export function decideStructuralProjection(context) {
     return { kind: "candidate", reason: "move-host-unsupported" };
   }
   const destParent = sourceElement(context.afterIndex, destParentId);
-  if (!destParent || isUnsupportedInPlaceTag(destParent.tagName)) {
+  if (isUnsupportedInPlaceParent(destParent)) {
     return { kind: "candidate", reason: "move-parent-unsupported" };
+  }
+  if (parentHasSignificantMixedContent(context.afterIndex, destParentId)) {
+    return { kind: "candidate", reason: "move-mixed-content" };
   }
   const nextSibling = afterMoved.nextElementSiblingId
     ? context.afterIndex.byNodeId.get(afterMoved.nextElementSiblingId)
@@ -358,12 +419,13 @@ export function executeVerifiedStructuralProjection(options) {
       fragment.remove();
       return { ok: false, reason: "insert-before-unproven" };
     }
+    const created = collectSubtree(fragment, new Set(plan.identityDelta.addedElementIds));
+    const creationTicket = sealEditorCreatedSourceElements(created);
     parent.insertBefore(fragment, before);
     if (!placementMatches(fragment, plan.parentElementId || "", plan.beforeElementId)) {
       fragment.remove();
       return { ok: false, reason: "insert-placement-mismatch" };
     }
-    const created = collectSubtree(fragment, new Set(plan.identityDelta.addedElementIds));
     if (live.authority) {
       const granted = grantEditorCreatedSourceElements({
         authority: live.authority,
@@ -374,6 +436,7 @@ export function executeVerifiedStructuralProjection(options) {
         createdElements: created,
         allowedElementIds: plan.identityDelta.addedElementIds,
         markerAttribute: live.markerAttribute,
+        creationTicket,
       });
       if (!granted.ok) {
         fragment.remove();

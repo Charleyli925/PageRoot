@@ -1226,7 +1226,8 @@ prefix/suffix outside the island and a complete next-`SourceIndex` DOM mapping
 all succeed. Proven structural history (insert, duplicate, delete and supported
 move) may likewise keep the current iframe when ADR 0074's projection plan
 re-proves the current receipt, frame, identities and local structure, then
-grants only editor-created or history-restored nodes from that transaction.
+grants only editor-created or history-restored nodes from that transaction,
+using the pre-connect node ticket rather than a live-tree scan.
 This is a projection optimization, not another history application
 path: the session applies exact source patches locally and persists the complete
 result through normal autosave. Failure at any proof point retires the frame and

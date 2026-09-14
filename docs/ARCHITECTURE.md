@@ -543,7 +543,10 @@ toolbar and rejected again at the common command boundary, while independent
 source-backed siblings, delete/move, text copy and complete-HTML save/export keep
 their existing contracts. After the kernel accepts complete HTML, Canvas may keep
 the current iframe when ADR 0074 proves source identity, live node identity and
-the local update; missing proof uses the existing Candidate rebuild. The visible toolbar keeps this deliberately small:
+the local update; missing proof uses the existing Candidate rebuild. Insert and
+move into mixed text/comment parents, customized built-ins, and unprovable
+hosts stay on Candidate. `body` may receive proven child insert/move; it is
+still not itself a delete/move target. The visible toolbar keeps this deliberately small:
 duplicate, delete and sibling up/down; the Canvas port exposes raw insertion and
 cross-parent move for product workflows without adding a component or layout
 system. See ADR 0064 and ADR 0065.

@@ -325,8 +325,17 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
     await expect.poll(async () => editor.getAttribute("data-structural-projection-kind"), {
       timeout: 5_000,
     }).not.toBeNull();
-    const projectionKind = await editor.getAttribute("data-structural-projection-kind");
-    const inPlace = projectionKind === "in-place";
+    await expect.poll(async () => editor.getAttribute("data-structural-projection-outcome"), {
+      timeout: 5_000,
+    }).not.toBe("pending");
+    const planned = await editor.getAttribute("data-structural-projection-kind");
+    const outcome = await editor.getAttribute("data-structural-projection-outcome");
+    failUnless(
+      planned !== "in-place" || outcome === "in-place",
+      "PLANNED_IN_PLACE_DID_NOT_HOLD",
+      { planned, outcome },
+    );
+    const inPlace = outcome === "in-place";
     const settled = await waitForRuntimeHandoffSettled(page, {
       timeout: 7_000,
       expectedSourceRevision: sourceHash,

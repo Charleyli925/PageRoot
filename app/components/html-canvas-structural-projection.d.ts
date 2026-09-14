@@ -52,6 +52,16 @@ export type LiveStructuralSurface = {
   isProvenSourceElement?: ((element: HTMLElement) => boolean) | null;
 };
 
+export function applyStructuralProjectionObservation(
+  element: Element | null | undefined,
+  observation: {
+    kind?: string;
+    reason?: string;
+    planned?: string;
+    outcome?: string;
+  } | null | undefined,
+): void;
+
 export function isVerifiedStructuralProjectionPlan(
   plan: unknown,
 ): plan is VerifiedStructuralProjectionPlan;
@@ -61,6 +71,8 @@ export function isStructuralInPlaceEnabled(
 ): boolean;
 
 export function isUnsupportedInPlaceTag(tagName: string | null | undefined): boolean;
+
+export function isUnsupportedInPlaceParentTag(tagName: string | null | undefined): boolean;
 
 export function resolveDeleteSelectionLanding(
   beforeIndex: SourceIndexValue,

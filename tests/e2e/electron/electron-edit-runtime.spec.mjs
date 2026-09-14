@@ -1766,6 +1766,188 @@ test("long-page element duplication stays in the current Runtime document", {
   });
 });
 
+test("runtime source delete stays in the current document and does not recover from an unproven target", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime delete</title></head><body>
+  <main>
+    <p data-native-case="runtime-delete">普通段落</p>
+    <p data-native-case="runtime-delete-keep">保留段落</p>
+  </main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-delete-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "runtime-delete")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const beforeGeneration = await editor
+      .locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
+    await frame.locator('[data-native-case="runtime-delete"]').click();
+    const deleteButton = page.getByRole("button", { name: "删除元素", exact: true });
+    await expect(deleteButton).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await deleteButton.click();
+    await expect.poll(async () => ({
+      kind: await editor.getAttribute("data-structural-projection-kind"),
+      outcome: await editor.getAttribute("data-structural-projection-outcome"),
+      reason: await editor.getAttribute("data-structural-projection-reason"),
+    })).toEqual({
+      kind: "in-place",
+      outcome: "in-place",
+      reason: "verified-delete",
+    });
+    await expect(editor).not.toHaveAttribute(
+      "data-structural-projection-reason",
+      "delete-target-unproven",
+    );
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-delete"]')).toHaveCount(0);
+    await expect(frame.locator('[data-native-case="runtime-delete-keep"]')).toHaveCount(1);
+  });
+});
+
+test("body-child duplication stays in the current Runtime document", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime body child</title>
+<script>document.body.dataset.runtimeReady = "true";</script>
+</head>
+<body style="padding:32px">
+  <p data-native-case="body-copy">普通段落</p>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-body-copy-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "body-copy")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const beforeGeneration = await editor
+      .locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
+    await frame.locator('[data-native-case="body-copy"]').click();
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await expect.poll(async () => ({
+      kind: await editor.getAttribute("data-structural-projection-kind"),
+      outcome: await editor.getAttribute("data-structural-projection-outcome"),
+      reason: await editor.getAttribute("data-structural-projection-reason"),
+    })).toEqual({
+      kind: "in-place",
+      outcome: "in-place",
+      reason: "verified-insert",
+    });
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="body-copy"]')).toHaveCount(2);
+  });
+});
+
+test("mixed-content delete undo restores the exact text and comment order", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime mixed content</title>
+<script>document.body.dataset.runtimeReady = "true";</script>
+</head>
+<body style="padding:32px">
+  <main>
+    <div data-native-case="mixed-host">前<p data-native-case="mixed-a">中</p>后<p data-native-case="mixed-b">末</p>尾</div>
+  </main>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-mixed-undo-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ electronApp, page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "mixed-a")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    await expect(frame.locator('[data-native-case="mixed-host"]')).toHaveText("前中后末尾");
+    await frame.locator('[data-native-case="mixed-a"]').click();
+    const deleteMixed = page.getByRole("button", { name: "删除元素", exact: true });
+    await expect(deleteMixed).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await deleteMixed.click();
+    await expect.poll(() => editor.getAttribute("data-structural-projection-kind"))
+      .not.toBeNull();
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="mixed-host"]')).toHaveCount(1);
+    await expect(frame.locator('[data-native-case="mixed-a"]')).toHaveCount(0);
+    await expect(frame.locator('[data-native-case="mixed-host"]')).toHaveText("前后末尾");
+    await clickEditHistoryMenu(electronApp, page, "undo");
+    await expect.poll(async () => {
+      const restored = await currentEditorFrame(page);
+      return restored.locator('[data-native-case="mixed-host"]').textContent();
+    }).toBe("前中后末尾");
+    const undoKind = await editor.getAttribute("data-structural-projection-kind");
+    const undoOutcome = await editor.getAttribute("data-structural-projection-outcome");
+    if (undoKind === "in-place") {
+      expect(undoOutcome).toBe("in-place");
+    } else {
+      expect(undoKind).toBe("candidate");
+    }
+    frame = await currentEditorFrame(page);
+    expect(await frame.locator('[data-native-case="mixed-host"]').evaluate((host) => (
+      [...host.childNodes].map((node) => node.textContent).join("")
+    ))).toBe("前中后末尾");
+    expect(await frame.locator('[data-native-case="mixed-a"]').count()).toBe(1);
+  });
+});
+
+test("customized builtin hosts never claim a proven in-place structural projection", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime customized builtin</title></head><body>
+  <div is="review-card" data-native-case="review-host">
+    <span data-native-case="review-child">正文</span>
+  </div>
+  <script>
+    customElements.define("review-card", class extends HTMLDivElement {
+      connectedCallback() {
+        if (this.dataset.swapped === "true") return;
+        this.dataset.swapped = "true";
+        const child = this.querySelector("[data-native-case=review-child]");
+        if (!child) return;
+        child.replaceWith(child.cloneNode(true));
+      }
+    }, { extends: "div" });
+    document.body.dataset.runtimeReady = "true";
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-builtin-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const frame = (await loadedDiskFrame(page, sourcePath, "review-host")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const toolbar = page.getByRole("toolbar").filter({ visible: true });
+    await expect(frame.locator('[data-native-case="review-host"]')).toHaveAttribute(
+      "data-swapped",
+      "true",
+    );
+    await frame.locator('[data-native-case="review-host"]').click();
+    const duplicate = toolbar.getByRole("button", { name: "复制元素", exact: true });
+    if (await duplicate.count()) {
+      await duplicate.click();
+      await expect.poll(() => editor.getAttribute("data-structural-projection-kind"))
+        .not.toBe("in-place");
+      await expect.poll(() => editor.getAttribute("data-structural-projection-outcome"))
+        .not.toBe("in-place");
+    } else {
+      await expect(duplicate).toHaveCount(0);
+    }
+  });
+});
+
 test("overlapping edits promote only the latest Runtime without losing charts or text editing", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {

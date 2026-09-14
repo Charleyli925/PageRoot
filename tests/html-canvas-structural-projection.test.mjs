@@ -134,6 +134,90 @@ test("insert, delete and cross-parent move classify as proven in-place", () => {
   assert.equal(moveDecision.plan.parentElementId, ids.right);
 });
 
+test("customized builtins, mixed content and body-as-parent keep distinct projection classes", () => {
+  const card = "pr1_0000000000004000800000000000000f";
+  const cardChild = "pr1_00000000000040008000000000000014";
+  const builtinHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><div is="review-card" data-pageroot-id="${card}"><span data-pageroot-id="${cardChild}">正文</span></div></body></html>`;
+  const deletedBuiltin = applySemanticOperation(
+    createSemanticDocumentState(builtinHtml),
+    createDeleteElementOperation(builtinHtml, {
+      baseRevision: 0,
+      operationId: "op_delete_builtin",
+      elementId: card,
+    }),
+  );
+  assert.equal(
+    decideFromResult(builtinHtml, deletedBuiltin, { operationType: "deleteElement" }).kind,
+    "candidate",
+  );
+
+  const host = "pr1_00000000000040008000000000000010";
+  const first = "pr1_00000000000040008000000000000011";
+  const second = "pr1_00000000000040008000000000000012";
+  const mixedHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><div data-pageroot-id="${host}">前<span data-pageroot-id="${first}">中</span>后<span data-pageroot-id="${second}">末</span>尾</div></body></html>`;
+  const duplicatedMixed = applySemanticOperation(
+    createSemanticDocumentState(mixedHtml),
+    createDuplicateElementOperation(mixedHtml, {
+      baseRevision: 0,
+      operationId: "op_duplicate_mixed",
+      elementId: first,
+    }),
+    { randomUUID: uuidFactory("40000000-0000-4000-8000-000000000001") },
+  );
+  const mixedDecision = decideFromResult(mixedHtml, duplicatedMixed, { operationType: "insertElement" });
+  assert.equal(mixedDecision.kind, "candidate");
+  assert.equal(mixedDecision.reason, "insert-mixed-content");
+
+  const deletedMixed = applySemanticOperation(
+    createSemanticDocumentState(mixedHtml),
+    createDeleteElementOperation(mixedHtml, {
+      baseRevision: 0,
+      operationId: "op_delete_mixed",
+      elementId: first,
+    }),
+  );
+  assert.equal(
+    decideFromResult(mixedHtml, deletedMixed, { operationType: "deleteElement" }).kind,
+    "in-place",
+  );
+
+  const paragraph = "pr1_00000000000040008000000000000013";
+  const bodyHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><p data-pageroot-id="${paragraph}">普通段落</p></body></html>`;
+  const duplicatedBodyChild = applySemanticOperation(
+    createSemanticDocumentState(bodyHtml),
+    createDuplicateElementOperation(bodyHtml, {
+      baseRevision: 0,
+      operationId: "op_duplicate_body_child",
+      elementId: paragraph,
+    }),
+    { randomUUID: uuidFactory("50000000-0000-4000-8000-000000000001") },
+  );
+  const bodyDecision = decideFromResult(bodyHtml, duplicatedBodyChild, { operationType: "insertElement" });
+  const scriptId = "pr1_00000000000040008000000000000016";
+  const bodyPrettyHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head>
+<body data-pageroot-id="${ids.body}" style="padding:32px">
+  <p data-pageroot-id="${paragraph}">普通段落</p>
+  <div data-pageroot-id="${host}">前<span data-pageroot-id="${first}">中</span>后<span data-pageroot-id="${second}">末</span>尾</div>
+  <script data-pageroot-id="${scriptId}">document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+  const duplicatedPrettyBodyChild = applySemanticOperation(
+    createSemanticDocumentState(bodyPrettyHtml),
+    createDuplicateElementOperation(bodyPrettyHtml, {
+      baseRevision: 0,
+      operationId: "op_duplicate_pretty_body_child",
+      elementId: paragraph,
+    }),
+    { randomUUID: uuidFactory("60000000-0000-4000-8000-000000000001") },
+  );
+  const prettyBodyDecision = decideFromResult(
+    bodyPrettyHtml,
+    duplicatedPrettyBodyChild,
+    { operationType: "insertElement" },
+  );
+  assert.equal(prettyBodyDecision.kind, "in-place", prettyBodyDecision.reason);
+  assert.equal(prettyBodyDecision.plan.parentElementId, ids.body);
+});
+
 test("tables, custom elements and mixed identity stay on Candidate", () => {
   const tableId = "pr1_0000000000004000800000000000000a";
   const bodyId = "pr1_0000000000004000800000000000000b";

@@ -109,11 +109,13 @@ import {
 } from "./html-canvas-selection";
 import {
   SOURCE_ELEMENT_ATTRIBUTE,
+  createBoundSourceElementProof,
   registerProvedStableSourceElements,
   sourceElementId,
   uniqueSourceElement,
 } from "./html-canvas-source-element";
 import {
+  applyStructuralProjectionObservation,
   decideStructuralProjection,
   executeVerifiedStructuralProjection,
 } from "./html-canvas-structural-projection.js";
@@ -1313,35 +1315,58 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return analysis;
   }, []);
 
-  const currentRuntimeSourceProof = useCallback(() => {
+  const structuralProjectionObservationRef = useRef({
+    kind: "",
+    reason: "",
+    planned: "",
+    outcome: "",
+  });
+  const publishStructuralProjectionObservation = useCallback((
+    patch: Partial<{
+      kind: string;
+      reason: string;
+      planned: string;
+      outcome: string;
+    }>,
+  ) => {
+    const current = structuralProjectionObservationRef.current;
+    const next = {
+      kind: patch.kind ?? current.kind,
+      reason: patch.reason ?? current.reason,
+      planned: patch.planned ?? patch.kind ?? current.planned,
+      outcome: patch.outcome ?? current.outcome,
+    };
+    structuralProjectionObservationRef.current = next;
+    applyStructuralProjectionObservation(containerRef.current, next);
+  }, []);
+  useLayoutEffect(() => {
+    applyStructuralProjectionObservation(
+      containerRef.current,
+      structuralProjectionObservationRef.current,
+    );
+  });
+
+  const boundRuntimeSourceProof = useCallback((
+    sourceIndex: SourceIndexValue | null | undefined,
+  ) => {
     const runtimeFrame = runtimeFrameRef.current;
     if (
       !runtimeFrame?.settled
       || runtimeFrame.elementGeneration !== frameLoadGenerationRef.current
     ) return null;
-    const registered = runtimeSourceElementsRef.current;
-    return (element: HTMLElement) => {
-      const registeredPagerootId = registered?.pagerootIds.get(element);
-      const livePagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-      const liveSourceEntry = livePagerootId
-        ? sourceIndexRef.current?.byPagerootId.get(livePagerootId)
-        : null;
-      return Boolean(
-        registered
-        && registered.elementGeneration === runtimeFrame.elementGeneration
-        && registered.executionId === runtimeFrame.grant.executionId
-        && registered.elements.has(element)
-        && element.isConnected
-        && registeredPagerootId
-        && registeredPagerootId === livePagerootId
-        && registeredPagerootId === element.getAttribute(
-          EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-        )
-        && liveSourceEntry?.type === "element"
-        && liveSourceEntry.tagName === element.localName
-      );
-    };
+    return createBoundSourceElementProof({
+      authority: runtimeSourceElementsRef.current,
+      sourceIndex,
+      expectedGeneration: frameLoadGenerationRef.current,
+      expectedExecutionId: runtimeFrame.grant.executionId,
+      markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+    });
   }, []);
+
+  const currentRuntimeSourceProof = useCallback(
+    () => boundRuntimeSourceProof(sourceIndexRef.current),
+    [boundRuntimeSourceProof],
+  );
 
   const currentRuntimeShadowProof = useCallback(() => {
     const runtimeFrame = runtimeFrameRef.current;
@@ -3941,14 +3966,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       recordRuntimeContinuityEvent("structuralProjection", {
         reason: `${structuralDecision?.kind || mutation.kind}:${structuralDecision?.reason || refreshDecision.reason}`,
       });
-      containerRef.current?.setAttribute(
-        "data-structural-projection-kind",
-        structuralDecision?.kind || mutation.kind,
-      );
-      containerRef.current?.setAttribute(
-        "data-structural-projection-reason",
-        structuralDecision?.reason || refreshDecision.reason,
-      );
+      const plannedProjection = structuralDecision?.kind || mutation.kind;
+      publishStructuralProjectionObservation({
+        kind: plannedProjection,
+        reason: structuralDecision?.reason || refreshDecision.reason,
+        planned: plannedProjection,
+        outcome: structuralDecision?.kind === "in-place" ? "pending" : plannedProjection,
+      });
       const targetUpdates = deterministicTargetUpdates(result, originalTargets);
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
@@ -4175,12 +4199,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             executionId: runtimeFrameRef.current?.grant.executionId ?? null,
             authority: runtimeSourceElementsRef.current,
             markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-            isProvenSourceElement: currentRuntimeSourceProof(),
+            isProvenSourceElement: boundRuntimeSourceProof(sourceIndex),
           },
         });
         if (!executed.ok) {
           throw new Error(`结构原地投影失败：${executed.reason}`);
         }
+        publishStructuralProjectionObservation({ outcome: "in-place" });
         if (executed.selectedElementId) {
           const nextSelection = sourceSelectionForElementId(
             result.sourceIndex,
@@ -4299,6 +4324,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           "data-source-command-projection",
           "refresh-required",
         );
+        if (structuralProjectionObservationRef.current.outcome === "pending") {
+          publishStructuralProjectionObservation({ outcome: "recovered" });
+        }
         containerRef.current?.setAttribute(
           "data-source-command-projection-detail",
           (cause instanceof Error ? cause.message : String(cause || "")).slice(0, 240),
@@ -4340,6 +4368,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     advanceLastKnownGoodRuntimeProjection,
     advanceRuntimeRefreshPending,
     currentRuntimeSourceProof,
+    boundRuntimeSourceProof,
+    publishStructuralProjectionObservation,
     loadFrameSource,
     publishRenderedProjectionIdentity,
     recordRuntimeRefreshDecision,
@@ -6785,7 +6815,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                 executionId: runtimeFrameRef.current?.grant.executionId ?? null,
                 authority: runtimeSourceElementsRef.current,
                 markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-                isProvenSourceElement: currentRuntimeSourceProof(),
+                isProvenSourceElement: boundRuntimeSourceProof(previousIndex),
               },
             });
             if (executed.ok) {
@@ -6824,14 +6854,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                 "data-history-adopt-path",
                 "structural-in-place",
               );
-              containerRef.current?.setAttribute(
-                "data-structural-projection-kind",
-                decision.kind,
-              );
-              containerRef.current?.setAttribute(
-                "data-structural-projection-reason",
-                decision.reason,
-              );
+              publishStructuralProjectionObservation({
+                kind: decision.kind,
+                reason: decision.reason,
+                planned: decision.kind,
+                outcome: "in-place",
+              });
               publishRenderedProjectionIdentity(source, nextIndex.sourceSha256);
               supersedeRuntimeRefreshPending();
               requestAnimationFrame(() => updateOverlayPosition());
@@ -6886,7 +6914,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     advanceLastKnownGoodRuntimeProjection,
     adoptEditableIslandHistoryInPlace,
     adoptElementStyleHistoryInPlace,
-    currentRuntimeSourceProof,
+    boundRuntimeSourceProof,
+    publishStructuralProjectionObservation,
     detachNativeEditForFence,
     loadFrameSource,
     publishRenderedProjectionIdentity,

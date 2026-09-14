@@ -10,6 +10,18 @@ export function uniqueSourceElement(
   elementId: string,
 ): HTMLElement | null;
 
+export function createBoundSourceElementProof(options: {
+  authority: RuntimeSourceAuthority | null | undefined;
+  sourceIndex: SourceIndexValue | null | undefined;
+  expectedGeneration: number;
+  expectedExecutionId: string;
+  markerAttribute?: string;
+}): ((element: HTMLElement) => boolean) | null;
+
+export function sealEditorCreatedSourceElements(
+  createdElements: readonly HTMLElement[],
+): WeakSet<HTMLElement>;
+
 export type RuntimeSourceAuthority = {
   elementGeneration: number;
   executionId: string;
@@ -26,6 +38,7 @@ export function grantEditorCreatedSourceElements(options: {
   createdElements: readonly HTMLElement[];
   allowedElementIds: readonly string[];
   markerAttribute: string;
+  creationTicket: WeakSet<HTMLElement> | { has(element: HTMLElement): boolean };
 }): { ok: true } | { ok: false; reason: string };
 
 export function revokeRemovedSourceElements(options: {

@@ -129,7 +129,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   structure transaction, PageRoot itself may grant this generation's edit
   authority only to the exact editor-created or history-restored nodes from
   that transaction, through the parent-owned `RuntimeSourceElements` owner
-  (ADR 0074). The grant is not a page-wide re-registry. Forged IDs, stale
+  (ADR 0074). The grant is not a page-wide re-registry. Only the exact nodes
+  sealed before they connect may be granted; a later live-tree scan cannot
+  nominate author replacements that happen to carry legal IDs. Forged IDs, stale
   frames, old Documents, disconnected nodes, duplicate grants and
   author-created same-ID objects fail closed. The bootstrap does not
   freeze author activity or audit Runtime DOM. Its one-shot private capability

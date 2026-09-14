@@ -10,6 +10,8 @@ export {
   sourceElementSelector,
   sourceElementId,
   uniqueSourceElement,
+  createBoundSourceElementProof,
+  sealEditorCreatedSourceElements,
   grantEditorCreatedSourceElements,
   revokeRemovedSourceElements,
 } from "./html-canvas-source-authority.js";

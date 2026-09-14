@@ -21,6 +21,48 @@ export function uniqueSourceElement(documentNode, elementId) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+export function createBoundSourceElementProof({
+  authority,
+  sourceIndex,
+  expectedGeneration,
+  expectedExecutionId,
+  markerAttribute,
+} = {}) {
+  if (
+    !authority
+    || !sourceIndex
+    || authority.elementGeneration !== expectedGeneration
+    || authority.executionId !== expectedExecutionId
+  ) {
+    return null;
+  }
+  return (element) => {
+    const registeredPagerootId = authority.pagerootIds.get(element);
+    const livePagerootId = sourceElementId(element);
+    const liveSourceEntry = livePagerootId
+      ? sourceIndex.byPagerootId.get(livePagerootId)
+      : null;
+    return Boolean(
+      element
+      && authority.elements.has(element)
+      && element.isConnected
+      && registeredPagerootId
+      && registeredPagerootId === livePagerootId
+      && (!markerAttribute || element.getAttribute?.(markerAttribute) === registeredPagerootId)
+      && liveSourceEntry?.type === "element"
+      && liveSourceEntry.tagName === element.localName
+    );
+  };
+}
+
+export function sealEditorCreatedSourceElements(createdElements) {
+  const sealed = new WeakSet();
+  for (const element of createdElements) {
+    if (element) sealed.add(element);
+  }
+  return sealed;
+}
+
 export function grantEditorCreatedSourceElements(options) {
   const {
     authority,
@@ -31,6 +73,7 @@ export function grantEditorCreatedSourceElements(options) {
     createdElements,
     allowedElementIds,
     markerAttribute,
+    creationTicket,
   } = options;
   if (!authority || !documentNode || !sourceIndex) {
     return { ok: false, reason: "authority-missing" };
@@ -49,6 +92,9 @@ export function grantEditorCreatedSourceElements(options) {
       || element.nodeType !== 1
       || element.ownerDocument !== documentNode
       || !element.isConnected
+      || !creationTicket
+      || typeof creationTicket.has !== "function"
+      || !creationTicket.has(element)
     ) {
       return { ok: false, reason: "created-node-invalid" };
     }
