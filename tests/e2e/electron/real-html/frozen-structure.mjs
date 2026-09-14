@@ -486,7 +486,15 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
     });
     if (target.continuationProbe) await record("probe-after-copy", { mode: target.continuationProbe }, () =>
       probeFrozenEndedContinuation({ page, frame, editor, target, readSource, calls, marker: `PRDIRECT_${fileId}_COPY` }));
-    await record("select-copy", { id: copyTarget.selectedId }, () => selectCopy(target.selectedId));
+    await record("select-copy", { id: copyTarget.selectedId }, async () => {
+      const selected = frame.locator("[data-html-canvas-selected]");
+      const count = await selected.count();
+      failUnless(count <= 1, "FROZEN_SELECTION_NOT_UNIQUE", { count });
+      const prior = count === 1 ? await selected.getAttribute("data-pageroot-id") : null;
+      failUnless(prior === null || prior === target.selectedId || prior === copyTarget.selectedId,
+        "FROZEN_SELECTION_NOT_KNOWN", { prior, originalId: target.selectedId, copyId: copyTarget.selectedId });
+      return selectCopy(prior);
+    });
     await record("activate-copy", { editableId: copyTarget.selectedId }, () => activateCopyLeaf());
     await record("input-copy", { appended: marker }, async () => {
       await sameDocument(); await requireFrozenTextFocus(handle, copyTarget.selectedId, { atEnd: true });
