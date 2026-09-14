@@ -2436,11 +2436,24 @@
       ]
     },
     {
+      "id": "real-html-frozen-entry",
+      "patterns": [
+        "^tests/e2e/electron/frozen-html-scenarios\\.mjs$",
+        "^tests/e2e/electron/real-html/frozen-entry-contract\\.mjs$",
+        "^tests/(?:frozen-entry-contract|frozen-html-scenarios-entry)\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/frozen-entry-contract.test.mjs",
+        "tests/frozen-html-scenarios-entry.test.mjs"
+      ]
+    },
+    {
       "id": "real-html-test-oracles",
       "patterns": [
         "^tests/e2e/electron/local-html-corpus\\.mjs$",
         "^tests/e2e/electron/helpers/clipboard-snapshot\\.mjs$",
-        "^tests/e2e/electron/real-html/.*\\.mjs$",
+        "^tests/e2e/electron/real-html/(?!frozen-entry-contract\\.mjs$).*\\.mjs$",
         "^tests/helpers/source-byte-region-oracle\\.mjs$",
         "^tests/(?:clipboard-snapshot|real-html-extended-format-evidence|real-html-result-model|real-html-source-scope|real-html-stage-contracts|source-byte-region-oracle|workspace-provenance)\\.test\\.mjs$"
       ],
@@ -2531,7 +2544,7 @@
     {
       "id": "electron-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?!ai-|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|helpers/packaged-app-launch\\.mjs|real-html/).*\\.mjs$"
+        "^tests/e2e/electron/(?!ai-|frozen-html-scenarios\\.mjs$|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|helpers/packaged-app-launch\\.mjs|real-html/).*\\.mjs$"
       ],
       "suites": [
         "electron-editing-smoke"

@@ -503,9 +503,16 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 浏览器双击助手在宿主 realm 等待 iframe 祖先的有限布局动画结束，再测量文字点击位置。
 禁脚本 iframe 的 Playwright 重试计时器可能停滞；不得通过 force、开放脚本权限或加长超时规避。
 保留动画期间直接双击的失败负例，以及宿主等待后的正常选词正例。
-`local-html-corpus.mjs` 当前只允许 `capability-preflight-only`；旧的现场发现资格入口
-以 `AUTOMATIC_DISCOVERY_EXECUTION_RETIRED` 终止，尚未迁移的行为不会假算为完成。
-微验收入口 `frozen-html-operation.mjs` 消费 `STEMMIO_FROZEN_MANIFEST` 与独立传入的
+`frozen-html-scenarios.mjs` 是真实 Electron 私有验收的唯一公共薄入口。`--list` 只列出
+A/B/C 场景合同，`--plan` 只校验复合冻结清单，执行模式按 A→B→C 分派到已有冻结执行器；
+入口不自动发现、替换目标或重放失败动作。复合清单必须绑定当前 HEAD、Tree、workspace
+source Hash，包含三个不同的嵌套清单，并在启动 Electron 前完成摘要、scope、runner 和
+周期校验。A 对应普通文字/格式/历史原位连续性，B 对应编辑→历史→复制→评论→继续编辑，
+C 对应必要重建→接管→继续编辑→重开。场景失败保留首个失败，但不阻止独立后续场景取证。
+`local-html-corpus.mjs` 只通过入口的 `--preflight` 以 `capability-preflight-only` 模式运行；
+旧的现场发现资格入口以 `AUTOMATIC_DISCOVERY_EXECUTION_RETIRED` 终止，尚未迁移的行为不会
+假算为完成。
+低层微验收入口 `frozen-html-operation.mjs` 仍消费 `STEMMIO_FROZEN_MANIFEST` 与独立传入的
 `STEMMIO_FROZEN_MANIFEST_SHA256`，精确绑定工作稿种子字节、源码指纹和单行 A→B 目标。
 清单另冻结初始 Runtime 预期；启动和重开都先等待其明确终态，再等待 handoff 完成。
 冻结执行器在初始 Runtime 就绪后限制 Playwright 自身 Inspector 网络响应缓存：总量 64 KiB、
@@ -586,7 +593,11 @@ iframe 内 elementFromPoint 成功就点击被宿主裁剪的坐标，也不查�
 
 长期要求：涉及编辑、格式化、选择、历史、页面切换、Runtime/iframe、加载恢复或保存重开的相关改动，必须在真实 Electron App 中使用用户指定的本地 HTML 语料进行验收；通用编辑或 Runtime 生命周期变更覆盖语料目录内全部 HTML。语料路径由本地工作区规则或环境配置提供，不写入公共仓库。此要求适用于以后所有相关任务，不只某次问题修复。合成物料仅用于可公开的确定性测试与边界覆盖，不能替代真实文档验收。
 
-`STEMMIO_REAL_HTML_DIR` 指向该语料目录后，运行 `npm run test:real-html:electron`；缺少目录或空目录直接失败，完整结果与截图写入系统临时目录，不进入 Git。该入口先冻结文件 / 阶段 / 操作计划，再分为 A 文字编辑、B 元素结构、C Runtime/iframe、D 元素能力与行为覆盖、E 编辑到重建再续写的连续链路。A/B/C/D/E 均从恢复后的本地副本和独立 Electron session 开始，但 E 内部的多轮链路必须保持同一长会话。阶段之间不继承 Selection、编辑 session、Candidate 或 iframe generation；一个阶段失败不得阻止其他独立阶段继续取证。
+`STEMMIO_REAL_HTML_DIR` 指向该语料目录后，先运行
+`npm run test:real-html:electron -- --preflight`；缺少目录或空目录直接失败，完整结果与截图写入系统临时目录，不进入 Git。
+预检通过后，执行同一份经摘要和源码指纹校验的复合冻结计划：
+`npm run test:real-html:electron -- --manifest "$FROZEN_SCENARIO_PLAN" --manifest-sha256 "$FROZEN_SCENARIO_PLAN_SHA256"`。
+计划分为 A 文字编辑、B 元素结构、C Runtime/iframe、D 元素能力与行为覆盖、E 编辑到重建再续写的连续链路；公共 A/B/C 场景账本由薄入口维护，D/E 的专项事实仍由各自冻结执行器负责。A/B/C/D/E 均从恢复后的本地副本和独立 Electron session 开始，但 E 内部的多轮链路必须保持同一长会话。阶段之间不继承 Selection、编辑 session、Candidate 或 iframe generation；一个阶段失败不得阻止其他独立阶段继续取证。
 
 测试可信度出现疑问时必须冻结全量语料，先用极小合成案例分别验证 Native Edit 宿主解析、逻辑输入位置与 Candidate 观察器。每个判定必须成对证明正确事实可通过、故意错误会失败；任何失败先保留为单一最小复现并归因为产品或测试缺陷，再决定修改对象。三组判定稳定前不得修改断言后直接重跑全量，也不得进入 20/50/100 次压力测试；稳定后只恢复一次完整语料验收。
 

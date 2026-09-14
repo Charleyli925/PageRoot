@@ -754,6 +754,20 @@ test("real-HTML result and byte oracles select their focused Node tests", () => 
   }
 });
 
+test("frozen real-HTML entry changes stay on their focused contract tests", () => {
+  for (const changedFile of [
+    "tests/e2e/electron/frozen-html-scenarios.mjs",
+    "tests/e2e/electron/real-html/frozen-entry-contract.mjs",
+  ]) {
+    const plan = selectGatePlan({ map, lane: "edit", changedFiles: [changedFile] });
+    assert.deepEqual(plan.selectedNodeTests, [
+      "tests/frozen-entry-contract.test.mjs",
+      "tests/frozen-html-scenarios-entry.test.mjs",
+    ]);
+    assert.deepEqual(suiteIds(plan), ["node-targeted"]);
+  }
+});
+
 test("the shared fixture driver schedules both browser and Electron smoke", () => {
   const plan = selectGatePlan({
     map,

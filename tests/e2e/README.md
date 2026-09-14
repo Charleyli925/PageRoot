@@ -150,11 +150,19 @@ dispatches synthetic DOM input events and is reported only as a **DOM editing
 compatibility scan**; it is not real mouse/keyboard acceptance. The fixed
 Electron sample in `electron-native-input.spec.mjs` owns real click/dblclick,
 keyboard input, Backspace, Delete and Enter. Private
-corpus acceptance remains `STEMMIO_REAL_HTML_DIR=... npm run
-test:real-html:electron` and reports A text, B structure and C Runtime/iframe
-as separate file/stage/operation rows. Operations execute and report in the
-same order; every A mutation freezes and checks its own source baseline. The
-private report binds HEAD plus staged, unstaged and untracked source bytes.
+corpus acceptance remains a reviewed composite-plan execution through
+`STEMMIO_REAL_HTML_DIR=... npm run test:real-html:electron -- --preflight` for
+read-only capability preparation, followed by
+`npm run test:real-html:electron -- --manifest "$FROZEN_SCENARIO_PLAN"\
+ --manifest-sha256 "$FROZEN_SCENARIO_PLAN_SHA256"`. The public entry reports
+A ordinary edit/format/history continuity, B edit/history/copy/comment/
+continuation, and C rebuild/takeover/continuation/reopen as independent
+scenario rows. `--list` and `--plan` do not start Electron. The entry dispatches
+only to the existing reviewed frozen executors; it does not auto-discover or
+replace a failed target, and it never retries a failed child. Operations execute
+and report in the same order; every A mutation freezes and checks its own source
+baseline. The private report binds HEAD plus staged, unstaged and untracked
+source bytes.
 The private deterministic paste probe requires an empty system clipboard and verifies that it is
 empty again afterward. Any non-empty clipboard marks only Paste as
 `NOT_APPLICABLE` before mutation; lossless preservation of system clipboard
