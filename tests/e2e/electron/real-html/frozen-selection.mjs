@@ -20,6 +20,7 @@ export const FROZEN_REENTRY_ELEMENT_OPERATIONS = Object.freeze([
 export const FROZEN_STRUCTURE_OPERATIONS = Object.freeze([
   "copy", "select-copy", "activate-copy", "input-copy", "save-copy", "select-copy-for-delete", "delete-copy",
 ]);
+export const FROZEN_STRUCTURE_COPY_OPERATIONS = Object.freeze(["copy"]);
 export const FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS = Object.freeze([
   "copy", "select-copy", "activate-copy", "input-copy", "save-copy",
   "style-copy", "move-copy",
@@ -77,6 +78,27 @@ export function readFrozenSelection(bytes, expectedDigest) {
       && (plan.sourceEvolution === undefined || plan.sourceEvolution === "verified-text-region")
       && plan.commentBasis === "EXACT_AUTHORED_SOURCE_ANCHOR"
       && HASH.test(plan.structurePrefixSha256 || ""), "FROZEN_MIXED_CONTRACT_INVALID");
+    plan.targets = Object.freeze(checked);
+    Object.freeze(plan.original); Object.freeze(plan.seed);
+    return Object.freeze(plan);
+  }
+  if (plan.scope === "core-structure-path-race") {
+    requireFact(plan.operation === "structure" && ["runtime", "static"].includes(plan.initialRuntime) && plan.reopen === true
+      && Array.isArray(plan.targets) && plan.targets.length === 2,
+    "FROZEN_STRUCTURE_PATH_RACE_PLAN_INVALID");
+    const checked = plan.targets.map((target) => {
+      const bytes = Buffer.from(JSON.stringify({
+        ...plan, scope: "core-structure-leaf", targets: [{ ...target, operations: [...FROZEN_STRUCTURE_COPY_OPERATIONS] }],
+      }));
+      return readFrozenSelection(bytes, frozenDigest(bytes)).targets[0];
+    });
+    requireFact(checked[0].expectedProjection === "candidate"
+      && checked[1].expectedProjection === "in-place"
+      && checked[0].selectedId !== checked[1].selectedId
+      && checked[0].copyBinding.byteOffset >= checked[1].copyBinding.byteOffset
+      && JSON.stringify(checked[0].operations) === JSON.stringify(FROZEN_STRUCTURE_COPY_OPERATIONS)
+      && JSON.stringify(checked[1].operations) === JSON.stringify(FROZEN_STRUCTURE_COPY_OPERATIONS),
+    "FROZEN_STRUCTURE_PATH_RACE_CONTRACT_INVALID");
     plan.targets = Object.freeze(checked);
     Object.freeze(plan.original); Object.freeze(plan.seed);
     return Object.freeze(plan);
@@ -160,8 +182,16 @@ export function readFrozenSelection(bytes, expectedDigest) {
       && (target.continuationProbe === undefined || target.continuationProbe === "session-ended-no-refocus")
       && JSON.stringify(target.operations) === JSON.stringify(structureClosedLoop
         ? FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS
-        : target.continuationProbe ? FROZEN_STRUCTURE_PROBE_OPERATIONS : FROZEN_STRUCTURE_OPERATIONS),
+        : target.continuationProbe ? FROZEN_STRUCTURE_PROBE_OPERATIONS
+        : JSON.stringify(target.operations) === JSON.stringify(FROZEN_STRUCTURE_COPY_OPERATIONS)
+          ? FROZEN_STRUCTURE_COPY_OPERATIONS
+          : FROZEN_STRUCTURE_OPERATIONS),
     "FROZEN_STRUCTURE_CONTRACT_INVALID");
+    if (JSON.stringify(target.operations) === JSON.stringify(FROZEN_STRUCTURE_COPY_OPERATIONS)) {
+      requireFact(PROJECTION_EXPECTATIONS.has(target.expectedProjection)
+        && target.continuationProbe === undefined && !structureClosedLoop,
+      "FROZEN_STRUCTURE_COPY_ONLY_CONTRACT_INVALID");
+    }
     const overrides = target.projectionByOperation || {};
     requireFact(typeof overrides === "object"
       && Object.keys(overrides).every((operation) => target.operations.includes(operation)

@@ -360,7 +360,9 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
   const documentId = () => frame.evaluate(() => globalThis.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ ||= crypto.randomUUID());
   let generation = await readFrozenActiveGeneration(editor);
   const record = async (operation, expected, action) => {
-    const row = rows.find(item => item.operation === operation), start = performance.now();
+    const row = rows.find(item => item.operation === operation
+      && (operation !== "copy" || item.targetId === target.selectedId));
+    const start = performance.now();
     row.expected = expected; row.targetId = operation === "copy" || operation.startsWith("probe-") ? target.selectedId : copyTarget.selectedId;
     try { row.actual = await action(); Object.assign(row, { state: "PASS", reason: "EXPECTED_CHANGE_OBSERVED" }); }
     catch (error) { Object.assign(row, { state: "FAIL", reason: error.code || "OPERATION_ASSERTION_FAILED", details: error.details }); throw error; }
@@ -501,6 +503,17 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
         && await editor.getAttribute("data-element-copy-command-reason") === "available", "COPY_COMMAND_REFUSED");
       return { capability, ...result };
     });
+    if (JSON.stringify(target.operations) === JSON.stringify(["copy"])) {
+      failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId).count() === 1,
+        "FROZEN_COPY_DISPLAY_MISSING");
+      failUnless(await frozenFrameAccess(frame, target, calls).target(target.selectedId).count() === 1,
+        "ORIGINAL_IDENTITY_CHANGED");
+      requireTextOperationLedger(rows, target.operations);
+      return {
+        finalSha256: frozenDigest(currentBytes), finalSize: currentBytes.length, originalText,
+        copyId: copyTarget.selectedId, restoredMarker: null, reopenCopyPresent: true,
+      };
+    }
     if (target.continuationProbe) await record("probe-after-copy", { mode: target.continuationProbe }, () =>
       probeFrozenEndedContinuation({ page, frame, editor, target, readSource, calls, marker: `PRDIRECT_${fileId}_COPY` }));
     await record("select-copy", { id: copyTarget.selectedId }, async () => (
@@ -648,4 +661,54 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       reopenCopyPresent: closedLoop,
     };
   } finally { await handle?.dispose(); await documentHandle?.dispose(); }
+}
+
+export async function executeFrozenStructurePathRace({ plan, page, editor, readSource, rows, calls }) {
+  const copies = [];
+  for (const target of plan.targets) {
+    const active = editor.locator('iframe[data-runtime-slot-role="active"]');
+    failUnless(await active.count() === 1, "FROZEN_ACTIVE_FRAME_NOT_UNIQUE");
+    const frame = await (await active.elementHandle()).contentFrame();
+    failUnless(frame, "FROZEN_ACTIVE_FRAME_MISSING");
+    await executeFrozenSelection({
+      access: frozenFrameAccess(frame, target, calls),
+      keyboard: page.keyboard,
+      mouse: page.mouse,
+      target,
+      calls,
+    });
+    const result = await executeFrozenStructure({
+      frame, target, page, editor, fileId: plan.fileId, readSource, rows, calls,
+    });
+    copies.push({
+      originalId: target.selectedId,
+      copyId: result.copyId,
+      expectedProjection: target.expectedProjection,
+    });
+  }
+  await waitForRuntimeHandoffSettled(page, { timeout: 10_000 });
+  const active = editor.locator('iframe[data-runtime-slot-role="active"]');
+  failUnless(await active.count() === 1, "FROZEN_ACTIVE_FRAME_NOT_UNIQUE");
+  failUnless(await editor.locator('iframe[data-runtime-slot-role="candidate"]').count() === 0,
+    "STALE_CANDIDATE_STILL_PRESENT");
+  const frame = await (await active.elementHandle()).contentFrame();
+  const after = await readSource();
+  const working = await editor.getAttribute("data-working-source-sha256");
+  const displayed = await editor.getAttribute("data-rendered-projection-sha256");
+  failUnless(working === displayed && working === `sha256:${frozenDigest(after)}`,
+    "FROZEN_PATH_RACE_SOURCE_DISPLAY_DRIFT", { working, displayed, source: frozenDigest(after) });
+  for (const copy of copies) {
+    failUnless(await frame.locator(`[data-pageroot-id="${copy.originalId}"]`).count() === 1,
+      "PATH_RACE_ORIGINAL_MISSING", copy);
+    failUnless(await frame.locator(`[data-pageroot-id="${copy.copyId}"]`).count() === 1,
+      "PATH_RACE_COPY_MISSING", copy);
+    failUnless(after.toString("utf8").includes(copy.originalId) && after.toString("utf8").includes(copy.copyId),
+      "PATH_RACE_SOURCE_IDENTITY_MISSING", copy);
+  }
+  return {
+    finalSha256: frozenDigest(after),
+    finalSize: after.length,
+    copies,
+    reopenCopyPresent: true,
+  };
 }

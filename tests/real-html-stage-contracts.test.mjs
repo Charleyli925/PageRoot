@@ -41,7 +41,7 @@ import {
 } from "./e2e/electron/real-html/continuity-chain.mjs";
 import { summarizeRuntimeObserverRecords } from "./e2e/electron/real-html/runtime-observer.mjs";
 import { normalizeCapabilityProbeObservations } from "./e2e/electron/real-html/capability-driver.mjs";
-import { assertReadOnlyCorpusMode, frozenInitialRuntimeDecision, FROZEN_ELEMENT_OPERATIONS, FROZEN_COPY_DENIED_OPERATIONS, FROZEN_STRUCTURE_PROBE_OPERATIONS, FROZEN_STRUCTURE_OPERATIONS, FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS, FROZEN_FORMAT_OPERATIONS, FROZEN_REENTRY_FORMAT_OPERATIONS, FROZEN_TEXT_OPERATIONS, frozenDigest, readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay }
+import { assertReadOnlyCorpusMode, frozenInitialRuntimeDecision, FROZEN_ELEMENT_OPERATIONS, FROZEN_COPY_DENIED_OPERATIONS, FROZEN_STRUCTURE_PROBE_OPERATIONS, FROZEN_STRUCTURE_OPERATIONS, FROZEN_STRUCTURE_COPY_OPERATIONS, FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS, FROZEN_FORMAT_OPERATIONS, FROZEN_REENTRY_FORMAT_OPERATIONS, FROZEN_TEXT_OPERATIONS, frozenDigest, readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay }
   from "./e2e/electron/real-html/frozen-selection.mjs";
 import { verifiedUndoTail, requireTextOperationLedger, verifyEndedHistorySession, verifyFrozenHistory } from "./e2e/electron/real-html/frozen-text.mjs";
 
@@ -1084,10 +1084,62 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
     readFrozenSelection(mixedLeafBytes, frozenDigest(mixedLeafBytes)).targets[0].projectionByOperation["delete-copy"],
     "in-place",
   );
+  const copyOnlyBytes = Buffer.from(JSON.stringify({
+    ...structurePlan,
+    targets: [{
+      ...structurePlan.targets[0],
+      operations: [...FROZEN_STRUCTURE_COPY_OPERATIONS],
+      expectedProjection: "candidate",
+    }],
+  }));
+  assert.equal(readFrozenSelection(copyOnlyBytes, frozenDigest(copyOnlyBytes)).targets[0].operations[0], "copy");
+  assert.throws(() => readFrozenSelection(Buffer.from(JSON.stringify({
+    ...structurePlan,
+    targets: [{ ...structurePlan.targets[0], operations: [...FROZEN_STRUCTURE_COPY_OPERATIONS] }],
+  })), frozenDigest(Buffer.from(JSON.stringify({
+    ...structurePlan,
+    targets: [{ ...structurePlan.targets[0], operations: [...FROZEN_STRUCTURE_COPY_OPERATIONS] }],
+  })))), { code: "FROZEN_STRUCTURE_COPY_ONLY_CONTRACT_INVALID" });
+  const racePlan = {
+    ...structurePlan,
+    scope: "core-structure-path-race",
+    targets: [
+      {
+        ...structurePlan.targets[0],
+        operations: [...FROZEN_STRUCTURE_COPY_OPERATIONS],
+        expectedProjection: "candidate",
+        copyBinding: { ...structurePlan.targets[0].copyBinding, byteOffset: 200 },
+      },
+      {
+        ...structurePlan.targets[0],
+        clickId: capabilityId(302),
+        selectedId: capabilityId(302),
+        clickTag: "p",
+        selectedTag: "p",
+        operations: [...FROZEN_STRUCTURE_COPY_OPERATIONS],
+        expectedProjection: "in-place",
+        copyBinding: {
+          ...structurePlan.targets[0].copyBinding,
+          parentId: capabilityId(398),
+          byteOffset: 100,
+          originalElementSha256: "b".repeat(64),
+        },
+      },
+    ],
+  };
+  const raceBytes = Buffer.from(JSON.stringify(racePlan));
+  assert.equal(readFrozenSelection(raceBytes, frozenDigest(raceBytes)).scope, "core-structure-path-race");
+  assert.throws(() => readFrozenSelection(Buffer.from(JSON.stringify({
+    ...racePlan,
+    targets: [racePlan.targets[1], racePlan.targets[0]],
+  })), frozenDigest(Buffer.from(JSON.stringify({
+    ...racePlan,
+    targets: [racePlan.targets[1], racePlan.targets[0]],
+  })))), { code: "FROZEN_STRUCTURE_PATH_RACE_CONTRACT_INVALID" });
   const probeBytes = Buffer.from(JSON.stringify({ ...structurePlan, targets: [{ ...structurePlan.targets[0],
     continuationProbe: "session-ended-no-refocus", operations: FROZEN_STRUCTURE_PROBE_OPERATIONS }] }));
   assert.doesNotThrow(() => readFrozenSelection(probeBytes, frozenDigest(probeBytes)));
-  for (const change of [{ operations: ["copy"] }, { rebuildPath: "AUTO" }, { copyBinding: { kind: "find-new-id" } },
+  for (const change of [{ rebuildPath: "AUTO" }, { copyBinding: { kind: "find-new-id" } },
     { continuationProbe: "AUTO" }, { continuationProbe: "session-ended-no-refocus" },
     { clickTag: "p" }, { clickTag: "div", selectedTag: "div" },
     { copyCapability: { expected: "AVAILABLE", basis: "OBSERVED_UI", reason: "available" } }]) {
