@@ -2101,6 +2101,10 @@ test("command-port insert and cross-parent move keep a closed structural loop", 
     await expect.poll(async () => (
       (await readPublishedWorkingCopy(workingCopyPath, "utf8")).includes("可编辑")
     )).toBe(true);
+    await expect.poll(async () => (
+      (await readPublishedWorkingCopy(workingCopyPath, "utf8"))
+        .includes('data-native-case="loop-inserted"')
+    )).toBe(true);
     const saved = await readPublishedWorkingCopy(workingCopyPath);
     writeFileSync(reopenPath, saved);
     await stopPageRoot(electronApp, isolatedUserData);
