@@ -360,6 +360,10 @@ overrides). It calls each real `/models` and `/chat/completions` endpoint, never
 prints a Token, and must pass for DeepSeek, 智谱, 阿里通义, and OpenAI. Qoder and
 Codex need a clean-machine install, official login, first round and review.
 
+These vendor keys stay with the developer: they are optional inputs for that
+manual proof and are never required by `Release Candidate`, the source gate or
+any release credential check.
+
 ## Design constraints
 
 - Treat the current HTML bytes as authoritative.
