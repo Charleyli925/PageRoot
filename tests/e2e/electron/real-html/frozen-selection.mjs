@@ -332,6 +332,7 @@ export async function verifyFrozenHostPoint(handle, point) {
 
 export async function executeFrozenSelection({ access, keyboard, mouse, target, calls, priorSelectionId = null }) {
   const started = performance.now();
+  const selectionCallStart = calls.length;
   const clickTarget = access.target(target.clickId);
   const selectedTarget = access.target(target.selectedId);
   for (const [locator, tag] of [[clickTarget, target.clickTag], [selectedTarget, target.selectedTag]]) {
@@ -424,7 +425,11 @@ export async function executeFrozenSelection({ access, keyboard, mouse, target, 
   } finally {
     await handle.dispose();
   }
-  const issues = selectionExecutionIssues(calls, target);
+  // `calls` is also the aggregate ledger for multi-target probes such as the
+  // path-race. Validate only this invocation's activity; prior target
+  // selections remain useful evidence but must not make the next invocation
+  // appear to have extra lookups or clicks.
+  const issues = selectionExecutionIssues(calls.slice(selectionCallStart), target);
   requireFact(issues.length === 0, "FROZEN_EXECUTION_ACTIVITY_INVALID", { issues });
   return { state: "PASS", operation: "select", expected: target.selectedId,
     actual: target.selectedId, initialSelectionCount: initialCount, initialSelectionId: initialId,
