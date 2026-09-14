@@ -1,7 +1,7 @@
 // Thin public entry for the reviewed A/B/C real-HTML scenario family.
 // Listing and plan validation are read-only. Execution only dispatches the
 // existing frozen executors; it never discovers or substitutes a target.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -24,6 +24,10 @@ const electronDirectory = path.dirname(scriptPath);
 const productRoot = path.resolve(electronDirectory, "../..");
 const DEFAULT_RENDERER_BUILD_TIMEOUT_MS = 180_000;
 const DEFAULT_SCENARIO_TIMEOUT_MS = 15 * 60_000;
+const PROCESS_TERM_GRACE_MS = 1_000;
+const PROCESS_KILL_WAIT_MS = 2_000;
+const PROCESS_POLL_MS = 25;
+const MAX_OUTPUT_SUMMARY_BYTES = 32 * 1024;
 
 function reportError(error) {
   return {
@@ -37,18 +41,72 @@ function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-function terminateProcessTree(child, signal = "SIGTERM") {
-  if (!child || !child.pid) return;
+function processGroupAlive(child) {
+  if (!child?.pid) return false;
+  try {
+    process.kill(process.platform === "win32" ? child.pid : -child.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function signalProcessTree(child, signal) {
+  if (!child?.pid) return;
   if (process.platform !== "win32") {
-    try { process.kill(-child.pid, signal); } catch { /* The process may already be gone. */ }
+    try { process.kill(-child.pid, signal); } catch { /* The process group may already be gone. */ }
   }
   try { child.kill(signal); } catch { /* The process may already be gone. */ }
 }
 
-/** Run a bounded child process and retain enough output to diagnose the first failure. */
+async function waitForProcessGroupExit(child, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupAlive(child) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, PROCESS_POLL_MS));
+  }
+  return !processGroupAlive(child);
+}
+
+/**
+ * Terminate only the process group owned by this invocation and verify that it
+ * is gone. A parent close event is not sufficient: descendants can outlive it.
+ */
+async function terminateProcessTree(child) {
+  if (!child?.pid || !processGroupAlive(child)) {
+    return { attempted: false, confirmed: true, signal: null };
+  }
+  signalProcessTree(child, "SIGTERM");
+  if (await waitForProcessGroupExit(child, PROCESS_TERM_GRACE_MS)) {
+    return { attempted: true, confirmed: true, signal: "SIGTERM" };
+  }
+  signalProcessTree(child, "SIGKILL");
+  const confirmed = await waitForProcessGroupExit(child, PROCESS_KILL_WAIT_MS);
+  return { attempted: true, confirmed, signal: "SIGKILL" };
+}
+
+function appendOutputSummary(previous, chunk) {
+  const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+  return `${previous}${text}`.slice(-MAX_OUTPUT_SUMMARY_BYTES);
+}
+
+function closeOutputStream(stream, existingError = null) {
+  if (!stream) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let error = existingError;
+    const onError = (cause) => {
+      error ||= { code: cause.code || "OUTPUT_LOG_FAILED", message: cause.message };
+    };
+    stream.once("error", onError);
+    stream.end(() => resolve(error));
+  });
+}
+
+/** Run a bounded child process, retain bounded output and verify owned cleanup. */
 export function runCommand(command, args, {
   env = process.env,
   timeoutMs = DEFAULT_SCENARIO_TIMEOUT_MS,
+  outputDirectory = null,
+  printOutput = true,
 } = {}) {
   return new Promise((resolve) => {
     let stdout = "";
@@ -56,41 +114,107 @@ export function runCommand(command, args, {
     let spawnError = null;
     let timedOut = false;
     let settled = false;
-    let killTimer = null;
+    let closed = false;
+    let closeStatus = null;
+    let closeSignal = null;
+    let cleanup = { attempted: false, confirmed: true, signal: null };
+    let cleanupPromise = null;
+    let finishing = false;
+    const logDirectory = outputDirectory ? path.resolve(outputDirectory) : null;
+    if (logDirectory) mkdirSync(logDirectory, { recursive: true });
+    const stdoutPath = logDirectory ? path.join(logDirectory, "child.stdout.log") : null;
+    const stderrPath = logDirectory ? path.join(logDirectory, "child.stderr.log") : null;
+    const stdoutLog = stdoutPath ? createWriteStream(stdoutPath, { flags: "w" }) : null;
+    const stderrLog = stderrPath ? createWriteStream(stderrPath, { flags: "w" }) : null;
+    let stdoutLogError = null;
+    let stderrLogError = null;
+    stdoutLog?.on("error", (cause) => {
+      stdoutLogError ||= { code: cause.code || "OUTPUT_LOG_FAILED", message: cause.message };
+    });
+    stderrLog?.on("error", (cause) => {
+      stderrLogError ||= { code: cause.code || "OUTPUT_LOG_FAILED", message: cause.message };
+    });
     const child = spawn(command, args, {
       cwd: productRoot,
       env,
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });
+    const startCleanup = () => {
+      if (!cleanupPromise) {
+        cleanupPromise = terminateProcessTree(child);
+        cleanupPromise.then((result) => {
+          cleanup = result;
+          // A killed process normally emits `close` immediately. Keep the
+          // runner bounded even if Node delays that event after the owned
+          // process group has already been confirmed gone.
+          if (timedOut && !closed) {
+            closed = true;
+            closeStatus = null;
+            closeSignal = result.signal || "SIGKILL";
+          }
+          maybeFinish();
+        });
+      }
+      return cleanupPromise;
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      terminateProcessTree(child);
-      killTimer = setTimeout(() => terminateProcessTree(child, "SIGKILL"), 1_000);
+      startCleanup();
     }, timeoutMs);
-    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
-    const finish = (status, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
-      if (stdout) process.stdout.write(stdout);
-      if (stderr) process.stderr.write(stderr);
-      resolve({
-        exitCode: Number.isInteger(status) ? status : null,
-        signal: signal || null,
-        timedOut,
-        spawnError,
-        stdout,
-        stderr,
-      });
+    child.stdout?.on("data", (chunk) => {
+      stdout = appendOutputSummary(stdout, chunk);
+      stdoutLog?.write(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr = appendOutputSummary(stderr, chunk);
+      stderrLog?.write(chunk);
+    });
+    const finish = async () => {
+      if (settled || finishing || !closed) return;
+      finishing = true;
+      try {
+        await startCleanup();
+        settled = true;
+        clearTimeout(timer);
+        const [closedStdoutError, closedStderrError] = await Promise.all([
+          closeOutputStream(stdoutLog, stdoutLogError), closeOutputStream(stderrLog, stderrLogError),
+        ]);
+        if (printOutput && stdout) process.stdout.write(stdout);
+        if (printOutput && stderr) process.stderr.write(stderr);
+        resolve({
+          exitCode: Number.isInteger(closeStatus) ? closeStatus : null,
+          signal: closeSignal || null,
+          timedOut,
+          spawnError,
+          stdout,
+          stderr,
+          stdoutPath,
+          stderrPath,
+          cleanup: { ...cleanup, outputLogErrors: [closedStdoutError, closedStderrError].filter(Boolean) },
+        });
+      } finally {
+        finishing = false;
+      }
     };
+    function maybeFinish() { void finish(); }
     child.once("error", (error) => {
       spawnError = { code: error.code || "SPAWN_ERROR", message: error.message };
-      if (!child.pid) finish(null, null);
+      if (!child.pid) {
+        closed = true;
+        closeStatus = null;
+        closeSignal = null;
+        startCleanup();
+        maybeFinish();
+      }
     });
-    child.once("close", finish);
+    child.once("close", (status, signal) => {
+      closed = true;
+      closeStatus = status;
+      closeSignal = signal;
+      startCleanup();
+      maybeFinish();
+    });
   });
 }
 
@@ -173,6 +297,11 @@ function childProcessSummary(child) {
     signal: child?.signal || null,
     timedOut: child?.timedOut === true,
     spawnError: child?.spawnError || null,
+    stdoutPath: child?.stdoutPath || null,
+    stderrPath: child?.stderrPath || null,
+    stdoutTail: child?.stdout || "",
+    stderrTail: child?.stderr || "",
+    cleanup: child?.cleanup || null,
   };
 }
 
@@ -272,6 +401,7 @@ export async function executePlan(plan, currentVersion, nestedPlans = [], {
       child = await run(process.execPath, [scenarioChild(scenario)], {
         env: childEnvironment(scenario, { reportPath, reportDirectory: scenarioDirectory, nestedPlan }),
         timeoutMs: scenarioTimeoutMs,
+        outputDirectory: scenarioDirectory,
       });
     } catch (error) {
       child = { exitCode: null, signal: null, timedOut: false,
@@ -296,6 +426,7 @@ export async function executePlan(plan, currentVersion, nestedPlans = [], {
         protocolError = reportError(error);
       }
     }
+    const cleanupUnconfirmed = child?.cleanup?.confirmed === false;
     let state = "FAIL";
     let reason = "CHILD_REPORT_PROTOCOL_FAILED";
     if (child?.spawnError) {
@@ -319,6 +450,10 @@ export async function executePlan(plan, currentVersion, nestedPlans = [], {
     } else if (child?.exitCode !== 0) {
       reason = `CHILD_EXIT_${child?.exitCode ?? "UNKNOWN"}`;
     }
+    if (cleanupUnconfirmed) {
+      state = "NOT_EXECUTED";
+      reason = "ENVIRONMENT_BLOCKED";
+    }
     const scenarioReport = {
       order: index + 1,
       id: scenario.id,
@@ -328,8 +463,10 @@ export async function executePlan(plan, currentVersion, nestedPlans = [], {
       reportPath,
       process: childProcessSummary(child),
       evidence,
-      firstFailure: child?.timedOut
-        ? { code: "CHILD_TIMEOUT" }
+      firstFailure: cleanupUnconfirmed
+        ? { code: "FROZEN_ENTRY_PROCESS_CLEANUP_UNCONFIRMED", cleanup: child.cleanup }
+        : child?.timedOut
+          ? { code: "CHILD_TIMEOUT" }
         : child?.spawnError
           ? child.spawnError
           : childReport?.firstFailure || protocolError || childReportReadError || null,
@@ -343,6 +480,37 @@ export async function executePlan(plan, currentVersion, nestedPlans = [], {
     // A scenario failure is retained, but never causes an implicit retry or
     // prevents the independent later scenario from producing its own facts.
     writeReport();
+    if (cleanupUnconfirmed) {
+      for (const [blockedIndex, blockedScenario] of plan.scenarios.entries()) {
+        if (blockedIndex <= index) continue;
+        const blockedDirectory = path.join(output, blockedScenario.id);
+        mkdirSync(blockedDirectory, { recursive: true });
+        const blockedReportPath = path.join(blockedDirectory, "result.json");
+        const blockedReport = {
+          order: blockedIndex + 1,
+          id: blockedScenario.id,
+          scope: blockedScenario.scope,
+          manifestSha256: blockedScenario.manifestSha256,
+          nestedPlan: nestedPlanSummary(nestedPlans[blockedIndex]),
+          reportPath: blockedReportPath,
+          process: null,
+          evidence: null,
+          firstFailure: {
+            code: "FROZEN_ENTRY_PROCESS_CLEANUP_UNCONFIRMED",
+            priorScenarioId: scenario.id,
+            cleanup: child.cleanup,
+          },
+        };
+        report.scenarioReports.push(blockedReport);
+        report.ledger = recordFrozenScenarioOutcome(report.ledger, blockedScenario.id, {
+          state: "NOT_EXECUTED",
+          reason: "ENVIRONMENT_BLOCKED",
+          details: blockedReport,
+        });
+      }
+      writeReport();
+      break;
+    }
   }
   const summary = summarizeFrozenScenarioLedger(report.ledger);
   report.summary = summary;

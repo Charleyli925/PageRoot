@@ -306,6 +306,8 @@ export function validateFrozenNestedScenarioShape(scenario, nestedPlan) {
         || nestedPlan.operation !== "structure"
         || !["runtime", "static"].includes(nestedPlan.initialRuntime)
         || nestedPlan.reopen !== true
+        || !operations.includes("copy")
+        || !operations.includes("move-copy")
         || !operations.includes("input-restored")
         || !operations.includes("save-restored")
         || !["candidate", "recovered"].includes(forcedRebuild)
@@ -357,23 +359,237 @@ export async function validateNestedFrozenScenarioPlans(plan, currentVersion = n
   return Object.freeze(nested);
 }
 
-function operationRows(value, rows = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) operationRows(item, rows);
-    return rows;
-  }
-  if (!value || typeof value !== "object") return rows;
-  if (typeof value.operation === "string" && typeof value.state === "string") rows.push(value);
-  for (const [key, child] of Object.entries(value)) {
-    if (key !== "calls" && key !== "version" && key !== "source" && key !== "display") operationRows(child, rows);
-  }
-  return rows;
-}
-
 function reportVersionMatches(version, currentVersion) {
   return Boolean(version && currentVersion
     && ["head", "tree", "workspaceSourceSha256", "untrackedFileCount"]
       .every((field) => version[field] === currentVersion[field]));
+}
+
+const FROZEN_TEXT_OPERATIONS = Object.freeze([
+  "activate", "input", "backspace", "save", "undo", "redo",
+]);
+const FROZEN_REENTRY_CONTINUATION_OPERATIONS = Object.freeze([
+  "activate", "input", "backspace", "save", "undo", "resume-after-undo", "redo", "resume-after-redo",
+]);
+const FROZEN_MIXED_CONTROL_OPERATIONS = Object.freeze([
+  "select-text", "create-comment", "select-structure", "resume-text", "verify-cycle",
+]);
+
+function continuationOperations(target) {
+  return target?.historyResume === "explicit-reentry"
+    ? FROZEN_REENTRY_CONTINUATION_OPERATIONS
+    : FROZEN_TEXT_OPERATIONS;
+}
+
+function normalizeSelectionOperation(row) {
+  if (!row || typeof row !== "object") return row;
+  // The shared selection executor records the resolved identity as `actual`
+  // (and the frozen target as `expected`), while staged operation rows carry a
+  // canonical targetId. Normalize only this one ingress shape before ledger
+  // reconciliation; the planned `expected` value is never accepted as actual
+  // evidence, and a missing operation remains missing.
+  return {
+    ...row,
+    operation: typeof row.operation === "string" ? row.operation : null,
+    targetId: typeof row.targetId === "string"
+      ? row.targetId
+      : typeof row.actual === "string" ? row.actual : null,
+  };
+}
+
+function operationGroups(scenario, nestedPlan, report) {
+  const groups = [];
+  const add = (stage, expectedOperations, actualRows, cycle = null, actualCycle = null) => {
+    groups.push({ stage, cycle, expectedOperations, actualRows, actualCycle });
+  };
+  const target = nestedPlan?.targets?.[0];
+  if (scenario.id === "A") {
+    add("selection", [{ operation: "select", targetId: target?.selectedId }], [normalizeSelectionOperation(report.operation)]);
+    add("text", (target?.operations || []).map((operation) => ({
+      operation, targetId: target?.selectedId,
+    })), report.textOperations);
+  } else if (scenario.id === "B") {
+    const textTarget = nestedPlan?.targets?.[0];
+    const structureTarget = nestedPlan?.targets?.[1];
+    const cycles = Array.isArray(report.mixed?.cycles) ? report.mixed.cycles : [];
+    for (let index = 0; index < (nestedPlan?.cycles || 0); index += 1) {
+      const actual = cycles[index];
+      const copyId = report.mixed?.copyIds?.[index] || null;
+      add("control", FROZEN_MIXED_CONTROL_OPERATIONS.map((operation) => ({
+        operation,
+        targetId: operation === "select-structure" ? structureTarget?.selectedId : textTarget?.selectedId,
+      })), actual?.control, index + 1, actual?.cycle);
+      add("text", (textTarget?.operations || []).map((operation) => ({
+        operation, targetId: textTarget?.selectedId,
+      })), actual?.text, index + 1, actual?.cycle);
+      add("structure", (structureTarget?.operations || []).map((operation, operationIndex) => ({
+        operation,
+        targetId: operationIndex === 0 ? structureTarget?.selectedId : copyId,
+      })), actual?.structure, index + 1, actual?.cycle);
+      add("continuation", continuationOperations(textTarget).map((operation) => ({
+        operation, targetId: textTarget?.selectedId,
+      })), actual?.continuation, index + 1, actual?.cycle);
+    }
+    add("checkpoint", ["reopen-cumulative", ...Array.from(
+      { length: nestedPlan?.cycles || 0 }, (_, index) => `delete-comment-${index + 1}`,
+    )].map((operation) => ({ operation, targetId: textTarget?.selectedId })), report.mixed?.checkpoint);
+  } else if (scenario.id === "C") {
+    const copyId = report.structure?.copyId || null;
+    add("selection", [{ operation: "select", targetId: target?.selectedId }], [normalizeSelectionOperation(report.operation)]);
+    add("structure", (target?.operations || []).map((operation, operationIndex) => ({
+      operation,
+      targetId: operationIndex === 0 ? target?.selectedId : copyId,
+    })), report.structureOperations);
+  }
+  return groups;
+}
+
+function knownOperationRows(scenario, nestedPlan, report) {
+  return operationGroups(scenario, nestedPlan, report).flatMap((group) => (
+    Array.isArray(group.actualRows) ? group.actualRows : []
+  ));
+}
+
+function reconcileOperationLedger(scenario, nestedPlan, report) {
+  const groups = operationGroups(scenario, nestedPlan, report);
+  const mismatches = [];
+  for (const group of groups) {
+    if (group.cycle !== null && group.actualCycle !== group.cycle) {
+      mismatches.push({ stage: group.stage, cycle: group.cycle,
+        expectedCycle: group.cycle, actualCycle: group.actualCycle });
+    }
+    if (!Array.isArray(group.actualRows) || group.actualRows.length !== group.expectedOperations.length) {
+      mismatches.push({ stage: group.stage, cycle: group.cycle,
+        expectedCount: group.expectedOperations.length,
+        actualCount: Array.isArray(group.actualRows) ? group.actualRows.length : null });
+      continue;
+    }
+    for (const [index, expected] of group.expectedOperations.entries()) {
+      const actual = group.actualRows[index];
+      if (typeof expected.operation !== "string" || expected.operation.length === 0
+        || typeof expected.targetId !== "string" || expected.targetId.length === 0
+        || actual?.operation !== expected.operation || actual?.targetId !== expected.targetId) {
+        mismatches.push({ stage: group.stage, cycle: group.cycle, sequence: index + 1,
+          expected, actual: actual ? { operation: actual.operation, targetId: actual.targetId } : null });
+      }
+    }
+  }
+  if (scenario.id === "B") {
+    const copyIds = report.mixed?.copyIds;
+    if (!Array.isArray(copyIds)
+      || copyIds.length !== nestedPlan.cycles
+      || copyIds.some((id) => typeof id !== "string" || id.length === 0)
+      || new Set(copyIds).size !== copyIds.length) {
+      mismatches.push({ stage: "structure-output", expectedCycles: nestedPlan.cycles, actualCopyIds: copyIds || null });
+    }
+  }
+  if (mismatches.length > 0) {
+    contractError(
+      "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH",
+      `Scenario ${scenario.id} report does not match its frozen operation ledger.`,
+      { scenarioId: scenario.id, mismatches },
+    );
+  }
+  return groups.flatMap((group) => group.actualRows);
+}
+
+function requireCompleteEvidence(condition, code, details) {
+  if (!condition) contractError(code, "Frozen child evidence is incomplete.", details);
+}
+
+function validateOperationEvidence(rows, scenario) {
+  for (const [index, row] of rows.entries()) {
+    requireCompleteEvidence(row?.state === "PASS"
+      && typeof row.reason === "string" && row.reason.trim() !== ""
+      && Number.isFinite(row.durationMs) && row.durationMs >= 0,
+    "FROZEN_ENTRY_CHILD_OPERATION_EVIDENCE_INVALID", {
+      scenarioId: scenario.id, sequence: index + 1,
+      operation: row?.operation || null,
+      reason: row?.reason || null, durationMs: row?.durationMs ?? null,
+    });
+  }
+}
+
+function validateSourceEvidence(report, scenario) {
+  const source = report.source;
+  const finalSource = report.finalSource;
+  const display = report.display;
+  requireCompleteEvidence(source?.hashMatches === true && source?.sizeMatches === true,
+    "FROZEN_ENTRY_CHILD_SOURCE_EVIDENCE_INVALID", { scenarioId: scenario.id, source });
+  requireCompleteEvidence(finalSource?.hashMatches === true && finalSource?.sizeMatches === true,
+    "FROZEN_ENTRY_CHILD_FINAL_SOURCE_EVIDENCE_INVALID", { scenarioId: scenario.id, finalSource });
+  requireCompleteEvidence(display?.conditions?.workingMatches === true
+    && display?.conditions?.displayedMatches === true,
+    "FROZEN_ENTRY_CHILD_DISPLAY_EVIDENCE_INVALID", { scenarioId: scenario.id, display });
+  if (report.reopen) {
+    requireCompleteEvidence(report.reopen.state === "PASS"
+      && typeof report.reopen.reason === "string" && report.reopen.reason.trim() !== ""
+      && Number.isFinite(report.reopen.durationMs) && report.reopen.durationMs >= 0
+      && report.reopen.source?.hashMatches === true && report.reopen.source?.sizeMatches === true
+      && report.reopen.display?.workingMatches === true
+      && report.reopen.display?.displayedMatches === true,
+    "FROZEN_ENTRY_CHILD_REOPEN_EVIDENCE_INVALID", {
+      scenarioId: scenario.id, reopen: report.reopen,
+    });
+  }
+}
+
+function validateLifecycleEvidence(report, scenario, nestedPlan) {
+  const lifecycle = report.lifecycle;
+  requireCompleteEvidence(lifecycle && typeof lifecycle === "object"
+    && Array.isArray(lifecycle.records)
+    && Array.isArray(lifecycle.candidateRecords)
+    && Array.isArray(lifecycle.lifecycleRecords)
+    && lifecycle.records.length === lifecycle.candidateRecords.length + lifecycle.lifecycleRecords.length
+    && [...lifecycle.records, ...lifecycle.candidateRecords, ...lifecycle.lifecycleRecords]
+      .every((record) => record && typeof record === "object"
+        && typeof record.kind === "string" && record.kind.trim() !== ""),
+  "FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_INVALID", {
+    scenarioId: scenario.id, lifecycle,
+  });
+  if (scenario.id !== "C") return;
+  const expectedPath = nestedPlan.targets?.[0]?.rebuildPath;
+  if (expectedPath !== "runtime-candidate") return;
+  const kinds = new Set(lifecycle.lifecycleRecords.map((record) => record?.kind));
+  requireCompleteEvidence(
+    ["rebuild-request", "generation", "runtime-terminal"].every((kind) => kinds.has(kind))
+      && lifecycle.candidateRecords.some((record) => record?.kind === "candidate-created")
+      && lifecycle.lifecycleRecords.some((record) => record?.kind === "candidate-terminal")
+      && lifecycle.lifecycleRecords.some((record) => record?.kind === "active-identity"),
+    "FROZEN_ENTRY_CHILD_REBUILD_LIFECYCLE_INVALID",
+    { scenarioId: scenario.id, expectedPath, lifecycle },
+  );
+}
+
+function validateRebuildEvidence(row, nestedPlan) {
+  const target = nestedPlan.targets?.[0];
+  const expectedOutcome = target?.projectionByOperation?.["move-copy"];
+  const expectedPath = target?.rebuildPath;
+  const actual = row?.actual;
+  const runtime = actual?.runtime;
+  const conditions = runtime?.conditions;
+  const terminalConditions = runtime?.terminalConditions;
+  const requiredConditionKeys = expectedPath === "runtime-candidate"
+    ? ["knownExpectedPath", "pathMatches", "sourceMatches", "documentKnown", "generationKnown",
+      "documentMatches", "generationMatches", "requestMatches", "candidateMatches", "candidateReady",
+      "generationObserved", "activeMatches", "runtimeReady", "noRejectedCandidate"]
+    : ["knownPath", "documentChanged", "generationChanged", "sourceMatches", "candidateAbsent", "staticTerminal"];
+  const conditionFacts = requiredConditionKeys.every((key) => conditions?.[key] === true);
+  const terminalFacts = expectedPath === "runtime-candidate"
+    ? terminalConditions?.phaseSettled === true && terminalConditions?.runtimeReady === true
+    : terminalConditions?.phaseStatic === true && terminalConditions?.runtimeNotCandidate === true;
+  requireCompleteEvidence(row?.operation === "move-copy"
+    && row.state === "PASS"
+    && ["candidate", "recovered"].includes(expectedOutcome)
+    && actual?.outcome === expectedOutcome
+    && runtime?.path === expectedPath
+    && conditionFacts && terminalFacts
+    && Number.isSafeInteger(Number(runtime?.generation)) && Number(runtime.generation) > 0
+    && (expectedPath !== "runtime-candidate" || typeof runtime.candidateId === "string")
+    && (expectedPath !== "runtime-candidate" || runtime.candidateId.trim() !== ""),
+  "FROZEN_ENTRY_CHILD_REBUILD_EVIDENCE_INVALID", {
+    expectedOutcome, expectedPath, actual,
+  });
 }
 
 /**
@@ -397,13 +613,14 @@ export function summarizeFrozenScenarioReport(report, scenario, nestedPlan, curr
   if (!FROZEN_ENTRY_STATES.includes(report.state)) {
     contractError("FROZEN_ENTRY_CHILD_REPORT_STATE_INVALID", `Scenario ${scenario.id} child report has an invalid state.`);
   }
-  const rows = operationRows(report);
-  const failures = rows.filter((row) => row.state !== "PASS");
+  let rows = knownOperationRows(scenario, nestedPlan, report);
+  if (report.state === "PASS") rows = reconcileOperationLedger(scenario, nestedPlan, report);
+  const failures = rows.filter((row) => row?.state !== "PASS");
   if (report.state === "PASS") {
     if (rows.length === 0 || failures.length > 0 || report.cleanup !== "PASS") {
       contractError("FROZEN_ENTRY_CHILD_REPORT_INCOMPLETE", `Scenario ${scenario.id} PASS report has incomplete operation evidence.`, {
         operationCount: rows.length,
-        incomplete: failures.map((row) => ({ operation: row.operation, state: row.state, reason: row.reason })),
+        incomplete: failures.map((row) => ({ operation: row?.operation, state: row?.state, reason: row?.reason })),
         cleanup: report.cleanup,
       });
     }
@@ -414,24 +631,17 @@ export function summarizeFrozenScenarioReport(report, scenario, nestedPlan, curr
       && (!Array.isArray(report.mixed?.cycles) || report.mixed.cycles.length !== nestedPlan.cycles)) {
       contractError("FROZEN_ENTRY_CHILD_MIXED_CYCLES_MISSING", "Scenario B PASS report is missing one report group per frozen cycle.");
     }
-    if (!report.source || !report.display || !report.finalSource) {
-      contractError("FROZEN_ENTRY_CHILD_SOURCE_EVIDENCE_MISSING", `Scenario ${scenario.id} PASS report is missing source/display evidence.`);
-    }
-    if (!report.lifecycle || typeof report.lifecycle !== "object") {
-      contractError("FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_MISSING", `Scenario ${scenario.id} PASS report is missing lifecycle evidence.`);
-    }
+    validateOperationEvidence(rows, scenario);
+    validateSourceEvidence(report, scenario);
+    validateLifecycleEvidence(report, scenario, nestedPlan);
     if (scenario.id === "C") {
-      const requiredOperation = "move-copy";
-      const row = rows.find((candidate) => candidate.operation === requiredOperation);
-      const expected = nestedPlan.targets?.[0]?.projectionByOperation?.[requiredOperation];
-      const runtime = row?.actual?.runtime;
-      if (!row || row.state !== "PASS" || !["candidate", "recovered"].includes(expected)
-        || !["candidate", "recovered"].includes(row.actual?.outcome)
-        || !runtime || runtime.runtime === "in-place"
-        || !rows.some((candidate) => candidate.operation === "input-restored" && candidate.state === "PASS")
-        || !rows.some((candidate) => candidate.operation === "save-restored" && candidate.state === "PASS")) {
-        contractError("FROZEN_ENTRY_CHILD_REBUILD_EVIDENCE_MISSING", "Scenario C PASS report is missing the forced rebuild continuation evidence.");
-      }
+      validateRebuildEvidence(rows.find((candidate) => candidate.operation === "move-copy"), nestedPlan);
+      requireCompleteEvidence(
+        rows.some((candidate) => candidate.operation === "input-restored" && candidate.state === "PASS")
+          && rows.some((candidate) => candidate.operation === "save-restored" && candidate.state === "PASS"),
+        "FROZEN_ENTRY_CHILD_REBUILD_CONTINUATION_MISSING",
+        { scenarioId: scenario.id },
+      );
     }
   } else if (report.state === "FAIL" && !report.firstFailure) {
     contractError("FROZEN_ENTRY_CHILD_FAILURE_EVIDENCE_MISSING", `Scenario ${scenario.id} FAIL report is missing firstFailure.`);
@@ -450,7 +660,22 @@ export function summarizeFrozenScenarioReport(report, scenario, nestedPlan, curr
     failedOperations: failures.length,
     firstFailure: report.firstFailure || null,
     reopen: report.reopen ? { state: report.reopen.state, reason: report.reopen.reason || null } : null,
-    lifecycle: { records: lifecycleRecords, reportPath: report.reportPath || null },
+    operationLedger: rows.map((row) => ({
+      operation: row.operation || null,
+      targetId: row.targetId || null,
+      state: row.state || null,
+      reason: row.reason || null,
+      durationMs: Number.isFinite(row.durationMs) ? row.durationMs : null,
+    })),
+    source: report.source,
+    display: report.display?.conditions || null,
+    finalSource: report.finalSource,
+    lifecycle: {
+      records: lifecycleRecords,
+      candidateRecords: report.lifecycle?.candidateRecords?.length || 0,
+      lifecycleRecords: report.lifecycle?.lifecycleRecords?.length || 0,
+      reportPath: report.reportPath || null,
+    },
     requiredRebuild: scenario.id === "C" ? {
       operation: "move-copy",
       expected: nestedPlan.targets?.[0]?.projectionByOperation?.["move-copy"] || null,

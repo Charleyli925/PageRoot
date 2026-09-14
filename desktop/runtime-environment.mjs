@@ -73,7 +73,10 @@ export class RuntimeEnvironmentError extends Error {
 export const E2E_WINDOW_MODES = Object.freeze(["hidden", "visible-background", "foreground"]);
 
 export function resolveE2EWindowMode({ environment = process.env, e2eUserDataPath = null } = {}) {
-  if (!e2eUserDataPath) return "foreground";
+  // A normal application launch has no E2E window mode. The lifecycle keeps
+  // its ordinary ready-to-show path; only an isolated E2E userData directory
+  // opts into the test presentation policy below.
+  if (!e2eUserDataPath) return null;
   const explicit = String(environment?.[PRODUCT_ENV.E2E_WINDOW_MODE] || "").trim().toLowerCase();
   const legacyForeground = environment?.[PRODUCT_ENV.E2E_FOREGROUND] === "1";
   const mode = explicit || (legacyForeground ? "foreground" : "hidden");

@@ -138,16 +138,32 @@ test("C rejects copy-only or descriptive-only rebuild plans", () => {
     scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
     targets: [{ ...target, operations: ["copy", "input-restored", "save-restored"], projectionByOperation: {} }],
   }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
-  assert.doesNotThrow(() => validateFrozenNestedScenarioShape(scenario, {
+  assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
     scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
     targets: [{ ...target, operations: ["copy", "input-restored", "save-restored"],
       projectionByOperation: { "move-copy": "candidate" } }],
+  }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
+  assert.doesNotThrow(() => validateFrozenNestedScenarioShape(scenario, {
+    scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
+    targets: [{ ...target, operations: ["copy", "move-copy", "input-restored", "save-restored"],
+      projectionByOperation: { "move-copy": "candidate" } }],
   }));
+  assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
+    scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
+    targets: [{ ...target, operations: ["copy", "move-copy", "input-restored", "save-restored"],
+      projectionByOperation: { "move-copy": "in-place" } }],
+  }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
 });
 
 test("child PASS requires report evidence beyond a zero exit code", () => {
   const scenario = envelope().scenarios[0];
-  const nestedPlan = { reopen: true };
+  const nestedPlan = {
+    scope: "core-text-format",
+    operation: "native-text",
+    initialRuntime: "static",
+    reopen: true,
+    targets: [{ selectedId: "a-target", operations: ["activate", "input", "backspace", "save", "undo", "redo"] }],
+  };
   const base = {
     schemaVersion: 1,
     kind: "stemmio-frozen-html-operation-result",
@@ -158,20 +174,57 @@ test("child PASS requires report evidence beyond a zero exit code", () => {
     state: "PASS",
     cleanup: "PASS",
     calls: [],
-    source: { sha256: "a".repeat(64) },
-    display: { working: "sha256:a", displayed: "sha256:a" },
-    finalSource: { sha256: "a".repeat(64) },
-    lifecycle: { records: [] },
-    reopen: { state: "PASS" },
-    operation: { operation: "select", state: "PASS" },
+    source: { hashMatches: true, sizeMatches: true },
+    display: {
+      working: "sha256:a", displayed: "sha256:a",
+      conditions: { workingMatches: true, displayedMatches: true },
+    },
+    finalSource: { hashMatches: true, sizeMatches: true },
+    lifecycle: { candidateRecords: [], lifecycleRecords: [], records: [] },
+    reopen: {
+      state: "PASS", reason: "EXACT_REOPEN", durationMs: 1,
+      source: { hashMatches: true, sizeMatches: true },
+      display: { workingMatches: true, displayedMatches: true },
+    },
+    operation: { operation: "select", targetId: "a-target", state: "PASS", reason: "EXPECTED", durationMs: 1 },
+    textOperations: nestedPlan.targets[0].operations.map((operation) => ({
+      operation, targetId: "a-target", state: "PASS", reason: "EXPECTED", durationMs: 1,
+    })),
   };
-  assert.equal(summarizeFrozenScenarioReport(base, scenario, nestedPlan, version).operationCount, 1);
+  assert.equal(summarizeFrozenScenarioReport(base, scenario, nestedPlan, version).operationCount, 7);
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, textOperations: base.textOperations.slice(0, 1),
+  }, scenario, nestedPlan, version), {
+    code: "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH",
+  });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, textOperations: [...base.textOperations.slice(0, 2), base.textOperations[0], ...base.textOperations.slice(3)],
+  }, scenario, nestedPlan, version), {
+    code: "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH",
+  });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, textOperations: base.textOperations.map((row, index) => index === 1 ? { ...row, targetId: "wrong-target" } : row),
+  }, scenario, nestedPlan, version), {
+    code: "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH",
+  });
   assert.throws(() => summarizeFrozenScenarioReport({ ...base, operation: undefined }, scenario, nestedPlan, version), {
-    code: "FROZEN_ENTRY_CHILD_REPORT_INCOMPLETE",
+    code: "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH",
   });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, operation: { targetId: "a-target", state: "PASS", reason: "EXPECTED", durationMs: 1 },
+  }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH" });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, operation: { operation: "select", expected: "a-target", state: "PASS", reason: "EXPECTED", durationMs: 1 },
+  }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH" });
   assert.throws(() => summarizeFrozenScenarioReport({ ...base, lifecycle: undefined }, scenario, nestedPlan, version), {
-    code: "FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_MISSING",
+    code: "FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_INVALID",
   });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, source: { hashMatches: true, sizeMatches: false },
+  }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_SOURCE_EVIDENCE_INVALID" });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, operation: { ...base.operation, reason: "" },
+  }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_OPERATION_EVIDENCE_INVALID" });
   assert.throws(() => summarizeFrozenScenarioReport({ ...base, state: "FAIL", firstFailure: undefined }, scenario, nestedPlan, version), {
     code: "FROZEN_ENTRY_CHILD_FAILURE_EVIDENCE_MISSING",
   });

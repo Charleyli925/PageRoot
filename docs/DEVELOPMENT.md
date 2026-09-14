@@ -198,6 +198,27 @@ old `local-html-corpus.mjs` entry remains available only through `--preflight`
 with `capability-preflight-only`; automatic-discovery qualification remains
 retired.
 
+Parent acceptance reconciles every planned stage, cycle, target and operation
+in exact order from the child result rather than searching arbitrary nested
+fields. A zero exit code or a partial report is insufficient; each scenario
+also retains its child report path, complete operation-ledger summary, bounded
+stdout/stderr tails plus the full per-scenario log paths, lifecycle and reopen
+summary, and first failure. If an owned process group cannot be
+confirmed gone after a timeout, the current scenario is recorded as an
+environment block and later scenarios do not start.
+
+The public infrastructure chain can be exercised without private HTML with
+the opt-in synthetic sample below. It builds the renderer, runs the real A
+executor, writes its child report and lets the parent entry reconcile it; B and
+C remain protocol-complete fixtures in that unit test. This is engineering
+plumbing evidence, not private real-document acceptance:
+
+```bash
+STEMMIO_RUN_PUBLIC_FROZEN_ENTRY=1 \
+  node --test tests/frozen-html-scenarios-entry.test.mjs \
+  --test-name-pattern='public opt-in entry smoke'
+```
+
 The low-level frozen executor still accepts a single reviewed manifest through
 `STEMMIO_FROZEN_MANIFEST` and `STEMMIO_FROZEN_MANIFEST_SHA256` for focused
 diagnostics. Reviewed plans choose either one selection or the fixed native
@@ -370,6 +391,9 @@ stealing the current application's focus. Use `hidden` for CI or
 `foreground` only for deliberate debugging; the legacy
 `STEMMIO_E2E_FOREGROUND=1` still maps to `foreground` and conflicts with any
 other explicit mode. The mode applies at initial launch and every reopen.
+Formal launches without an isolated E2E user-data directory keep the original
+hidden-until-`ready-to-show` timing; the E2E mode only changes isolated test
+windows.
 Every E2E mode suppresses automatically triggered native dialogs and logs them
 instead of popping up. Expected delete confirmations are handled by the
 scenario helper, while unexpected dialogs fail the scenario. The hosted-macOS

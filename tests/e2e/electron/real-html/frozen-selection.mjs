@@ -210,10 +210,7 @@ export function readFrozenSelection(bytes, expectedDigest) {
         && target.formatCapability?.expected === "AVAILABLE"
         && target.formatCapability?.scope === "element"
         && target.formatCapability?.basis === "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER"
-        && target.continuationProbe === undefined
-        // C's public contract must name the operation that is required to
-        // rebuild. A generic rebuildPath description is not execution proof.
-        && ["candidate", "recovered"].includes(target.projectionByOperation?.["move-copy"]),
+        && target.continuationProbe === undefined,
       "FROZEN_STRUCTURE_CLOSED_LOOP_CONTRACT_INVALID");
       Object.freeze(target.formatCapability);
     }

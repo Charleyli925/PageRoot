@@ -96,6 +96,7 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
 });
 
 test("E2E window mode separates hidden, visible-background and foreground behavior", () => {
+  assert.equal(resolveE2EWindowMode({ environment: {}, e2eUserDataPath: null }), null);
   assert.equal(resolveE2EWindowMode({ e2eUserDataPath: "/tmp/stemmio-native-e2e-test", environment: {} }), "hidden");
   assert.equal(resolveE2EWindowMode({ e2eUserDataPath: "/tmp/stemmio-native-e2e-test", environment: {
     STEMMIO_E2E_WINDOW_MODE: "visible-background",
@@ -110,6 +111,14 @@ test("E2E window mode separates hidden, visible-background and foreground behavi
     STEMMIO_E2E_FOREGROUND: "1",
     STEMMIO_E2E_WINDOW_MODE: "hidden",
   } }), { code: "E2E_WINDOW_MODE_CONFLICT" });
+});
+
+test("formal launch keeps the ready-to-show display timing outside isolated E2E", async () => {
+  const appLifecycle = await readFile(sourceUrl("../desktop/app-lifecycle.mjs"), "utf8");
+  const createWindow = appLifecycle.slice(appLifecycle.indexOf("async function createWindow()"));
+  assert.match(createWindow, /show:\s*e2eWindowMode\s*===\s*"foreground"/u);
+  assert.match(createWindow, /mainWindow\.once\("ready-to-show", \(\) => \{[\s\S]*?presentMainWindow\(\);/u);
+  assert.doesNotMatch(createWindow, /e2eWindowMode\s*===\s*null[\s\S]{0,120}show:\s*true/u);
 });
 
 test("window loads the real renderer shell before Bridge readiness", async () => {

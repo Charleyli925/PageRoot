@@ -1,5 +1,6 @@
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { expect, test } from "@playwright/test";
+import { withExpectedDeleteConfirmation } from "./real-html/expected-delete-dialog.mjs";
 import {
   activateNativeEdit,
   addCanvasComment,
@@ -57,7 +58,62 @@ test("public frozen-entry sample launches visibly without focus and reopens the 
     });
     expect(initialWindow).toEqual({ visible: true, focused: false });
     const initialFrame = await currentEditorFrame(launched.page);
-    await expect(initialFrame.locator(caseSelector("list-item"))).toHaveCount(1);
+    const initialItem = initialFrame.locator(caseSelector("list-item"));
+    await expect(initialItem).toHaveCount(1);
+    const originalId = await initialItem.getAttribute("data-stemmio-id");
+    expect(originalId).toMatch(/^sm1_[a-f0-9]{32}$/u);
+    const editor = launched.page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    const expectVisibleBackground = async () => {
+      await expect.poll(() => launched.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        return { visible: window?.isVisible(), focused: window?.isFocused() };
+      })).toEqual({ visible: true, focused: false });
+    };
+    let persistedRevision = Number(await launched.page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await initialFrame.locator(caseSelector("list-item")).first().click();
+    await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+    persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    await waitForRuntimeHandoffSettled(launched.page);
+    await expectVisibleBackground();
+    let activeFrame = await currentEditorFrame(launched.page);
+    const copiedItems = activeFrame.locator(caseSelector("list-item"));
+    await expect(copiedItems).toHaveCount(2);
+    const copiedIds = await copiedItems.evaluateAll((elements) => elements.map((element) => (
+      element.getAttribute("data-stemmio-id")
+    )));
+    expect(copiedIds).toHaveLength(2);
+    expect(new Set(copiedIds).size).toBe(2);
+    expect(copiedIds).toContain(originalId);
+    const copiedId = copiedIds.find((id) => id !== originalId);
+    expect(copiedId).toMatch(/^sm1_[a-f0-9]{32}$/u);
+    await copiedItems.nth(1).click();
+    const toolbarLabel = await editor.getByRole("toolbar").getAttribute("aria-label");
+    const deleteTargetLabel = toolbarLabel?.replace(/^编辑/u, "") || "";
+    expect(deleteTargetLabel).toBeTruthy();
+    await withExpectedDeleteConfirmation(launched.page, () => editor.getByRole("button", {
+      name: "删除元素", exact: true,
+    }).click(), { targetText: deleteTargetLabel });
+    persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    await waitForRuntimeHandoffSettled(launched.page);
+    await expectVisibleBackground();
+    activeFrame = await currentEditorFrame(launched.page);
+    await expect(activeFrame.locator(`[data-stemmio-id="${originalId}"]`)).toHaveCount(1);
+    await expect(activeFrame.locator(`[data-stemmio-id="${copiedId}"]`)).toHaveCount(0);
+    await clickEditHistoryMenu(launched.electronApp, launched.page, "undo");
+    persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    await waitForRuntimeHandoffSettled(launched.page);
+    await expectVisibleBackground();
+    activeFrame = await currentEditorFrame(launched.page);
+    await expect(activeFrame.locator(`[data-stemmio-id="${originalId}"]`)).toHaveCount(1);
+    await expect(activeFrame.locator(`[data-stemmio-id="${copiedId}"]`)).toHaveCount(1);
+    await clickEditHistoryMenu(launched.electronApp, launched.page, "redo");
+    persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    await waitForRuntimeHandoffSettled(launched.page);
+    await expectVisibleBackground();
+    activeFrame = await currentEditorFrame(launched.page);
+    await expect(activeFrame.locator(`[data-stemmio-id="${originalId}"]`)).toHaveCount(1);
+    await expect(activeFrame.locator(`[data-stemmio-id="${copiedId}"]`)).toHaveCount(0);
 
     await closeStemmioGracefully(launched.electronApp, launched.page);
     launched = null;
@@ -69,7 +125,8 @@ test("public frozen-entry sample launches visibly without focus and reopens the 
     });
     expect(reopenedWindow).toEqual({ visible: true, focused: false });
     const reopenedFrame = await currentEditorFrame(launched.page);
-    await expect(reopenedFrame.locator(caseSelector("list-item"))).toHaveCount(1);
+    await expect(reopenedFrame.locator(`[data-stemmio-id="${originalId}"]`)).toHaveCount(1);
+    await expect(reopenedFrame.locator(`[data-stemmio-id="${copiedId}"]`)).toHaveCount(0);
   } finally {
     if (launched) await stopStemmio(launched.electronApp, launched.isolatedUserData);
     else if (isolatedUserData) removeIsolatedUserData(isolatedUserData);
