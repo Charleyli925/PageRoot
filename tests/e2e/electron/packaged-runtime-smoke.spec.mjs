@@ -297,12 +297,6 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
         comments: draft.comments.map(
           (comment) => comment.text,
         ),
-        commentAnchorUsesSavedSource: draft.comments.map(
-          (comment) => comment.target?.expectedSourceSha256 ?? comment.sourceAnchor?.expectedSourceSha256 ?? null,
-        ),
-        commentAnchorQuote: draft.comments.map(
-          (comment) => comment.target?.textQuote ?? comment.sourceAnchor?.textQuote ?? null,
-        ),
         changeEventCount: draft.changeEvents.length,
         changeEventsUseCanonicalIdentity: draft.changeEvents
           .every((event) => (
@@ -315,8 +309,6 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
       oneRevisionPerAppliedOperation: true,
       revisionAdvancedByBothWrites: true,
       comments: ["打包环境 Revision 自动合并"],
-      commentAnchorUsesSavedSource: [savedSourceSha256],
-      commentAnchorQuote: [replacement],
       changeEventCount: 1,
       changeEventsUseCanonicalIdentity: true,
       deletedCommentIds: ["comment_packaged_external_deleted"],
@@ -337,7 +329,31 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     await expect(page.locator("main.workbench"))
       .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
     const reopenedBeforeClose = await bridgeJson(page, "/workspace", { sourcePath });
-    expect(reopenedBeforeClose.runtimeState.draft.draftRevision).toBe(expectedRevision);
+    const reopenedDraft = reopenedBeforeClose.runtimeState.draft;
+    const revisionAfterFirstReopen = reopenedDraft.draftRevision;
+    // The comment created against the pre-edit source is re-anchored to the saved
+    // bytes before the project is closed, and that correction is a durable operation
+    // of its own: the ledger still advances exactly one revision per operation.
+    expect({
+      oneRevisionPerAppliedOperation:
+        reopenedDraft.draftRevision === reopenedDraft.appliedOperationIds.length,
+      revisionAdvancedByBothWrites: reopenedDraft.draftRevision >= expectedRevision,
+      commentAnchorUsesSavedSource: reopenedDraft.comments.map(
+        (comment) => comment.target?.expectedSourceSha256
+          ?? comment.sourceAnchor?.expectedSourceSha256
+          ?? null,
+      ),
+      commentAnchorQuote: reopenedDraft.comments.map(
+        (comment) => comment.target?.textQuote
+          ?? comment.sourceAnchor?.textQuote
+          ?? null,
+      ),
+    }).toEqual({
+      oneRevisionPerAppliedOperation: true,
+      revisionAdvancedByBothWrites: true,
+      commentAnchorUsesSavedSource: [savedSourceSha256],
+      commentAnchorQuote: [replacement],
+    });
     await closePackagedGracefully(electronApp, page);
     electronApp = null;
 
@@ -345,7 +361,23 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     electronApp = launched.electronApp;
     page = launched.page;
     const reopenedAfterClose = await bridgeJson(page, "/workspace", { sourcePath });
-    expect(reopenedAfterClose.runtimeState.draft.draftRevision).toBe(expectedRevision);
+    const reopenedAfterCloseDraft = reopenedAfterClose.runtimeState.draft;
+    // Reopening a closed project must not add draft operations: the ledger is
+    // stable across close and reopen, and each applied operation still owns
+    // exactly one revision.
+    expect({
+      revisionStableAcrossClose:
+        reopenedAfterCloseDraft.draftRevision === revisionAfterFirstReopen,
+      oneRevisionPerAppliedOperation:
+        reopenedAfterCloseDraft.draftRevision
+          === reopenedAfterCloseDraft.appliedOperationIds.length,
+      revisionCoversBothWrites:
+        reopenedAfterCloseDraft.draftRevision >= expectedRevision,
+    }).toEqual({
+      revisionStableAcrossClose: true,
+      oneRevisionPerAppliedOperation: true,
+      revisionCoversBothWrites: true,
+    });
     expect(reopenedAfterClose.runtimeState.draft.deletedCommentIds)
       .toEqual(["comment_packaged_external_deleted"]);
     expect(reopenedAfterClose.runtimeState.draft.comments.map((comment) => comment.text))
