@@ -372,6 +372,14 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       keyboard: page.keyboard, mouse: page.mouse, target: copyTarget, calls: audit, priorSelectionId }); }
     finally { calls.push(...audit); }
   };
+  const currentKnownPrior = async (allowed) => {
+    const selected = frame.locator("[data-html-canvas-selected]");
+    const count = await selected.count();
+    failUnless(count <= 1, "FROZEN_SELECTION_NOT_UNIQUE", { count });
+    const prior = count === 1 ? await selected.getAttribute("data-pageroot-id") : null;
+    failUnless(prior === null || allowed.includes(prior), "FROZEN_SELECTION_NOT_KNOWN", { prior, allowed });
+    return prior;
+  };
   const refreshActiveFrame = async () => {
     const active = editor.locator('iframe[data-runtime-slot-role="active"]');
     failUnless(await active.count() === 1, "FROZEN_ACTIVE_FRAME_NOT_UNIQUE");
@@ -486,15 +494,9 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
     });
     if (target.continuationProbe) await record("probe-after-copy", { mode: target.continuationProbe }, () =>
       probeFrozenEndedContinuation({ page, frame, editor, target, readSource, calls, marker: `PRDIRECT_${fileId}_COPY` }));
-    await record("select-copy", { id: copyTarget.selectedId }, async () => {
-      const selected = frame.locator("[data-html-canvas-selected]");
-      const count = await selected.count();
-      failUnless(count <= 1, "FROZEN_SELECTION_NOT_UNIQUE", { count });
-      const prior = count === 1 ? await selected.getAttribute("data-pageroot-id") : null;
-      failUnless(prior === null || prior === target.selectedId || prior === copyTarget.selectedId,
-        "FROZEN_SELECTION_NOT_KNOWN", { prior, originalId: target.selectedId, copyId: copyTarget.selectedId });
-      return selectCopy(prior);
-    });
+    await record("select-copy", { id: copyTarget.selectedId }, async () => (
+      selectCopy(await currentKnownPrior([target.selectedId, copyTarget.selectedId]))
+    ));
     await record("activate-copy", { editableId: copyTarget.selectedId }, () => activateCopyLeaf());
     await record("input-copy", { appended: marker }, async () => {
       await sameDocument(); await requireFrozenTextFocus(handle, copyTarget.selectedId, { atEnd: true });
@@ -560,7 +562,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       await page.keyboard.press("Escape");
       await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
       failUnless(await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true", "COPY_EDIT_SESSION_NOT_ENDED");
-      return selectCopy(copyTarget.selectedId);
+      return selectCopy(await currentKnownPrior([copyTarget.selectedId]));
     });
     await record("delete-copy", { sourceRestored: frozenDigest(baseline) }, async () => {
       const result = await rebuild(async () => {
