@@ -610,6 +610,9 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
         return { restoredSha256: frozenDigest(restoredBytes) };
       });
       await record("restore-baseline", { sourceRestored: frozenDigest(baseline) }, async () => {
+        await page.keyboard.press("Escape");
+        await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
+        failUnless(await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true", "COPY_EDIT_SESSION_NOT_ENDED");
         const walked = await walkHistory("undo", baseline, "RESTORE_BASELINE_FAILED");
         failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId).count() === 0,
           "BASELINE_STILL_HAS_COPY");
