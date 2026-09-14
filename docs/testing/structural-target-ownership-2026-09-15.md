@@ -37,6 +37,7 @@
 | 新增合成 Electron 回归 | 通过 | 1 passed；覆盖 copy → direct comment → direct format → delete landing → direct comment |
 | 既有 Electron 定向回归 | 通过 | 14 passed；覆盖复制、删除、混合内容 Undo、跨父移动、Runtime 编辑、Native Edit rebase、Candidate commit failure 等 |
 | 收尾门禁第一轮 | 发现并修正测试契约 | `task:finish` 的 74 个 Electron 用例中 72 passed、2 failed；失败都集中在 Candidate handoff 后仍按旧元素断言选择。定向复验这 2 个用例在新提交上 2/2 passed，随后重新执行完整收尾门禁。 |
+| 收尾门禁第二轮（最终） | 通过 | `npm run task:finish`：465 Node、66 Browser、83 Electron、15 AI 全部通过，0 failed、0 skipped、0 not executed。 |
 
 关键门禁的机器可读结果位于 worktree 的 `output/test-runs/`（生成目录不提交）。
 
@@ -61,7 +62,7 @@ npm run test:real-html:electron
 
 ## 门禁失败的纠偏记录
 
-第一轮 `task:finish` 没有被用重复运行来洗绿。两个失败分别是 Candidate handoff 的呈现锚点断言和慢 Runtime 场景的旧元素选择断言；实际产品行为已经把结构操作输出选择交给新副本，正是本次目标所有权修复所要求的契约。测试随后改为等待并断言操作输出的 Stable ID（呈现锚点取新的已选元素，重复副本取最后一个输出节点），没有放宽源码、焦点、结构或连续性校验。新提交上两个失败用例单独 2/2 通过，完整 `task:finish` 以该新提交重新执行。
+第一轮 `task:finish` 没有被用重复运行来洗绿。两个失败分别是 Candidate handoff 的呈现锚点断言和慢 Runtime 场景的旧元素选择断言；实际产品行为已经把结构操作输出选择交给新副本，正是本次目标所有权修复所要求的契约。测试随后改为等待并断言操作输出的 Stable ID（呈现锚点取新的已选元素，重复副本取最后一个输出节点），没有放宽源码、焦点、结构或连续性校验。新提交上两个失败用例单独 2/2 通过，随后以该新提交重新执行完整 `task:finish`，最终 465 Node、66 Browser、83 Electron、15 AI 全部通过。
 
 ## 目标所有权回归覆盖
 
