@@ -508,7 +508,10 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
         "FROZEN_COPY_DISPLAY_MISSING");
       failUnless(await frozenFrameAccess(frame, target, calls).target(target.selectedId).count() === 1,
         "ORIGINAL_IDENTITY_CHANGED");
-      requireTextOperationLedger(rows, target.operations);
+      requireTextOperationLedger(
+        rows.filter((row) => row.operation === "copy" && row.targetId === target.selectedId),
+        target.operations,
+      );
       return {
         finalSha256: frozenDigest(currentBytes), finalSize: currentBytes.length, originalText,
         copyId: copyTarget.selectedId, restoredMarker: null, reopenCopyPresent: true,
