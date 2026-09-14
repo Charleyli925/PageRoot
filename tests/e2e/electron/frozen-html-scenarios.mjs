@@ -230,7 +230,7 @@ export async function ensureRendererBuilt({ run = runCommand } = {}) {
     env: process.env,
     timeoutMs: DEFAULT_RENDERER_BUILD_TIMEOUT_MS,
   });
-  if (result.spawnError || result.timedOut || result.exitCode !== 0) {
+  if (result.spawnError || result.timedOut || result.exitCode !== 0 || result.cleanup?.confirmed !== true) {
     throw Object.assign(new Error("The desktop renderer build failed before frozen execution."), {
       code: "FROZEN_ENTRY_RENDERER_BUILD_FAILED",
       details: result,
@@ -272,6 +272,15 @@ function scenarioChild(scenario) {
 
 function childEnvironment(scenario, { reportPath, reportDirectory, nestedPlan } = {}) {
   const env = { ...process.env, STEMMIO_FROZEN_SCENARIO_ID: scenario.id };
+  // Structural fallback is a frozen scenario fact. Never let a caller's
+  // process-wide switch leak into A/B; only C's reviewed rebuild contract may
+  // opt into the test-only path.
+  if (scenario.id === "C"
+    && ["candidate", "recovered"].includes(nestedPlan?.targets?.[0]?.projectionByOperation?.["move-copy"])) {
+    env.STEMMIO_DISABLE_STRUCTURAL_IN_PLACE = "1";
+  } else {
+    delete env.STEMMIO_DISABLE_STRUCTURAL_IN_PLACE;
+  }
   if (!env.STEMMIO_E2E_WINDOW_MODE && env.STEMMIO_E2E_FOREGROUND !== "1") {
     // Real-HTML local runs should be inspectable without activating Stemmio.
     env.STEMMIO_E2E_WINDOW_MODE = "visible-background";
@@ -426,7 +435,15 @@ export async function executePlan(plan, currentVersion, nestedPlans = [], {
         protocolError = reportError(error);
       }
     }
-    const cleanupUnconfirmed = child?.cleanup?.confirmed === false;
+    // A timeout may have left descendants alive even after the child reports
+    // itself closed. Never advance to another scenario without an explicit
+    // process-group cleanup confirmation for that path.
+    // Every spawned child owns an isolated process group. A missing cleanup
+    // receipt is unknown state, not a successful no-op: allowing the next
+    // scenario to start would invalidate the isolation guarantee. Spawn
+    // failures are the only path without a child process to clean up.
+    const cleanupRequired = Boolean(child) && !child.spawnError;
+    const cleanupUnconfirmed = cleanupRequired && child.cleanup?.confirmed !== true;
     let state = "FAIL";
     let reason = "CHILD_REPORT_PROTOCOL_FAILED";
     if (child?.spawnError) {
@@ -541,7 +558,8 @@ async function main(argv) {
     const result = await runCommand(process.execPath, [path.join(electronDirectory, "local-html-corpus.mjs")], {
       env: { ...process.env, STEMMIO_REAL_HTML_MODE: "capability-preflight-only" },
     });
-    return result.exitCode ?? 1;
+    return result.spawnError || result.timedOut || result.exitCode !== 0 || result.cleanup?.confirmed !== true
+      ? 1 : 0;
   }
 
   const currentVersion = workspaceSourceFingerprint(productRoot);

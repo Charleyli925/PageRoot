@@ -10,7 +10,8 @@ import { materializeSourceElementIdentity } from "../bridge/project-file-reposit
 import { FROZEN_SCENARIO_DEFINITIONS } from "./e2e/electron/real-html/frozen-entry-contract.mjs";
 import { workspaceSourceFingerprint } from "./e2e/electron/real-html/workspace-provenance.mjs";
 import { digestFrozenEntry } from "./e2e/electron/real-html/frozen-entry-contract.mjs";
-import { FROZEN_FORMAT_OPERATIONS, readFrozenSelection } from "./e2e/electron/real-html/frozen-selection.mjs";
+import { FROZEN_FORMAT_OPERATIONS, FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS,
+  FROZEN_STRUCTURE_PROBE_OPERATIONS, frozenDigest, readFrozenSelection } from "./e2e/electron/real-html/frozen-selection.mjs";
 import { executePlan, ensureRendererBuilt, runCommand } from "./e2e/electron/frozen-html-scenarios.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -97,18 +98,18 @@ function dispatcherFixture(version) {
     nestedPlans: [
       {
         scope: "core-text-format", operation: "native-text", initialRuntime: "static", reopen: true,
-        targets: [{ selectedId: "a-target", operations: ["activate", "input", "backspace", "save", "undo", "redo"], historyResume: "in-place" }],
+        targets: [{ selectedId: "a-target", selectedTag: "p", operations: ["activate", "input", "backspace", "save", "undo", "redo"], historyResume: "in-place" }],
       },
       {
         scope: "core-three-cycle", operation: "mixed", initialRuntime: "static", reopen: true, cycles: 3,
         targets: [
-          { selectedId: "b-text", operations: ["activate", "input", "backspace", "save", "undo", "redo"], historyResume: "in-place" },
-          { selectedId: "b-structure", operations: ["copy", "select-copy", "activate-copy", "input-copy", "save-copy"] },
+          { selectedId: "b-text", selectedTag: "p", operations: ["activate", "input", "backspace", "save", "undo", "redo"], historyResume: "in-place" },
+          { selectedId: "b-structure", selectedTag: "p", operations: ["copy", "select-copy", "activate-copy", "input-copy", "save-copy"] },
         ],
       },
       {
         scope: "core-structure-closed-loop", operation: "structure", initialRuntime: "runtime", reopen: true,
-        targets: [{ selectedId: "c-target", operations: ["copy", "move-copy", "input-restored", "save-restored"],
+        targets: [{ selectedId: "c-target", selectedTag: "p", expectedProjection: "candidate", operations: ["copy", "move-copy", "input-restored", "save-restored"],
           projectionByOperation: { "move-copy": "candidate" }, rebuildPath: "runtime-candidate" }],
       },
     ],
@@ -116,10 +117,34 @@ function dispatcherFixture(version) {
 }
 
 function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) {
-  const rows = (operations, targetId) => operations.map((operation) => ({
-    operation, targetId, state: "PASS", reason: "EXPECTED", durationMs: 1,
-  }));
+  const rows = (operations, targetId) => operations.map((operation) => {
+    let actual = { observed: true, targetId };
+    if (["input", "input-copy", "input-restored"].includes(operation)) {
+      actual = { id: targetId, focusedId: targetId, appended: `[[${operation}:OBSERVED]]` };
+    } else if (["backspace", "delete-forward"].includes(operation)) {
+      actual = { removed: "X" };
+    } else if (["save", "save-copy", "save-newline"].includes(operation)) {
+      actual = { sourceSha256: "a".repeat(64), sourceContains: operation, outsideUnchanged: true,
+        changedRanges: { start: 0, end: 1 } };
+    } else if (operation === "save-restored") {
+      actual = { restoredSha256: "a".repeat(64), persistedRevision: 1 };
+    }
+    return { operation, targetId, state: "PASS", reason: "EXPECTED", durationMs: 1, actual };
+  });
+  const copyIdFor = (index) => {
+    const digit = String.fromCharCode(98 + index);
+    return `sm1_${digit.repeat(12)}4${digit.repeat(3)}8${digit.repeat(15)}`;
+  };
+  const copyConditions = Object.fromEntries([
+    "originalUnique", "originalBytesMatch", "originalLeaf", "parentMatches", "siblingMatches", "offsetMatches",
+    "positiveInsertion", "prefixUnchanged", "suffixUnchanged", "oneLeafInserted", "freshId",
+    "idsUnique", "exactlyOneAdded", "copyAttributeShape", "equivalentBytes", "copyParentMatches",
+  ].map((key) => [key, true]));
   const lifecycle = { candidateRecords: [], lifecycleRecords: [], records: [] };
+  const runtimeConfig = {
+    windowMode: env.STEMMIO_E2E_WINDOW_MODE || "visible-background",
+    structuralInPlace: env.STEMMIO_FROZEN_SCENARIO_ID === "C" ? "disabled" : "enabled",
+  };
   const report = {
     schemaVersion: 1,
     kind: "stemmio-frozen-html-operation-result",
@@ -129,6 +154,7 @@ function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) 
     reportPath: env.STEMMIO_FROZEN_REPORT_PATH,
     reportDirectory: path.dirname(env.STEMMIO_FROZEN_REPORT_PATH),
     version,
+    runtimeConfig,
     state: "PASS",
     cleanup: "PASS",
     calls: [{ kind: "fixture" }],
@@ -143,18 +169,22 @@ function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) 
       state: "PASS", reason: "EXACT_REOPEN", durationMs: 1,
       source: { hashMatches: true, sizeMatches: true },
       display: { workingMatches: true, displayedMatches: true },
+      target: { id: nestedPlan.targets[0].selectedId, tag: nestedPlan.targets[0].selectedTag || "p" },
+      output: null,
+      runtimeConfig,
     },
   };
   if (env.STEMMIO_FROZEN_SCENARIO_ID === "A") {
     report.operation = {
       operation: "select", targetId: nestedPlan.targets[0].selectedId,
       state: incomplete ? "NOT_EXECUTED" : "PASS", reason: "EXPECTED", durationMs: 1,
+      actual: nestedPlan.targets[0].selectedId,
     };
     report.textOperations = rows(nestedPlan.targets[0].operations, nestedPlan.targets[0].selectedId);
     if (incomplete) report.textOperations = report.textOperations.slice(0, 1);
   }
   if (env.STEMMIO_FROZEN_SCENARIO_ID === "B") report.mixed = {
-    cycles: Array.from({ length: nestedPlan.cycles }, () => ({
+    cycles: Array.from({ length: nestedPlan.cycles }, (_, index) => ({
       cycle: undefined,
       control: ["select-text", "create-comment", "select-structure", "resume-text", "verify-cycle"].map((operation) => ({
         operation,
@@ -162,12 +192,15 @@ function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) 
         state: "PASS",
         reason: "EXPECTED",
         durationMs: 1,
+        actual: { observed: true, targetId: operation === "select-structure" ? nestedPlan.targets[1].selectedId : nestedPlan.targets[0].selectedId },
       })),
       text: rows(nestedPlan.targets[0].operations, nestedPlan.targets[0].selectedId),
-      structure: rows(nestedPlan.targets[1].operations, nestedPlan.targets[1].selectedId),
+      structure: rows(nestedPlan.targets[1].operations, nestedPlan.targets[1].selectedId).map((row, rowIndex) => (
+        rowIndex === 0 ? { ...row, actual: { source: { copyId: copyIdFor(index), conditions: copyConditions } } } : row
+      )),
       continuation: rows(["activate", "input", "backspace", "save", "undo", "redo"], nestedPlan.targets[0].selectedId),
     })),
-    copyIds: ["b-copy-1", "b-copy-2", "b-copy-3"],
+    copyIds: [copyIdFor(0), copyIdFor(1), copyIdFor(2)],
     checkpoint: rows(["reopen-cumulative", "delete-comment-1", "delete-comment-2", "delete-comment-3"], nestedPlan.targets[0].selectedId),
   };
   if (env.STEMMIO_FROZEN_SCENARIO_ID === "B") {
@@ -176,13 +209,16 @@ function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) 
       cycle: index + 1,
       structure: cycle.structure.map((row, rowIndex) => ({
         ...row,
-        targetId: rowIndex === 0 ? nestedPlan.targets[1].selectedId : report.mixed.copyIds[index],
+        targetId: rowIndex === 0 || row.operation.startsWith("probe-")
+          ? nestedPlan.targets[1].selectedId : report.mixed.copyIds[index],
       })),
     }));
   }
   if (env.STEMMIO_FROZEN_SCENARIO_ID === "C") {
-    report.structure = { copyId: "c-copy" };
-    report.operation = { operation: "select", targetId: "c-target", state: "PASS", reason: "EXPECTED", durationMs: 1 };
+    const copyId = copyIdFor(4);
+    report.structure = { copyId, reopenCopyPresent: true };
+    report.operation = { operation: "select", targetId: "c-target", state: "PASS", reason: "EXPECTED", durationMs: 1,
+      actual: "c-target" };
     const runtimeConditions = {
       knownExpectedPath: true, pathMatches: true, sourceMatches: true, documentKnown: true,
       generationKnown: true, documentMatches: true, generationMatches: true,
@@ -190,8 +226,11 @@ function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) 
       generationObserved: true, activeMatches: true, runtimeReady: true, noRejectedCandidate: true,
     };
     report.structureOperations = rows(nestedPlan.targets[0].operations, nestedPlan.targets[0].selectedId)
+    .map((row) => row.operation === "copy"
+      ? { ...row, actual: { source: { copyId, conditions: copyConditions } } }
+      : row)
     .map((row) => row.operation === "move-copy"
-      ? { ...row, targetId: "c-copy", actual: {
+      ? { ...row, targetId: copyId, actual: {
         planned: "candidate", outcome: "candidate", runtime: {
           path: "runtime-candidate", conditions: runtimeConditions,
           terminalConditions: { phaseSettled: true, runtimeReady: true },
@@ -199,19 +238,31 @@ function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) 
         },
       } }
       : row)
-      .map((row, rowIndex) => ({ ...row, targetId: rowIndex === 0 ? "c-target" : "c-copy" }));
+      .map((row, rowIndex) => ({ ...row, targetId: rowIndex === 0 ? "c-target" : copyId }));
+    report.structureOperations = report.structureOperations.map((row) => row.operation === "input-restored"
+      ? { ...row, actual: { id: copyId, appended: "[[C:RESTORED]]" } }
+      : row.operation === "save-restored"
+        ? { ...row, actual: { restoredSha256: "a".repeat(64), persistedRevision: 1 } }
+        : row);
     report.lifecycle = {
-      candidateRecords: [{ kind: "candidate-created", candidateId: "c-candidate" }],
+      candidateRecords: [{ kind: "candidate-created", candidateId: "c-candidate", generation: "2" }],
       lifecycleRecords: [
-        { kind: "rebuild-request" }, { kind: "candidate-terminal" }, { kind: "generation" },
-        { kind: "active-identity" }, { kind: "runtime-terminal" },
+        { kind: "rebuild-request", sourceRevision: "sha256:a" },
+        { kind: "candidate-terminal", candidateId: "c-candidate", terminal: "ready" },
+        { kind: "generation", beforeGeneration: "1", afterGeneration: "2", generation: "2", candidateId: "c-candidate" },
+        { kind: "active-identity", candidateId: "c-candidate", generation: "2", documentId: "doc-c" },
+        { kind: "runtime-terminal", candidateId: "c-candidate", generation: "2", phase: "settled", outcome: "ready", terminal: "ready" },
       ],
       records: [
-        { kind: "candidate-created", candidateId: "c-candidate" },
-        { kind: "rebuild-request" }, { kind: "candidate-terminal" }, { kind: "generation" },
-        { kind: "active-identity" }, { kind: "runtime-terminal" },
+        { kind: "candidate-created", candidateId: "c-candidate", generation: "2" },
+        { kind: "rebuild-request", sourceRevision: "sha256:a" },
+        { kind: "candidate-terminal", candidateId: "c-candidate", terminal: "ready" },
+        { kind: "generation", beforeGeneration: "1", afterGeneration: "2", generation: "2", candidateId: "c-candidate" },
+        { kind: "active-identity", candidateId: "c-candidate", generation: "2", documentId: "doc-c" },
+        { kind: "runtime-terminal", candidateId: "c-candidate", generation: "2", phase: "settled", outcome: "ready", terminal: "ready" },
       ],
     };
+    report.reopen.output = { id: copyId, present: true };
   }
   return report;
 }
@@ -224,7 +275,8 @@ test("valid dispatch records A→B→C child reports and evidence paths", async 
     run: async (_command, _args, { env }) => {
       await writeFile(env.STEMMIO_FROZEN_REPORT_PATH,
         JSON.stringify(passChildReport(env, version, nestedPlans[env.STEMMIO_FROZEN_SCENARIO_ID === "A" ? 0 : env.STEMMIO_FROZEN_SCENARIO_ID === "B" ? 1 : 2])));
-      return { exitCode: 0, signal: null, timedOut: false, spawnError: null };
+      return { exitCode: 0, signal: null, timedOut: false, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
     },
     print: false,
   });
@@ -245,7 +297,8 @@ test("B ledger rejects a missing cycle stage instead of counting cycle objects",
       const report = passChildReport(env, version, nestedPlans[index]);
       if (env.STEMMIO_FROZEN_SCENARIO_ID === "B") report.mixed.cycles[1].structure.pop();
       await writeFile(env.STEMMIO_FROZEN_REPORT_PATH, JSON.stringify(report));
-      return { exitCode: 0, timedOut: false, signal: null, spawnError: null };
+      return { exitCode: 0, timedOut: false, signal: null, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
     },
     print: false,
   });
@@ -272,7 +325,8 @@ test("C ledger rejects a rebuild report with the wrong path or lifecycle proof",
         move.actual.runtime.conditions.pathMatches = false;
       }
       await writeFile(env.STEMMIO_FROZEN_REPORT_PATH, JSON.stringify(report));
-      return { exitCode: 0, timedOut: false, signal: null, spawnError: null };
+      return { exitCode: 0, timedOut: false, signal: null, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
     },
     print: false,
   });
@@ -284,7 +338,140 @@ test("C ledger rejects a rebuild report with the wrong path or lifecycle proof",
     "FROZEN_ENTRY_CHILD_REBUILD_EVIDENCE_INVALID");
 });
 
-test("public opt-in entry smoke traverses the real A child and parent report protocol", {
+test("copy outputs, rebuild continuation and lifecycle records are independently reconciled", async () => {
+  const version = workspaceSourceFingerprint(root);
+  const { plan, nestedPlans } = dispatcherFixture(version);
+  const runFixture = async (mutate) => executePlan(plan, version, nestedPlans, {
+    build: async () => ({ exitCode: 0 }),
+    run: async (_command, _args, { env }) => {
+      const index = env.STEMMIO_FROZEN_SCENARIO_ID === "A" ? 0
+        : env.STEMMIO_FROZEN_SCENARIO_ID === "B" ? 1 : 2;
+      const report = passChildReport(env, version, nestedPlans[index]);
+      mutate(report, env.STEMMIO_FROZEN_SCENARIO_ID);
+      await writeFile(env.STEMMIO_FROZEN_REPORT_PATH, JSON.stringify(report));
+      return { exitCode: 0, timedOut: false, signal: null, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
+    },
+    print: false,
+  });
+
+  const wrongOutput = await runFixture((report, id) => {
+    if (id !== "B") return;
+    const forgedId = "sm1_eeeeeeeeeeee4eee8eeeeeeeeeeeeeee";
+    report.mixed.copyIds[0] = forgedId;
+  });
+  assert.equal(wrongOutput.report.ledger[1].state, "FAIL");
+  assert.equal(wrongOutput.report.scenarioReports[1].firstFailure?.code,
+    "FROZEN_ENTRY_CHILD_OUTPUT_BINDING_MISMATCH");
+
+  const wrongContinuation = await runFixture((report, id) => {
+    if (id !== "C") return;
+    const input = report.structureOperations.find((row) => row.operation === "input-restored");
+    input.actual.id = "c-target";
+  });
+  assert.equal(wrongContinuation.report.ledger[2].state, "FAIL");
+  assert.equal(wrongContinuation.report.scenarioReports[2].firstFailure?.code,
+    "FROZEN_ENTRY_CHILD_REBUILD_CONTINUATION_INVALID");
+
+  const truncatedLifecycle = await runFixture((report, id) => {
+    if (id !== "C") return;
+    report.lifecycle.records.pop();
+  });
+  assert.equal(truncatedLifecycle.report.ledger[2].state, "FAIL");
+  assert.equal(truncatedLifecycle.report.scenarioReports[2].firstFailure?.code,
+    "FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_INVALID");
+});
+
+function publicStableId(letter) {
+  return `sm1_${letter.repeat(12)}4${letter.repeat(3)}8${letter.repeat(15)}`;
+}
+
+async function createPublicScenarioFixture(directory, { fileId, scope, operation, version }) {
+  const ids = {
+    text: publicStableId("a"),
+    structure: publicStableId("b"),
+    sourceParent: publicStableId("c"),
+    destinationParent: publicStableId("d"),
+  };
+  const runtimeScript = operation === "structure"
+    ? "<script>document.body.dataset.publicRuntime = 'ready';</script>" : "";
+  const template = `<!doctype html><html><head><meta charset="utf-8"><title>Public ${fileId}</title></head><body><div data-stemmio-id="${ids.sourceParent}"><p data-stemmio-id="${ids.text}">Public text target</p><p data-stemmio-id="${ids.structure}">Public structure target</p></div><div data-stemmio-id="${ids.destinationParent}"></div>${runtimeScript}</body></html>`;
+  const materialized = materializeSourceElementIdentity(template);
+  const html = Buffer.from(materialized.html, "utf8");
+  const originalPath = path.join(directory, `${fileId}-original.html`);
+  const seedPath = path.join(directory, `${fileId}-seed.html`);
+  await Promise.all([writeFile(originalPath, html), writeFile(seedPath, html)]);
+  const identity = { path: seedPath, sha256: createHash("sha256").update(html).digest("hex"), size: html.length };
+  const byId = new Map(materialized.identity.elements.map((element) => [element.stemmioId, element]));
+  const textElement = byId.get(ids.text);
+  const structureElement = byId.get(ids.structure);
+  const sourceParent = byId.get(ids.sourceParent);
+  const destinationParent = byId.get(ids.destinationParent);
+  const byteOffset = element => Buffer.byteLength(materialized.html.slice(0, element.contentEndOffset));
+  const rawElement = element => Buffer.from(materialized.html.slice(element.startOffset, element.sourceEndOffset), "utf8");
+  const structureBinding = {
+    kind: "inserted-leaf-at-frozen-source-offset",
+    parentId: ids.sourceParent,
+    beforeSiblingId: null,
+    byteOffset: byteOffset(sourceParent),
+    originalElementSha256: frozenDigest(rawElement(structureElement)),
+  };
+  const textBinding = {
+    kind: "inserted-leaf-at-frozen-source-offset",
+    parentId: ids.destinationParent,
+    beforeSiblingId: null,
+    byteOffset: byteOffset(destinationParent),
+    originalElementSha256: frozenDigest(rawElement(textElement)),
+  };
+  const textTarget = {
+    clickId: ids.text, selectedId: ids.text, clickTag: "p", selectedTag: "p", mapping: "self",
+    expectedCapability: "AVAILABLE", contractReason: "UNIQUE_REACHABLE_AUTHORED_TARGET", sourceProof: "REVIEWED_EXACT_SEED",
+    tabId: null, scrollContainer: "document", textCapability: {
+      expected: "AVAILABLE", basis: "SOURCE_EDITABLE_ISLAND", clickPoint: "first-direct-text-character",
+    }, operations: [...FROZEN_FORMAT_OPERATIONS], textNodePath: [0], initialBold: false,
+    historyAdoption: "editable-island-in-place", historyResume: "in-place", historyBasis: "REVIEWED_CANONICAL_ISLAND",
+    formatCapability: { scope: "text-range", expected: "AVAILABLE", basis: "SOURCE_SAFE_TEXT_RANGE_WRAPPER" },
+    copyBinding: textBinding,
+  };
+  const structureTarget = {
+    clickId: ids.structure, selectedId: ids.structure, clickTag: "p", selectedTag: "p", mapping: "self",
+    expectedCapability: "AVAILABLE", contractReason: "UNIQUE_REACHABLE_AUTHORED_TARGET", sourceProof: "REVIEWED_EXACT_SEED",
+    tabId: null, scrollContainer: "document", copyCapability: {
+      expected: "AVAILABLE", basis: "REVIEWED_SOURCE_EQUIVALENT_LEAF", reason: "available",
+    }, textCapability: { expected: "AVAILABLE", basis: "SOURCE_EDITABLE_ISLAND_PLAIN_LEAF" },
+    copyBinding: structureBinding, rebuildPath: "static-rebuild", continuationProbe: "session-ended-no-refocus",
+    operations: [...FROZEN_STRUCTURE_PROBE_OPERATIONS],
+  };
+  let nested;
+  if (scope === "core-three-cycle") {
+    nested = {
+      schemaVersion: 1, scope, reviewStatus: "FROZEN", reviewedBy: "root", fileId, initialRuntime: "static",
+      operation, original: { ...identity, path: originalPath }, seed: identity, workspaceSourceSha256: version.workspaceSourceSha256,
+      reopen: true, cycles: 3, textScope: "core-text-format", sourceEvolution: "verified-text-region",
+      commentBasis: "EXACT_AUTHORED_SOURCE_ANCHOR", structurePrefixSha256: frozenDigest(html.subarray(0, structureBinding.byteOffset)),
+      targets: [textTarget, structureTarget],
+    };
+  } else {
+    nested = {
+      schemaVersion: 1, scope, reviewStatus: "FROZEN", reviewedBy: "root", fileId, initialRuntime: "runtime",
+      operation, original: { ...identity, path: originalPath }, seed: identity, workspaceSourceSha256: version.workspaceSourceSha256,
+      reopen: true,
+      targets: [{ ...structureTarget, continuationProbe: undefined,
+        rebuildPath: "runtime-candidate",
+        operations: [...FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS], expectedProjection: "candidate",
+        projectionByOperation: { copy: "candidate", "move-copy": "candidate" }, destinationParentId: ids.destinationParent,
+        initialBold: false, formatCapability: {
+          expected: "AVAILABLE", scope: "element", basis: "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER",
+        } }],
+    };
+  }
+  const bytes = Buffer.from(JSON.stringify(nested));
+  const manifestPath = path.join(directory, `${fileId}.json`);
+  await writeFile(manifestPath, bytes);
+  return { manifestPath, manifestSha256: digestFrozenEntry(bytes), bytes, nested: readFrozenSelection(bytes, digestFrozenEntry(bytes)) };
+}
+
+test("public opt-in entry smoke traverses real A/B/C children and parent report protocol", {
   skip: process.env.STEMMIO_RUN_PUBLIC_FROZEN_ENTRY !== "1",
 }, async () => {
   const version = workspaceSourceFingerprint(root);
@@ -349,25 +536,26 @@ test("public opt-in entry smoke traverses the real A child and parent report pro
   const nestedBytes = Buffer.from(JSON.stringify(nested));
   await writeFile(nestedPath, nestedBytes);
   const nestedDigest = digestFrozenEntry(nestedBytes);
+  const bFixture = await createPublicScenarioFixture(directory, {
+    fileId: "H97", scope: "core-three-cycle", operation: "mixed", version,
+  });
+  const cFixture = await createPublicScenarioFixture(directory, {
+    fileId: "H98", scope: "core-structure-closed-loop", operation: "structure", version,
+  });
   const fixture = dispatcherFixture(version);
   const plan = {
     ...fixture.plan,
-    scenarios: fixture.plan.scenarios.map((scenario, index) => index === 0
-      ? { ...scenario, scope: "core-text-format", manifestPath: nestedPath, manifestSha256: nestedDigest }
-      : scenario),
+    scenarios: fixture.plan.scenarios.map((scenario, index) => [
+      { ...scenario, scope: "core-text-format", manifestPath: nestedPath, manifestSha256: nestedDigest },
+      { ...scenario, scope: "core-three-cycle", manifestPath: bFixture.manifestPath, manifestSha256: bFixture.manifestSha256 },
+      { ...scenario, scope: "core-structure-closed-loop", manifestPath: cFixture.manifestPath, manifestSha256: cFixture.manifestSha256 },
+    ][index]),
   };
-  const nestedPlans = [readFrozenSelection(nestedBytes, nestedDigest), ...fixture.nestedPlans.slice(1)];
+  const nestedPlans = [readFrozenSelection(nestedBytes, nestedDigest), bFixture.nested, cFixture.nested];
   const result = await executePlan(plan, version, nestedPlans, {
     build: () => ensureRendererBuilt(),
     run: async (command, args, options) => {
-      if (options.env.STEMMIO_FROZEN_SCENARIO_ID === "A") return runCommand(command, args, options);
-      await writeFile(options.env.STEMMIO_FROZEN_REPORT_PATH, JSON.stringify(passChildReport(
-        options.env,
-        version,
-        nestedPlans[options.env.STEMMIO_FROZEN_SCENARIO_ID === "B" ? 1 : 2],
-      )));
-      return { exitCode: 0, signal: null, timedOut: false, spawnError: null,
-        cleanup: { attempted: false, confirmed: true, signal: null } };
+      return runCommand(command, args, options);
     },
     scenarioTimeoutMs: 180_000,
     print: false,
@@ -377,6 +565,8 @@ test("public opt-in entry smoke traverses the real A child and parent report pro
     ["A", "PASS"], ["B", "PASS"], ["C", "PASS"],
   ]);
   assert.equal(result.report.scenarioReports[0].evidence.operationCount, FROZEN_FORMAT_OPERATIONS.length + 1);
+  assert.equal(result.report.scenarioReports[1].evidence.operationCount > 0, true);
+  assert.equal(result.report.scenarioReports[2].evidence.operationCount > 0, true);
   assert.equal(result.report.scenarioReports[0].process.cleanup.confirmed, true);
   assert.ok(result.report.scenarioReports[0].process.stdoutPath.endsWith("/A/child.stdout.log"));
 });
@@ -389,19 +579,22 @@ test("a failed or timed-out B retains first failure and does not prevent C", asy
       build: async () => ({ exitCode: 0 }),
       run: async (_command, _args, { env }) => {
         if (env.STEMMIO_FROZEN_SCENARIO_ID === "B" && mode === "timeout") {
-          return { exitCode: null, signal: "SIGTERM", timedOut: true, spawnError: null };
+          return { exitCode: null, signal: "SIGTERM", timedOut: true, spawnError: null,
+            cleanup: { attempted: true, confirmed: true, signal: "SIGKILL" } };
         }
         if (env.STEMMIO_FROZEN_SCENARIO_ID === "B") {
           await writeFile(env.STEMMIO_FROZEN_REPORT_PATH, JSON.stringify({
             ...passChildReport(env, version, nestedPlans[1]), state: "FAIL",
             firstFailure: { code: "FIXTURE_FIRST_FAILURE", step: "input" }, cleanup: "PASS",
           }));
-          return { exitCode: 1, signal: null, timedOut: false, spawnError: null };
+          return { exitCode: 1, signal: null, timedOut: false, spawnError: null,
+            cleanup: { attempted: false, confirmed: true, signal: null } };
         }
         await writeFile(env.STEMMIO_FROZEN_REPORT_PATH, JSON.stringify(passChildReport(
           env, version, nestedPlans[env.STEMMIO_FROZEN_SCENARIO_ID === "A" ? 0 : 2],
         )));
-        return { exitCode: 0, signal: null, timedOut: false, spawnError: null };
+        return { exitCode: 0, signal: null, timedOut: false, spawnError: null,
+          cleanup: { attempted: false, confirmed: true, signal: null } };
       },
       print: false,
     });
@@ -446,12 +639,14 @@ test("zero exit with a missing or incomplete report cannot become PASS", async (
   const result = await executePlan(plan, version, nestedPlans, {
     build: async () => ({ exitCode: 0 }),
     run: async (_command, _args, { env }) => {
-      if (env.STEMMIO_FROZEN_SCENARIO_ID === "B") return { exitCode: 0, timedOut: false, signal: null, spawnError: null };
+      if (env.STEMMIO_FROZEN_SCENARIO_ID === "B") return { exitCode: 0, timedOut: false, signal: null, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
       await writeFile(env.STEMMIO_FROZEN_REPORT_PATH, JSON.stringify(passChildReport(
         env, version, nestedPlans[env.STEMMIO_FROZEN_SCENARIO_ID === "A" ? 0 : 2],
         { incomplete: env.STEMMIO_FROZEN_SCENARIO_ID === "A" },
       )));
-      return { exitCode: 0, timedOut: false, signal: null, spawnError: null };
+      return { exitCode: 0, timedOut: false, signal: null, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
     },
     print: false,
   });
@@ -476,7 +671,8 @@ test("a child report from another invocation cannot be associated with the curre
         report.reportDirectory = "/tmp";
       }
       await writeFile(env.STEMMIO_FROZEN_REPORT_PATH, JSON.stringify(report));
-      return { exitCode: 0, timedOut: false, signal: null, spawnError: null };
+      return { exitCode: 0, timedOut: false, signal: null, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
     },
     print: false,
   });
@@ -512,7 +708,8 @@ test("direct node invocation uses the npm executable when npm_execpath is absent
   try {
     await ensureRendererBuilt({ run: async (command, args) => {
       invocation = { command, args };
-      return { exitCode: 0, timedOut: false, spawnError: null };
+      return { exitCode: 0, timedOut: false, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
     } });
   } finally {
     if (previous === undefined) delete process.env.npm_execpath;
@@ -529,7 +726,8 @@ test("direct node invocation uses npm_execpath when npm launched the entry", asy
   try {
     await ensureRendererBuilt({ run: async (command, args) => {
       invocation = { command, args };
-      return { exitCode: 0, timedOut: false, spawnError: null };
+      return { exitCode: 0, timedOut: false, spawnError: null,
+        cleanup: { attempted: false, confirmed: true, signal: null } };
     } });
   } finally {
     if (previous === undefined) delete process.env.npm_execpath;
@@ -537,6 +735,13 @@ test("direct node invocation uses npm_execpath when npm launched the entry", asy
   }
   assert.equal(invocation.command, process.execPath);
   assert.deepEqual(invocation.args, ["/tmp/fake-npm-cli.js", "run", "desktop:renderer"]);
+});
+
+test("renderer build requires an explicit cleanup receipt", async () => {
+  await assert.rejects(() => ensureRendererBuilt({ run: async () => ({
+    exitCode: 0, timedOut: false, spawnError: null,
+    cleanup: { attempted: true, confirmed: false, signal: "SIGKILL" },
+  }) }), { code: "FROZEN_ENTRY_RENDERER_BUILD_FAILED" });
 });
 
 test("bounded child execution terminates a hung process without waiting indefinitely", async () => {
