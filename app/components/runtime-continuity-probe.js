@@ -197,6 +197,7 @@ export function summarizeRuntimeContinuity(trace) {
     framePrepared: 0,
     frameCleared: 0,
     framePromoted: 0,
+    structuralProjection: 0,
   };
   for (const event of trace?.events || []) {
     if (event.name === "frameCreated") counts.frameCreated += 1;
@@ -205,6 +206,7 @@ export function summarizeRuntimeContinuity(trace) {
     if (event.name === "framePrepared") counts.framePrepared += 1;
     if (event.name === "frameCleared") counts.frameCleared += 1;
     if (event.name === "framePromoted") counts.framePromoted += 1;
+    if (event.name === "structuralProjection") counts.structuralProjection += 1;
   }
   const samples = Array.isArray(trace?.samples) ? trace.samples : [];
   if (samples.length < 2) {

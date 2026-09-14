@@ -14,10 +14,12 @@ receipt records its `sessionIncarnation` plus monotonic `sequence`, its
 
 `DocumentWorkflow` and project/workspace workflows are receipt producers;
 `HtmlCanvasEditor` is only a receipt consumer. Local-edit and history receipts
-may update the mounted frame in place. Authority receipts always advance the
+may update the mounted frame in place, including proven structural projections
+under ADR 0074. Authority receipts always advance the
 Canvas generation and reload the physical frame, even when the source bytes are
 equal. No consumer may infer ownership from HTML equality or a membership list
-of previously emitted HTML strings.
+of previously emitted HTML strings. An authority replacement must not be
+disguised as a `local-edit` receipt to avoid a rebuild.
 
 Canvas verification returns only an immutable observation containing the
 receipt, rendered HTML, rendered Hash and physical frame generation.

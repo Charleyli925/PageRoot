@@ -715,7 +715,11 @@ generation, the private source-object authority set is established exactly once
 before author Script activation and is then sealed. A registered object may be
 revoked when its live identity fails, but author code can never add another
 trusted object after activation; generated, copied and forged nodes remain
-display/comment-only. Exact parser-time execution order is not an Edit Runtime
+display/comment-only. PageRoot may grant this generation's authority only to
+the exact nodes it created from one accepted semantic source transaction,
+through the existing parent-owned Runtime source-element owner, after proving
+the current receipt, frame, identities and local structure. Whole-document
+re-registration is forbidden. See ADR 0074. Exact parser-time execution order is not an Edit Runtime
 contract: PageRoot may finish source parsing and authority registration before
 activating parser-blocking, `async`, `defer` or module scripts. Reproducing every
 edge timing must not reintroduce Runtime snapshots, freeze, per-node provenance
@@ -1219,7 +1223,12 @@ A Renderer-applied history result may advance the mounted editable-island
 projection without replacing its iframe only after exact old/new target
 resolution through the recorded TargetRef transition, byte-equal source
 prefix/suffix outside the island and a complete next-`SourceIndex` DOM mapping
-all succeed. This is a projection optimization, not another history application
+all succeed. Proven structural history (insert, duplicate, delete and supported
+move) may likewise keep the current iframe when ADR 0074's projection plan
+re-proves the current receipt, frame, identities and local structure, then
+grants only editor-created or history-restored nodes from that transaction,
+using the pre-connect node ticket rather than a live-tree scan.
+This is a projection optimization, not another history application
 path: the session applies exact source patches locally and persists the complete
 result through normal autosave. Failure at any proof point retires the frame and
 loads the canonical source through the normal verified fallback.

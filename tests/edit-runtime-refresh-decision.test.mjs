@@ -35,6 +35,19 @@ test("Runtime structure and program changes prepare a candidate now", () => {
   }).action, "candidate-now");
   assert.deepEqual(decideEditRuntimeRefresh({
     hasRuntime: true,
+    mutationKind: "structure",
+    structuralProjection: { kind: "in-place", reason: "verified-delete" },
+  }), {
+    action: "in-place",
+    reason: "runtime-verified-delete",
+    synchronizeCurrentFrame: true,
+  });
+  assert.equal(decideEditRuntimeRefresh({
+    mutationKind: "structure",
+    structuralProjection: { kind: "candidate", reason: "insert-host-unsupported" },
+  }).synchronizeCurrentFrame, false);
+  assert.deepEqual(decideEditRuntimeRefresh({
+    hasRuntime: true,
     mutationKind: "style",
     programIdentityChanged: true,
   }), {

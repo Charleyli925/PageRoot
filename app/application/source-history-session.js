@@ -370,6 +370,10 @@ export class SourceHistorySession {
         toTarget: structuredClone(undo ? entry.beforeTarget : entry.afterTarget),
       },
       ...(afterSelection ? { selection: structuredClone(afterSelection) } : {}),
+      ...(identityDelta ? { identityDelta: structuredClone(identityDelta) } : {}),
+      ...(entry.semanticOperation
+        ? { semanticOperation: structuredClone(entry.semanticOperation) }
+        : {}),
     };
   }
 

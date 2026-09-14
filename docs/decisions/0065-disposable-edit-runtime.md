@@ -75,6 +75,13 @@ source or be reconciled node by node.
   starts. A registered object may lose authority when it disconnects or its
   identity no longer validates, but no generated, copied or forged object may
   gain authority later; such objects remain display/comment-only.
+- PageRoot itself may grant this generation's edit authority to the exact
+  nodes it created from one accepted semantic source transaction. The grant
+  uses the existing parent-owned `RuntimeSourceElements` owner and requires
+  the current receipt, frame, kernel or history identities, exact Node
+  objects and local structure. It is not a reopened initialization registry
+  and not a whole-document re-scan. Author-created same-ID objects, stale
+  frames, old Documents and duplicate grants fail closed. See ADR 0074.
 - PageRoot directly edits only nodes still proven to be authored source
   elements. A runtime-generated node is display-only: it may be commented on
   through its nearest source host but cannot be text-edited, styled, reordered,
@@ -86,9 +93,11 @@ source or be reconciled node by node.
   the command boundary repeats the same proof so alternate callers cannot
   bypass it. Ordinary text copy and complete-HTML save/export are unaffected.
 - Every accepted semantic source change still produces complete next HTML.
-  Structural and other non-native changes rebuild the disposable iframe and
-  rerun the author program. Successful direct text, common-style and same-parent
-  reorder changes update the proved current DOM projection and end there;
+  Structural operations carry a verified local projection plan when they can
+  keep the current iframe; missing proof still rebuilds the disposable iframe
+  and reruns the author program. Successful direct text, common-style,
+  same-parent reorder and proven structural projections update the proved
+  current DOM projection and end there;
   finishing the edit, changing selection, waiting or saving does not create a
   deferred author program rerun. Local projection failure, stale source identity
   and explicit recovery remain rebuild boundaries. A necessary pending recovery advances to
@@ -142,11 +151,11 @@ saved fact.**
   performance target. Cancelled, terminated, superseded and lease-expired
   results remain permanently ineligible.
 - The implementation preserves the current page whenever it can still prove a
-  local source-backed update. A structure change or a change whose result
-  requires author Script may rebuild the disposable iframe, but rebuilds are
-  reserved for those explicit boundaries and for failed/stale local projection,
-  rather than being a default follow-up to an already successful text/style
-  edit.
+  local source-backed update. A structure change without a verified projection
+  plan, or a change whose result requires author Script, may rebuild the
+  disposable iframe, but rebuilds are reserved for those explicit boundaries
+  and for failed/stale local projection, rather than being a default follow-up
+  to an already successful text/style or proven structural edit.
 - A necessary rebuild should restore the shared scroll position, any exposed
   zoom context, and the selection resolved by stable element ID when those
   facts still have a valid target. Restoration is best-effort presentation;
@@ -235,8 +244,11 @@ runtime-only state after reopen.
 - Repeated preparations beyond the replay-window size remain available without
   restarting PageRoot, while current/recent request identities still reject replay.
 - `location.assign()` and `location.replace()` cannot navigate the Edit frame.
-- A semantic structure edit rebuilds the iframe, reruns the program and saves
-  only the complete semantic HTML result.
+- A semantic structure edit that cannot prove a local projection rebuilds the
+  iframe, reruns the program and saves only the complete semantic HTML result.
+  A proven ordinary-source insert, duplicate, delete or supported move keeps
+  the current Document identity, grants only editor-created nodes from that
+  transaction, and still saves complete HTML.
 - Continuous direct text input and common formatting stay in the same document
   through edit completion, target changes, waiting and ordinary save; author
   Script is not rerun for those successful local projections. The completed

@@ -18,7 +18,7 @@ export type StructureDestination = {
   beforeElementId?: string | null;
 };
 
-function sourceSelectionForElementId(
+export function sourceSelectionForElementId(
   sourceIndex: SourceIndexValue,
   elementId: string,
   original?: HtmlCanvasSelection | null,

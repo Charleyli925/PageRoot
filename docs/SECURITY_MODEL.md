@@ -125,7 +125,15 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   A fixed bootstrap privately proves the complete source-node set after parsing
   and before author code runs. An authored head script therefore
   cannot register a generated object against a future parser-node identity;
-  copied public markers remain non-authoritative. The bootstrap does not
+  copied public markers remain non-authoritative. After an accepted semantic
+  structure transaction, PageRoot itself may grant this generation's edit
+  authority only to the exact editor-created or history-restored nodes from
+  that transaction, through the parent-owned `RuntimeSourceElements` owner
+  (ADR 0074). The grant is not a page-wide re-registry. Only the exact nodes
+  sealed before they connect may be granted; a later live-tree scan cannot
+  nominate author replacements that happen to carry legal IDs. Forged IDs, stale
+  frames, old Documents, disconnected nodes, duplicate grants and
+  author-created same-ID objects fail closed. The bootstrap does not
   freeze author activity or audit Runtime DOM. Its one-shot private capability
   also reports author activation outcome only after validating source window,
   session, execution and frame token. Script resource/bootstrap failures reject

@@ -182,6 +182,8 @@
         "^app/lib/source-(?:patch-engine|index|text-map)",
         "^app/lib/edit-pipeline-counters",
         "^app/components/html-canvas-structure-commands",
+        "^app/components/html-canvas-structural-projection",
+        "^app/components/html-canvas-source-authority",
         "^schemas/semantic-operation",
         "^tests/semantic-operation-kernel",
         "^tests/source-structure-edit",
@@ -204,10 +206,15 @@
         "app/lib/source-patch-engine.js",
         "app/lib/source-index.js",
         "app/components/html-canvas-structure-commands.ts",
+        "app/components/html-canvas-structural-projection.js",
+        "app/components/html-canvas-source-authority.js",
         "app/components/html-canvas-source-commands.js"
       ],
       "focusedTests": [
         "tests/html-canvas-source-commands.test.mjs",
+        "tests/html-canvas-structural-projection.test.mjs",
+        "tests/structural-projection-baseline.test.mjs",
+        "tests/runtime-source-element-grant.test.mjs",
         "tests/semantic-operation-kernel.test.mjs",
         "tests/source-structure-edit.test.mjs",
         "tests/source-patch-engine.test.mjs",
@@ -220,8 +227,10 @@
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
         "docs/ARCHITECTURE_CONTRACT.md",
+        "docs/SECURITY_MODEL.md",
         "docs/decisions/0062-semantic-source-operation-kernel.md",
-        "docs/decisions/0064-stable-id-source-structure-editing.md"
+        "docs/decisions/0064-stable-id-source-structure-editing.md",
+        "docs/decisions/0074-proven-in-place-structural-editing.md"
       ],
       "requiredDocSections": [
         {
@@ -281,6 +290,7 @@
         "^app/application/edit-author-runtime-session",
         "^app/components/desktop-edit-runtime-api",
         "^app/components/edit-runtime-refresh-decision",
+        "^app/components/html-canvas-structural-projection",
         "^desktop/edit-runtime-",
         "^tests/edit-runtime-",
         "^tests/edit-author-runtime-session",
@@ -301,6 +311,8 @@
         "app/application/edit-author-runtime-session.js",
         "app/components/desktop-edit-runtime-api.ts",
         "app/components/edit-runtime-refresh-decision.js",
+        "app/components/html-canvas-structural-projection.js",
+        "app/components/html-canvas-source-authority.js",
         "desktop/edit-runtime-protocol.mjs",
         "desktop/edit-runtime-bootstrap.mjs",
         "desktop/edit-runtime-preparation-fence.mjs",
@@ -313,11 +325,16 @@
         "tests/edit-runtime-bootstrap.test.mjs",
         "tests/edit-runtime-preparation-fence.test.mjs",
         "tests/edit-author-runtime-session.test.mjs",
-        "tests/edit-runtime-refresh-decision.test.mjs"
+        "tests/edit-runtime-refresh-decision.test.mjs",
+        "tests/html-canvas-structural-projection.test.mjs",
+        "tests/structural-projection-baseline.test.mjs",
+        "tests/runtime-source-element-grant.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
+        "docs/SECURITY_MODEL.md",
         "docs/decisions/0065-disposable-edit-runtime.md",
+        "docs/decisions/0074-proven-in-place-structural-editing.md",
         "docs/INTERACTION_FLOW.md"
       ],
       "requiredDocSections": [

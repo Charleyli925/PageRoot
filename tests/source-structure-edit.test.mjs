@@ -107,11 +107,29 @@ test("insert, delete and cross-parent move keep source identity authoritative", 
   assert.equal(target.pagerootId, ids.second);
 });
 
+test("cross-parent move refuses a cycle into the moving element's descendants", () => {
+  const baseline = createSemanticDocumentState(html);
+  assert.throws(() => applySemanticOperation(
+    baseline,
+    createMoveElementOperation(html, {
+      baseRevision: 0,
+      operationId: "op_move_cycle",
+      elementId: ids.left,
+      parentElementId: ids.first,
+    }),
+  ), (error) => error.code === "SEMANTIC_MOVE_CYCLE");
+});
+
 test("structure operation builders reject root deletion and invalid insertion ownership", () => {
   assert.throws(() => createDeleteElementOperation(html, {
     baseRevision: 0,
     elementId: ids.body,
   }), /cannot be deleted/u);
+  assert.throws(() => createMoveElementOperation(html, {
+    baseRevision: 0,
+    elementId: ids.body,
+    parentElementId: ids.left,
+  }), /cannot be moved/u);
   assert.throws(() => createInsertElementOperation(html, {
     baseRevision: 0,
     parentElementId: ids.left,

@@ -89,6 +89,8 @@ export class SourceHistorySession {
       toTarget: SourceHistoryEntry["afterTarget"];
     };
     selection?: SourceHistoryEntry["beforeSelection"];
+    identityDelta?: SourceHistoryEntry["identityDelta"];
+    semanticOperation?: SourceHistoryEntry["semanticOperation"];
   } | null;
   readonly pendingOperations: SourceHistoryEntry[];
   readonly snapshot: OpenDocumentMemoryHistory | null;

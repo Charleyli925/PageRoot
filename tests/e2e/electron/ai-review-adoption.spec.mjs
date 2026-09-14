@@ -857,7 +857,37 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(beforeReviewFrame.getByRole("textbox", { name: "审阅同步输入" }))
       .toHaveValue("反向动作同步");
     await launched.page.getByRole("button", { name: "同步滚动" }).click();
-    await afterReviewFrame.locator("[data-pageroot-review-region-bar]").first().click();
+    // Hosted Electron can publish the two region-bar lists on different turns;
+    // select a correlation pair so both panes have a paintable mask target.
+    const pairedReviewRegion = async () => {
+      const sideFrames = [
+        [beforeReviewFrame, "before"],
+        [afterReviewFrame, "after"],
+      ];
+      const [beforeRegions, afterRegions] = await Promise.all(
+        sideFrames.map(([frame, side]) => frame.locator(
+          "[data-pageroot-review-region-bar]",
+        ).evaluateAll((bars, side) => bars.map((bar) => ({
+          group: bar.getAttribute("data-pageroot-review-focus-group") || "",
+          region: (bar.getAttribute("data-pageroot-review-focus-region") || "")
+            .replace(`region-${side}-`, ""),
+        })), side)),
+      );
+      return afterRegions.find((after) => beforeRegions.some((before) => (
+        before.group === after.group && before.region === after.region
+      ))) || null;
+    };
+    await expect.poll(pairedReviewRegion, { timeout: 30_000 }).toBeTruthy();
+    const selectedReviewRegion = await pairedReviewRegion();
+    expect(selectedReviewRegion).toBeTruthy();
+    await afterReviewFrame.locator("[data-pageroot-review-region-bar]").evaluateAll(
+      (bars, target) => bars.find((bar) => (
+        bar.getAttribute("data-pageroot-review-focus-group") === target.group
+        && (bar.getAttribute("data-pageroot-review-focus-region") || "")
+          .replace("region-after-", "") === target.region
+      ))?.click(),
+      selectedReviewRegion,
+    );
     await assertReviewFocusPaint(beforeReviewFrame, afterReviewFrame);
     await expect.poll(() => afterReviewFrame.locator(
       "[data-pageroot-review-mask-hole]",

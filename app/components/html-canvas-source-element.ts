@@ -1,15 +1,21 @@
-import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
 import type { SourceElementValue, SourceIndexValue } from "./html-canvas-internal-types";
+import {
+  SOURCE_ELEMENT_ATTRIBUTE,
+  sourceElementId,
+} from "./html-canvas-source-authority.js";
 
-export const SOURCE_ELEMENT_ATTRIBUTE = PAGEROOT_ELEMENT_ID_ATTRIBUTE;
-
-export function escapedPagerootElementId(elementId: string): string {
-  return elementId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-export function sourceElementSelector(elementId: string): string {
-  return `[${SOURCE_ELEMENT_ATTRIBUTE}="${escapedPagerootElementId(elementId)}"]`;
-}
+export {
+  SOURCE_ELEMENT_ATTRIBUTE,
+  escapedPagerootElementId,
+  sourceElementSelector,
+  sourceElementId,
+  uniqueSourceElement,
+  createBoundSourceElementProof,
+  sealEditorCreatedSourceElements,
+  grantEditorCreatedSourceElements,
+  revokeRemovedSourceElements,
+} from "./html-canvas-source-authority.js";
+export type { RuntimeSourceAuthority } from "./html-canvas-source-authority.js";
 
 export function closestSourceElement(
   node: EventTarget | Node | null,
@@ -24,11 +30,6 @@ export function closestSourceElement(
   return element?.closest<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`) ?? null;
 }
 
-export function sourceElementId(element: Element | null): string | null {
-  const value = element?.getAttribute(SOURCE_ELEMENT_ATTRIBUTE) ?? "";
-  return value || null;
-}
-
 export function sourceElementFromDom(
   element: Element | null,
   sourceIndex: SourceIndexValue | null | undefined,
@@ -37,16 +38,6 @@ export function sourceElementFromDom(
   if (!elementId || !sourceIndex) return null;
   const sourceElement = sourceIndex.byPagerootId.get(elementId);
   return sourceElement?.type === "element" ? sourceElement : null;
-}
-
-export function uniqueSourceElement(
-  documentNode: Document,
-  elementId: string,
-): HTMLElement | null {
-  const matches = documentNode.querySelectorAll<HTMLElement>(
-    sourceElementSelector(elementId),
-  );
-  return matches.length === 1 ? matches[0] : null;
 }
 
 export function registerProvedStableSourceElements(options: {

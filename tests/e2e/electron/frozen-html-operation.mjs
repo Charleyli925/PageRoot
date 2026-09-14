@@ -8,7 +8,7 @@ import { executeFrozenSelection, frozenDigest, frozenFrameAccess, frozenInitialR
   readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay } from "./real-html/frozen-selection.mjs";
 import { workspaceSourceFingerprint } from "./real-html/workspace-provenance.mjs";
 import { executeFrozenText } from "./real-html/frozen-text.mjs";
-import { executeFrozenCopyDenied, executeFrozenStructure } from "./real-html/frozen-structure.mjs";
+import { executeFrozenCopyDenied, executeFrozenStructure, executeFrozenStructurePathRace } from "./real-html/frozen-structure.mjs";
 import { executeFrozenMixed, finishFrozenMixed, frozenRows, mixedCycleRows, mixedCheckpointOperations, verifyFreshCommentStorage } from "./real-html/frozen-mixed.mjs";
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
 import { startRuntimeLifecycleObservation, stopRuntimeLifecycleObservation }
@@ -52,10 +52,17 @@ const report = { scope: plan.scope, qualification: false, fileId: plan.fileId,
   version, manifestDigest, state: "NOT_EXECUTED", calls: [],
   operation: { operation: "select", targetId: plan.targets[0].selectedId,
     state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null },
-  [plan.operation === "structure" || plan.operation === "copy-denied" ? "structureOperations" : "textOperations"]: (plan.targets[0].operations || []).map((operation) => ({
-    operation, targetId: plan.targets[0].selectedId, state: "NOT_EXECUTED",
-    reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null,
-  })), reopen: plan.reopen ? { state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED" } : null };
+  [plan.operation === "structure" || plan.operation === "copy-denied" ? "structureOperations" : "textOperations"]: (
+    plan.scope === "core-structure-path-race"
+      ? plan.targets.flatMap((target) => (target.operations || []).map((operation) => ({
+        operation, targetId: target.selectedId, state: "NOT_EXECUTED",
+        reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null,
+      })))
+      : (plan.targets[0].operations || []).map((operation) => ({
+        operation, targetId: plan.targets[0].selectedId, state: "NOT_EXECUTED",
+        reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null,
+      }))
+  ), reopen: plan.reopen ? { state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED" } : null };
 let session;
 let workingPath;
 let expectedFinal = plan.seed;
@@ -103,6 +110,14 @@ try {
       readSource: () => readPublishedWorkingCopy(workingPath, null), readComments,
       report: report.mixed, calls: report.calls });
   } else {
+  if (plan.scope === "core-structure-path-race") {
+    report.structure = await executeFrozenStructurePathRace({
+      plan, page, editor,
+      readSource: () => readPublishedWorkingCopy(workingPath, null),
+      rows: report.structureOperations, calls: report.calls,
+    });
+    expectedFinal = { sha256: report.structure.finalSha256, size: report.structure.finalSize };
+  } else {
   const active = editor.locator('iframe[data-runtime-slot-role="active"]');
   await expect(active).toHaveCount(1);
   const frame = await (await active.elementHandle()).contentFrame();
@@ -118,11 +133,13 @@ try {
   }
   if (plan.operation === "structure") {
     report.structure = await executeFrozenStructure({ frame, target: plan.targets[0], page, editor,
+      electronApp: session.electronApp,
       fileId: plan.fileId, readSource: () => readPublishedWorkingCopy(workingPath, null), rows: report.structureOperations, calls: report.calls });
     expectedFinal = { sha256: report.structure.finalSha256, size: report.structure.finalSize };
   }
   if (plan.operation === "copy-denied") await executeFrozenCopyDenied({ frame, target: plan.targets[0], editor,
     readSource: () => readPublishedWorkingCopy(workingPath, null), rows: report.structureOperations, calls: report.calls });
+  }
   }
   report.source = verifyFrozenBytes(await readPublishedWorkingCopy(workingPath, null), expectedFinal, "WORKING_SOURCE_CHANGED");
   report.display = {
@@ -155,9 +172,21 @@ try {
         await finishFrozenMixed({ plan, page: session.page, editor: reopenedEditor,
           readSource: () => readPublishedWorkingCopy(workingPath, null), readComments,
           report: report.mixed, expectedFinal, calls: report.calls });
+      } else if (plan.scope === "core-structure-path-race") {
+        for (const copy of report.structure.copies) {
+          await expect(reopenedFrame.locator(`[data-pageroot-id="${copy.originalId}"]`)).toHaveCount(1);
+          await expect(reopenedFrame.locator(`[data-pageroot-id="${copy.copyId}"]`)).toHaveCount(1);
+        }
+        await expect(reopenedEditor.locator('iframe[data-runtime-slot-role="candidate"]')).toHaveCount(0);
       } else if (plan.operation === "structure") {
         expect(await reopenedTarget.textContent()).toBe(report.structure.originalText);
-        await expect(reopenedFrame.locator(`[data-pageroot-id="${report.structure.copyId}"]`)).toHaveCount(0);
+        const reopenedCopy = reopenedFrame.locator(`[data-pageroot-id="${report.structure.copyId}"]`);
+        if (report.structure.reopenCopyPresent) {
+          await expect(reopenedCopy).toHaveCount(1);
+          await expect(reopenedCopy).toContainText(report.structure.restoredMarker.trim());
+        } else {
+          await expect(reopenedCopy).toHaveCount(0);
+        }
       } else await expect(reopenedTarget).toContainText(`PRCORE_${plan.fileId}`);
       const source = verifyFrozenBytes(await readPublishedWorkingCopy(workingPath, null), expectedFinal, "REOPEN_SOURCE_CHANGED");
       const display = verifyFrozenDisplay({ working: await reopenedEditor.getAttribute("data-working-source-sha256"),

@@ -221,8 +221,11 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `PAGEROOT_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
 - 交互预览与 Edit 可丢弃 Script 页：Electron 用四类真实用例证明普通脚本
-  持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及语义
-  结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。运行时后代必须
+  持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及无法
+  证明原地条件的语义结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。
+  已证明的普通源码复制、删除、插入和受支持移动必须保持当前 Document 身份，
+  并为本次事务创建或恢复的节点授予合法编辑权限；撤销/重做走同一证明。
+  运行时后代必须
   映射到最近源码宿主，只保留评论能力，不暴露文字/样式/结构编辑。元素复制要同时
   证明整个选中子树：运行生成内容及包含它的外层容器隐藏复制入口，保留评论和
   其他结构动作，并且旧的按钮引用或其他调用者也必须在公共命令边界被拒绝；同页独立的
@@ -543,10 +546,21 @@ generation、提升身份、Runtime ready 和源码一致性后重新定位同�
 把两者强制视为同一 ID，也不能据现场结果重新推断映射。缺失见证、错落点、空属性或
 源码证据不符须失败并输出全部条件；没有适用拒绝样本必须保留具体不适用依据。
 `core-structure-leaf` 仅接收已核对的纯文字 span 或 p 结构样本，冻结父级、后续兄弟和源码插入字节位置。
+独立 `core-structure-path-race` 在同一会话先复制混合内容子节点（Candidate），再复制普通叶节点（原地），
+结算后源码与画布都必须各有两份身份，且不得留下过期 Candidate 覆盖。复制顺序冻结为「后插入点先执行」，
+避免第一份复制移动第二份的 byte offset。
 副本 ID 只能来自该位置新增且与原件身份无关字节等价的唯一叶节点；禁止 DOM 扫描或寻找相似副本。
 复制、选中副本、激活、输入、保存、重新选中副本、确认删除逐项记账；静态重建与动态 Candidate
 采用分别判断，文字修改不得重建。保存只允许副本区域变化，删除后原始种子字节必须恢复，
 重开核验原件身份和副本不存在。这是 B 的可复制部分证据。
+独立 `core-structure-closed-loop` 在同一冻结叶节点上追加改样式、跨父移动、删除后 Undo、
+编辑恢复对象、恢复基线再 Redo 回已保存恢复态，以及保存后重开。移动目标父级必须预先冻结且
+不得等于复制插入父级；插入/跨父移动只走 Editor 命令端口。`expectedProjection` 为默认独立预期，
+`projectionByOperation` 可按操作覆盖，产品改标不能降低该组门槛。
+结构 Harness 预先冻结 `expectedProjection`：`in-place`、`candidate`、`recovered` 或 `refuse`。
+必须原地的普通源码操作不得因为产品改标 Candidate 而放宽；必须重建、必须拒绝和接受后恢复
+同样按冻结组核对。计划属性 `data-structural-projection-kind` 不能代替结果
+`data-structural-projection-outcome`，重建次数只计实际 Document 替换。
 独立 `core-copy-denied` 只消费已核对的 Runtime 额外属性及源码缺失依据，验证同一冻结目标的
 UI/实时能力与精确原因、新鲜 probe 回执、复制按钮不存在、Document/generation/源码不变。
 不强行调用隐藏命令，不把拒绝验证记为复制成功；其他未冻结的拒绝样本仍不算覆盖完成。
