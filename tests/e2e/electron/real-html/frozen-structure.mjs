@@ -6,7 +6,6 @@ import { readFrozenActiveGeneration, requireCurrentTextDocument, requireFrozenTe
   requireTextOperationLedger, verifyFrozenHistory } from "./frozen-text.mjs";
 import { compareElementScopedMutation, compareElementStyleMutation, SOURCE_SCOPE_POLICIES } from "./source-scope.mjs";
 import { withExpectedDeleteConfirmation } from "./expected-delete-dialog.mjs";
-import { resolveDeleteSelectionLanding } from "../../../../app/components/html-canvas-structural-projection.js";
 import { buildSourceIndex } from "../../../../app/lib/source-index.js";
 
 const ID = /^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u;
@@ -61,6 +60,40 @@ function sourceNodes(source) {
   };
   visit(parse(source, { sourceCodeLocationInfo: true }));
   return nodes;
+}
+
+// The deletion landing is a test oracle, not a call-through to the production
+// projection planner. Keep the frozen rule explicit so a shared production
+// regression cannot make the harness agree with the bug it is meant to catch.
+const FROZEN_DELETE_UNSUPPORTED_TAGS = new Set([
+  "table", "thead", "tbody", "tfoot", "tr", "td", "th", "col", "colgroup", "caption",
+  "template", "slot", "iframe", "object", "embed", "applet", "script", "style", "link",
+  "meta", "svg", "math", "html", "head", "body", "frameset", "frame", "noscript",
+]);
+
+function frozenSourceElement(index, id) {
+  if (!id) return null;
+  const element = index?.byStemmioId?.get(id);
+  return element?.type === "element" ? element : null;
+}
+
+function frozenLandingCandidate(element) {
+  return Boolean(element?.type === "element" && element.stemmioId
+    && !FROZEN_DELETE_UNSUPPORTED_TAGS.has(String(element.tagName || "").toLowerCase())
+    && !["html", "head", "body"].includes(String(element.tagName || "").toLowerCase()));
+}
+
+export function resolveFrozenDeleteSelectionLanding(beforeIndex, removedRootElementId) {
+  const target = frozenSourceElement(beforeIndex, removedRootElementId);
+  if (!target) return null;
+  const next = target.nextElementSiblingId
+    ? beforeIndex.byNodeId.get(target.nextElementSiblingId) : null;
+  if (frozenLandingCandidate(next)) return next.stemmioId;
+  const previous = target.previousElementSiblingId
+    ? beforeIndex.byNodeId.get(target.previousElementSiblingId) : null;
+  if (frozenLandingCandidate(previous)) return previous.stemmioId;
+  const parent = target.parentId ? beforeIndex.byNodeId.get(target.parentId) : null;
+  return frozenLandingCandidate(parent) ? parent.stemmioId : null;
 }
 
 // Parse source to validate one predeclared insertion, never to choose a target.
@@ -599,7 +632,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       return selectCopy(await currentKnownPrior([copyTarget.selectedId]));
     });
     await record("delete-copy", { sourceRestored: frozenDigest(baseline) }, async () => {
-      const expectedLandingId = resolveDeleteSelectionLanding(
+      const expectedLandingId = resolveFrozenDeleteSelectionLanding(
         buildSourceIndex(currentBytes.toString("utf8")),
         copyTarget.selectedId,
       );
