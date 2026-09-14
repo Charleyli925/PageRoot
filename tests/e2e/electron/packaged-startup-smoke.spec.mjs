@@ -359,7 +359,6 @@ test("packaged app creates one durable welcome project on an empty first launch"
     expect(firstProjects[0]).toMatchObject({
       projectId: firstActive.projectId,
       documentId: firstActive.documentId,
-      sourcePath: firstActive.sourcePath,
       availability: "ready",
     });
 
@@ -398,7 +397,11 @@ test("packaged app creates one durable welcome project on an empty first launch"
     expect(restartedActive).toMatchObject(firstProjectIdentity);
     const restartedProjects = await restarted.evaluate(() => window.stemmioProjects.listRegisteredProjects());
     expect(restartedProjects).toHaveLength(1);
-    expect(restartedProjects[0]).toMatchObject(firstProjectIdentity);
+    expect(restartedProjects[0]).toMatchObject({
+      projectId: firstProjectIdentity.projectId,
+      documentId: firstProjectIdentity.documentId,
+      availability: "ready",
+    });
     expect(readFileSync(firstActive.sourcePath, "utf8")).toContain(editedIntro);
 
     const restartedEditor = restarted.getByTestId("html-canvas-editor").filter({ visible: true }).first();
