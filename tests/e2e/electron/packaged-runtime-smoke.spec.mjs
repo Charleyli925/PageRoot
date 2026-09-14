@@ -233,7 +233,16 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     await page.keyboard.insertText(replacement);
     await page.keyboard.press(keyShortcut("S"));
     await expect.poll(
-      () => readFileSync(sourcePath).equals(expected),
+      () => {
+        try {
+          return readFileSync(sourcePath).equals(expected);
+        } catch (error) {
+          // The packaged app publishes the managed source atomically (staging + rename),
+          // so a read can transiently miss the path while that swap is in flight.
+          if (error?.code === "ENOENT") return false;
+          throw error;
+        }
+      },
       { timeout: 30_000 },
     ).toBe(true);
     expect(readFileSync(externalSourcePath)).toEqual(original);
