@@ -133,11 +133,15 @@ verification; a caller cannot obtain in-place rights by passing `safe: true`.
 
 For ordinary, source-traceable content the user can:
 
-copy → edit the copy → move → delete → undo → redo → save
+copy → edit the copy → change style → move → delete → undo →
+edit the restored object → restore the baseline → redo to the saved
+restored state → save and reopen
 
 while keeping the current iframe `Document` identity whenever the proofs
-succeed. New and restored objects remain legally editable. Delete keeps the
-existing explicit confirmation. Selection after a confirmed delete lands on
+succeed. New and restored objects remain legally editable. The frozen
+`core-structure-closed-loop` harness records that product loop against a
+reviewed leaf, a frozen destination parent and independent projection
+expectations. Delete keeps the existing explicit confirmation. Selection after a confirmed delete lands on
 the next eligible source sibling, else the previous, else a legal parent,
 else clears. Comments on deleted IDs become orphaned by existing Stable ID
 rules.

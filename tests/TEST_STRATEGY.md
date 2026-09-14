@@ -550,6 +550,10 @@ generation、提升身份、Runtime ready 和源码一致性后重新定位同�
 复制、选中副本、激活、输入、保存、重新选中副本、确认删除逐项记账；静态重建与动态 Candidate
 采用分别判断，文字修改不得重建。保存只允许副本区域变化，删除后原始种子字节必须恢复，
 重开核验原件身份和副本不存在。这是 B 的可复制部分证据。
+独立 `core-structure-closed-loop` 在同一冻结叶节点上追加改样式、跨父移动、删除后 Undo、
+编辑恢复对象、恢复基线再 Redo 回已保存恢复态，以及保存后重开。移动目标父级必须预先冻结且
+不得等于复制插入父级；插入/跨父移动只走 Editor 命令端口。`expectedProjection` 为默认独立预期，
+`projectionByOperation` 可按操作覆盖，产品改标不能降低该组门槛。
 结构 Harness 预先冻结 `expectedProjection`：`in-place`、`candidate`、`recovered` 或 `refuse`。
 必须原地的普通源码操作不得因为产品改标 Candidate 而放宽；必须重建、必须拒绝和接受后恢复
 同样按冻结组核对。计划属性 `data-structural-projection-kind` 不能代替结果

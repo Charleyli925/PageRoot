@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { boldMarkerPattern } from "./e2e/electron/real-html/frozen-text.mjs";
-import { bindFrozenCopy } from "./e2e/electron/real-html/frozen-structure.mjs";
+import { bindFrozenCopy, bindFrozenMove } from "./e2e/electron/real-html/frozen-structure.mjs";
 import { frozenDigest } from "./e2e/electron/real-html/frozen-selection.mjs";
 
 import {
@@ -106,6 +106,27 @@ for (const tag of ["span", "p"]) test(`copy binding for ${tag} accepts only the 
     assert.throws(() => bindFrozenCopy(before, after, { ...target, copyBinding: { ...target.copyBinding, ...change } }),
       { code: "FROZEN_COPY_SOURCE_INVALID" });
   }
+});
+
+test("move binding accepts only a frozen destination parent with unchanged identity set", () => {
+  const parentId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const destId = "pr1_eeeeeeeeeeee4eee8eeeeeeeeeeeeeee";
+  const copyId = "pr1_cccccccccccc4ccc8ccccccccccccccc";
+  const siblingId = "pr1_dddddddddddd4ddd8ddddddddddddddd";
+  const copy = `<p data-pageroot-id="${copyId}">中文 text</p>`;
+  const sibling = `<aside data-pageroot-id="${siblingId}">Outside</aside>`;
+  const dest = `<section data-pageroot-id="${destId}"></section>`;
+  const before = Buffer.from(`<div data-pageroot-id="${parentId}">${copy}\n${sibling}${dest}</div>`);
+  const after = Buffer.from(`<div data-pageroot-id="${parentId}">\n${sibling}<section data-pageroot-id="${destId}">${copy}</section></div>`);
+  assert.ok(bindFrozenMove(before, after, {
+    copyId, destinationParentId: destId, originalParentId: parentId,
+  }).conditions.landedAtDestination);
+  assert.throws(() => bindFrozenMove(before, after, {
+    copyId, destinationParentId: destId, originalParentId: destId,
+  }), { code: "FROZEN_MOVE_SOURCE_INVALID" });
+  assert.throws(() => bindFrozenMove(before, before, {
+    copyId, destinationParentId: destId, originalParentId: parentId,
+  }), { code: "FROZEN_MOVE_SOURCE_INVALID" });
 });
 
 test("fixed bold oracle accepts the declared wrapper but rejects extra formatting and outside writes", () => {

@@ -3,6 +3,7 @@ import { expect } from "@playwright/test";
 
 const ID = /^pr1_[a-f0-9]{32}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
+const PROJECTION_EXPECTATIONS = new Set(["in-place", "candidate", "recovered", "refuse"]);
 export const frozenDigest = (value) => createHash("sha256").update(value).digest("hex");
 export const FROZEN_TEXT_OPERATIONS = Object.freeze([
   "activate", "input", "backspace", "save", "undo", "redo",
@@ -18,6 +19,13 @@ export const FROZEN_REENTRY_ELEMENT_OPERATIONS = Object.freeze([
 ]);
 export const FROZEN_STRUCTURE_OPERATIONS = Object.freeze([
   "copy", "select-copy", "activate-copy", "input-copy", "save-copy", "select-copy-for-delete", "delete-copy",
+]);
+export const FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS = Object.freeze([
+  "copy", "select-copy", "activate-copy", "input-copy", "save-copy",
+  "style-copy", "move-copy",
+  "select-copy-for-delete", "delete-copy",
+  "undo-delete", "activate-restored", "input-restored", "save-restored",
+  "restore-baseline", "redo-to-restored",
 ]);
 export const FROZEN_COPY_DENIED_OPERATIONS = Object.freeze(["verify-copy-denied"]);
 export const FROZEN_STRUCTURE_PROBE_OPERATIONS = Object.freeze([
@@ -75,7 +83,9 @@ export function readFrozenSelection(bytes, expectedDigest) {
   }
   const elementCore = plan.scope === "element-text-format";
   const formatCore = plan.scope === "core-text-format" || elementCore;
-  const structureCore = plan.scope === "core-structure-leaf";
+  const structureLeaf = plan.scope === "core-structure-leaf";
+  const structureClosedLoop = plan.scope === "core-structure-closed-loop";
+  const structureCore = structureLeaf || structureClosedLoop;
   const copyDenied = plan.scope === "core-copy-denied";
   const textMicro = plan.scope === "native-text-core-micro" || formatCore;
   requireFact(plan.schemaVersion === 1 && (plan.scope === "single-selection-micro" || textMicro || structureCore || copyDenied)
@@ -148,9 +158,26 @@ export function readFrozenSelection(bytes, expectedDigest) {
       && HASH.test(binding.originalElementSha256 || "")
       && ["runtime-candidate", "static-rebuild"].includes(target.rebuildPath)
       && (target.continuationProbe === undefined || target.continuationProbe === "session-ended-no-refocus")
-      && JSON.stringify(target.operations) === JSON.stringify(target.continuationProbe
-        ? FROZEN_STRUCTURE_PROBE_OPERATIONS : FROZEN_STRUCTURE_OPERATIONS),
+      && JSON.stringify(target.operations) === JSON.stringify(structureClosedLoop
+        ? FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS
+        : target.continuationProbe ? FROZEN_STRUCTURE_PROBE_OPERATIONS : FROZEN_STRUCTURE_OPERATIONS),
     "FROZEN_STRUCTURE_CONTRACT_INVALID");
+    if (structureClosedLoop) {
+      const overrides = target.projectionByOperation || {};
+      requireFact(PROJECTION_EXPECTATIONS.has(target.expectedProjection)
+        && ID.test(target.destinationParentId || "")
+        && target.destinationParentId !== binding.parentId
+        && target.initialBold === false
+        && target.formatCapability?.expected === "AVAILABLE"
+        && target.formatCapability?.scope === "element"
+        && target.formatCapability?.basis === "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER"
+        && target.continuationProbe === undefined
+        && typeof overrides === "object"
+        && Object.keys(overrides).every((operation) => target.operations.includes(operation)
+          && PROJECTION_EXPECTATIONS.has(overrides[operation])),
+      "FROZEN_STRUCTURE_CLOSED_LOOP_CONTRACT_INVALID");
+      Object.freeze(overrides); Object.freeze(target.formatCapability);
+    }
     for (const value of [binding, target.copyCapability, target.textCapability, target.operations]) Object.freeze(value);
   }
   if (textMicro) {

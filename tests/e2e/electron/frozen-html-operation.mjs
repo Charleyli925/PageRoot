@@ -118,6 +118,7 @@ try {
   }
   if (plan.operation === "structure") {
     report.structure = await executeFrozenStructure({ frame, target: plan.targets[0], page, editor,
+      electronApp: session.electronApp,
       fileId: plan.fileId, readSource: () => readPublishedWorkingCopy(workingPath, null), rows: report.structureOperations, calls: report.calls });
     expectedFinal = { sha256: report.structure.finalSha256, size: report.structure.finalSize };
   }
@@ -157,7 +158,13 @@ try {
           report: report.mixed, expectedFinal, calls: report.calls });
       } else if (plan.operation === "structure") {
         expect(await reopenedTarget.textContent()).toBe(report.structure.originalText);
-        await expect(reopenedFrame.locator(`[data-pageroot-id="${report.structure.copyId}"]`)).toHaveCount(0);
+        const reopenedCopy = reopenedFrame.locator(`[data-pageroot-id="${report.structure.copyId}"]`);
+        if (report.structure.reopenCopyPresent) {
+          await expect(reopenedCopy).toHaveCount(1);
+          await expect(reopenedCopy).toContainText(report.structure.restoredMarker.trim());
+        } else {
+          await expect(reopenedCopy).toHaveCount(0);
+        }
       } else await expect(reopenedTarget).toContainText(`PRCORE_${plan.fileId}`);
       const source = verifyFrozenBytes(await readPublishedWorkingCopy(workingPath, null), expectedFinal, "REOPEN_SOURCE_CHANGED");
       const display = verifyFrozenDisplay({ working: await reopenedEditor.getAttribute("data-working-source-sha256"),

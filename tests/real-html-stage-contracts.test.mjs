@@ -41,7 +41,7 @@ import {
 } from "./e2e/electron/real-html/continuity-chain.mjs";
 import { summarizeRuntimeObserverRecords } from "./e2e/electron/real-html/runtime-observer.mjs";
 import { normalizeCapabilityProbeObservations } from "./e2e/electron/real-html/capability-driver.mjs";
-import { assertReadOnlyCorpusMode, frozenInitialRuntimeDecision, FROZEN_ELEMENT_OPERATIONS, FROZEN_COPY_DENIED_OPERATIONS, FROZEN_STRUCTURE_PROBE_OPERATIONS, FROZEN_STRUCTURE_OPERATIONS, FROZEN_FORMAT_OPERATIONS, FROZEN_REENTRY_FORMAT_OPERATIONS, FROZEN_TEXT_OPERATIONS, frozenDigest, readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay }
+import { assertReadOnlyCorpusMode, frozenInitialRuntimeDecision, FROZEN_ELEMENT_OPERATIONS, FROZEN_COPY_DENIED_OPERATIONS, FROZEN_STRUCTURE_PROBE_OPERATIONS, FROZEN_STRUCTURE_OPERATIONS, FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS, FROZEN_FORMAT_OPERATIONS, FROZEN_REENTRY_FORMAT_OPERATIONS, FROZEN_TEXT_OPERATIONS, frozenDigest, readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay }
   from "./e2e/electron/real-html/frozen-selection.mjs";
 import { verifiedUndoTail, requireTextOperationLedger, verifyEndedHistorySession, verifyFrozenHistory } from "./e2e/electron/real-html/frozen-text.mjs";
 
@@ -1024,6 +1024,48 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
   const paragraphBytes = Buffer.from(JSON.stringify({ ...structurePlan,
     targets: [{ ...structurePlan.targets[0], clickTag: "p", selectedTag: "p" }] }));
   assert.equal(readFrozenSelection(paragraphBytes, frozenDigest(paragraphBytes)).targets[0].selectedTag, "p");
+  const closedLoopPlan = {
+    ...structurePlan,
+    scope: "core-structure-closed-loop",
+    targets: [{
+      ...structurePlan.targets[0],
+      clickTag: "p",
+      selectedTag: "p",
+      operations: FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS,
+      expectedProjection: "in-place",
+      destinationParentId: capabilityId(399),
+      initialBold: false,
+      formatCapability: {
+        expected: "AVAILABLE",
+        scope: "element",
+        basis: "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER",
+      },
+      projectionByOperation: { copy: "candidate" },
+    }],
+  };
+  const closedLoopBytes = Buffer.from(JSON.stringify(closedLoopPlan));
+  assert.equal(readFrozenSelection(closedLoopBytes, frozenDigest(closedLoopBytes)).scope, "core-structure-closed-loop");
+  assert.throws(() => readFrozenSelection(Buffer.from(JSON.stringify({
+    ...closedLoopPlan,
+    targets: [{ ...closedLoopPlan.targets[0], operations: FROZEN_STRUCTURE_OPERATIONS }],
+  })), frozenDigest(Buffer.from(JSON.stringify({
+    ...closedLoopPlan,
+    targets: [{ ...closedLoopPlan.targets[0], operations: FROZEN_STRUCTURE_OPERATIONS }],
+  })))), { code: "FROZEN_STRUCTURE_CONTRACT_INVALID" });
+  for (const change of [
+    { destinationParentId: structurePlan.targets[0].copyBinding.parentId },
+    { expectedProjection: "AUTO" },
+    { initialBold: true },
+    { projectionByOperation: { copy: "AUTO" } },
+  ]) {
+    const bytes = Buffer.from(JSON.stringify({
+      ...closedLoopPlan,
+      targets: [{ ...closedLoopPlan.targets[0], ...change }],
+    }));
+    assert.throws(() => readFrozenSelection(bytes, frozenDigest(bytes)), {
+      code: "FROZEN_STRUCTURE_CLOSED_LOOP_CONTRACT_INVALID",
+    });
+  }
   const probeBytes = Buffer.from(JSON.stringify({ ...structurePlan, targets: [{ ...structurePlan.targets[0],
     continuationProbe: "session-ended-no-refocus", operations: FROZEN_STRUCTURE_PROBE_OPERATIONS }] }));
   assert.doesNotThrow(() => readFrozenSelection(probeBytes, frozenDigest(probeBytes)));
@@ -1275,6 +1317,24 @@ test("independent projection expectations cannot follow a product Candidate labe
   assert.throws(
     () => requireIndependentProjectionExpectation({ expectedProjection: "refuse" }, "candidate", "candidate"),
     { code: "FROZEN_REFUSE_PATH_EXECUTED" },
+  );
+  assert.deepEqual(
+    requireIndependentProjectionExpectation(
+      { expectedProjection: "in-place", projectionByOperation: { copy: "candidate" } },
+      "candidate",
+      "candidate",
+      "copy",
+    ),
+    { expected: "candidate", planned: "candidate", outcome: "candidate" },
+  );
+  assert.throws(
+    () => requireIndependentProjectionExpectation(
+      { expectedProjection: "in-place", projectionByOperation: { copy: "candidate" } },
+      "candidate",
+      "candidate",
+      "delete-copy",
+    ),
+    { code: "EXPECTED_IN_PLACE_DID_NOT_HOLD" },
   );
 });
 

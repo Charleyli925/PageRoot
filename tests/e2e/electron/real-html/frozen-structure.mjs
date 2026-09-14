@@ -1,10 +1,10 @@
 import { parse, parseFragment } from "parse5";
 import { expect } from "@playwright/test";
-import { keyShortcut, waitForRuntimeHandoffSettled } from "../electron-native-harness.mjs";
+import { clickEditHistoryMenu, keyShortcut, waitForRuntimeHandoffSettled } from "../electron-native-harness.mjs";
 import { executeFrozenSelection, frozenDigest, frozenFrameAccess } from "./frozen-selection.mjs";
 import { readFrozenActiveGeneration, requireCurrentTextDocument, requireFrozenTextFocus,
   requireTextOperationLedger, verifyFrozenHistory } from "./frozen-text.mjs";
-import { compareElementScopedMutation, SOURCE_SCOPE_POLICIES } from "./source-scope.mjs";
+import { compareElementScopedMutation, compareElementStyleMutation, SOURCE_SCOPE_POLICIES } from "./source-scope.mjs";
 
 const ID = /^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u;
 const failUnless = (condition, code, details) => {
@@ -12,8 +12,8 @@ const failUnless = (condition, code, details) => {
 };
 const PROJECTION_EXPECTATIONS = new Set(["in-place", "candidate", "recovered", "refuse"]);
 
-export function requireIndependentProjectionExpectation(target, planned, outcome) {
-  const expected = target?.expectedProjection || null;
+export function requireIndependentProjectionExpectation(target, planned, outcome, operation = null) {
+  const expected = (operation && target?.projectionByOperation?.[operation]) || target?.expectedProjection || null;
   if (!expected) {
     failUnless(
       planned !== "in-place" || outcome === "in-place",
@@ -110,6 +110,31 @@ export function bindFrozenCopy(beforeBytes, afterBytes, target) {
   failUnless(Object.values(conditions).every(Boolean), "FROZEN_COPY_SOURCE_INVALID",
     { conditions, changedRanges, actualChangedRanges: byteChanges(beforeBytes, afterBytes) });
   return { copyId, conditions, changedRanges };
+}
+
+export function bindFrozenMove(beforeBytes, afterBytes, { copyId, destinationParentId, originalParentId }) {
+  const beforeNodes = sourceNodes(beforeBytes.toString("utf8"));
+  const afterNodes = sourceNodes(afterBytes.toString("utf8"));
+  const beforeCopy = beforeNodes.filter(node => idOf(node) === copyId);
+  const afterCopy = afterNodes.filter(node => idOf(node) === copyId);
+  const destination = afterNodes.filter(node => idOf(node) === destinationParentId);
+  const beforeIds = beforeNodes.map(idOf).filter(Boolean).sort();
+  const afterIds = afterNodes.map(idOf).filter(Boolean).sort();
+  const conditions = {
+    copyUniqueBefore: beforeCopy.length === 1,
+    copyUniqueAfter: afterCopy.length === 1,
+    destinationUnique: destination.length === 1,
+    movedFromOriginal: idOf(beforeCopy[0]?.parentNode) === originalParentId,
+    landedAtDestination: idOf(afterCopy[0]?.parentNode) === destinationParentId,
+    destinationChanged: originalParentId !== destinationParentId,
+    sameIdentitySet: beforeIds.length === afterIds.length && JSON.stringify(beforeIds) === JSON.stringify(afterIds),
+    sameNodeCount: beforeNodes.length === afterNodes.length,
+  };
+  failUnless(Object.values(conditions).every(Boolean), "FROZEN_MOVE_SOURCE_INVALID", {
+    conditions, copyId, destinationParentId, originalParentId,
+    actualChangedRanges: byteChanges(beforeBytes, afterBytes),
+  });
+  return { conditions };
 }
 
 export function verifyFrozenStructureLifecycle({ path, before, after, sourceHash, records }) {
@@ -324,11 +349,13 @@ export async function probeFrozenEndedContinuation({ page, frame, editor, target
   }
 }
 
-export async function executeFrozenStructure({ frame, target, page, editor, fileId, readSource, rows, calls }) {
+export async function executeFrozenStructure({ frame, target, page, editor, electronApp, fileId, readSource, rows, calls }) {
   const baseline = await readSource();
-  let currentBytes = baseline, copyTarget, copiedBytes, savedBytes;
+  const closedLoop = target.operations.includes("style-copy");
+  let currentBytes = baseline, copyTarget, copiedBytes, savedBytes, restoredBytes;
   let handle, documentHandle;
   const marker = ` PRCOPY_${fileId}`;
+  const restoredMarker = ` PRREST_${fileId}`;
   const originalText = await frozenFrameAccess(frame, target, calls).target(target.selectedId).textContent();
   const documentId = () => frame.evaluate(() => globalThis.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ ||= crypto.randomUUID());
   let generation = await readFrozenActiveGeneration(editor);
@@ -345,7 +372,12 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
       keyboard: page.keyboard, mouse: page.mouse, target: copyTarget, calls: audit, priorSelectionId }); }
     finally { calls.push(...audit); }
   };
-  const rebuild = async (action, verifySource) => {
+  const refreshActiveFrame = async () => {
+    const active = editor.locator('iframe[data-runtime-slot-role="active"]');
+    failUnless(await active.count() === 1, "FROZEN_ACTIVE_FRAME_NOT_UNIQUE");
+    frame = await (await active.elementHandle()).contentFrame();
+  };
+  const rebuild = async (action, verifySource, operation) => {
     const before = { generation, documentId: await documentId() };
     const cursor = await editor.evaluate(() => ({ candidate: globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__.records.length,
       lifecycle: globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__.lifecycleRecords.length }));
@@ -361,7 +393,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
     }).not.toBe("pending");
     const planned = await editor.getAttribute("data-structural-projection-kind");
     const outcome = await editor.getAttribute("data-structural-projection-outcome");
-    requireIndependentProjectionExpectation(target, planned, outcome);
+    requireIndependentProjectionExpectation(target, planned, outcome, operation);
     const inPlace = outcome === "in-place";
     const settled = await waitForRuntimeHandoffSettled(page, {
       timeout: 7_000,
@@ -369,9 +401,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
       priorGeneration: Number(generation),
       requireGenerationAdvance: !inPlace,
     });
-    const active = editor.locator('iframe[data-runtime-slot-role="active"]');
-    failUnless(await active.count() === 1, "FROZEN_ACTIVE_FRAME_NOT_UNIQUE");
-    frame = await (await active.elementHandle()).contentFrame();
+    await refreshActiveFrame();
     const records = await editor.evaluate((_element, cursor) => {
       const state = globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__;
       return [...state.records.slice(cursor.candidate), ...state.lifecycleRecords.slice(cursor.lifecycle)];
@@ -391,11 +421,53 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
       },
     });
     currentBytes = afterBytes; generation = settled.activeFrameGeneration;
-    return { source, runtime };
+    return { source, runtime, planned, outcome };
+  };
+  const walkHistory = async (direction, expectedBytes, code) => {
+    failUnless(electronApp, "FROZEN_HISTORY_APP_MISSING");
+    const attempts = [];
+    for (let index = 0; index < 12 && !(await readSource()).equals(expectedBytes); index += 1) {
+      const prior = await readSource();
+      await clickEditHistoryMenu(electronApp, page, direction);
+      await expect.poll(async () => !(await readSource()).equals(prior), { timeout: 5_000 }).toBe(true);
+      const current = await readSource();
+      attempts.push(frozenDigest(current));
+      await waitForRuntimeHandoffSettled(page, {
+        timeout: 7_000,
+        expectedSourceRevision: `sha256:${frozenDigest(current)}`,
+      });
+      await refreshActiveFrame();
+    }
+    const actual = await readSource();
+    failUnless(actual.equals(expectedBytes), code, {
+      attempts, expectedSha256: frozenDigest(expectedBytes), actualSha256: frozenDigest(actual),
+    });
+    currentBytes = actual;
+    generation = await readFrozenActiveGeneration(editor);
+    return { attempts };
   };
   const sameDocument = async () => {
     await requireCurrentTextDocument(frame, documentHandle, handle);
     failUnless(await readFrozenActiveGeneration(editor) === generation, "UNEXPECTED_COPY_TEXT_REBUILD");
+  };
+  const activateCopyLeaf = async () => {
+    await handle?.dispose(); await documentHandle?.dispose();
+    const locator = frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId);
+    handle = await locator.elementHandle(); documentHandle = await frame.evaluateHandle(() => document);
+    const position = await handle.evaluate(element => {
+      const text = [...element.childNodes].find(node => node.nodeType === 3 && node.textContent);
+      if (!text) return null;
+      const range = element.ownerDocument.createRange(); range.setStart(text, 0); range.setEnd(text, 1);
+      const rect = range.getBoundingClientRect(), outer = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0
+        ? { x: rect.left - outer.left + rect.width / 2, y: rect.top - outer.top + rect.height / 2 } : null;
+    });
+    failUnless(position, "COPY_PLAIN_LEAF_DRIFT");
+    await handle.dblclick({ position, timeout: 2_000 });
+    await expect(locator).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u, { timeout: 2_000 });
+    await page.keyboard.press(keyShortcut("ArrowDown"));
+    await sameDocument();
+    return requireFrozenTextFocus(handle, copyTarget.selectedId, { atEnd: true });
   };
   try {
     await record("copy", { newLeafAtByteOffset: target.copyBinding.byteOffset }, async () => {
@@ -406,7 +478,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
         calls.push({ kind: "operation-output-binding", from: target.selectedId, id: source.copyId,
           byteOffset: target.copyBinding.byteOffset });
         return source;
-      });
+      }, "copy");
       copiedBytes = currentBytes;
       failUnless(await editor.getAttribute("data-element-copy-command-availability") === "available"
         && await editor.getAttribute("data-element-copy-command-reason") === "available", "COPY_COMMAND_REFUSED");
@@ -415,22 +487,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
     if (target.continuationProbe) await record("probe-after-copy", { mode: target.continuationProbe }, () =>
       probeFrozenEndedContinuation({ page, frame, editor, target, readSource, calls, marker: `PRDIRECT_${fileId}_COPY` }));
     await record("select-copy", { id: copyTarget.selectedId }, () => selectCopy(target.selectedId));
-    await record("activate-copy", { editableId: copyTarget.selectedId }, async () => {
-      const locator = frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId);
-      handle = await locator.elementHandle(); documentHandle = await frame.evaluateHandle(() => document);
-      const position = await handle.evaluate(element => {
-        if (element.childNodes.length !== 1 || element.firstChild.nodeType !== 3) return null;
-        const range = element.ownerDocument.createRange(); range.setStart(element.firstChild, 0); range.setEnd(element.firstChild, 1);
-        const rect = range.getBoundingClientRect(), outer = element.getBoundingClientRect();
-        return { x: rect.left - outer.left + rect.width / 2, y: rect.top - outer.top + rect.height / 2 };
-      });
-      failUnless(position, "COPY_PLAIN_LEAF_DRIFT");
-      await handle.dblclick({ position, timeout: 2_000 });
-      await expect(locator).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u, { timeout: 2_000 });
-      await page.keyboard.press(keyShortcut("ArrowDown"));
-      await sameDocument();
-      return requireFrozenTextFocus(handle, copyTarget.selectedId, { atEnd: true });
-    });
+    await record("activate-copy", { editableId: copyTarget.selectedId }, () => activateCopyLeaf());
     await record("input-copy", { appended: marker }, async () => {
       await sameDocument(); await requireFrozenTextFocus(handle, copyTarget.selectedId, { atEnd: true });
       await page.keyboard.type(marker);
@@ -448,6 +505,49 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
       await sameDocument(); currentBytes = savedBytes;
       return { outsideUnchanged: oracle.outsideUnchanged, changedRanges: oracle.changedRanges };
     });
+    if (closedLoop) {
+      await record("style-copy", { fontWeight: "700" }, async () => {
+        await page.keyboard.press("Escape");
+        await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
+        failUnless(await editor.getAttribute("data-e2e-copy-native-edit-ended") === "true", "COPY_EDIT_SESSION_NOT_ENDED");
+        await selectCopy(copyTarget.selectedId);
+        const locator = frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId);
+        await handle?.dispose(); handle = await locator.elementHandle();
+        const button = editor.getByRole("button", { name: "加粗", exact: true });
+        await expect(button).toHaveAttribute("aria-pressed", "false");
+        const beforeStyle = currentBytes;
+        await button.click();
+        await expect(button).toHaveAttribute("aria-pressed", "true");
+        await page.keyboard.press(keyShortcut("s"));
+        let oracle;
+        await expect.poll(async () => {
+          const after = await readSource();
+          oracle = compareElementStyleMutation({ before: beforeStyle, after, sourceId: copyTarget.selectedId,
+            expectedProperty: "font-weight", expectedValue: "700" });
+          return oracle.ok;
+        }, { timeout: 5_000 }).toBe(true);
+        currentBytes = await readSource();
+        return { fontWeight: "700", outsideElementUnchanged: oracle.outsideElementUnchanged };
+      });
+      await record("move-copy", { parentId: target.destinationParentId }, async () => {
+        const result = await rebuild(async () => {
+          const moved = await page.getByTestId("html-canvas-editor").evaluate((element, parentElementId) => {
+            const run = element.__PAGEROOT_E2E_STRUCTURE_COMMANDS__?.moveSelectedTo;
+            if (typeof run !== "function") throw new Error("STRUCTURE_COMMAND_UNAVAILABLE:moveSelectedTo");
+            return run({ parentElementId });
+          }, target.destinationParentId);
+          failUnless(moved === true, "FROZEN_MOVE_COMMAND_REFUSED", { moved });
+        }, after => bindFrozenMove(currentBytes, after, {
+          copyId: copyTarget.selectedId,
+          destinationParentId: target.destinationParentId,
+          originalParentId: target.copyBinding.parentId,
+        }), "move-copy");
+        failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId)
+          .evaluate((element, parentId) => element.parentElement?.getAttribute("data-pageroot-id") === parentId,
+            target.destinationParentId), "FROZEN_MOVE_DISPLAY_PARENT_MISMATCH");
+        return result;
+      });
+    }
     await record("select-copy-for-delete", { id: copyTarget.selectedId }, async () => {
       await page.keyboard.press("Escape");
       await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
@@ -464,7 +564,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
           expectedSha256: frozenDigest(baseline), actualSha256: frozenDigest(after),
           actualChangedRanges: byteChanges(currentBytes, after), remainingChanges: byteChanges(baseline, after) });
         return { restored };
-      });
+      }, "delete-copy");
       failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId).count() === 0, "DELETED_COPY_STILL_PRESENT");
       const original = frozenFrameAccess(frame, target, calls).target(target.selectedId);
       failUnless(await original.count() === 1 && await original.textContent() === originalText, "ORIGINAL_IDENTITY_CHANGED");
@@ -472,7 +572,51 @@ export async function executeFrozenStructure({ frame, target, page, editor, file
     });
     if (target.continuationProbe) await record("probe-after-delete", { mode: target.continuationProbe }, () =>
       probeFrozenEndedContinuation({ page, frame, editor, target, readSource, calls, marker: `PRDIRECT_${fileId}_DELETE` }));
+    if (closedLoop) {
+      await record("undo-delete", { copyPresent: true }, async () => {
+        const result = await rebuild(() => clickEditHistoryMenu(electronApp, page, "undo"), after => {
+          failUnless(!after.equals(baseline) && after.toString().includes(marker), "UNDO_DELETE_DID_NOT_RESTORE_COPY", {
+            equalsBaseline: after.equals(baseline), containsMarker: after.toString().includes(marker),
+          });
+          return { restored: true };
+        }, "undo-delete");
+        failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId).count() === 1,
+          "UNDO_DELETE_COPY_MISSING");
+        return result;
+      });
+      await record("activate-restored", { editableId: copyTarget.selectedId }, () => activateCopyLeaf());
+      await record("input-restored", { appended: restoredMarker }, async () => {
+        await sameDocument(); await requireFrozenTextFocus(handle, copyTarget.selectedId, { atEnd: true });
+        await page.keyboard.type(restoredMarker);
+        failUnless((await handle.textContent()).includes(restoredMarker), "FROZEN_RESTORED_INPUT_LANDING_MISMATCH");
+        await sameDocument(); return { appended: restoredMarker, id: copyTarget.selectedId };
+      });
+      await record("save-restored", { sourceContains: restoredMarker }, async () => {
+        await page.keyboard.press(keyShortcut("s"));
+        await expect.poll(async () => (await readSource()).includes(restoredMarker), { timeout: 5_000 }).toBe(true);
+        restoredBytes = await readSource();
+        failUnless(restoredBytes.toString().includes(marker), "RESTORED_COPY_LOST_FIRST_EDIT");
+        currentBytes = restoredBytes;
+        return { restoredSha256: frozenDigest(restoredBytes) };
+      });
+      await record("restore-baseline", { sourceRestored: frozenDigest(baseline) }, async () => {
+        const walked = await walkHistory("undo", baseline, "RESTORE_BASELINE_FAILED");
+        failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId).count() === 0,
+          "BASELINE_STILL_HAS_COPY");
+        return walked;
+      });
+      await record("redo-to-restored", { sourceRestored: frozenDigest(restoredBytes) }, async () => {
+        const walked = await walkHistory("redo", restoredBytes, "REDO_TO_RESTORED_FAILED");
+        failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId).count() === 1,
+          "REDO_RESTORED_COPY_MISSING");
+        return walked;
+      });
+    }
     requireTextOperationLedger(rows, target.operations);
-    return { finalSha256: frozenDigest(currentBytes), finalSize: currentBytes.length, originalText, copyId: copyTarget.selectedId };
+    return {
+      finalSha256: frozenDigest(currentBytes), finalSize: currentBytes.length, originalText,
+      copyId: copyTarget.selectedId, restoredMarker: closedLoop ? restoredMarker : null,
+      reopenCopyPresent: closedLoop,
+    };
   } finally { await handle?.dispose(); await documentHandle?.dispose(); }
 }
