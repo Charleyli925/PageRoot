@@ -57,6 +57,11 @@ copyFileSync(plan.seed.path, importPath);
 const report = { schemaVersion: 1, kind: "stemmio-frozen-html-operation-result",
   scenarioId: process.env.STEMMIO_FROZEN_SCENARIO_ID || null,
   reportPath, reportDirectory: output, scope: plan.scope, qualification: false, fileId: plan.fileId,
+  runtimeConfig: {
+    windowMode: process.env.STEMMIO_E2E_WINDOW_MODE
+      || (process.env.STEMMIO_E2E_FOREGROUND === "1" ? "foreground" : "hidden"),
+    structuralInPlace: process.env.STEMMIO_DISABLE_STRUCTURAL_IN_PLACE === "1" ? "disabled" : "enabled",
+  },
   version, manifestDigest, state: "NOT_EXECUTED", calls: [],
   operation: { operation: "select", targetId: plan.targets[0].selectedId,
     state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null },
@@ -177,6 +182,11 @@ try {
       const reopenedTarget = frozenFrameAccess(reopenedFrame, plan.targets[0], report.calls).target(plan.targets[0].selectedId);
       await expect(reopenedTarget).toHaveCount(1);
       expect(await reopenedTarget.evaluate((element) => element.localName)).toBe(plan.targets[0].selectedTag);
+      const reopenedTargetIdentity = {
+        id: await reopenedTarget.getAttribute("data-stemmio-id"),
+        tag: await reopenedTarget.evaluate((element) => element.localName),
+      };
+      let reopenedOutput = null;
       if (plan.operation === "mixed") {
         await finishFrozenMixed({ plan, page: session.page, editor: reopenedEditor,
           readSource: () => readPublishedWorkingCopy(workingPath, null), readComments,
@@ -196,11 +206,23 @@ try {
         } else {
           await expect(reopenedCopy).toHaveCount(0);
         }
+        reopenedOutput = {
+          id: report.structure.copyId,
+          present: await reopenedCopy.count() === 1,
+        };
       } else await expect(reopenedTarget).toContainText(`PRCORE_${plan.fileId}`);
       const source = verifyFrozenBytes(await readPublishedWorkingCopy(workingPath, null), expectedFinal, "REOPEN_SOURCE_CHANGED");
       const display = verifyFrozenDisplay({ working: await reopenedEditor.getAttribute("data-working-source-sha256"),
         displayed: await reopenedEditor.getAttribute("data-rendered-projection-sha256") }, expectedFinal);
-      Object.assign(report.reopen, { state: "PASS", reason: "EXACT_ID_TEXT_AND_SOURCE_REOPENED", source, display });
+      Object.assign(report.reopen, {
+        state: "PASS", reason: "EXACT_ID_TEXT_AND_SOURCE_REOPENED", source, display,
+        target: reopenedTargetIdentity, output: reopenedOutput,
+        runtimeConfig: {
+          windowMode: process.env.STEMMIO_E2E_WINDOW_MODE
+            || (process.env.STEMMIO_E2E_FOREGROUND === "1" ? "foreground" : "hidden"),
+          structuralInPlace: process.env.STEMMIO_DISABLE_STRUCTURAL_IN_PLACE === "1" ? "disabled" : "enabled",
+        },
+      });
     } catch (error) {
       Object.assign(report.reopen, { state: "FAIL", reason: error.code || "REOPEN_ASSERTION_FAILED" });
       throw error;

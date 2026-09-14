@@ -129,6 +129,7 @@ test("C rejects copy-only or descriptive-only rebuild plans", () => {
   const target = {
     rebuildPath: "runtime-candidate",
     operations: ["copy"],
+    expectedProjection: "candidate",
     projectionByOperation: {},
   };
   assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
@@ -150,6 +151,12 @@ test("C rejects copy-only or descriptive-only rebuild plans", () => {
   }));
   assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
     scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
+    targets: [{ ...target, expectedProjection: "in-place",
+      operations: ["copy", "move-copy", "input-restored", "save-restored"],
+      projectionByOperation: { "move-copy": "candidate" } }],
+  }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
+  assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
+    scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
     targets: [{ ...target, operations: ["copy", "move-copy", "input-restored", "save-restored"],
       projectionByOperation: { "move-copy": "in-place" } }],
   }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
@@ -162,7 +169,7 @@ test("child PASS requires report evidence beyond a zero exit code", () => {
     operation: "native-text",
     initialRuntime: "static",
     reopen: true,
-    targets: [{ selectedId: "a-target", operations: ["activate", "input", "backspace", "save", "undo", "redo"] }],
+    targets: [{ selectedId: "a-target", selectedTag: "p", operations: ["activate", "input", "backspace", "save", "undo", "redo"] }],
   };
   const base = {
     schemaVersion: 1,
@@ -180,15 +187,27 @@ test("child PASS requires report evidence beyond a zero exit code", () => {
       conditions: { workingMatches: true, displayedMatches: true },
     },
     finalSource: { hashMatches: true, sizeMatches: true },
+    runtimeConfig: { windowMode: "visible-background", structuralInPlace: "enabled" },
     lifecycle: { candidateRecords: [], lifecycleRecords: [], records: [] },
     reopen: {
       state: "PASS", reason: "EXACT_REOPEN", durationMs: 1,
       source: { hashMatches: true, sizeMatches: true },
       display: { workingMatches: true, displayedMatches: true },
+      target: { id: "a-target", tag: "p" },
+      runtimeConfig: { windowMode: "visible-background", structuralInPlace: "enabled" },
     },
-    operation: { operation: "select", targetId: "a-target", state: "PASS", reason: "EXPECTED", durationMs: 1 },
+    operation: { operation: "select", targetId: "a-target", state: "PASS", reason: "EXPECTED", durationMs: 1,
+      actual: "a-target" },
     textOperations: nestedPlan.targets[0].operations.map((operation) => ({
       operation, targetId: "a-target", state: "PASS", reason: "EXPECTED", durationMs: 1,
+      actual: ["input"].includes(operation)
+        ? { appended: "observed", focusedId: "a-target" }
+        : ["backspace"].includes(operation)
+          ? { removed: "X" }
+          : ["save"].includes(operation)
+            ? { sourceSha256: "a".repeat(64), sourceContains: "observed", outsideUnchanged: true,
+              changedRanges: { start: 0, end: 1 } }
+            : { observed: true },
     })),
   };
   assert.equal(summarizeFrozenScenarioReport(base, scenario, nestedPlan, version).operationCount, 7);
@@ -216,12 +235,25 @@ test("child PASS requires report evidence beyond a zero exit code", () => {
   assert.throws(() => summarizeFrozenScenarioReport({
     ...base, operation: { operation: "select", expected: "a-target", state: "PASS", reason: "EXPECTED", durationMs: 1 },
   }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH" });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base,
+    textOperations: base.textOperations.map((row, index) => index === 1 ? { ...row, actual: undefined } : row),
+  }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_OPERATION_EVIDENCE_INVALID" });
   assert.throws(() => summarizeFrozenScenarioReport({ ...base, lifecycle: undefined }, scenario, nestedPlan, version), {
     code: "FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_INVALID",
   });
   assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, runtimeConfig: { windowMode: "visible-background", structuralInPlace: "disabled" },
+  }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_RUNTIME_CONFIGURATION_INVALID" });
+  assert.throws(() => summarizeFrozenScenarioReport({
     ...base, source: { hashMatches: true, sizeMatches: false },
   }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_SOURCE_EVIDENCE_INVALID" });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, reopen: { ...base.reopen, target: { id: "wrong-target", tag: "p" } },
+  }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_REOPEN_EVIDENCE_INVALID" });
+  assert.throws(() => summarizeFrozenScenarioReport({
+    ...base, lifecycle: { ...base.lifecycle, records: [{ kind: "unrelated" }] },
+  }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_INVALID" });
   assert.throws(() => summarizeFrozenScenarioReport({
     ...base, operation: { ...base.operation, reason: "" },
   }, scenario, nestedPlan, version), { code: "FROZEN_ENTRY_CHILD_OPERATION_EVIDENCE_INVALID" });
