@@ -341,6 +341,9 @@ jobs:
         timeout-minutes: 5
         with:
           node-version: 22.13.0
+      - name: Install baseline policy runtime
+        timeout-minutes: 10
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
       - name: Audit dependencies and packaged runtime closure
         timeout-minutes: 10
         run: >-

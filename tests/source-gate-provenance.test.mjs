@@ -237,6 +237,10 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(baselinePolicy, /name: baseline-policy/u);
   assert.match(baselinePolicy, /needs:[\s\S]*- branch-policy/u);
   assert.doesNotMatch(baselinePolicy, /review-policy|codex-review/u);
+  assert.match(
+    baselinePolicy,
+    /npm ci --omit=dev --ignore-scripts --no-audit --no-fund[\s\S]*check-dependency-audit\.mjs/u,
+  );
   assert.match(baselinePolicy, /check-dependency-audit\.mjs/u);
   assert.match(baselinePolicy, /--write-snapshot output\/ci-evidence\/dependency-audit\.json/u);
   assert.match(ci, /name: linux-deps/u);
