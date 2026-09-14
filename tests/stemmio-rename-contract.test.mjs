@@ -24,6 +24,7 @@ const CURRENT_CONTRACT_ROOTS = [
 ];
 
 const CURRENT_CONTRACT_ROOT_FILES = new Set([
+  "AGENTS.md",
   "package.json",
   "package-lock.json",
   "README.md",
@@ -32,16 +33,75 @@ const CURRENT_CONTRACT_ROOT_FILES = new Set([
   "PRIVACY.md",
   "SECURITY.md",
   "SUPPORT.md",
+  "TRADEMARKS.md",
   "docs/decisions/0074-proven-in-place-structural-editing.md",
 ]);
+
+// These are surgical exceptions for current production modules and current
+// project guidance. Each expression names the one persisted, semantic or
+// historical token that must remain readable; a new retired identifier in the
+// same file must still fail the scanner below.
+const SURGICAL_CONTENT_EXCEPTIONS = Object.freeze({
+  "shared/conversation.mjs": [
+    // The v3 decoder documents the intentionally unsupported historical actor.
+    /historical PageRoot actor contract/gu,
+  ],
+  "shared/editable-island.mjs": [
+    // Authored v1 source markers remain byte-preserved while runtime markers are Stemmio-owned.
+    /data-html-ai-source-node-id/gu,
+  ],
+  "bridge/lifecycle-core.mjs": [
+    // The finalizer strips only these five historical HTML metadata names.
+    /html-ai-(?:document-id|version-id|version-label|based-on-version-id|request-id)/gu,
+  ],
+  "app/lib/source-index.js": [
+    // SourceIndex still recognizes the legacy authored marker without exposing it as identity.
+    /data-html-ai-source-node-id/gu,
+  ],
+  "app/components/IslandEditingController.ts": [
+    // The editor removes the same legacy authored marker during source cleanup.
+    /data-html-ai-source-node-id/gu,
+  ],
+  "app/components/HtmlCanvasEditor.tsx": [
+    // Page-root is a semantic HTML selection term, not the product identity.
+    /isPageRoot(?:Element|Selection)?/gu,
+  ],
+  "app/components/html-canvas-comment-layout.ts": [
+    // Page-root is a semantic HTML selection term, not the product identity.
+    /isPageRoot(?:Element|Selection)?/gu,
+  ],
+  "app/components/html-canvas-pointer-capability.ts": [
+    // Page-root is a semantic HTML selection term, not the product identity.
+    /isPageRoot(?:Element|Selection)?/gu,
+  ],
+  "app/components/html-canvas-selection-chrome.tsx": [
+    // Page-root is a semantic HTML selection term, not the product identity.
+    /isPageRoot(?:Element|Selection)?/gu,
+  ],
+  "app/components/html-canvas-selection.ts": [
+    // Page-root is a semantic HTML selection term, not the product identity.
+    /isPageRoot(?:Element|Selection)?/gu,
+  ],
+  "scripts/notice-policy.mjs": [
+    // Notice fingerprints intentionally normalize the historical product label.
+    /const PRODUCT_BRAND_TOKEN = \/\(\?:PageRoot\|Stemmio\|源页\)\/gu;/gu,
+  ],
+  "scripts/developer-preview.mjs": [
+    // Existing annotated release tags retain their immutable pre-cutover message.
+    /PageRoot \$\{version\}/gu,
+  ],
+  "AGENTS.md": [],
+  "TRADEMARKS.md": [
+    // The former brand is named once to identify historical builds only.
+    /former PageRoot name/gu,
+  ],
+});
 
 // These exact files are immutable legal, compatibility, historical or
 // negative-evidence records. They are intentionally not treated as current
 // product contracts, but their paths still participate in the path scan below.
 const LEGACY_CONTENT_PATHS = new Set([
-  "AGENTS.md",
   "LICENSE",
-  "TRADEMARKS.md",
   "THIRD_PARTY_NOTICES.md",
   "design-qa.md",
   "desktop/resources/开发者测试版说明.txt",
@@ -65,12 +125,6 @@ const LEGACY_CONTENT_PATHS = new Set([
   "schemas/conversation.v1.schema.json",
   "schemas/conversation.v2.schema.json",
   "schemas/scope-report.v1.schema.json",
-  "shared/conversation.mjs",
-  "shared/editable-island.mjs",
-  "bridge/lifecycle-core.mjs",
-  "app/lib/source-index.js",
-  "app/components/IslandEditingController.ts",
-  "scripts/notice-policy.mjs",
   "tests/stemmio-rename-contract.test.mjs",
 ]);
 
@@ -81,25 +135,19 @@ const LEGACY_PATH_EXCEPTIONS = new Set([
 
 const RETIRED_PRODUCT_IDENTIFIERS = /(?:PageRoot|pageroot|PAGEROOT|HTML AI|HTML_AI|pr1_|htmlAI|com\.htmlai\.workbench|pageroot\.local|html-change\.local|html-app:|x-html-ai-bridge-token)/u;
 
-function removeContractExceptions(contents) {
-  return contents
+function removeContractExceptions(contents, relativePath = "") {
+  let normalized = String(contents)
     // The public source repository intentionally keeps its historical name.
     .replace(/https:\/\/github\.com\/Charleyli925\/PageRoot[^\s"'`)]*/gu, "")
     .replace(/Charleyli925\/PageRoot/gu, "")
     .replace(/\bcd PageRoot\b/gu, "")
     .replace(/docs\/decisions\/0069-pageroot-native-openai-compatible-agent\.md/gu, "")
-    .replace(/"repo"\s*:\s*"PageRoot"/gu, "")
-    // Page-root is a semantic HTML selection term, not the product identity.
-    .replace(/isPageRoot(?:Element|Selection)?/gu, "")
-    // Persisted source metadata and authored source markers are byte-preserved
-    // HTML contracts, not current product namespaces.
-    .replace(/data-html-ai-source-node-id/gu, "")
-    .replace(/html-ai-(?:document-id|version-id|version-label|based-on-version-id|request-id)/gu, "")
-    // This comment documents the retained v1 projection boundary.
-    .replace(/historical PageRoot actor contract/gu, "")
-    // Existing annotated release tags retain their immutable pre-cutover
-    // message; the preview baseline parser accepts that exact form.
-    .replace(/PageRoot \$\{version\}/gu, "");
+    .replace(/"repo"\s*:\s*"PageRoot"/gu, "");
+
+  for (const pattern of SURGICAL_CONTENT_EXCEPTIONS[relativePath] || []) {
+    normalized = normalized.replace(pattern, "");
+  }
+  return normalized;
 }
 
 function trackedPaths() {
@@ -134,13 +182,28 @@ test("current Stemmio contracts have no unexplained retired product identifiers"
     .filter((relativePath) => !isLegacyContentPath(relativePath))
     .map(async (relativePath) => ({
     relativePath,
-    contents: removeContractExceptions(await source(relativePath)),
+    contents: removeContractExceptions(await source(relativePath), relativePath),
   })));
   for (const { relativePath, contents } of entries) {
     assert.doesNotMatch(
       contents,
       RETIRED_PRODUCT_IDENTIFIERS,
       `${relativePath} contains an unexplained retired product identifier`,
+    );
+  }
+});
+
+test("retired-identifier exceptions are surgical rather than file-wide", async () => {
+  for (const relativePath of Object.keys(SURGICAL_CONTENT_EXCEPTIONS)) {
+    const contents = await source(relativePath);
+    const injected = removeContractExceptions(
+      `${contents}\n// PageRoot regression sentinel`,
+      relativePath,
+    );
+    assert.match(
+      injected,
+      RETIRED_PRODUCT_IDENTIFIERS,
+      `${relativePath} must reject a new retired identifier outside its exact exception`,
     );
   }
 });

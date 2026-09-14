@@ -1031,9 +1031,9 @@ test("every speaker has an avatar mark, so the thread reads as a chat", () => {
   // panel parked in the sidebar instead of someone speaking in it.
   assert.equal(sidebarActorInitial("user"), "你");
   assert.equal(sidebarActorInitial("qoder"), "Q");
-  assert.equal(sidebarActorInitial("stemmio"), "P");
+  assert.equal(sidebarActorInitial("stemmio"), "S");
   // An unknown actor still gets a mark rather than an empty square.
-  assert.equal(sidebarActorInitial("someone-else"), "P");
+  assert.equal(sidebarActorInitial("someone-else"), "S");
 });
 
 test("the conversation sidebar routes access repair to Settings", async () => {

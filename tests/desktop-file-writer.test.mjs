@@ -50,6 +50,22 @@ test("managed welcome HTML is a normal source file and is never reset after edit
   assert.equal(await readFile(sourcePath, "utf8"), edited);
 });
 
+test("welcome guidance names the current Agent review decisions", async () => {
+  assert.match(DEFAULT_PROJECT_HTML, /在 AI 面板选择并连接你信任的 Agent/u);
+  assert.match(DEFAULT_PROJECT_HTML, /查看修改/u);
+  assert.match(DEFAULT_PROJECT_HTML, /采用修改/u);
+  assert.match(DEFAULT_PROJECT_HTML, /不用这次/u);
+  assert.doesNotMatch(DEFAULT_PROJECT_HTML, /审阅对比|打开 AI 修改后|回到修改前继续/u);
+
+  const firstOpenGuide = await readFile(
+    new URL("../desktop/resources/首次打开说明.txt", import.meta.url),
+    "utf8",
+  );
+  assert.match(firstOpenGuide, /点击“查看修改”进入对照/u);
+  assert.match(firstOpenGuide, /“采用修改”或“不用这次”/u);
+  assert.doesNotMatch(firstOpenGuide, /审阅对比|打开 AI 修改后|返回 AI 修改前/u);
+});
+
 test("desktop writer serializes revisions and never lets an older write win", async (t) => {
   resetProjectFileQueuesForTests();
   const directory = await mkdtemp(join(tmpdir(), "stemmio-writer-"));

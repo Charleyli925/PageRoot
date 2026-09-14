@@ -96,6 +96,16 @@ async function closePackagedGracefully(electronApp, page) {
   await closed;
 }
 
+function packagedLaunchEnvironment(isolatedUserData) {
+  return {
+    ...process.env,
+    STEMMIO_E2E: "1",
+    STEMMIO_E2E_USER_DATA_DIR: isolatedUserData,
+    STEMMIO_WORKSPACE: path.join(isolatedUserData, "workspace"),
+    STEMMIO_PROJECT_FILES_ROOT: path.join(isolatedUserData, "project-files"),
+  };
+}
+
 function expectManagedV1Identity(managedSourcePath, original) {
   const managed = readFileSync(managedSourcePath);
   expect(managed).not.toEqual(original);
@@ -299,6 +309,105 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     await restarted.keyboard.insertText("Saved after durable restart");
     await restarted.keyboard.press(keyShortcut("S"));
     await expect.poll(() => readPublishedWorkingCopy(liveManagedSourcePath, "utf8"), { timeout: 30_000 }).toContain("Saved after durable restart");
+    await closePackagedGracefully(electronApp, restarted);
+    electronApp = null;
+  } finally {
+    if (electronApp) await stopPackagedAppForCleanup(electronApp);
+    removeIsolatedDirectory(isolatedUserData);
+  }
+});
+
+test("packaged app creates one durable welcome project on an empty first launch", async () => {
+  test.setTimeout(180_000);
+  const isolatedUserData = mkdtempSync(
+    path.join(tmpdir(), "stemmio-native-e2e-packaged-startup-"),
+  );
+  const sourcePackagedApp = packagedApplication();
+  const stagedPackagedApp = stagePackagedApplicationForLaunch({
+    appPath: sourcePackagedApp.appPath,
+    isolationRoot: isolatedUserData,
+  });
+  const packagedApp = packagedApplication(stagedPackagedApp.appPath);
+  const launchOptions = {
+    executablePath: packagedApp.executable,
+    cwd: stagedPackagedApp.cwd,
+    args: [],
+    env: packagedLaunchEnvironment(isolatedUserData),
+  };
+  const externalWelcomePath = path.join(isolatedUserData, "欢迎来到源页.html");
+  let electronApp = null;
+  try {
+    electronApp = await electron.launch(launchOptions);
+    const page = await electronApp.firstWindow();
+    await page.waitForLoadState("domcontentloaded");
+    await expect(page).toHaveTitle("源页");
+    await expect(page.locator("main.workbench")).toBeVisible();
+    await waitForProjectReady(page, { timeout: 60_000 });
+
+    const firstActive = await page.evaluate(() => window.stemmioProjects?.getActiveProject());
+    expect(firstActive).toMatchObject({
+      projectId: expect.stringMatching(/^project_[A-Za-z0-9_-]+$/u),
+      documentId: expect.stringMatching(/^doc_[A-Za-z0-9_-]+$/u),
+      sourcePath: expect.stringMatching(/\/欢迎来到源页\.html$/u),
+    });
+    expect(firstActive.sourcePath).not.toBe(externalWelcomePath);
+    await expect.poll(() => existsSync(externalWelcomePath)).toBe(true);
+    await expect.poll(() => existsSync(firstActive.sourcePath)).toBe(true);
+
+    const firstProjects = await page.evaluate(() => window.stemmioProjects.listRegisteredProjects());
+    expect(firstProjects).toHaveLength(1);
+    expect(firstProjects[0]).toMatchObject({
+      projectId: firstActive.projectId,
+      documentId: firstActive.documentId,
+      sourcePath: firstActive.sourcePath,
+      availability: "ready",
+    });
+
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    await expect(editor).toHaveAttribute("data-render-verified", "true", { timeout: 30_000 });
+    const firstFrame = await currentEditorFrame(page);
+    await expect.poll(() => firstFrame.locator('img[alt="源页 Logo"]').evaluate(
+      (image) => image.complete && image.naturalWidth > 0,
+    )).toBe(true);
+
+    const editableIntro = firstFrame.locator(".intro");
+    await editableIntro.dblclick();
+    await expect.poll(() => editableIntro.getAttribute("contenteditable"))
+      .toMatch(/^(?:plaintext-only|true)$/u);
+    const editedIntro = "欢迎页首启验证已保存。";
+    await editableIntro.fill(editedIntro);
+    await expect.poll(() => readFileSync(firstActive.sourcePath, "utf8"), {
+      timeout: 30_000,
+    }).toContain(editedIntro);
+
+    const firstProjectIdentity = {
+      projectId: firstActive.projectId,
+      documentId: firstActive.documentId,
+      sourcePath: firstActive.sourcePath,
+    };
+    await closePackagedGracefully(electronApp, page);
+    electronApp = null;
+
+    electronApp = await electron.launch(launchOptions);
+    const restarted = await electronApp.firstWindow();
+    await restarted.waitForLoadState("domcontentloaded");
+    await expect(restarted).toHaveTitle("源页");
+    await expect(restarted.locator("main.workbench")).toBeVisible();
+    await waitForProjectReady(restarted, { timeout: 60_000 });
+    const restartedActive = await restarted.evaluate(() => window.stemmioProjects?.getActiveProject());
+    expect(restartedActive).toMatchObject(firstProjectIdentity);
+    const restartedProjects = await restarted.evaluate(() => window.stemmioProjects.listRegisteredProjects());
+    expect(restartedProjects).toHaveLength(1);
+    expect(restartedProjects[0]).toMatchObject(firstProjectIdentity);
+    expect(readFileSync(firstActive.sourcePath, "utf8")).toContain(editedIntro);
+
+    const restartedEditor = restarted.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    await expect(restartedEditor).toHaveAttribute("data-render-verified", "true", { timeout: 30_000 });
+    const restartedFrame = await currentEditorFrame(restarted);
+    await expect(restartedFrame.locator(".intro")).toContainText(editedIntro);
+    await expect.poll(() => restartedFrame.locator('img[alt="源页 Logo"]').evaluate(
+      (image) => image.complete && image.naturalWidth > 0,
+    )).toBe(true);
     await closePackagedGracefully(electronApp, restarted);
     electronApp = null;
   } finally {

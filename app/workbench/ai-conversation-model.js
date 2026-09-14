@@ -254,7 +254,7 @@ const ACTOR_INITIALS = Object.freeze({
   user: "你",
   agent: "A",
   qoder: "Q",
-  stemmio: "P",
+  stemmio: "S",
 });
 
 /**
