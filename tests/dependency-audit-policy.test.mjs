@@ -9,6 +9,11 @@ import {
   evaluatePackagedRuntimeClosure,
   verifyDependencyAuditSnapshot,
 } from "../scripts/check-dependency-audit.mjs";
+import {
+  bareRuntimeModuleName,
+  importedRuntimeModules,
+  requiredRuntimeModuleClosure,
+} from "../scripts/packaged-runtime-closure.mjs";
 
 const dependabotConfig = await readFile(
   new URL("../.github/dependabot.yml", import.meta.url),
@@ -126,6 +131,38 @@ test("packaged runtime dependencies form one explicit hoisted closure", () => {
   const missing = evaluatePackagedRuntimeClosure(packageJson, missingLock);
   assert.equal(missing.passed, false);
   assert.deepEqual(missing.missingPackages, ["node_modules/entities"]);
+});
+
+test("packaged source imports derive package names and transitive peer closure", () => {
+  assert.equal(bareRuntimeModuleName("@scope/parser/subpath"), "@scope/parser");
+  assert.equal(bareRuntimeModuleName("node:fs/promises"), null);
+  assert.equal(bareRuntimeModuleName("./local-module.mjs"), null);
+  assert.deepEqual(
+    importedRuntimeModules(`
+      import { parse } from "acorn";
+      export { value } from "parse5";
+      const updater = await import("electron-updater");
+      const electron = require("electron");
+      const local = await import("./local-module.mjs");
+    `),
+    ["acorn", "electron-updater", "parse5"],
+  );
+  assert.deepEqual(
+    requiredRuntimeModuleClosure(["@scope/runtime"], {
+      packages: {
+        "node_modules/@scope/runtime": {
+          dependencies: { helper: "1.0.0" },
+          peerDependencies: { validator: "1.0.0" },
+        },
+        "node_modules/helper": {},
+        "node_modules/validator": {},
+      },
+    }),
+    {
+      requiredModules: ["@scope/runtime", "helper", "validator"],
+      missingPackages: [],
+    },
+  );
 });
 
 test("packaged runtime closure resolves the selected platform and architecture macros", () => {

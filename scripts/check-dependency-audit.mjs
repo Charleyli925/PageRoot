@@ -2,9 +2,13 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  evaluatePackagedSourceRuntimeClosure,
+  managedRuntimeModules,
+} from "./packaged-runtime-closure.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -44,34 +48,6 @@ export function evaluateAuditReport(report, {
     expired,
     passed: unexpected.length === 0 && expired.length === 0,
   });
-}
-
-function runtimeResourcePath(value, {
-  platform = process.platform,
-  arch = process.arch,
-} = {}) {
-  return String(value || "")
-    .replaceAll("${platform}", platform)
-    .replaceAll("${arch}", arch);
-}
-
-function managedRuntimeModules(packageJson, options) {
-  const modules = new Set();
-  for (const resource of packageJson?.build?.extraResources || []) {
-    const from = runtimeResourcePath(resource?.from, options);
-    const to = runtimeResourcePath(resource?.to, options);
-    if (
-      !from
-      || to !== from
-    ) {
-      continue;
-    }
-    const match = from.match(
-      /^node_modules\/((?:@[^/]+\/)?[^/]+)$/u,
-    );
-    if (match) modules.add(match[1]);
-  }
-  return modules;
 }
 
 export function evaluatePackagedRuntimeClosure(packageJson, packageLock, options = {}) {
@@ -200,6 +176,11 @@ function main(argv = process.argv.slice(2)) {
     packageJson,
     packageLock,
   );
+  const sourceRuntimeClosure = evaluatePackagedSourceRuntimeClosure(
+    productRoot,
+    packageJson,
+    packageLock,
+  );
   if (!runtimeClosure.passed) {
     throw new Error(
       [
@@ -209,6 +190,20 @@ function main(argv = process.argv.slice(2)) {
           && `Packaged runtime dependencies missing from extraResources: ${runtimeClosure.missingResources.join(", ")}.`,
         runtimeClosure.nestedPackages.length > 0
           && `Packaged runtime dependencies must be hoisted: ${runtimeClosure.nestedPackages.join(", ")}.`,
+      ].filter(Boolean).join("\n"),
+    );
+  }
+  if (!sourceRuntimeClosure.passed) {
+    throw new Error(
+      [
+        sourceRuntimeClosure.undeclaredDirectModules.length > 0
+          && `Packaged application imports undeclared runtime modules: ${sourceRuntimeClosure.undeclaredDirectModules.join(", ")}.`,
+        sourceRuntimeClosure.missingPackages.length > 0
+          && `Imported packaged runtime modules are missing from the lockfile: ${sourceRuntimeClosure.missingPackages.join(", ")}.`,
+        sourceRuntimeClosure.missingResources.length > 0
+          && `Imported packaged runtime modules are missing from extraResources: ${sourceRuntimeClosure.missingResources.join(", ")}.`,
+        sourceRuntimeClosure.unexpectedResources.length > 0
+          && `Packaged runtime modules are not reachable from application imports: ${sourceRuntimeClosure.unexpectedResources.join(", ")}.`,
       ].filter(Boolean).join("\n"),
     );
   }
@@ -243,7 +238,7 @@ function main(argv = process.argv.slice(2)) {
     console.log(`Dependency audit snapshot: ${destination}`);
   }
   console.log(
-    `Dependency audit policy passed; ${runtimeClosure.managedModules.length} packaged runtime module(s) form one hoisted closure and no unreviewed advisory is present.`,
+    `Dependency audit policy passed; ${sourceRuntimeClosure.directModules.length} direct application module(s) expand to ${runtimeClosure.managedModules.length} packaged runtime module(s) in one source-derived hoisted closure, with no unreviewed advisory present.`,
   );
 }
 
