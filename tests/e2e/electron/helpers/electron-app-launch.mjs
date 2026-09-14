@@ -728,7 +728,6 @@ export async function launchStemmio({
     diagnosticTimeout: diagnosticOperationTimeout,
   };
   let page = null;
-  let nativeWindow;
   try {
     page = await waitForFirstWindow(electronApp, { timeout: firstWindowTimeout });
     // A fatal render error can unmount the React root while leaving a live
@@ -749,7 +748,7 @@ export async function launchStemmio({
     await page.waitForLoadState("domcontentloaded");
     const mainRendererUrl = page.url();
     launchDiagnostics.mainRendererUrl = mainRendererUrl;
-    nativeWindow = await waitForMainBrowserWindow(electronApp, mainRendererUrl);
+    await waitForMainBrowserWindow(electronApp, mainRendererUrl);
     await page.waitForFunction(() => document.visibilityState === "visible");
     await page.evaluate(() => new Promise((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -786,7 +785,7 @@ export async function launchStemmio({
   // eventual native state instead of treating that startup race as a product
   // policy failure. This keeps visible-background strict: it must become
   // visible without acquiring system focus.
-  nativeWindow = await waitForExpectedNativeWindowState(
+  await waitForExpectedNativeWindowState(
     electronApp,
     launchDiagnostics.mainRendererUrl,
     windowMode,

@@ -57,6 +57,7 @@ test("public frozen-entry sample launches visibly without focus and reopens the 
       return { visible: window?.isVisible(), focused: window?.isFocused() };
     });
     expect(initialWindow).toEqual({ visible: true, focused: false });
+    await waitForRuntimeHandoffSettled(launched.page);
     const initialFrame = await currentEditorFrame(launched.page);
     const initialItem = initialFrame.locator(caseSelector("list-item"));
     await expect(initialItem).toHaveCount(1);
@@ -108,7 +109,7 @@ test("public frozen-entry sample launches visibly without focus and reopens the 
     await expect(activeFrame.locator(`[data-stemmio-id="${originalId}"]`)).toHaveCount(1);
     await expect(activeFrame.locator(`[data-stemmio-id="${copiedId}"]`)).toHaveCount(1);
     await clickEditHistoryMenu(launched.electronApp, launched.page, "redo");
-    persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    await expectCheckpointPersisted(launched.page, persistedRevision);
     await waitForRuntimeHandoffSettled(launched.page);
     await expectVisibleBackground();
     activeFrame = await currentEditorFrame(launched.page);
