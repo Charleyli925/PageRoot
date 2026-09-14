@@ -36,6 +36,7 @@
 | 变更文件定向 ESLint | 通过 | 0 errors；8 warnings，均为既有规则/代码风格提示 |
 | 新增合成 Electron 回归 | 通过 | 1 passed；覆盖 copy → direct comment → direct format → delete landing → direct comment |
 | 既有 Electron 定向回归 | 通过 | 14 passed；覆盖复制、删除、混合内容 Undo、跨父移动、Runtime 编辑、Native Edit rebase、Candidate commit failure 等 |
+| 收尾门禁第一轮 | 发现并修正测试契约 | `task:finish` 的 74 个 Electron 用例中 72 passed、2 failed；失败都集中在 Candidate handoff 后仍按旧元素断言选择。定向复验这 2 个用例在新提交上 2/2 passed，随后重新执行完整收尾门禁。 |
 
 关键门禁的机器可读结果位于 worktree 的 `output/test-runs/`（生成目录不提交）。
 
@@ -57,6 +58,10 @@ npm run test:real-html:electron
 - 需要先解决当前 Stemmio 身份迁移后的真实语料导入/目标冻结问题，再从同一原始字节重新生成 B 默认、C 关闭原地路径及必要的 A/D/E 组。
 
 之前遗留的 `pr1_*` H05 长会话计划在当前源码上被正确拒绝为 `FROZEN_IDENTITY_INVALID`。这是保护条件，不是测试失败后换目标的理由。该旧计划没有被改写或提交。
+
+## 门禁失败的纠偏记录
+
+第一轮 `task:finish` 没有被用重复运行来洗绿。两个失败分别是 Candidate handoff 的呈现锚点断言和慢 Runtime 场景的旧元素选择断言；实际产品行为已经把结构操作输出选择交给新副本，正是本次目标所有权修复所要求的契约。测试随后改为等待并断言操作输出的 Stable ID（呈现锚点取新的已选元素，重复副本取最后一个输出节点），没有放宽源码、焦点、结构或连续性校验。新提交上两个失败用例单独 2/2 通过，完整 `task:finish` 以该新提交重新执行。
 
 ## 目标所有权回归覆盖
 
