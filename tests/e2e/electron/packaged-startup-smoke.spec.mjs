@@ -375,7 +375,7 @@ test("packaged app creates one durable welcome project on an empty first launch"
       .toMatch(/^(?:plaintext-only|true)$/u);
     const editedIntro = "欢迎页首启验证已保存。";
     await editableIntro.fill(editedIntro);
-    await expect.poll(() => readFileSync(firstActive.sourcePath, "utf8"), {
+    await expect.poll(() => readPublishedWorkingCopy(firstActive.sourcePath, "utf8"), {
       timeout: 30_000,
     }).toContain(editedIntro);
 
@@ -402,7 +402,9 @@ test("packaged app creates one durable welcome project on an empty first launch"
       documentId: firstProjectIdentity.documentId,
       availability: "ready",
     });
-    expect(readFileSync(firstActive.sourcePath, "utf8")).toContain(editedIntro);
+    await expect.poll(() => readPublishedWorkingCopy(firstActive.sourcePath, "utf8"), {
+      timeout: 30_000,
+    }).toContain(editedIntro);
 
     const restartedEditor = restarted.getByTestId("html-canvas-editor").filter({ visible: true }).first();
     await expect(restartedEditor).toHaveAttribute("data-render-verified", "true", { timeout: 30_000 });
