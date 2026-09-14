@@ -2281,7 +2281,7 @@
       "patterns": [
         "^package(?:-lock)?\\.json$",
         "^\\.github/dependabot\\.yml$",
-        "^scripts/check-dependency-audit\\.mjs$",
+        "^scripts/(?:check-dependency-audit|packaged-runtime-closure)\\.mjs$",
         "^tests/dependency-audit-policy\\.test\\.mjs$",
         "^docs/DEPENDENCY_SECURITY\\.md$"
       ],
@@ -2326,6 +2326,7 @@
         "^desktop/after-pack\\.mjs$",
         "^desktop/renderer/index\\.html$",
         "^desktop/resources/(?:entitlements\\.mac\\.plist|icon\\.icns)$",
+        "^tests/e2e/electron/helpers/packaged-app-launch\\.mjs$",
         "^PageRoot \u7528\u6237\u58f0\u660e\u4e0e\u514d\u8d23\u58f0\u660e\\.txt$"
       ],
       "suites": [],
@@ -2337,7 +2338,7 @@
     {
       "id": "package-verifier-contract",
       "patterns": [
-        "^scripts/verify-packaged-artifact\\.mjs$"
+        "^scripts/(?:verify-packaged-artifact|packaged-runtime-closure)\\.mjs$"
       ],
       "suites": [],
       "nodeTests": [
@@ -2509,7 +2510,7 @@
     {
       "id": "packaged-runtime-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?:packaged-runtime-smoke\\.spec|packaged-startup-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config)\\.mjs$"
+        "^tests/e2e/electron/(?:packaged-runtime-smoke\\.spec|packaged-startup-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|helpers/packaged-app-launch)\\.mjs$"
       ],
       "suites": [],
       "nodeTests": []
@@ -2517,7 +2518,7 @@
     {
       "id": "electron-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?!ai-|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|real-html/).*\\.mjs$"
+        "^tests/e2e/electron/(?!ai-|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|helpers/packaged-app-launch\\.mjs|real-html/).*\\.mjs$"
       ],
       "suites": [
         "electron-editing-smoke"

@@ -106,10 +106,10 @@ electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID 
 1. 拒绝未提交的源代码，并把 commit SHA 与 Tree SHA 写入证明。
 2. 构建最新 Electron renderer。
 3. 只生成一个对应架构的 DMG，不生成 updater ZIP、blockmap 或发布元数据。
-4. 校验 `app.asar` 文件闭包、源文件、Bridge、Schema、法律资源、测试应用名、测试版本、独立 Bundle ID、架构、DMG 完整性和只读挂载内容，并确认没有私有 Codex/App Server 资源或预埋 native Codex。
+4. 从所有 PageRoot 自有打包 JavaScript 的实际导入推导生产依赖闭包，并与声明、lockfile、`extraResources`、`app.asar` 和安装包内 `node_modules` 逐项对账；任何漏包、未声明、嵌套或不可达依赖都失败。同时校验源文件、Bridge、Schema、法律资源、测试应用名、测试版本、独立 Bundle ID、架构、DMG 完整性和只读挂载内容，并确认没有私有 Codex/App Server 资源或预埋 native Codex。
 5. 要求稳定的 Developer ID Application 签名；签名凭据来自本机钥匙串或仓库 secrets，且仅读取签名证书凭据，不读取 Apple 公证、发布或遥测凭据。签名失败直接停止，不生成可安装的 ad-hoc 替代包。
 6. 关闭 Preview 的自动更新检查、下载和安装；新包继续手动安装。
-7. 使用上述新根目录启动真实 `.app`，确认首个窗口、版本、Bridge、Workbench 就绪状态和正常退出。
+7. 先把真实 `.app` 复制到仓库外、且任何父目录都不存在 `node_modules` 的临时位置，再使用上述新数据根目录启动，确认首个窗口、版本、Bridge、Workbench 就绪状态和正常退出。不得直接从源码工作树下的 `release/` 或 `output/` 启动作为安装态证据。
 8. 写入 `developer-preview.json`，包括 DMG SHA-256，并固定：
    - `kind: developer-preview`
    - `releaseEligible: false`

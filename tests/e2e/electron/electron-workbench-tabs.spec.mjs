@@ -361,14 +361,18 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
   let external = null;
   try {
     await loadedDiskFrame(first.page, projectA.sourcePath, "list-item");
+    await expect(first.page.locator('[data-testid="workbench-document-surface-cache"] iframe'))
+      .toHaveCount(0);
     await openRecentProject(first.page, projectB.sourcePath);
     const firstTabs = first.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(firstTabs).toHaveCount(2);
     await expect(firstTabs.filter({ hasText: "registry-restart-b" })).toHaveAttribute("aria-selected", "true");
     const cachedSurfaces = first.page.getByTestId("workbench-document-surface-cache")
       .locator("[data-tab-id]");
-    await expect(cachedSurfaces).toHaveCount(2, { timeout: 30_000 });
-    await expect(cachedSurfaces.locator("iframe")).toHaveCount(2);
+    // The active document keeps its source projection in the cache session,
+    // but only the inactive tab mounts a read-only display iframe.
+    await expect(cachedSurfaces).toHaveCount(1, { timeout: 30_000 });
+    await expect(cachedSurfaces.locator("iframe")).toHaveCount(1);
     await expect(cachedSurfaces.locator("iframe").first())
       .toHaveAttribute("sandbox", "allow-same-origin");
     const tabsStatePath = path.join(first.isolatedUserData, "workbench-tabs.json");
@@ -394,9 +398,10 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
     await expect(restoredTabs.filter({ hasText: "registry-restart-a" })).toHaveCount(1);
     await expect(restoredTabs.filter({ hasText: "registry-restart-b" })).toHaveCount(1);
     await expect(restoredTabs.filter({ hasText: "registry-restart-b" })).toHaveAttribute("aria-selected", "true");
-    const restoredCache = restored.page.getByTestId("workbench-document-surface-cache");
-    await expect(restoredCache.locator("[data-tab-id]")).toHaveCount(1, { timeout: 30_000 });
-    await expect(restoredCache).toHaveAttribute("data-warm-count", "1", { timeout: 30_000 });
+    // The restored active document may have a data-only warm projection, but
+    // it must not keep a hidden full-page display iframe once its Canvas is live.
+    await expect(restored.page.locator('[data-testid="workbench-document-surface-cache"] iframe'))
+      .toHaveCount(0, { timeout: 30_000 });
     const readStartupPresentation = () => restored.page.evaluate(() => ({
       projected: performance.getEntriesByName("pageroot:tab-cache:prewarmed", "mark")
         .find((entry) => entry.detail?.hot === true)?.startTime || null,
