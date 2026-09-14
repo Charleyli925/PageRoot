@@ -513,6 +513,36 @@ export async function waitForMainBrowserWindow(
   return nativeWindow;
 }
 
+async function waitForExpectedNativeWindowState(
+  electronApp,
+  rendererUrl,
+  windowMode,
+  { timeout = DEFAULT_MAIN_WINDOW_TIMEOUT } = {},
+) {
+  let latest = null;
+  const expectedVisible = windowMode !== "hidden";
+  await expect.poll(async () => {
+    latest = await electronApp.evaluate(({ BrowserWindow }, expectedRendererUrl) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => (
+        !candidate.isDestroyed()
+        && candidate.webContents.getURL() === expectedRendererUrl
+      ));
+      if (!window) return null;
+      return {
+        focused: window.isFocused(),
+        visible: window.isVisible(),
+      };
+    }, rendererUrl);
+    return Boolean(latest)
+      && latest.visible === expectedVisible
+      && (windowMode === "foreground" || latest.focused === false);
+  }, {
+    timeout,
+    message: `Stemmio ${windowMode} window did not settle to its expected visibility/focus policy. Last state: ${JSON.stringify(latest)}`,
+  }).toBe(true);
+  return latest;
+}
+
 const DEFAULT_RENDERER_MOUNT_TIMEOUT = 20_000;
 const RENDERER_MOUNT_POLL_MS = 100;
 const READINESS_POLL_MS = 250;
@@ -751,8 +781,17 @@ export async function launchStemmio({
   }
   const windowMode = explicitWindowMode || (legacyForeground ? "foreground" : "hidden");
   expect(["hidden", "visible-background", "foreground"]).toContain(windowMode);
-  expect(nativeWindow.visible).toBe(windowMode !== "hidden");
-  if (windowMode !== "foreground") expect(nativeWindow.focused).toBe(false);
+  // BrowserWindow becomes discoverable as soon as its renderer URL is known,
+  // while the ready-to-show handler may still be presenting it. Reconcile the
+  // eventual native state instead of treating that startup race as a product
+  // policy failure. This keeps visible-background strict: it must become
+  // visible without acquiring system focus.
+  nativeWindow = await waitForExpectedNativeWindowState(
+    electronApp,
+    launchDiagnostics.mainRendererUrl,
+    windowMode,
+    { timeout: firstWindowTimeout },
+  );
   return {
     electronApp,
     page,
