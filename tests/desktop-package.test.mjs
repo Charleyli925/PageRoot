@@ -66,6 +66,8 @@ const APP_FILE_ALLOWLIST = [
   "desktop/agent-login-url.mjs",
   "shared/agent-vendor-key-url.mjs",
   "shared/agent-configuration-preferences.mjs",
+  "shared/project-storage-contract.mjs",
+  "shared/product-identity.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/**/*",
@@ -209,6 +211,15 @@ const LEGAL_RESOURCE_FILES = [
   "THIRD_PARTY_NOTICES.md",
 ];
 
+// The desktop main process imports this shared contract (and its identity
+// dependency) from app.asar, while the Bridge imports the same bytes from
+// Resources/shared. Keep the deliberate dual placement explicit so a new
+// overlap still fails closed below.
+const INTENTIONAL_APP_ASAR_RESOURCE_OVERLAPS = new Set([
+  "shared/project-storage-contract.mjs",
+  "shared/product-identity.mjs",
+]);
+
 function sorted(values) {
   return [...values].sort();
 }
@@ -256,6 +267,35 @@ test("desktop package manifest owns the exact application and Bridge resource cl
     );
   }
 
+  // Every exact app.asar JavaScript entry must keep its own relative imports
+  // inside app.asar. Resource-only Bridge/shared files are checked separately
+  // below; this catches a desktop entry accidentally importing a file that is
+  // present only under Resources/shared.
+  const exactApplicationSources = packageJson.build.files.filter((entry) => (
+    typeof entry === "string"
+    && !entry.startsWith("!")
+    && !/[?*{}[\]]/u.test(entry)
+    && /\.(?:cjs|js|mjs)$/u.test(entry)
+  ));
+  for (const relativePath of exactApplicationSources) {
+    const source = await readFile(path.join(
+      path.resolve(import.meta.dirname, ".."),
+      relativePath,
+    ), "utf8");
+    for (const match of source.matchAll(
+      /\bfrom\s+["'](\.{1,2}\/[^"']+)["']/gu,
+    )) {
+      const dependency = path.posix.normalize(path.posix.join(
+        path.posix.dirname(relativePath),
+        match[1],
+      ));
+      assert.ok(
+        packageJson.build.files.includes(dependency),
+        `${relativePath} imports an app.asar file that is not packaged: ${dependency}`,
+      );
+    }
+  }
+
   const resourceTargets = packageJson.build.extraResources.map((entry) => entry.to);
   assert.deepEqual(
     sorted(resourceTargets),
@@ -283,9 +323,12 @@ test("desktop package manifest owns the exact application and Bridge resource cl
     && !/[?*{}[\]]/u.test(entry)
   ));
   assert.deepEqual(
-    exactPackagedAppTargets.filter((entry) => resourceTargets.includes(entry)),
+    exactPackagedAppTargets.filter((entry) => (
+      resourceTargets.includes(entry)
+      && !INTENTIONAL_APP_ASAR_RESOURCE_OVERLAPS.has(entry)
+    )),
     [],
-    "a path listed in both build.files and extraResources is copied only as a resource and never reaches app.asar",
+    "a path listed in both build.files and extraResources must be an explicit runtime overlap",
   );
   const packagedRuntimeTargets = new Set([
     ...resourceTargets,

@@ -69,6 +69,8 @@ export const APP_SOURCE_FILES = [
   "desktop/agent-login-url.mjs",
   "shared/agent-vendor-key-url.mjs",
   "shared/agent-configuration-preferences.mjs",
+  "shared/project-storage-contract.mjs",
+  "shared/product-identity.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/index.html",
