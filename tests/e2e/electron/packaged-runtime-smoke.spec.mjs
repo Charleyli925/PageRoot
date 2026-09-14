@@ -43,6 +43,26 @@ function packagedApplication(appPath = process.env.STEMMIO_PACKAGED_APP_PATH) {
   return { appPath, executable };
 }
 
+const STABLE_SOURCE_ID_ATTRIBUTE = / data-stemmio-id="sm1_[a-f0-9]{32}"/gu;
+
+function stripStableSourceIds(source) {
+  return Buffer.from(source.toString("utf8").replace(STABLE_SOURCE_ID_ATTRIBUTE, ""));
+}
+
+function managedIslandExpected(managedSource, replacement) {
+  const spanId = managedSource.toString("utf8").match(
+    /<span title='single-quoted' data-order-b="2" data-order-a='1' data-stemmio-id="(sm1_[a-f0-9]{32})">SOURCE_FIDELITY_TOKEN_001<\/span>/u,
+  )?.[1];
+  if (!spanId) {
+    throw new Error("The identified source-fidelity span is missing from the managed Working Copy.");
+  }
+  return replaceEditableIslandBytes(
+    managedSource,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1' data-stemmio-id="${spanId}">${replacement}</span>`,
+  );
+}
+
 function seedActiveDiskProject(isolatedUserData, sourcePath) {
   writeFileSync(
     path.join(isolatedUserData, "html-projects.json"),
@@ -161,11 +181,6 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "PackagedRuntime_OK_源页";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceEditableIslandBytes(
-    original,
-    "source-fidelity",
-    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
-  );
   writeFileSync(sourcePathAlias, original);
   const externalSourcePath = realpathSync(sourcePathAlias);
   seedActiveDiskProject(isolatedUserData, externalSourcePath);
@@ -195,7 +210,17 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     )?.sourcePath || "");
     expect(sourcePath).not.toBe(externalSourcePath);
     expect(readFileSync(externalSourcePath)).toEqual(original);
-    expect(readFileSync(sourcePath)).toEqual(original);
+    // The managed Working Copy is authoritative and carries the documented `sm1_`
+    // persistent source-element identities (ADR 0075). The original file above stays
+    // byte-exact; prove the managed copy differs from it only by those identities.
+    const importedManagedSource = readFileSync(sourcePath);
+    const managedSourceIds = [...importedManagedSource.toString("utf8").matchAll(
+      / data-stemmio-id="(sm1_[a-f0-9]{32})"/gu,
+    )].map((match) => match[1]);
+    expect(managedSourceIds.length).toBeGreaterThan(0);
+    expect(new Set(managedSourceIds).size).toBe(managedSourceIds.length);
+    expect(stripStableSourceIds(importedManagedSource)).toEqual(original);
+    const expected = managedIslandExpected(importedManagedSource, replacement);
     await expect(page.locator("main.workbench"))
       .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
     let frame = await currentEditorFrame(page);
