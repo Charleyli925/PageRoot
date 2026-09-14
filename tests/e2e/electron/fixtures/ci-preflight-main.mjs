@@ -4,9 +4,9 @@ import {
 } from "electron";
 import path from "node:path";
 
-const isolatedUserData = process.env.PAGEROOT_ELECTRON_PREFLIGHT_USER_DATA;
+const isolatedUserData = process.env.STEMMIO_ELECTRON_PREFLIGHT_USER_DATA;
 if (!isolatedUserData || !path.isAbsolute(isolatedUserData)) {
-  throw new Error("PAGEROOT_ELECTRON_PREFLIGHT_USER_DATA must be an absolute path.");
+  throw new Error("STEMMIO_ELECTRON_PREFLIGHT_USER_DATA must be an absolute path.");
 }
 
 app.setPath("userData", isolatedUserData);

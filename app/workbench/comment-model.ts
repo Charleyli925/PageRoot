@@ -11,7 +11,7 @@ import type {
 } from "./types";
 import { isRecord } from "./record-model";
 import { canLocateTarget } from "./comment-relink-model.js";
-import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
+import { isValidStemmioElementId } from "../../shared/stemmio-element-identity.mjs";
 import { normalizeRuntimeVisualHint } from "../lib/runtime-comment-hint.js";
 import type { HtmlCanvasRuntimeVisualHint } from "../components/HtmlCanvasEditor.types";
 
@@ -84,7 +84,7 @@ export function canSaveCommentTarget(target: HtmlCanvasSelection): boolean {
   return Boolean(
     anchor
     && anchor.resolution === "exact"
-    && isValidPagerootElementId(anchor.elementId),
+    && isValidStemmioElementId(anchor.elementId),
   );
 }
 

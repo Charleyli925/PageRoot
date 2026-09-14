@@ -9,6 +9,15 @@ import {
   resolveRuntimeChannel,
   runtimeEnvironmentMarker,
 } from "../desktop/runtime-environment.mjs";
+import {
+  PRODUCT_AGENTS_DIRECTORY_NAME,
+  PRODUCT_PROJECT_RECORDS_DIRECTORY_NAME,
+  PRODUCT_PROJECTS_DIRECTORY_NAME,
+  PRODUCT_RECOVERY_JOURNALS_DIRECTORY_NAME,
+  PRODUCT_SESSION_DIRECTORY_NAME,
+  PRODUCT_PREVIEW_NAME,
+  PRODUCT_STABLE_DIRECTORY_NAME,
+} from "../shared/product-identity.mjs";
 
 const homePath = "/Users/tester";
 const appDataPath = `${homePath}/Library/Application Support`;
@@ -30,62 +39,104 @@ test("runtime environment keeps stable and preview roots separate", () => {
     documentsPath,
     logsBasePath,
   });
-  assert.equal(stable.userDataPath, `${appDataPath}/PageRoot`);
-  assert.equal(stable.sessionDataPath, stable.userDataPath);
-  assert.equal(stable.projectFilesRoot, `${documentsPath}/PageRoot/项目`);
-  assert.equal(stable.workspacePath, `${documentsPath}/PageRoot/项目记录`);
-  assert.equal(preview.userDataPath, `${appDataPath}/PageRoot Developer Preview`);
+  assert.equal(stable.userDataPath, `${appDataPath}/Stemmio`);
+  assert.equal(stable.sessionDataPath, `${stable.userDataPath}/chromium`);
+  assert.equal(stable.projectFilesRoot, `${documentsPath}/Stemmio/项目`);
+  assert.equal(stable.workspacePath, `${documentsPath}/Stemmio/项目记录`);
+  assert.equal(preview.userDataPath, `${appDataPath}/Stemmio Developer Preview`);
   assert.equal(preview.sessionDataPath, `${preview.userDataPath}/chromium`);
-  assert.equal(preview.projectFilesRoot, `${documentsPath}/PageRoot Developer Preview/项目`);
-  assert.equal(preview.workspacePath, `${documentsPath}/PageRoot Developer Preview/项目记录`);
+  assert.equal(preview.projectFilesRoot, `${documentsPath}/Stemmio Developer Preview/项目`);
+  assert.equal(preview.workspacePath, `${documentsPath}/Stemmio Developer Preview/项目记录`);
   assert.equal(preview.agentsRoot, `${preview.userDataPath}/agents`);
   assert.equal(preview.recoveryJournalPath, `${preview.userDataPath}/recovery-journals-v1`);
-  assert.equal(preview.logsPath, `${logsBasePath}/PageRoot Developer Preview`);
+  assert.equal(preview.logsPath, `${logsBasePath}/Stemmio Developer Preview`);
   assert.notEqual(stable.userDataPath, preview.userDataPath);
   assert.notEqual(stable.projectFilesRoot, preview.projectFilesRoot);
 });
 
-test("stable preserves legacy project and workspace path overrides", () => {
-  const customProjectsRoot = `${homePath}/Custom PageRoot/项目`;
-  const customWorkspaceRoot = `${homePath}/Custom PageRoot/项目记录`;
+test("desktop path derivation stays aligned with the shared product contract", () => {
+  const stable = createRuntimeEnvironment({
+    channel: "stable",
+    homePath,
+    appDataPath,
+    documentsPath,
+    logsBasePath,
+  });
+  const preview = createRuntimeEnvironment({
+    channel: "preview",
+    homePath,
+    appDataPath,
+    documentsPath,
+    logsBasePath,
+  });
+  assert.equal(stable.userDataPath, `${appDataPath}/${PRODUCT_STABLE_DIRECTORY_NAME}`);
+  assert.equal(stable.sessionDataPath, `${stable.userDataPath}/${PRODUCT_SESSION_DIRECTORY_NAME}`);
+  assert.equal(stable.projectFilesRoot, `${documentsPath}/${PRODUCT_STABLE_DIRECTORY_NAME}/${PRODUCT_PROJECTS_DIRECTORY_NAME}`);
+  assert.equal(stable.workspacePath, `${documentsPath}/${PRODUCT_STABLE_DIRECTORY_NAME}/${PRODUCT_PROJECT_RECORDS_DIRECTORY_NAME}`);
+  assert.equal(stable.agentsRoot, `${stable.userDataPath}/${PRODUCT_AGENTS_DIRECTORY_NAME}`);
+  assert.equal(stable.recoveryJournalPath, `${stable.userDataPath}/${PRODUCT_RECOVERY_JOURNALS_DIRECTORY_NAME}`);
+  assert.equal(preview.applicationName, PRODUCT_PREVIEW_NAME);
+});
+
+test("stable ignores project and workspace path overrides", () => {
+  const customProjectsRoot = `${homePath}/Custom Stemmio/项目`;
+  const customWorkspaceRoot = `${homePath}/Custom Stemmio/项目记录`;
   const stable = createRuntimeEnvironment({
     channel: "stable",
     environment: {
-      HTML_AI_PROJECT_FILES_ROOT: customProjectsRoot,
-      HTML_AI_WORKSPACE: customWorkspaceRoot,
+      STEMMIO_PROJECT_FILES_ROOT: customProjectsRoot,
+      STEMMIO_WORKSPACE: customWorkspaceRoot,
     },
     homePath,
     appDataPath,
     documentsPath,
     logsBasePath,
   });
-  assert.equal(stable.projectFilesRoot, customProjectsRoot);
-  assert.equal(stable.workspacePath, customWorkspaceRoot);
+  assert.equal(stable.projectFilesRoot, `${documentsPath}/Stemmio/项目`);
+  assert.equal(stable.workspacePath, `${documentsPath}/Stemmio/项目记录`);
+});
+
+test("source accepts only explicit Stemmio roots", () => {
+  const customProjectsRoot = `${homePath}/Custom Stemmio/项目`;
+  const customWorkspaceRoot = `${homePath}/Custom Stemmio/项目记录`;
+  const source = createRuntimeEnvironment({
+    channel: "source",
+    environment: {
+      STEMMIO_PROJECT_FILES_ROOT: customProjectsRoot,
+      STEMMIO_WORKSPACE: customWorkspaceRoot,
+    },
+    homePath,
+    appDataPath,
+    documentsPath,
+    logsBasePath,
+  });
+  assert.equal(source.projectFilesRoot, customProjectsRoot);
+  assert.equal(source.workspacePath, customWorkspaceRoot);
 });
 
 test("preview ignores stable project and workspace path overrides", () => {
   const preview = createRuntimeEnvironment({
     channel: "preview",
     environment: {
-      HTML_AI_PROJECT_FILES_ROOT: `${homePath}/PageRoot/项目`,
-      HTML_AI_WORKSPACE: `${homePath}/PageRoot/项目记录`,
+      STEMMIO_PROJECT_FILES_ROOT: `${homePath}/Stemmio/项目`,
+      STEMMIO_WORKSPACE: `${homePath}/Stemmio/项目记录`,
     },
     homePath,
     appDataPath,
     documentsPath,
     logsBasePath,
   });
-  assert.equal(preview.projectFilesRoot, `${documentsPath}/PageRoot Developer Preview/项目`);
-  assert.equal(preview.workspacePath, `${documentsPath}/PageRoot Developer Preview/项目记录`);
+  assert.equal(preview.projectFilesRoot, `${documentsPath}/Stemmio Developer Preview/项目`);
+  assert.equal(preview.workspacePath, `${documentsPath}/Stemmio Developer Preview/项目记录`);
 });
 
 test("E2E runtime roots stay under the explicitly isolated test directory", () => {
-  const isolatedRoot = "/private/tmp/pageroot-native-e2e-example";
+  const isolatedRoot = "/private/tmp/stemmio-native-e2e-example";
   const environment = createRuntimeEnvironment({
     channel: "e2e",
     environment: {
-      HTML_AI_PROJECT_FILES_ROOT: `${isolatedRoot}/project-files`,
-      HTML_AI_WORKSPACE: `${isolatedRoot}/workspace`,
+      STEMMIO_PROJECT_FILES_ROOT: `${isolatedRoot}/project-files`,
+      STEMMIO_WORKSPACE: `${isolatedRoot}/workspace`,
     },
     e2eUserDataPath: isolatedRoot,
     homePath,
@@ -100,7 +151,7 @@ test("E2E runtime roots stay under the explicitly isolated test directory", () =
   assert.throws(
     () => createRuntimeEnvironment({
       channel: "e2e",
-      environment: { HTML_AI_WORKSPACE: `${homePath}/Documents/PageRoot/项目记录` },
+      environment: { STEMMIO_WORKSPACE: `${homePath}/Documents/Stemmio/项目记录` },
       e2eUserDataPath: isolatedRoot,
     }),
     (error) => error instanceof RuntimeEnvironmentError
@@ -115,10 +166,10 @@ test("packaged channel is read from an explicit marker and missing marker fails 
   });
   assert.equal(
     resolveRuntimeChannel({
-      resourcesPath: "/Applications/PageRoot Developer Preview.app/Contents/Resources",
+      resourcesPath: "/Applications/Stemmio Developer Preview.app/Contents/Resources",
       defaultApp: false,
       readFile: (filePath) => {
-        assert.equal(filePath, `/Applications/PageRoot Developer Preview.app/Contents/Resources/${RUNTIME_ENVIRONMENT_FILE_NAME}`);
+        assert.equal(filePath, `/Applications/Stemmio Developer Preview.app/Contents/Resources/${RUNTIME_ENVIRONMENT_FILE_NAME}`);
         return JSON.stringify({ schemaVersion: 1, channel: "preview" });
       },
     }),
@@ -126,7 +177,7 @@ test("packaged channel is read from an explicit marker and missing marker fails 
   );
   assert.equal(
     resolveRuntimeChannel({
-      environment: { PAGEROOT_RUNTIME_CHANNEL: "e2e" },
+      environment: { STEMMIO_RUNTIME_CHANNEL: "e2e" },
       resourcesPath: "/unused",
       defaultApp: false,
     }),
@@ -134,8 +185,8 @@ test("packaged channel is read from an explicit marker and missing marker fails 
   );
   assert.equal(
     resolveRuntimeChannel({
-      environment: { PAGEROOT_RUNTIME_CHANNEL: "stable" },
-      resourcesPath: "/Applications/PageRoot Developer Preview.app/Contents/Resources",
+      environment: { STEMMIO_RUNTIME_CHANNEL: "stable" },
+      resourcesPath: "/Applications/Stemmio Developer Preview.app/Contents/Resources",
       defaultApp: false,
       allowEnvironmentOverride: false,
       readFile: () => JSON.stringify({ schemaVersion: 1, channel: "preview" }),
@@ -158,4 +209,32 @@ test("packaged channel is read from an explicit marker and missing marker fails 
     (error) => error instanceof RuntimeEnvironmentError
       && error.code === "RUNTIME_CHANNEL_MARKER_INVALID",
   );
+});
+
+test("legacy PageRoot channel variables cannot redirect a Stemmio runtime", () => {
+  assert.throws(
+    () => resolveRuntimeChannel({
+      environment: { PAGEROOT_RUNTIME_CHANNEL: "e2e" },
+      resourcesPath: "/missing/resources",
+      defaultApp: false,
+      readFile: () => {
+        throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      },
+    }),
+    (error) => error instanceof RuntimeEnvironmentError
+      && error.code === "RUNTIME_CHANNEL_MARKER_MISSING",
+  );
+  const stable = createRuntimeEnvironment({
+    channel: "stable",
+    environment: {
+      PAGEROOT_PROJECT_FILES_ROOT: `${homePath}/old-projects`,
+      PAGEROOT_WORKSPACE: `${homePath}/old-workspace`,
+    },
+    homePath,
+    appDataPath,
+    documentsPath,
+    logsBasePath,
+  });
+  assert.equal(stable.projectFilesRoot, `${documentsPath}/Stemmio/项目`);
+  assert.equal(stable.workspacePath, `${documentsPath}/Stemmio/项目记录`);
 });

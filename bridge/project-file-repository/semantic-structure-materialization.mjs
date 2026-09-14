@@ -35,9 +35,9 @@ function structureElements(inspection) {
       ? inspection.elements[element.parentElementIndex]
       : null;
     return {
-      elementId: element.pagerootId,
+      elementId: element.stemmioId,
       tagName: element.tagName,
-      parentElementId: parent?.pagerootId ?? null,
+      parentElementId: parent?.stemmioId ?? null,
       startOffset: element.startOffset,
       endOffset: element.sourceEndOffset,
       contentStartOffset: element.contentStartOffset,

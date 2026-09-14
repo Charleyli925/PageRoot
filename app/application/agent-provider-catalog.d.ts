@@ -90,7 +90,7 @@ export type AgentCatalogSnapshot = Readonly<{
   preflightBySelection: Readonly<Record<string, AgentPreflight>>;
 }>;
 
-export const PAGEROOT_AGENT_PROVIDER: AgentProviderDescriptor;
+export const STEMMIO_AGENT_PROVIDER: AgentProviderDescriptor;
 export const QODER_AGENT_PROVIDER: AgentProviderDescriptor;
 export const CODEX_AGENT_PROVIDER: AgentProviderDescriptor;
 export function defaultAgentProviders(): readonly AgentProviderDescriptor[];

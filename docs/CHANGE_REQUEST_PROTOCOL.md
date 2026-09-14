@@ -1,4 +1,4 @@
-# PageRoot Change Request 协议
+# Stemmio Change Request 协议
 
 - 协议主版本：3
 - 状态：v3 历史执行合同；不是 v4 Project 打开或迁移合同
@@ -7,7 +7,7 @@
 - Schema 入口：[schemas](../schemas)
 - 代表性样本：[fixtures/v3](../fixtures/v3)
 
-本协议规定 PageRoot 与内部 AI 通过本地可见文件夹交接时的身份、目录、冻结、完成、校验、事务和恢复规则。
+本协议规定 Stemmio 与内部 AI 通过本地可见文件夹交接时的身份、目录、冻结、完成、校验、事务和恢复规则。
 
 本文件保留 v3 历史 Request 的执行合同。桌面打开路径以
 [版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md) 和 v4 Schema 为准：
@@ -114,11 +114,11 @@ v4 独立工作稿迁移由 Repository 在真实活动稿上完成并保全其�
 
 - 每个项目拥有独立目录、runtime state、事务、Version 和 Request。
 - 完整 `projectId` 只作为历史 v3 协议身份；registry 通过不可变
-  `storageDirectoryName` 定位其历史可读目录。仅完整且身份可验证的 PageRoot
+  `storageDirectoryName` 定位其历史可读目录。仅完整且身份可验证的 Stemmio
   0.9.0 v3 记录可由历史适配器在原目录补写
   `storageDirectoryName=projectId`；该适配器不是 v4 Project 打开路径的一部分，
   v1/v2、记录不完整或身份不一致的旧目录不迁移。
-- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；新项目首次打开时默认创建包含“项目目标、目标受众、内容与事实规则、视觉与表达、AI 修改边界”五段的简洁 Markdown 模板，用户也可以清空后按需填写。项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把任务开始时已持久化的规则冻结到 `input/PROJECT.md`；PageRoot 通用边界只写在 `AI_RULES.md`，不预填到项目规则中。
+- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；新项目首次打开时默认创建包含“项目目标、目标受众、内容与事实规则、视觉与表达、AI 修改边界”五段的简洁 Markdown 模板，用户也可以清空后按需填写。项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把任务开始时已持久化的规则冻结到 `input/PROJECT.md`；Stemmio 通用边界只写在 `AI_RULES.md`，不预填到项目规则中。
 - `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
 - `working/<原用户文件名>-V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可审阅/打开”状态；审阅只读不会切换项目当前源，只有用户点击“直接打开”或在审阅页确认“打开 AI 修改后”才成为项目当前源。旧工作文件永不原地改写。
 - input manifest、冻结 annotation 等可移植索引只使用项目或 Request 内相对路径。
@@ -169,7 +169,7 @@ v4 独立工作稿迁移由 Repository 在真实活动稿上完成并保全其�
 
 ### 3.3 AI 输出文件命名
 
-PageRoot 在冻结 Request 时一次性计算唯一输出名，内部 AI 只接收并写入
+Stemmio 在冻结 Request 时一次性计算唯一输出名，内部 AI 只接收并写入
 Prompt 指定的精确路径，不能自行计算、递增或改名：
 
 ```text
@@ -312,7 +312,7 @@ offset 统一按 JavaScript UTF-16 code unit 计算。Request 只能把 `exact` 
 
 冻结：
 
-- `outputRelativePath=output/<原用户文件名>-V1.x.html`，其精确值由 PageRoot 按 3.3 写入；仅已冻结的旧 Request 保留 `output/index.html`
+- `outputRelativePath=output/<原用户文件名>-V1.x.html`，其精确值由 Stemmio 按 3.3 写入；仅已冻结的旧 Request 保留 `output/index.html`
 - `completionRelativePath=completion.json`
 - `completionSchema=completion.v1.schema.json`
 - 受支持 finalizer 版本

@@ -40,19 +40,19 @@ const channels = Object.freeze({
   listRecoveryJournals: "html-projects:list-recovery-journals",
 });
 const appChannels = Object.freeze({
-  prepareClose: "html-app:prepare-close",
-  closeResult: "html-app:close-result",
-  closeAborted: "html-app:close-aborted",
-  aboutRequested: "html-app:about-requested",
-  workspaceUnavailable: "html-app:workspace-unavailable",
-  workspaceRecoveryReady: "html-app:workspace-recovery-ready",
-  externalOpenRequested: "html-app:external-open-requested",
-  externalOpenReady: "html-app:external-open-ready",
-  externalOpenFailed: "html-app:external-open-failed",
-  externalOpenFailedReady: "html-app:external-open-failed-ready",
-  bridgeReady: "html-app:bridge-ready",
-  relaunch: "html-app:relaunch",
-  openUserNotice: "html-app:open-user-notice",
+  prepareClose: "stemmio-app:prepare-close",
+  closeResult: "stemmio-app:close-result",
+  closeAborted: "stemmio-app:close-aborted",
+  aboutRequested: "stemmio-app:about-requested",
+  workspaceUnavailable: "stemmio-app:workspace-unavailable",
+  workspaceRecoveryReady: "stemmio-app:workspace-recovery-ready",
+  externalOpenRequested: "stemmio-app:external-open-requested",
+  externalOpenReady: "stemmio-app:external-open-ready",
+  externalOpenFailed: "stemmio-app:external-open-failed",
+  externalOpenFailedReady: "stemmio-app:external-open-failed-ready",
+  bridgeReady: "stemmio-app:bridge-ready",
+  relaunch: "stemmio-app:relaunch",
+  openUserNotice: "stemmio-app:open-user-notice",
 });
 const integrationChannels = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
@@ -95,7 +95,7 @@ const editChannels = Object.freeze({
   historyRequested: "html-edit:history-requested",
   nativeHistory: "html-edit:native-history",
 });
-const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
+const PROJECT_IPC_PROTOCOL = "stemmio-project-result";
 const PROJECT_IPC_VERSION = 1;
 let bridgeConnectionWait = null;
 
@@ -476,20 +476,20 @@ const desktopRuntimeCapabilities = Object.freeze({
   interactivePreview: "independent-url",
 });
 const e2eStaticCandidateFailure = typeof process !== "undefined"
-  && process.env?.PAGEROOT_E2E === "1"
-  && process.env?.PAGEROOT_E2E_STATIC_CANDIDATE_FAILURE === "1";
+  && process.env?.STEMMIO_E2E === "1"
+  && process.env?.STEMMIO_E2E_STATIC_CANDIDATE_FAILURE === "1";
 const e2eRuntimeCommitHooks = typeof process !== "undefined"
-  && process.env?.PAGEROOT_E2E === "1"
-  && process.env?.PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS === "1";
+  && process.env?.STEMMIO_E2E === "1"
+  && process.env?.STEMMIO_E2E_RUNTIME_COMMIT_HOOKS === "1";
 const e2eCanvasCapabilityProbe = typeof process !== "undefined"
-  && process.env?.PAGEROOT_E2E === "1";
+  && process.env?.STEMMIO_E2E === "1";
 const runtimeConfig = Object.freeze({
   bridgePort,
   bridgeAuthToken,
   appVersion,
   betaAgentModelsEnabled: typeof process !== "undefined"
-    && (process.env?.PAGEROOT_ENABLE_BETA_AGENT_MODELS === "1"
-      || process.env?.PAGEROOT_E2E === "1"),
+    && (process.env?.STEMMIO_ENABLE_BETA_AGENT_MODELS === "1"
+      || process.env?.STEMMIO_E2E === "1"),
   getBridgeConnection: () => bridgeConnection,
   onBridgeReady: (listener) => {
     if (typeof listener !== "function") throw new TypeError("listener must be a function.");
@@ -761,12 +761,12 @@ function validWorkspacePreferencePatch(value) {
       return next && typeof next === "object" && !Array.isArray(next)
         && Object.keys(next).length <= 128
         && Object.entries(next).every(([id, provider]) => (
-          /^doc_[a-f0-9]{16,64}$/u.test(id) && ["pageroot", "qoder", "codex"].includes(provider)
+          /^doc_[a-f0-9]{16,64}$/u.test(id) && ["stemmio", "qoder", "codex"].includes(provider)
         ));
     }
     if (key === "agentConfigurations") {
       return next && typeof next === "object" && !Array.isArray(next)
-        && Object.entries(next).every(([id, entry]) => ["pageroot", "qoder", "codex"].includes(id)
+        && Object.entries(next).every(([id, entry]) => ["stemmio", "qoder", "codex"].includes(id)
           && entry && typeof entry === "object" && !Array.isArray(entry)
           && Object.keys(entry).every((name) => name === "modelId" || name === "reasoning")
           && (entry.modelId === null || (typeof entry.modelId === "string"
@@ -780,11 +780,11 @@ function validWorkspacePreferencePatch(value) {
     }
     if (key === "motion") return next === "system" || next === "reduced";
     if (key === "defaultAgentProviderId") {
-      return next === "pageroot" || next === "qoder" || next === "codex";
+      return next === "stemmio" || next === "qoder" || next === "codex";
     }
     if (key === "disabledAgentProviderIds") {
       return Array.isArray(next) && next.every((id) => (
-        id === "pageroot" || id === "qoder" || id === "codex"
+        id === "stemmio" || id === "qoder" || id === "codex"
       ));
     }
     if (key === "sidebarWidth") {
@@ -842,14 +842,14 @@ const editApi = Object.freeze({
   },
 });
 
-contextBridge.exposeInMainWorld("htmlAIProjects", projectsApi);
-contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
-contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
-contextBridge.exposeInMainWorld("htmlAIPreview", previewApi);
-contextBridge.exposeInMainWorld("htmlAIEditRuntime", editRuntimeApi);
-contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
-contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
-contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);
-contextBridge.exposeInMainWorld("htmlAIUiPreferences", uiPreferencesApi);
-contextBridge.exposeInMainWorld("htmlAIWorkbenchTabs", workbenchTabsApi);
-contextBridge.exposeInMainWorld("htmlAIEdit", editApi);
+contextBridge.exposeInMainWorld("stemmioProjects", projectsApi);
+contextBridge.exposeInMainWorld("stemmioIntegrations", integrationsApi);
+contextBridge.exposeInMainWorld("stemmioUpdates", updatesApi);
+contextBridge.exposeInMainWorld("stemmioPreview", previewApi);
+contextBridge.exposeInMainWorld("stemmioEditRuntime", editRuntimeApi);
+contextBridge.exposeInMainWorld("stemmioRuntime", runtimeConfig);
+contextBridge.exposeInMainWorld("stemmioAppLifecycle", appLifecycleApi);
+contextBridge.exposeInMainWorld("stemmioUsage", usageApi);
+contextBridge.exposeInMainWorld("stemmioUiPreferences", uiPreferencesApi);
+contextBridge.exposeInMainWorld("stemmioWorkbenchTabs", workbenchTabsApi);
+contextBridge.exposeInMainWorld("stemmioEdit", editApi);

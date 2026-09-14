@@ -15,7 +15,7 @@ export function bindMixedSource(baseline, current, text, structure) {
   const locate = bytes => {
     const source = bytes.toString(), found = [];
     const visit = node => {
-      if (node.attrs?.some(a => a.name === "data-pageroot-id" && a.value === text.selectedId)) found.push(node);
+      if (node.attrs?.some(a => a.name === "data-stemmio-id" && a.value === text.selectedId)) found.push(node);
       for (const child of node.childNodes || []) visit(child);
       if (node.content) visit(node.content);
     };
@@ -218,7 +218,7 @@ export async function executeFrozenMixed({ plan, page, editor, readSource, readC
     await record(cycle.control, "create-comment", async () => {
       const before = await readSource(), text = `PRCOMMENT_${markerId}`;
       const selected = frame.locator("[data-html-canvas-selected]");
-      await expect(selected).toHaveCount(1); await expect(selected).toHaveAttribute("data-pageroot-id", target.selectedId);
+      await expect(selected).toHaveCount(1); await expect(selected).toHaveAttribute("data-stemmio-id", target.selectedId);
       const button = editor.getByRole("button", { name: /留评论/u });
       await expect(button).toHaveCount(1); await button.click({ timeout: 2_000 });
       const composer = page.getByRole("region", { name: "添加评论" });
@@ -283,7 +283,7 @@ export async function finishFrozenMixed({ plan, page, editor, readSource, readCo
     requireFact(await target.evaluate(element => element.localName) === plan.targets[0].selectedTag, "FROZEN_IDENTITY_TAG_MISMATCH");
     for (let cycle = 1; cycle <= plan.cycles; cycle += 1)
       await expect(target).toContainText(`PRCORE_${plan.fileId}_C${cycle}_RESUME`);
-    for (const copyId of report.copyIds) await expect(frame.locator(`[data-pageroot-id="${copyId}"]`)).toHaveCount(0);
+    for (const copyId of report.copyIds) await expect(frame.locator(`[data-stemmio-id="${copyId}"]`)).toHaveCount(0);
     const source = verifyFrozenBytes(await readSource(), expectedFinal, "REOPEN_SOURCE_CHANGED");
     return { source, comments: await verifyMixedComments(readComments, report.comments) };
   });

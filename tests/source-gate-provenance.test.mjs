@@ -71,7 +71,7 @@ function evidence(overrides = {}) {
 test("source gate artifact name binds the exact Git tree and package version", () => {
   assert.equal(
     artifactName,
-    `PageRoot-source-gate-${treeSha}-${packageVersion}`,
+    `Stemmio-source-gate-${treeSha}-${packageVersion}`,
   );
   assert.throws(() => sourceGateArtifactName("short", packageVersion), /40-character Git SHA/u);
 });
@@ -187,7 +187,7 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
     readFile(path.join(productRoot, "package.json"), "utf8"),
-    readFile(path.join(productRoot, ".github/actions/setup-pageroot-npm/action.yml"), "utf8"),
+    readFile(path.join(productRoot, ".github/actions/setup-stemmio-npm/action.yml"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
   const prFeedbackPlan = workflowJob(ci, "pr-feedback-plan");
@@ -215,7 +215,7 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(ci, /name: pr-feedback/u);
   assert.match(prFeedbackPlan, /--for draft/u);
   assert.match(prFeedbackPlan, /planned_selection/u);
-  assert.doesNotMatch(prFeedbackPlan, /setup-pageroot-npm/u);
+  assert.doesNotMatch(prFeedbackPlan, /setup-stemmio-npm/u);
   assert.match(prFeedbackLinux, /github\.event\.pull_request\.draft == true/u);
   assert.match(prFeedbackLinux, /needs: pr-feedback-plan/u);
   assert.match(prFeedbackLinux, /npm run gate:draft -- --base "\$PR_BASE_SHA" --runtime node,browser[\s\S]*--planned-selection/u);
@@ -248,12 +248,12 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.doesNotMatch(sourceBuild, /Restore Electron download cache/u);
   assert.match(sourceBuild, /npm run ci:source-build/u);
   assert.doesNotMatch(sourceBuild, /ci:source-build:prepared/u);
-  assert.match(sourceBuild, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.match(sourceBuild, /name: Stemmio-web-build-\$\{\{ github\.run_id \}\}/u);
   assert.match(sourceBuild, /retention-days: 30/u);
   assert.match(sourceBuild, /overwrite: true/u);
-  assert.doesNotMatch(sourceBuild, /PageRoot-web-build-[^\n]*run_attempt/u);
-  assert.match(sourceNode, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
-  assert.match(sourceBrowser, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.doesNotMatch(sourceBuild, /Stemmio-web-build-[^\n]*run_attempt/u);
+  assert.match(sourceNode, /name: Stemmio-web-build-\$\{\{ github\.run_id \}\}/u);
+  assert.match(sourceBrowser, /name: Stemmio-web-build-\$\{\{ github\.run_id \}\}/u);
   assert.match(sourceBrowser, /skip-electron: "true"/u);
   assert.doesNotMatch(sourceBrowser, /Restore Electron download cache/u);
   assert.match(
@@ -271,7 +271,7 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(releaseGate, /--verify-snapshot output\/ci-evidence\/dependency-audit\.json/u);
   assert.doesNotMatch(releaseGate, /npm run audit:dependencies/u);
   assert.match(releaseGate, /Download product flaky evidence/u);
-  assert.match(releaseGate, /PageRoot-\*-evidence-\$\{\{ github\.run_id \}\}-\*/u);
+  assert.match(releaseGate, /Stemmio-\*-evidence-\$\{\{ github\.run_id \}\}-\*/u);
   assert.match(releaseGate, /select-source-gate-evidence\.mjs/u);
   assert.match(releaseGate, /path: output\/ci-evidence-attempts/u);
   assert.match(releaseGate, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/u);
@@ -310,11 +310,11 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   }
   assert.match(
     electronNative,
-    /name: PageRoot-electron-native-\$\{\{ matrix\.label \}\}-diagnostics-/u,
+    /name: Stemmio-electron-native-\$\{\{ matrix\.label \}\}-diagnostics-/u,
   );
   assert.match(
     electronNative,
-    /name: PageRoot-electron-native-\$\{\{ matrix\.label \}\}-evidence-/u,
+    /name: Stemmio-electron-native-\$\{\{ matrix\.label \}\}-evidence-/u,
   );
   assert.match(electronNative, /Upload native Electron diagnostics and retry evidence[\s\S]{0,200}if: failure\(\) \|\| cancelled\(\)/u);
   assert.match(electronAi, /playwright-flaky-summary\.mjs/u);
@@ -335,9 +335,9 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   // commit's run.
   assert.match(
     ci,
-    /format\('pageroot-pr-\{0\}', github\.event\.pull_request\.number \|\| github\.ref\)/u,
+    /format\('stemmio-pr-\{0\}', github\.event\.pull_request\.number \|\| github\.ref\)/u,
   );
-  assert.match(ci, /format\('pageroot-main-\{0\}', github\.sha\)/u);
+  assert.match(ci, /format\('stemmio-main-\{0\}', github\.sha\)/u);
   assert.match(ci, /cancel-in-progress: \$\{\{ github\.event_name != 'push' \}\}/u);
   assert.equal(
     packageJson.scripts["ci:source-build"],
@@ -360,8 +360,8 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
 
   assert.match(candidate, /source-gate-provenance\.mjs verify/u);
   assert.match(candidate, /gate:candidate-app:auto/u);
-  assert.match(candidate, /PAGEROOT_SOURCE_GATE_TRUSTED/u);
-  assert.match(candidate, /PAGEROOT_SOURCE_GATE_TREE/u);
+  assert.match(candidate, /STEMMIO_SOURCE_GATE_TRUSTED/u);
+  assert.match(candidate, /STEMMIO_SOURCE_GATE_TREE/u);
   assert.match(candidate, /release-app-checkpoint\.mjs create/u);
   assert.match(candidate, /release-app-checkpoint\.mjs restore/u);
   assert.match(candidate, /--profile candidate-artifacts/u);

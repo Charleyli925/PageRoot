@@ -22,8 +22,8 @@ concurrency:
   # later merge must never cancel an earlier commit's main-integrity run.
   group: >-
     ${{ github.event_name == 'push'
-    && format('pageroot-main-{0}', github.sha)
-    || format('pageroot-pr-{0}', github.event.pull_request.number || github.ref) }}
+    && format('stemmio-main-{0}', github.sha)
+    || format('stemmio-pr-{0}', github.event.pull_request.number || github.ref) }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
         timeout-minutes: 5
         with:
           node-version: 22.13.0
-      - name: Enforce PageRoot branch naming
+      - name: Enforce Stemmio branch naming
         timeout-minutes: 2
         env:
           BRANCH_NAME: ${{ github.head_ref }}
@@ -77,7 +77,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Setup npm without Electron
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 15
         with:
           skip-electron: "true"
@@ -111,7 +111,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-pr-feedback-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-pr-feedback-linux-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/ci-evidence
             output/test-runs
@@ -122,7 +122,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-pr-feedback-linux-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-pr-feedback-linux-playwright-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/playwright
           if-no-files-found: warn
           retention-days: 14
@@ -151,7 +151,7 @@ jobs:
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - name: Setup npm with Electron
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 15
         with:
           skip-electron: "false"
@@ -173,7 +173,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-pr-feedback-desktop-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-pr-feedback-desktop-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/ci-evidence
             output/test-runs
@@ -185,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-pr-feedback-desktop-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-pr-feedback-desktop-playwright-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/playwright
           if-no-files-found: warn
           retention-days: 14
@@ -256,7 +256,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-review-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-review-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/review-policy/review-policy.json
           if-no-files-found: warn
           retention-days: 30
@@ -275,7 +275,7 @@ jobs:
         timeout-minutes: 5
         with:
           node-version: 22.13.0
-      - name: Enforce PageRoot branch naming
+      - name: Enforce Stemmio branch naming
         timeout-minutes: 2
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
@@ -350,7 +350,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 5
         with:
-          name: PageRoot-dependency-audit-${{ github.run_id }}
+          name: Stemmio-dependency-audit-${{ github.run_id }}
           path: output/ci-evidence/dependency-audit.json
           if-no-files-found: error
           retention-days: 30
@@ -368,7 +368,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
       - name: Populate Linux npm cache without Electron
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 15
         with:
           skip-electron: "true"
@@ -395,7 +395,7 @@ jobs:
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - name: Populate macOS npm cache
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 15
         with:
           skip-electron: "false"
@@ -417,7 +417,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Restore Linux npm cache without Electron
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 10
         with:
           skip-electron: "true"
@@ -434,7 +434,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-web-build-${{ github.run_id }}
+          name: Stemmio-web-build-${{ github.run_id }}
           path: |
             dist
             package.json
@@ -446,7 +446,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-source-build-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-source-build-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
           if-no-files-found: warn
           retention-days: 30
@@ -467,7 +467,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Restore Linux npm cache without Electron
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 10
         with:
           skip-electron: "true"
@@ -476,7 +476,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-web-build-${{ github.run_id }}
+          name: Stemmio-web-build-${{ github.run_id }}
           path: .
       - name: Run full Node suite
         timeout-minutes: 15
@@ -491,7 +491,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-source-node-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-source-node-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
           if-no-files-found: warn
           retention-days: 30
@@ -524,7 +524,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Restore Linux npm cache without Electron
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 10
         with:
           skip-electron: "true"
@@ -569,7 +569,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-web-build-${{ github.run_id }}
+          name: Stemmio-web-build-${{ github.run_id }}
           path: .
       - name: Run ${{ matrix.label }}
         timeout-minutes: 15
@@ -594,7 +594,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-browser-${{ matrix.label }}-diagnostics-${{ github.run_attempt }}
+          name: Stemmio-browser-${{ matrix.label }}-diagnostics-${{ github.run_attempt }}
           path: output/playwright
           if-no-files-found: warn
           retention-days: 7
@@ -603,7 +603,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-browser-${{ matrix.label }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-browser-${{ matrix.label }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
           if-no-files-found: warn
           retention-days: 30
@@ -648,7 +648,7 @@ jobs:
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - name: Restore macOS npm cache
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 10
         with:
           skip-electron: "false"
@@ -692,7 +692,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-electron-native-${{ matrix.label }}-diagnostics-${{ github.run_attempt }}
+          name: Stemmio-electron-native-${{ matrix.label }}-diagnostics-${{ github.run_attempt }}
           path: output/playwright
           if-no-files-found: warn
           retention-days: 7
@@ -701,7 +701,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-electron-native-${{ matrix.label }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-electron-native-${{ matrix.label }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
           if-no-files-found: warn
           retention-days: 30
@@ -730,7 +730,7 @@ jobs:
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - name: Restore macOS npm cache
-        uses: ./.github/actions/setup-pageroot-npm
+        uses: ./.github/actions/setup-stemmio-npm
         timeout-minutes: 10
         with:
           skip-electron: "false"
@@ -771,7 +771,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-electron-ai-diagnostics-${{ github.run_attempt }}
+          name: Stemmio-electron-ai-diagnostics-${{ github.run_attempt }}
           path: output/playwright
           if-no-files-found: warn
           retention-days: 7
@@ -780,7 +780,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-electron-ai-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-electron-ai-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/ci-evidence
             output/design-qa
@@ -863,7 +863,7 @@ jobs:
         timeout-minutes: 5
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: PageRoot-*-evidence-${{ github.run_id }}-*
+          pattern: Stemmio-*-evidence-${{ github.run_id }}-*
           merge-multiple: false
           path: output/ci-evidence-attempts
       - name: Select source-gate evidence
@@ -877,7 +877,7 @@ jobs:
         timeout-minutes: 5
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: PageRoot-dependency-audit-${{ github.run_id }}
+          name: Stemmio-dependency-audit-${{ github.run_id }}
           path: output/ci-evidence
       - name: Verify dependency and packaged-runtime baseline is unchanged
         timeout-minutes: 2

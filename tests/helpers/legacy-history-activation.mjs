@@ -6,7 +6,7 @@ import path from "node:path";
 // setup writes the old record directly; production can only replay/confirm it.
 export async function seedLegacyHistoryActivation(input) {
   const { target, versionId, operationId, expectedActiveWorkingCopyId } = input;
-  const root = path.join(target.projectRootPath, ".pageroot");
+  const root = path.join(target.projectRootPath, ".stemmio");
   const runtimePath = path.join(root, "runtime-state.json");
   const runtime = JSON.parse(await readFile(runtimePath, "utf8"));
   const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));

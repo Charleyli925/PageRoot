@@ -151,7 +151,7 @@ export function createAgentInstaller({
         generation: nextGeneration(entry.providerId),
       };
       job.promise = (async () => {
-        const staging = await mkdtemp(path.join(os.tmpdir(), `pageroot-agent-install-${entry.providerId}-`));
+        const staging = await mkdtemp(path.join(os.tmpdir(), `stemmio-agent-install-${entry.providerId}-`));
         try {
           const unpacked = path.join(staging, "unpacked");
           await mkdir(unpacked, { recursive: true, mode: 0o755 });
@@ -337,7 +337,7 @@ async function defaultValidateInstallation(command, entry) {
         expectedVersion: entry.distribution?.managedRelease?.version,
       });
     } else {
-      fail("AGENT_INSTALL_UNSUPPORTED", "This Agent cannot be installed from PageRoot.", { status: 409 });
+      fail("AGENT_INSTALL_UNSUPPORTED", "This Agent cannot be installed from Stemmio.", { status: 409 });
     }
   } catch (cause) {
     if (String(cause?.code || "").startsWith("QODER_") || String(cause?.code || "").startsWith("CODEX_")) {

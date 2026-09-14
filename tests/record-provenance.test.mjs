@@ -17,7 +17,7 @@ import {
 } from "../shared/provenance.mjs";
 
 async function userData(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-device-identity-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-device-identity-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }

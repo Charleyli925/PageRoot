@@ -18,8 +18,8 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 function elementMap(inspection) {
   return new Map(
     inspection.elements
-      .filter((element) => element.pagerootId)
-      .map((element) => [element.pagerootId, element]),
+      .filter((element) => element.stemmioId)
+      .map((element) => [element.stemmioId, element]),
   );
 }
 
@@ -36,8 +36,8 @@ function identitySlots(inspection, retainedIds) {
       return null;
     }
     const parent = inspection.elements[parentIndex];
-    const result = retainedIds.has(parent?.pagerootId)
-      ? parent.pagerootId
+    const result = retainedIds.has(parent?.stemmioId)
+      ? parent.stemmioId
       : nearestRetainedAncestorId(parentIndex);
     nearestAncestorByIndex.set(elementIndex, result);
     return result;
@@ -56,16 +56,16 @@ function identitySlots(inspection, retainedIds) {
     let retainedId = null;
     for (const sibling of siblings) {
       previousIds.set(sibling.element, retainedId);
-      if (retainedIds.has(sibling.element.pagerootId)) {
-        retainedId = sibling.element.pagerootId;
+      if (retainedIds.has(sibling.element.stemmioId)) {
+        retainedId = sibling.element.stemmioId;
       }
     }
     retainedId = null;
     for (let index = siblings.length - 1; index >= 0; index -= 1) {
       const sibling = siblings[index];
       nextIds.set(sibling.element, retainedId);
-      if (retainedIds.has(sibling.element.pagerootId)) {
-        retainedId = sibling.element.pagerootId;
+      if (retainedIds.has(sibling.element.stemmioId)) {
+        retainedId = sibling.element.stemmioId;
       }
     }
     for (const sibling of siblings) {
@@ -82,10 +82,10 @@ function identitySlots(inspection, retainedIds) {
 
 function normalizedElementSource(html, element) {
   let source = String(html).slice(element.startOffset, element.sourceEndOffset);
-  if (element.pagerootId) {
-    const escaped = element.pagerootId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  if (element.stemmioId) {
+    const escaped = element.stemmioId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
     source = source.replace(new RegExp(
-      `\\s+data-pageroot-id\\s*=\\s*(?:"${escaped}"|'${escaped}'|${escaped})(?=\\s|/?>)`,
+      `\\s+data-stemmio-id\\s*=\\s*(?:"${escaped}"|'${escaped}'|${escaped})(?=\\s|/?>)`,
       "iu",
     ), "");
   }
@@ -151,12 +151,12 @@ export function prepareCandidateSourceIdentity(baseHtml, outputHtml, options = {
 
   const baseById = elementMap(baseIdentity);
   const forgedIds = [...submittedIdentity.claimedIds].filter(
-    (pagerootId) => !baseIdentity.claimedIds.has(pagerootId),
+    (stemmioId) => !baseIdentity.claimedIds.has(stemmioId),
   );
   if (forgedIds.length > 0) {
     throw candidateIdentityError(
       "CANDIDATE_SOURCE_IDENTITY_FORGED",
-      "The Candidate claimed source identities that PageRoot did not allocate.",
+      "The Candidate claimed source identities that Stemmio did not allocate.",
       ["CANDIDATE_SOURCE_IDENTITY_FORGED"],
       { forgedIds },
     );
@@ -164,10 +164,10 @@ export function prepareCandidateSourceIdentity(baseHtml, outputHtml, options = {
 
   const retainedIds = new Set(submittedIdentity.claimedIds);
   const deletedIds = [...baseIdentity.claimedIds].filter(
-    (pagerootId) => !retainedIds.has(pagerootId),
+    (stemmioId) => !retainedIds.has(stemmioId),
   );
   if (deletedIds.length > 0 && submittedIdentity.missing.length > 0) {
-    const deletedElements = deletedIds.map((pagerootId) => baseById.get(pagerootId));
+    const deletedElements = deletedIds.map((stemmioId) => baseById.get(stemmioId));
     const baseSlots = identitySlots(baseIdentity, retainedIds);
     const submittedSlots = identitySlots(submittedIdentity, retainedIds);
     const missingSourceSignatures = uniquelyKeyed(
@@ -212,7 +212,7 @@ export function prepareCandidateSourceIdentity(baseHtml, outputHtml, options = {
           return [];
         }
         return [{
-          pagerootIds: deletedGroup.map((element) => element.pagerootId),
+          stemmioIds: deletedGroup.map((element) => element.stemmioId),
           baseTagNames: deletedGroup.map((element) => element.tagName),
           outputTagNames: missingGroup.map((element) => element.tagName),
           baseOccurrenceCount: deletedGroup.length,
@@ -231,7 +231,7 @@ export function prepareCandidateSourceIdentity(baseHtml, outputHtml, options = {
           return [];
         }
         return [{
-          pagerootIds: deletedGroup.map((element) => element.pagerootId),
+          stemmioIds: deletedGroup.map((element) => element.stemmioId),
           baseTagNames: deletedGroup.map((element) => element.tagName),
           outputTagNames: missingGroup.map((element) => element.tagName),
           baseOccurrenceCount: deletedGroup.length,
@@ -255,7 +255,7 @@ export function prepareCandidateSourceIdentity(baseHtml, outputHtml, options = {
       const matched = exact ?? sameSlot;
       return matched
         ? [{
-            pagerootId: matched.pagerootId,
+            stemmioId: matched.stemmioId,
             baseTagName: matched.tagName,
             outputTagName: element.tagName,
             evidence: exact ? "exact-source" : "stable-slot",

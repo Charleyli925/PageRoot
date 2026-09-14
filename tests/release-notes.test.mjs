@@ -162,7 +162,7 @@ test("an unrecognized publish target still publishes the readable section", () =
 });
 
 test("the CLI writes notes for the current package version by default", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pageroot-release-notes-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-release-notes-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeReleaseNotes({ productRoot, destination: path.join(directory, "notes.md") });
   const written = await readFile(path.join(directory, "notes.md"), "utf8");

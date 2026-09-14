@@ -18,11 +18,11 @@ import {
   rawStartTagAttributes,
 } from "../html-source-parser.mjs";
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
-  generatePagerootElementId,
-  isValidPagerootElementId,
-} from "../../shared/pageroot-element-identity.mjs";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
+  generateStemmioElementId,
+  isValidStemmioElementId,
+} from "../../shared/stemmio-element-identity.mjs";
 import {
   validateSourceHistoryOperationBytes,
 } from "../../shared/source-history.mjs";
@@ -110,7 +110,7 @@ export function inspectSourceElementIdentity(html) {
       );
     }
     const identityAttributes = rawStartTagAttributes(source, startTag).filter(
-      (attribute) => attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+      (attribute) => attribute.name === STEMMIO_ELEMENT_ID_ATTRIBUTE,
     );
     const endTag = token.node?.sourceCodeLocation?.endTag;
     const explicitEndTag = Number.isInteger(endTag?.startOffset)
@@ -160,7 +160,7 @@ export function inspectSourceElementIdentity(html) {
       boundarySafe,
       closingDelimiterOffset,
       identityAttributes,
-      pagerootId: identityAttributes.length === 1
+      stemmioId: identityAttributes.length === 1
         ? identityAttributes[0].rawValue
         : null,
     }];
@@ -199,37 +199,37 @@ export function inspectSourceElementIdentity(html) {
     }
     if (element.identityAttributes.length !== 1) {
       issues.push({
-        code: "PAGEROOT_ID_ATTRIBUTE_REPEATED",
+        code: "STEMMIO_ID_ATTRIBUTE_REPEATED",
         tagName: element.tagName,
         startOffset: element.startOffset,
       });
       continue;
     }
-    if (!isValidPagerootElementId(element.pagerootId)) {
+    if (!isValidStemmioElementId(element.stemmioId)) {
       issues.push({
-        code: "PAGEROOT_ID_INVALID_FORMAT",
+        code: "STEMMIO_ID_INVALID_FORMAT",
         tagName: element.tagName,
         startOffset: element.startOffset,
-        value: element.pagerootId,
+        value: element.stemmioId,
       });
       continue;
     }
-    const matching = claims.get(element.pagerootId) ?? [];
+    const matching = claims.get(element.stemmioId) ?? [];
     matching.push(element);
-    claims.set(element.pagerootId, matching);
+    claims.set(element.stemmioId, matching);
   }
-  for (const [pagerootId, matching] of claims) {
+  for (const [stemmioId, matching] of claims) {
     if (matching.length < 2) continue;
     issues.push({
-      code: "PAGEROOT_ID_DUPLICATE_VALUE",
-      pagerootId,
+      code: "STEMMIO_ID_DUPLICATE_VALUE",
+      stemmioId,
       tagNames: matching.map((element) => element.tagName),
       startOffsets: matching.map((element) => element.startOffset),
     });
   }
   return {
-    schemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
-    attributeName: PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+    schemaVersion: STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
+    attributeName: STEMMIO_ELEMENT_ID_ATTRIBUTE,
     valid: issues.length === 0,
     complete: issues.length === 0 && missing.length === 0,
     status: issues.length > 0
@@ -253,8 +253,8 @@ export function inspectSourceElementIdentity(html) {
 function identityElementMap(inspection) {
   return new Map(
     inspection.elements
-      .filter((element) => isValidPagerootElementId(element.pagerootId))
-      .map((element) => [element.pagerootId, element]),
+      .filter((element) => isValidStemmioElementId(element.stemmioId))
+      .map((element) => [element.stemmioId, element]),
   );
 }
 
@@ -273,10 +273,10 @@ export function sourceElementIdentityBindingSha256(htmlOrInspection) {
     const parent = Number.isInteger(element.parentElementIndex)
       ? inspection.elements[element.parentElementIndex]
       : null;
-    return [element.pagerootId, element.tagName, parent?.pagerootId ?? null];
+    return [element.stemmioId, element.tagName, parent?.stemmioId ?? null];
   });
   return sha256(Buffer.from(JSON.stringify({
-    schemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+    schemaVersion: STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
     elements,
   }), "utf8"));
 }
@@ -286,7 +286,7 @@ function nearestRetainedAncestorId(inspection, element, retainedIds) {
   while (Number.isInteger(parentIndex)) {
     const parent = inspection.elements[parentIndex];
     if (!parent) return null;
-    if (retainedIds.has(parent.pagerootId)) return parent.pagerootId;
+    if (retainedIds.has(parent.stemmioId)) return parent.stemmioId;
     parentIndex = parent.parentElementIndex;
   }
   return null;
@@ -297,14 +297,14 @@ function identityBindingIssues(currentIdentity, nextIdentity) {
   const currentById = identityElementMap(currentIdentity);
   const nextById = identityElementMap(nextIdentity);
   const issues = [];
-  for (const pagerootId of retainedIds) {
-    const current = currentById.get(pagerootId);
-    const next = nextById.get(pagerootId);
+  for (const stemmioId of retainedIds) {
+    const current = currentById.get(stemmioId);
+    const next = nextById.get(stemmioId);
     if (!current || !next) continue;
     if (current.tagName !== next.tagName) {
       issues.push({
-        code: "PAGEROOT_ID_TAG_CHANGED",
-        pagerootId,
+        code: "STEMMIO_ID_TAG_CHANGED",
+        stemmioId,
         currentTagName: current.tagName,
         nextTagName: next.tagName,
       });
@@ -317,24 +317,24 @@ function identityBindingIssues(currentIdentity, nextIdentity) {
     const nextParentId = nearestRetainedAncestorId(nextIdentity, next, retainedIds);
     if (currentParentId !== nextParentId) {
       issues.push({
-        code: "PAGEROOT_ID_PARENT_CHANGED",
-        pagerootId,
+        code: "STEMMIO_ID_PARENT_CHANGED",
+        stemmioId,
         currentParentId,
         nextParentId,
       });
     }
   }
-  const currentOrder = currentIdentity.elements.map((element) => element.pagerootId);
+  const currentOrder = currentIdentity.elements.map((element) => element.stemmioId);
   const nextOrder = nextIdentity.elements
-    .map((element) => element.pagerootId)
-    .filter((pagerootId) => retainedIds.has(pagerootId));
+    .map((element) => element.stemmioId)
+    .filter((stemmioId) => retainedIds.has(stemmioId));
   for (let index = 0; index < currentOrder.length; index += 1) {
     if (currentOrder[index] === nextOrder[index]) continue;
     issues.push({
-      code: "PAGEROOT_ID_SOURCE_ORDER_CHANGED",
+      code: "STEMMIO_ID_SOURCE_ORDER_CHANGED",
       sourceOrder: index,
-      currentPagerootId: currentOrder[index] ?? null,
-      nextPagerootId: nextOrder[index] ?? null,
+      currentStemmioId: currentOrder[index] ?? null,
+      nextStemmioId: nextOrder[index] ?? null,
     });
   }
   return issues;
@@ -348,9 +348,9 @@ function semanticIdentitySnapshot(html, inspection) {
         ? inspection.elements[element.parentElementIndex]
         : null;
       return {
-        elementId: element.pagerootId,
+        elementId: element.stemmioId,
         tagName: element.tagName,
-        parentElementId: parent?.pagerootId ?? null,
+        parentElementId: parent?.stemmioId ?? null,
         outerHtmlSha256: sha256(Buffer.from(
           html.slice(element.startOffset, element.sourceEndOffset),
           "utf8",
@@ -388,7 +388,7 @@ function kernelIdentityFreeSubtreeHtml(
     element.startOffset >= root.startOffset
     && element.sourceEndOffset <= root.sourceEndOffset
   ));
-  const actualElementIds = new Set(subtree.map((element) => element.pagerootId));
+  const actualElementIds = new Set(subtree.map((element) => element.stemmioId));
   if (
     actualElementIds.size !== expectedElementIds.size
     || [...actualElementIds].some((elementId) => !expectedElementIds.has(elementId))
@@ -420,7 +420,7 @@ function kernelIdentityFreeSubtreeHtml(
     );
   }
   const removals = subtree.map((element) => {
-    const injected = ` ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${element.pagerootId}"`;
+    const injected = ` ${STEMMIO_ELEMENT_ID_ATTRIBUTE}="${element.stemmioId}"`;
     const endOffset = element.closingDelimiterOffset;
     const startOffset = endOffset - injected.length;
     if (
@@ -430,7 +430,7 @@ function kernelIdentityFreeSubtreeHtml(
       throw semanticAuthorizationError(
         "SEMANTIC_IDENTITY_MATERIALIZATION_ATTRIBUTE_MISMATCH",
         "A structural identity was not materialized in the kernel-owned form.",
-        { elementId: element.pagerootId },
+        { elementId: element.stemmioId },
       );
     }
     return { startOffset, endOffset };
@@ -471,7 +471,7 @@ function assertKernelStructuralMaterialization({
       const parent = Number.isInteger(element?.parentElementIndex)
         ? forwardAfterIdentity.elements[element.parentElementIndex]
         : null;
-      return !forwardAddedIds.has(parent?.pagerootId);
+      return !forwardAddedIds.has(parent?.stemmioId);
     });
     if (roots.length !== 1) {
       throw semanticAuthorizationError(
@@ -513,10 +513,10 @@ function assertKernelStructuralMaterialization({
 
 function identityTransitionFacts(beforeIdentity, afterIdentity) {
   const lostIds = [...beforeIdentity.claimedIds].filter(
-    (pagerootId) => !afterIdentity.claimedIds.has(pagerootId),
+    (stemmioId) => !afterIdentity.claimedIds.has(stemmioId),
   );
   const addedIds = [...afterIdentity.claimedIds].filter(
-    (pagerootId) => !beforeIdentity.claimedIds.has(pagerootId),
+    (stemmioId) => !beforeIdentity.claimedIds.has(stemmioId),
   );
   const bindingIssues = identityBindingIssues(beforeIdentity, afterIdentity);
   return {
@@ -637,7 +637,7 @@ export function materializeSourceElementIdentity(html, {
   if (!inspection.valid) {
     throw new ProjectFileRepositoryError(
       "SOURCE_ELEMENT_IDENTITY_INVALID",
-      "The Working Copy contains malformed or duplicated PageRoot element identities.",
+      "The Working Copy contains malformed or duplicated Stemmio element identities.",
       { issues: inspection.issues },
     );
   }
@@ -654,24 +654,24 @@ export function materializeSourceElementIdentity(html, {
 
   const allocated = new Set(inspection.claimedIds);
   const insertions = inspection.missing.map((element) => {
-    let pagerootId = null;
+    let stemmioId = null;
     for (let attempt = 0; attempt < 64; attempt += 1) {
-      const candidate = generatePagerootElementId(randomUUIDFactory);
+      const candidate = generateStemmioElementId(randomUUIDFactory);
       if (!allocated.has(candidate)) {
-        pagerootId = candidate;
+        stemmioId = candidate;
         allocated.add(candidate);
         break;
       }
     }
-    if (!pagerootId) {
+    if (!stemmioId) {
       throw new ProjectFileRepositoryError(
         "SOURCE_ELEMENT_IDENTITY_ALLOCATION_FAILED",
-        "A unique PageRoot element identity could not be allocated.",
+        "A unique Stemmio element identity could not be allocated.",
       );
     }
     return {
       offset: element.closingDelimiterOffset,
-      value: ` ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${pagerootId}"`,
+      value: ` ${STEMMIO_ELEMENT_ID_ATTRIBUTE}="${stemmioId}"`,
     };
   }).sort((left, right) => right.offset - left.offset);
 
@@ -717,10 +717,10 @@ export function materializeIdentityPreservingSave(currentHtml, nextHtml, options
     );
   }
   const lostIds = [...currentIdentity.claimedIds].filter(
-    (pagerootId) => !nextIdentity.claimedIds.has(pagerootId),
+    (stemmioId) => !nextIdentity.claimedIds.has(stemmioId),
   );
   const addedIds = [...nextIdentity.claimedIds].filter(
-    (pagerootId) => !currentIdentity.claimedIds.has(pagerootId),
+    (stemmioId) => !currentIdentity.claimedIds.has(stemmioId),
   );
   if (nextIdentity.missingElementCount > 0) {
     throw new ProjectFileRepositoryError(
@@ -765,7 +765,7 @@ export function sourceElementIdentityMigrationRecoveryPaths(
   recoveryId,
 ) {
   const workingCopy = assertId(workingCopyIdValue, WORKING_COPY_ID, "workingCopyId");
-  if (identitySchemaVersion !== PAGEROOT_ELEMENT_ID_SCHEMA_VERSION) {
+  if (identitySchemaVersion !== STEMMIO_ELEMENT_ID_SCHEMA_VERSION) {
     throw new ProjectFileRepositoryError(
       "IDENTITY_MIGRATION_INVALID",
       "The source element identity migration schema is unsupported.",
@@ -829,7 +829,7 @@ export async function compareAndSwapWorkingCopyFile({
 }) {
   const parent = path.dirname(sourcePath);
   await assertRealPathInsideProject(projectRootPath, parent, "Working Copy parent", { expectedKind: "directory" });
-  const temporary = path.join(parent, `.pageroot-save-${process.pid}-${randomUUID()}.tmp`);
+  const temporary = path.join(parent, `.stemmio-save-${process.pid}-${randomUUID()}.tmp`);
   await atomicWriteFile(temporary, nextBuffer);
   let swapped = false;
   try {
@@ -898,7 +898,7 @@ export async function compareAndSwapWorkingCopyFile({
     await syncDirectory(parent);
     const written = await readHtmlFile(sourcePath, "Working Copy", { projectRootPath });
     if (written.sha256 !== nextSha256) {
-      throw new ProjectFileRepositoryError("SOURCE_HASH_CONFLICT", "The Working Copy changed while PageRoot was verifying its save.", { expectedSourceSha256: nextSha256, actualSourceSha256: written.sha256 });
+      throw new ProjectFileRepositoryError("SOURCE_HASH_CONFLICT", "The Working Copy changed while Stemmio was verifying its save.", { expectedSourceSha256: nextSha256, actualSourceSha256: written.sha256 });
     }
     if (previousPath) {
       const previous = await readHtmlFile(previousPath, "previous Working Copy", { projectRootPath });
@@ -963,10 +963,10 @@ export function assertWorkingCopyState(
     || !validStateTimestamp(state.lastOpenedAt)
     || (
       state.sourceElementIdentitySchemaVersion !== undefined
-      && state.sourceElementIdentitySchemaVersion !== PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+      && state.sourceElementIdentitySchemaVersion !== STEMMIO_ELEMENT_ID_SCHEMA_VERSION
     )
     || (
-      state.sourceElementIdentitySchemaVersion === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+      state.sourceElementIdentitySchemaVersion === STEMMIO_ELEMENT_ID_SCHEMA_VERSION
       && (
         !allowMissingIdentityBinding
         || state.sourceElementIdentityBindingSha256 !== undefined
@@ -996,7 +996,7 @@ export function workingCopySourcePath(paths, workingCopy) {
   if (pathInside(paths.controlRoot, resolved, { allowRoot: true })) {
     throw new ProjectFileRepositoryError(
       "PATH_ESCAPES_PROJECT",
-      "A visible Working Copy cannot be inside .pageroot.",
+      "A visible Working Copy cannot be inside .stemmio.",
     );
   }
   return resolved;

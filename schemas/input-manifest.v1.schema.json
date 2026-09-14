@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/input-manifest.v1.schema.json",
-  "title": "HTML AI frozen input manifest v1",
+  "$id": "https://stemmio.local/schemas/input-manifest.v1.schema.json",
+  "title": "Stemmio frozen input manifest v1",
   "description": "The complete content-addressed Request inventory plus the ordered subset an internal-AI Attempt must read. Inventory-only audit files stay frozen and hashed without consuming AI context.",
   "type": "object",
   "additionalProperties": false,

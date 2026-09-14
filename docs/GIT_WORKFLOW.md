@@ -57,7 +57,7 @@ inventory, then compose the package source as follows:
 
 1. Fetch current `origin/main`; it supplies the canonical base and every change
    that has already merged.
-2. Include the latest head OID of every applicable PageRoot PR in the current
+2. Include the latest head OID of every applicable Stemmio PR in the current
    development scope that is not explicitly excluded. Open, draft and closed
    without merge are all eligible; PR state is evidence to report, not an
    implicit exclusion.

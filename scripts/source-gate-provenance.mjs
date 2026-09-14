@@ -53,7 +53,7 @@ function assertRepository(value) {
 }
 
 export function sourceGateArtifactName(treeSha, packageVersion) {
-  return `PageRoot-source-gate-${assertSha(treeSha, "treeSha")}-${assertVersion(packageVersion, "packageVersion")}`;
+  return `Stemmio-source-gate-${assertSha(treeSha, "treeSha")}-${assertVersion(packageVersion, "packageVersion")}`;
 }
 
 export function readPackageVersions(packageJson, packageLock) {
@@ -532,7 +532,7 @@ async function verifyAttestation(options) {
     packageVersion: identity.packageVersion,
     maxAgeHours: options.maxAgeHours,
   }));
-  if (process.env.PAGEROOT_EMERGENCY_MAIN_BYPASS === "1" && options.emergencyReason) {
+  if (process.env.STEMMIO_EMERGENCY_MAIN_BYPASS === "1" && options.emergencyReason) {
     const destination = path.resolve(productRoot, "output/source-gate/emergency-bypass.json");
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, `${JSON.stringify({
@@ -549,7 +549,7 @@ async function verifyAttestation(options) {
     );
   }
   if (!result.trusted && options.mode === "required") {
-    const emergencyBypass = process.env.PAGEROOT_EMERGENCY_MAIN_BYPASS === "1"
+    const emergencyBypass = process.env.STEMMIO_EMERGENCY_MAIN_BYPASS === "1"
       && Boolean(options.emergencyReason)
       && result.reason === "association_unavailable";
     if (emergencyBypass) {

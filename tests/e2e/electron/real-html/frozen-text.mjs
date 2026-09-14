@@ -10,7 +10,7 @@ function requireFact(condition, code, details) {
 
 export function boldMarkerPattern(marker, bold) {
   const escaped = marker.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return new RegExp(` <span style="all:\\s*unset;\\s*display:\\s*inline\\s*!important;\\s*font-weight:\\s*${bold ? "700" : "(?:400|normal)"}" data-pageroot-id="pr1_[0-9a-f]{32}">${escaped}</span>`, "u");
+  return new RegExp(` <span style="all:\\s*unset;\\s*display:\\s*inline\\s*!important;\\s*font-weight:\\s*${bold ? "700" : "(?:400|normal)"}" data-stemmio-id="sm1_[0-9a-f]{32}">${escaped}</span>`, "u");
 }
 
 async function markerBold(handle, marker) {
@@ -59,8 +59,8 @@ export async function requireFrozenTextFocus(targetHandle, expectedId, { atEnd =
       remainingLength = remaining.toString().length;
       remainingText = remaining.toString();
     }
-    return { id: element.getAttribute("data-pageroot-id"),
-      activeId: document.activeElement?.getAttribute("data-pageroot-id"),
+    return { id: element.getAttribute("data-stemmio-id"),
+      activeId: document.activeElement?.getAttribute("data-stemmio-id"),
       editable: element.isContentEditable, focused: document.activeElement === element,
       selectionInside: inside, collapsed: selection?.isCollapsed === true, remainingLength, remainingText };
   });
@@ -158,7 +158,7 @@ export async function executeFrozenText({ frame, target, access, page, editor,
   let saved;
   let generation = await readFrozenActiveGeneration(editor);
   const documentId = () => frame.evaluate(() =>
-    globalThis.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ ||= crypto.randomUUID());
+    globalThis.__STEMMIO_NATIVE_QA_DOCUMENT_TOKEN__ ||= crypto.randomUUID());
   const conditions = async () => {
     await requireCurrentTextDocument(frame, documentHandle, handle);
     const actualGeneration = await readFrozenActiveGeneration(editor);
@@ -179,7 +179,7 @@ export async function executeFrozenText({ frame, target, access, page, editor,
     const expectedPath = target.historyAdoption || "editable-island-in-place";
     const before = { documentId: await documentId(), generation };
     const cursor = await editor.evaluate(() => {
-      const state = globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__;
+      const state = globalThis.__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__;
       return { candidate: state.records.length, lifecycle: state.lifecycleRecords.length };
     });
     await page.keyboard.press(keyShortcut(shortcut));
@@ -191,7 +191,7 @@ export async function executeFrozenText({ frame, target, access, page, editor,
       expectedSourceRevision: sourceHash, priorGeneration: Number(generation),
       requireGenerationAdvance: expectedPath === "runtime-candidate" });
     const observation = await editor.evaluate((element, cursor) => {
-      const state = globalThis.__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__;
+      const state = globalThis.__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__;
       return { path: element.getAttribute("data-history-adopt-path"),
         records: [...state.records.slice(cursor.candidate), ...state.lifecycleRecords.slice(cursor.lifecycle)] };
     }, cursor);
@@ -217,7 +217,7 @@ export async function executeFrozenText({ frame, target, access, page, editor,
     // the separately planned reentry operation is not an implicit repair here.
     let focus;
     if (target.historyResume === "explicit-reentry") {
-      await editor.evaluate(element => element.dispatchEvent(new Event("pageroot:e2e-copy-capability-probe")));
+      await editor.evaluate(element => element.dispatchEvent(new Event("stemmio:e2e-copy-capability-probe")));
       const actual = await handle.evaluate(element => {
         const document = element.ownerDocument;
         const selection = document.getSelection();
@@ -270,7 +270,7 @@ export async function executeFrozenText({ frame, target, access, page, editor,
         // initial text hash. Identity and the declared path remain unchanged.
         const expectedText = verifiedSource === null ? null : await handle.evaluate((element, { source, path }) => {
           const document = new DOMParser().parseFromString(source, "text/html");
-          const targets = document.querySelectorAll(`[data-pageroot-id="${element.getAttribute("data-pageroot-id")}"]`);
+          const targets = document.querySelectorAll(`[data-stemmio-id="${element.getAttribute("data-stemmio-id")}"]`);
           if (targets.length !== 1) return null;
           const node = path.reduce((node, index) => node?.childNodes[index], targets[0]);
           return node?.nodeType === 3 ? node.textContent : null;
@@ -358,7 +358,7 @@ export async function executeFrozenText({ frame, target, access, page, editor,
         const after = await readSource();
         const oracle = compareElementScopedMutation({ before: saved, after, sourceId: target.selectedId,
           normalizationPolicy: SOURCE_SCOPE_POLICIES.TEXT_NEWLINE, expectedAfterContains: [lineMarker],
-          expectedAppendedPattern: new RegExp(`<br data-pageroot-id="pr1_[0-9a-f]{32}">${lineMarker}`, "u") });
+          expectedAppendedPattern: new RegExp(`<br data-stemmio-id="sm1_[0-9a-f]{32}">${lineMarker}`, "u") });
         requireFact(oracle.ok, "SOURCE_SCOPE_ORACLE_FAILED", oracle); saved = after;
         return { changedRanges: oracle.changedRanges, outsideUnchanged: oracle.outsideUnchanged,
           freshStableIdsValid: oracle.freshStableIdsValid };
@@ -390,7 +390,7 @@ export async function executeFrozenText({ frame, target, access, page, editor,
         await page.keyboard.press("Escape");
         await handle.click({ timeout: 3_000 });
         await expect(access.selected()).toHaveCount(1);
-        await expect(access.selected()).toHaveAttribute("data-pageroot-id", target.selectedId);
+        await expect(access.selected()).toHaveAttribute("data-stemmio-id", target.selectedId);
         requireFact(await bold() === target.initialBold, "FROZEN_FORMAT_INITIAL_STATE_DRIFT");
         await expect(button).toHaveAttribute("aria-pressed", String(target.initialBold));
         let source;

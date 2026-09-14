@@ -23,7 +23,7 @@ const PACKAGING_PATTERNS = [
   /^tests\/e2e\/electron\/playwright\.packaged(?:-startup)?\.config\.mjs$/u,
   /^tests\/e2e\/electron\/packaged-(?:runtime|startup)-smoke\.spec\.mjs$/u,
   /^\.github\/workflows\/(?:developer-preview|release-candidate|release-dry-run|release)\.yml$/u,
-  /^(?:LICENSE|NOTICE|PRIVACY\.md|THIRD_PARTY_NOTICES\.md|PageRoot 用户声明与免责声明\.txt)$/u,
+  /^(?:LICENSE|NOTICE|PRIVACY\.md|THIRD_PARTY_NOTICES\.md|源页 用户声明与免责声明\.txt)$/u,
 ];
 
 function assertSafeRef(value, label) {

@@ -7,7 +7,7 @@ import { build } from "vite";
 
 const root = process.cwd();
 const temporaryDirectory = await mkdtemp(
-  path.join(os.tmpdir(), "pageroot-review-benchmark-"),
+  path.join(os.tmpdir(), "stemmio-review-benchmark-"),
 );
 
 function complexHtml(sectionCount, changed) {
@@ -41,7 +41,7 @@ try {
       emptyOutDir: true,
       lib: {
         entry: path.join(root, "app/workbench/review-document.ts"),
-        name: "PageRootReviewBenchmark",
+        name: "StemmioReviewBenchmark",
         formats: ["iife"],
         fileName: () => "review.js",
       },
@@ -73,10 +73,10 @@ try {
           lastTimerAt = now;
         }, 10);
         const startedAt = performance.now();
-        const review = await globalThis.PageRootReviewBenchmark
+        const review = await globalThis.StemmioReviewBenchmark
           .buildReviewDocumentsAsync(before, after, {
             sessionId: `review-benchmark-${count}`,
-            sourcePath: "/tmp/pageroot-complex-review.html",
+            sourcePath: "/tmp/stemmio-complex-review.html",
             externalBootstrap: false,
             comments: [],
           });
@@ -84,7 +84,7 @@ try {
         clearInterval(timer);
         const phases = {};
         performance.getEntriesByType("measure").forEach((entry) => {
-          if (!entry.name.startsWith("pageroot:review-analysis:")) return;
+          if (!entry.name.startsWith("stemmio:review-analysis:")) return;
           const phase = entry.name.split(":").at(-1);
           phases[phase] = (phases[phase] || 0) + entry.duration;
         });

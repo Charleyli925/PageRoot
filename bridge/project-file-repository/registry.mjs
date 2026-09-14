@@ -48,8 +48,11 @@ import {
   topLevelHtmlRelativePath,
   versionId,
 } from "./identity.mjs";
+import {
+  PROJECT_REGISTRY_LOCK_FILE_NAME,
+} from "../../shared/project-storage-contract.mjs";
 
-export const CURRENT_REGISTRY_WRITE_LOCK_DIRECTORY = ".pageroot-registry-write-lock";
+export const CURRENT_REGISTRY_WRITE_LOCK_DIRECTORY = PROJECT_REGISTRY_LOCK_FILE_NAME;
 
 export const CURRENT_REGISTRY_WRITE_LOCK_WAIT_MS = 20;
 
@@ -154,7 +157,7 @@ export async function reclaimUnresolvableLockDirectory({
   await onBeforeReclaim?.({ lockPath, lastActivityMs });
   const abandonedPath = path.join(
     projectsRoot,
-    `.pageroot-lock-unresolvable-${randomUUID()}`,
+    `.stemmio-lock-unresolvable-${randomUUID()}`,
   );
   try {
     await rename(lockPath, abandonedPath);
@@ -283,7 +286,7 @@ export async function retireCurrentRegistryWriteLock({
   }
   const abandonedPath = path.join(
     projectsRoot,
-    `.pageroot-registry-write-stale-${randomUUID()}`,
+    `.stemmio-registry-write-stale-${randomUUID()}`,
   );
   try {
     await rename(lockPath, abandonedPath);
@@ -380,7 +383,7 @@ export async function acquireCurrentRegistryWriteLock({
     if (Date.now() >= deadlineAt) {
       throw new ProjectFileRepositoryError(
         "REGISTRY_BUSY",
-        "The project Registry is occupied. A lock left behind by an interrupted PageRoot process is reclaimed automatically after a short grace period.",
+        "The project Registry is occupied. A lock left behind by an interrupted Stemmio process is reclaimed automatically after a short grace period.",
       );
     }
     await waitForCurrentRegistryWriteLock();
@@ -401,14 +404,14 @@ export function assertRegistryTimestamp(value, label) {
 // or invalid is still an unrecognized shape and still fails closed, because
 // reading a shape we cannot explain and then rewriting it is the destructive
 // case. A record that carries every required member plus a member a newer
-// PageRoot added is fully explainable: it is validated normally and returned
+// Stemmio added is fully explainable: it is validated normally and returned
 // unchanged, so read -> modify -> write never deletes the newer member.
 
 // Forward compatibility. A Registry record whose required members are missing
 // or invalid is still an unrecognized shape and still fails closed, because
 // reading a shape we cannot explain and then rewriting it is the destructive
 // case. A record that carries every required member plus a member a newer
-// PageRoot added is fully explainable: it is validated normally and returned
+// Stemmio added is fully explainable: it is validated normally and returned
 // unchanged, so read -> modify -> write never deletes the newer member.
 export function assertRegistryProjectRecord(projectId, record) {
   if (
@@ -509,7 +512,7 @@ export function assertProjectIdentity(project) {
   if (!isObject(project) || project.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
     throw new ProjectFileRepositoryError(
       "UNSUPPORTED_PROJECT_SCHEMA",
-      "project.json is not a supported PageRoot project identity.",
+      "project.json is not a supported Stemmio project identity.",
     );
   }
   assertId(project.projectId, PROJECT_ID, "projectId");
@@ -524,7 +527,7 @@ export function assertManifest(manifest, project) {
   if (!isObject(manifest) || manifest.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
     throw new ProjectFileRepositoryError(
       "UNSUPPORTED_MANIFEST_SCHEMA",
-      "manifest.json is not a supported PageRoot manifest.",
+      "manifest.json is not a supported Stemmio manifest.",
     );
   }
   if (
@@ -640,7 +643,7 @@ export function assertHistoryActivation(runtime, project, manifest) {
   // Forward compatibility. The desktop confirmation mutates this receipt in
   // place and writes it back, so it is a preserved sub-record. Every required
   // member below is still validated, including its absence, while a member a
-  // newer PageRoot added is carried through untouched. Refusing the whole
+  // newer Stemmio added is carried through untouched. Refusing the whole
   // Runtime over one added member would lock the project out of an older build
   // for a receipt that build can otherwise read in full.
   if (
@@ -776,7 +779,7 @@ export function assertRuntime(runtime, project, manifest) {
   if (!isObject(runtime) || runtime.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
     throw new ProjectFileRepositoryError(
       "UNSUPPORTED_RUNTIME_SCHEMA",
-      "runtime-state.json is not a supported PageRoot runtime state.",
+      "runtime-state.json is not a supported Stemmio runtime state.",
     );
   }
   if (runtime.projectId !== project.projectId || runtime.documentId !== project.documentId) {

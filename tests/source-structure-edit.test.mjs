@@ -17,18 +17,18 @@ import { buildSourceIndex, sourceSha256 } from "../app/lib/source-index.js";
 import { createTargetRef } from "../app/lib/target-resolver.js";
 
 const ids = {
-  html: "pr1_00000000000040008000000000000001",
-  head: "pr1_00000000000040008000000000000002",
-  title: "pr1_00000000000040008000000000000003",
-  body: "pr1_00000000000040008000000000000004",
-  left: "pr1_00000000000040008000000000000005",
-  first: "pr1_00000000000040008000000000000006",
-  strong: "pr1_00000000000040008000000000000007",
-  second: "pr1_00000000000040008000000000000008",
-  right: "pr1_00000000000040008000000000000009",
+  html: "sm1_00000000000040008000000000000001",
+  head: "sm1_00000000000040008000000000000002",
+  title: "sm1_00000000000040008000000000000003",
+  body: "sm1_00000000000040008000000000000004",
+  left: "sm1_00000000000040008000000000000005",
+  first: "sm1_00000000000040008000000000000006",
+  strong: "sm1_00000000000040008000000000000007",
+  second: "sm1_00000000000040008000000000000008",
+  right: "sm1_00000000000040008000000000000009",
 };
 
-const html = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Structure</title></head><body data-pageroot-id="${ids.body}"><section data-pageroot-id="${ids.left}"><p data-pageroot-id="${ids.first}">A <strong data-pageroot-id="${ids.strong}">one</strong></p><p data-pageroot-id="${ids.second}">B</p></section><aside data-pageroot-id="${ids.right}"></aside></body></html>`;
+const html = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">Structure</title></head><body data-stemmio-id="${ids.body}"><section data-stemmio-id="${ids.left}"><p data-stemmio-id="${ids.first}">A <strong data-stemmio-id="${ids.strong}">one</strong></p><p data-stemmio-id="${ids.second}">B</p></section><aside data-stemmio-id="${ids.right}"></aside></body></html>`;
 
 function uuidFactory(...values) {
   let cursor = 0;
@@ -38,7 +38,7 @@ function uuidFactory(...values) {
 test("duplicate removes inherited identities and allocates fresh IDs for the full subtree", () => {
   const baseline = createSemanticDocumentState(html);
   const rawCopy = identityFreeSourceElementHtml(html, ids.first);
-  assert.doesNotMatch(rawCopy, /data-pageroot-id/u);
+  assert.doesNotMatch(rawCopy, /data-stemmio-id/u);
   const result = applySemanticOperation(
     baseline,
     createDuplicateElementOperation(html, {
@@ -55,9 +55,9 @@ test("duplicate removes inherited identities and allocates fresh IDs for the ful
   );
   const index = buildSourceIndex(result.html);
   assert.equal(result.allocatedElementIds.length, 2);
-  assert.equal(index.pagerootIdentity.complete, true);
-  assert.equal(index.byPagerootId.get(ids.first)?.textContent, "A one");
-  assert.equal(index.byPagerootId.get(result.insertedRootElementId)?.textContent, "A one");
+  assert.equal(index.stemmioIdentity.complete, true);
+  assert.equal(index.byStemmioId.get(ids.first)?.textContent, "A one");
+  assert.equal(index.byStemmioId.get(result.insertedRootElementId)?.textContent, "A one");
   assert.notEqual(result.insertedRootElementId, ids.first);
 });
 
@@ -79,7 +79,7 @@ test("insert, delete and cross-parent move keep source identity authoritative", 
       ),
     },
   );
-  assert.ok(inserted.html.indexOf("<article") < inserted.html.indexOf(`data-pageroot-id="${ids.second}"`));
+  assert.ok(inserted.html.indexOf("<article") < inserted.html.indexOf(`data-stemmio-id="${ids.second}"`));
 
   const deleted = applySemanticOperation(
     baseline,
@@ -89,7 +89,7 @@ test("insert, delete and cross-parent move keep source identity authoritative", 
       elementId: ids.first,
     }),
   );
-  assert.equal(buildSourceIndex(deleted.html).byPagerootId.has(ids.first), false);
+  assert.equal(buildSourceIndex(deleted.html).byStemmioId.has(ids.first), false);
 
   const moved = applySemanticOperation(
     baseline,
@@ -101,10 +101,10 @@ test("insert, delete and cross-parent move keep source identity authoritative", 
     }),
   );
   const movedIndex = buildSourceIndex(moved.html);
-  const target = movedIndex.byPagerootId.get(ids.second);
+  const target = movedIndex.byStemmioId.get(ids.second);
   const parent = movedIndex.byNodeId.get(target.parentId);
-  assert.equal(parent.pagerootId, ids.right);
-  assert.equal(target.pagerootId, ids.second);
+  assert.equal(parent.stemmioId, ids.right);
+  assert.equal(target.stemmioId, ids.second);
 });
 
 test("structure operation builders reject root deletion and invalid insertion ownership", () => {
@@ -121,10 +121,10 @@ test("structure operation builders reject root deletion and invalid insertion ow
 });
 
 test("insert and move fail closed when HTML parsing rejects the requested parent relationship", () => {
-  const scriptId = "pr1_00000000000040008000000000000010";
+  const scriptId = "sm1_00000000000040008000000000000010";
   const unsafeHtml = html.replace(
     `</body>`,
-    `<script data-pageroot-id="${scriptId}">void 0</script></body>`,
+    `<script data-stemmio-id="${scriptId}">void 0</script></body>`,
   );
   const baseline = createSemanticDocumentState(unsafeHtml);
   assert.throws(() => applySemanticOperation(
@@ -205,7 +205,7 @@ test("accepted structure patches undo and redo inside the bounded open-document 
 
 test("structure edits keep surviving comment IDs exact and orphan deleted targets", () => {
   const baseline = createSemanticDocumentState(html);
-  const trackedComment = createTargetRef(html, buildSourceIndex(html).byPagerootId.get(ids.first), {
+  const trackedComment = createTargetRef(html, buildSourceIndex(html).byStemmioId.get(ids.first), {
     targetId: "comment_target_first",
   });
   const duplicate = applySemanticOperation(

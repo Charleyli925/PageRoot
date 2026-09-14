@@ -8,11 +8,11 @@ import { expect, test } from "@playwright/test";
 
 import {
   createSourceFixture,
-  launchPageRoot,
+  launchStemmio,
   removeSourceFixture,
-  stopPageRoot,
+  stopStemmio,
   waitForProjectReady,
-} from "./helpers/pageroot-app-fixture.mjs";
+} from "./helpers/stemmio-app-fixture.mjs";
 
 const EXTERNAL_HTML =
   "<!doctype html><html><head><title>external</title></head><body><h1>external</h1></body></html>\n";
@@ -21,7 +21,7 @@ async function waitForWorkingCopyPath(page, externalPath) {
   let workingCopyPath = "";
   await expect.poll(async () => {
     const active = await page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
+      () => window.stemmioProjects?.getActiveProject(),
     );
     workingCopyPath = String(active?.sourcePath || "");
     return workingCopyPath && realpathSync(workingCopyPath) !== externalPath;
@@ -32,7 +32,7 @@ async function waitForWorkingCopyPath(page, externalPath) {
 test("conflict banner adopts the disk version and restores an editable project", async () => {
   test.setTimeout(120_000);
   const source = createSourceFixture({ fileName: "conflict-force-unlock.html" });
-  const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: source.sourcePath });
   try {
     await waitForProjectReady(launched.page);
     const workingCopyPath = await waitForWorkingCopyPath(
@@ -58,7 +58,7 @@ test("conflict banner adopts the disk version and restores an editable project",
     await expect(banner).toHaveCount(0);
     expect(readFileSync(workingCopyPath, "utf8")).toContain("external");
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);
   }
 });
@@ -66,7 +66,7 @@ test("conflict banner adopts the disk version and restores an editable project",
 test("reopening an existing working copy still watches external disk writes", async () => {
   test.setTimeout(180_000);
   const source = createSourceFixture({ fileName: "conflict-reopen-watch.html" });
-  const first = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  const first = await launchStemmio({ activeSourcePath: source.sourcePath });
   let launched = first;
   try {
     await waitForProjectReady(first.page);
@@ -74,8 +74,8 @@ test("reopening an existing working copy still watches external disk writes", as
       first.page,
       realpathSync(source.sourcePath),
     );
-    await stopPageRoot(first.electronApp, first.isolatedUserData, { cleanup: false });
-    launched = await launchPageRoot({
+    await stopStemmio(first.electronApp, first.isolatedUserData, { cleanup: false });
+    launched = await launchStemmio({
       activeSourcePath: workingCopyPath,
       isolatedUserData: first.isolatedUserData,
     });
@@ -86,7 +86,7 @@ test("reopening an existing working copy still watches external disk writes", as
     await expect(launched.page.locator(".source-conflict-banner"))
       .toBeVisible({ timeout: 5_000 });
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);
   }
 });

@@ -32,12 +32,12 @@ import {
   caseSelector,
   candidateHtmlFiles,
   captureReviewAcceptPersistence,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture,
   existsSync,
   focusChangeById,
   fixtureBuffer,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   managedProjectRootForId,
   mkdirSync,
@@ -50,7 +50,7 @@ import {
   rmSync,
   runOfficialFinalizer,
   sha256,
-  stopPageRoot,
+  stopStemmio,
   workingHtmlFiles,
   writeAiOutput,
   writeFileSync,
@@ -58,9 +58,9 @@ import {
 
 async function activateReviewMarkerGroup(frame, marker) {
   const focusGroupId = await marker.evaluate((element) => {
-    const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+    const changeId = element.getAttribute("data-stemmio-review-marker") || "";
     const facts = JSON.parse(
-      element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+      element.getAttribute("data-stemmio-review-projection-facts") || "[]",
     );
     const fact = facts[0];
     const displayGroupId = fact?.displayGroupId || `display-fact-${fact?.id || ""}`;
@@ -69,14 +69,14 @@ async function activateReviewMarkerGroup(frame, marker) {
       : `focus-${changeId}-${displayGroupId}`;
   });
   expect(focusGroupId).toBeTruthy();
-  if (await frame.locator("html").getAttribute("data-pageroot-review-focus-group") === focusGroupId) {
+  if (await frame.locator("html").getAttribute("data-stemmio-review-focus-group") === focusGroupId) {
     return focusGroupId;
   }
   await frame.locator(
-    `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${focusGroupId}"]`,
+    `[data-stemmio-review-region-bar][data-stemmio-review-focus-group="${focusGroupId}"]`,
   ).first().evaluate((bar) => bar.click());
   await expect(frame.locator("html"))
-    .toHaveAttribute("data-pageroot-review-focus-group", focusGroupId);
+    .toHaveAttribute("data-stemmio-review-focus-group", focusGroupId);
   return focusGroupId;
 }
 
@@ -220,7 +220,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       .replace(ORIGINAL_TEXT, PICKER_TEXT),
     "utf8",
   );
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   const ordinaryReviewCommentText = "这个普通段落也请保留。";
   try {
     const request = await addCommentAndSubmit(
@@ -230,7 +230,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       UPDATED_TEXT,
       [{
         text: ordinaryReviewCommentText,
-        targetSelector: ".review-comment-ordinary-target[data-pageroot-id]",
+        targetSelector: ".review-comment-ordinary-target[data-stemmio-id]",
       }],
     );
     const beforeAdoption = await captureReviewAcceptPersistence(launched.page);
@@ -285,7 +285,7 @@ ${REVIEW_MASK_UNION_BEFORE}
           'style="width: 240px; padding: 4px; border: 1px solid #c9ceda"',
           'style="width: 240px; padding: 14px; border: 3px solid #6d5ce7"',
         )
-        .replace(/<br data-pageroot-id="pr1_[a-f0-9]{32}">/u, "")
+        .replace(/<br data-stemmio-id="sm1_[a-f0-9]{32}">/u, "")
         .replace("只是换行位置调整。", "只是<br>换行位置调整。");
       const changedAtomicMedia = atomicMedia
         .replace(/\s*<img data-review-atomic-removed[^>]*>/u, "")
@@ -315,7 +315,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         "><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>",
       );
       const changedAnchorOnly = anchorOnly.replace(
-        /(<br data-pageroot-id="pr1_[a-f0-9]{32}">)只删除这句定位文字。/u,
+        /(<br data-stemmio-id="sm1_[a-f0-9]{32}">)只删除这句定位文字。/u,
         "$1",
       );
       const changedTabTwoDetail = tabTwoDetail.replace(
@@ -404,7 +404,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     expect(candidateRecord.outputSha256).not.toBe(candidateRecord.submittedOutputSha256);
     expect(inspectSourceElementIdentity(normalizedCandidateHtml).complete).toBe(true);
     const pending = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
+      () => window.stemmioProjects?.getActiveProject(),
     );
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
@@ -433,20 +433,20 @@ ${REVIEW_MASK_UNION_BEFORE}
     // turning it into an explicit visual focus or outline.
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       await expect.poll(async () => frame.locator("html").getAttribute(
-        "data-pageroot-review-focus",
+        "data-stemmio-review-focus",
       ), { timeout: 30_000 }).toMatch(/^change-[a-z0-9-]+$/u);
       await expect(frame.locator("html"))
-        .toHaveAttribute("data-pageroot-review-focus-group", "");
-      await expect(frame.locator("[data-pageroot-review-overlay-box]"))
+        .toHaveAttribute("data-stemmio-review-focus-group", "");
+      await expect(frame.locator("[data-stemmio-review-overlay-box]"))
         .toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-hole]"))
+      await expect(frame.locator("[data-stemmio-review-mask-hole]"))
         .toHaveCount(0);
     }
     const initialNavigationTarget = await beforeReviewFrame.locator("html")
-      .getAttribute("data-pageroot-review-focus");
+      .getAttribute("data-stemmio-review-focus");
     expect(initialNavigationTarget).toMatch(/^change-[a-z0-9-]+$/u);
     await expect(afterReviewFrame.locator("html"))
-      .toHaveAttribute("data-pageroot-review-focus", initialNavigationTarget);
+      .toHaveAttribute("data-stemmio-review-focus", initialNavigationTarget);
     const reviewReloadRevision = Number(
       await reviewWorkspace.getAttribute("data-reload-revision"),
     );
@@ -538,17 +538,17 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator("html"))
       .not.toHaveAttribute("data-review-post-load-replacement", "true");
     await expect(afterReviewFrame.locator("html"))
-      .not.toHaveAttribute("data-pageroot-preview-navigation-fallback", "true");
+      .not.toHaveAttribute("data-stemmio-preview-navigation-fallback", "true");
     await expect(afterReviewFrame.locator("html"))
-      .toHaveAttribute("data-pageroot-review-filter", "all");
+      .toHaveAttribute("data-stemmio-review-filter", "all");
     await expect.poll(async () => afterReviewFrame.locator(
       "[data-review-anonymous-panel-copy]",
     ).evaluateAll((elements) => elements.map((element) => ({
       copy: element.getAttribute("data-review-anonymous-panel-copy"),
-      changeId: element.closest("[data-pageroot-review-id]")
-        ?.getAttribute("data-pageroot-review-id") || "",
-      panelKey: element.closest('[data-pageroot-review-panel-container="true"]')
-        ?.getAttribute("data-pageroot-review-panel-key") || "",
+      changeId: element.closest("[data-stemmio-review-id]")
+        ?.getAttribute("data-stemmio-review-id") || "",
+      panelKey: element.closest('[data-stemmio-review-panel-container="true"]')
+        ?.getAttribute("data-stemmio-review-panel-key") || "",
     })))).toEqual([
       expect.objectContaining({ copy: "two", changeId: expect.any(String) }),
       expect.objectContaining({ copy: "one", changeId: expect.any(String) }),
@@ -556,8 +556,8 @@ ${REVIEW_MASK_UNION_BEFORE}
     const anonymousPanelKeys = await afterReviewFrame.locator(
       "[data-review-anonymous-panel-copy]",
     ).evaluateAll((elements) => elements.map((element) => (
-      element.closest('[data-pageroot-review-panel-container="true"]')
-        ?.getAttribute("data-pageroot-review-panel-key") || ""
+      element.closest('[data-stemmio-review-panel-container="true"]')
+        ?.getAttribute("data-stemmio-review-panel-key") || ""
     )));
     expect(new Set(anonymousPanelKeys).size).toBe(2);
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
@@ -650,9 +650,9 @@ ${REVIEW_MASK_UNION_BEFORE}
     const reviewCommentBubble = reviewCommentMarker.getByTestId("review-comment-bubble");
     await expect(reviewCommentBubble).toContainText(frozenReviewComment);
     await expect(reviewCommentBubble).toBeVisible();
-    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+    await expect(beforeReviewFrame.locator("[data-stemmio-review-comment-highlight]"))
       .toHaveCount(1);
-    await expect(afterReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+    await expect(afterReviewFrame.locator("[data-stemmio-review-comment-highlight]"))
       .toHaveCount(1);
     await expect.poll(async () => {
       const [bubbleBox, viewportBox] = await Promise.all([
@@ -665,7 +665,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     }).toBe(true);
     await reviewCommentBubble.hover();
     await expect(reviewCommentBubble).toBeVisible();
-    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+    if (process.env.STEMMIO_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
       await launched.page.screenshot({
@@ -673,7 +673,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         animations: "disabled",
       });
     }
-    if (process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP) {
+    if (process.env.STEMMIO_CAPTURE_TOOLBAR_CLEANUP) {
       const visibleToast = launched.page.locator(".toast.show");
       await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
       if (await visibleToast.isVisible().catch(() => false)) {
@@ -682,7 +682,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       }
       const captureDirectory = path.resolve(
         productRoot,
-        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+        process.env.STEMMIO_CAPTURE_TOOLBAR_CLEANUP_DIR
           || path.join("output", "design-qa", "toolbar-cleanup"),
       );
       mkdirSync(captureDirectory, { recursive: true });
@@ -693,9 +693,9 @@ ${REVIEW_MASK_UNION_BEFORE}
     }
     await reviewCommentMarker.click();
     await expect(reviewCommentBubble).toBeHidden();
-    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+    await expect(beforeReviewFrame.locator("[data-stemmio-review-comment-highlight]"))
       .toHaveCount(0);
-    await expect(afterReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+    await expect(afterReviewFrame.locator("[data-stemmio-review-comment-highlight]"))
       .toHaveCount(0);
     await launched.page.locator('section[data-side="before"] > header').hover();
     await reviewCommentMarker.hover();
@@ -716,14 +716,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(reviewCommentBubble).toBeVisible();
     const focusGroupsBeforeCommentEscape = await Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => (
-        frame.locator("html").getAttribute("data-pageroot-review-focus-group")
+        frame.locator("html").getAttribute("data-stemmio-review-focus-group")
       )),
     );
     await launched.page.keyboard.press("Escape");
     await expect(reviewCommentBubble).toBeHidden();
     await expect.poll(() => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => (
-        frame.locator("html").getAttribute("data-pageroot-review-focus-group")
+        frame.locator("html").getAttribute("data-stemmio-review-focus-group")
       )),
     )).toEqual(focusGroupsBeforeCommentEscape);
     await reviewCommentMarker.blur();
@@ -732,21 +732,21 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(reviewCommentBubble).toBeVisible();
     await ordinaryReviewCommentMarker.hover();
     await expect.poll(() => beforeReviewFrame.locator(
-      "[data-pageroot-review-comment-highlight]",
+      "[data-stemmio-review-comment-highlight]",
     ).count()).toBeGreaterThan(0);
     await launched.page.locator('section[data-side="before"] > header').hover();
     // Leaving the second marker must not clear the first marker that still owns
     // keyboard focus. The parent active-key set owns the combined highlight.
-    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+    await expect(beforeReviewFrame.locator("[data-stemmio-review-comment-highlight]"))
       .toHaveCount(1);
     await expect(launched.page.locator(
       'section[data-side="before"] [data-testid="review-comment-marker"]',
     )).toHaveCount(2);
     await reviewCommentMarker.blur();
     await expect(reviewCommentBubble).toBeHidden();
-    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+    await expect(beforeReviewFrame.locator("[data-stemmio-review-comment-highlight]"))
       .toHaveCount(0);
-    await expect(afterReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+    await expect(afterReviewFrame.locator("[data-stemmio-review-comment-highlight]"))
       .toHaveCount(0);
     // 接下来继续操作始终固定在工作台顶栏中的审阅控件。
     await expect(liveReviewTools).toBeVisible();
@@ -756,11 +756,11 @@ ${REVIEW_MASK_UNION_BEFORE}
       .evaluate((button) => button.click());
     await expect.poll(async () => beforeReviewFrame.locator("html").evaluate(() => {
       const transitioning = document.documentElement.hasAttribute(
-        "data-pageroot-review-transitioning",
+        "data-stemmio-review-transitioning",
       );
       return !transitioning || (
-        document.querySelectorAll("[data-pageroot-review-transition-mask]").length === 1
-        && document.querySelectorAll("[data-pageroot-review-projection-layer]").length === 0
+        document.querySelectorAll("[data-stemmio-review-transition-mask]").length === 1
+        && document.querySelectorAll("[data-stemmio-review-projection-layer]").length === 0
       );
     })).toBe(true);
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
@@ -769,23 +769,23 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toBeVisible();
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => (
-        !document.documentElement.hasAttribute("data-pageroot-review-transitioning")
+        !document.documentElement.hasAttribute("data-stemmio-review-transitioning")
       ))),
     ).then((states) => states.every(Boolean))).toBe(true);
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
-        const filter = document.documentElement.dataset.pagerootReviewFilter || "all";
-        return [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+        const filter = document.documentElement.dataset.stemmioReviewFilter || "all";
+        return [...document.querySelectorAll("[data-stemmio-review-overlay-box]")]
           .filter((box) => !String(
-            box.getAttribute("data-pageroot-review-fact") || "",
+            box.getAttribute("data-stemmio-review-fact") || "",
           ).startsWith("style:runtime-projection-"))
           .every((box) => {
-            const changeId = box.getAttribute("data-pageroot-review-overlay-box");
+            const changeId = box.getAttribute("data-stemmio-review-overlay-box");
             return [...document.querySelectorAll(
-              '[data-pageroot-review-marker="' + changeId + '"]',
+              '[data-stemmio-review-marker="' + changeId + '"]',
             )].some((marker) => {
               const markerTypes = String(
-                marker.getAttribute("data-pageroot-review-marker-types") || "",
+                marker.getAttribute("data-stemmio-review-marker-types") || "",
               ).split(/\s+/u);
               const matchesFilter = filter === "all" || markerTypes.includes(filter);
               if (!matchesFilter) return false;
@@ -811,7 +811,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toBeVisible();
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => (
-        !document.documentElement.hasAttribute("data-pageroot-review-transitioning")
+        !document.documentElement.hasAttribute("data-stemmio-review-transitioning")
       ))),
     ).then((states) => states.every(Boolean))).toBe(true);
     await assertReviewHasNoRuntimeVisualSupplement(
@@ -829,10 +829,10 @@ ${REVIEW_MASK_UNION_BEFORE}
         document.body?.scrollHeight || 0,
       );
       const layer = document.documentElement.hasAttribute(
-        "data-pageroot-review-transitioning",
+        "data-stemmio-review-transitioning",
       )
-        ? document.querySelector("[data-pageroot-review-transition-mask]")
-        : document.querySelector("[data-pageroot-review-projection-layer]");
+        ? document.querySelector("[data-stemmio-review-transition-mask]")
+        : document.querySelector("[data-stemmio-review-projection-layer]");
       return Boolean(layer && layer.getBoundingClientRect().height >= documentHeight - 1);
     })).toBe(true);
     await expect(afterReviewFrame.locator("#indexed-review-panel-two")).toBeVisible();
@@ -857,38 +857,38 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(beforeReviewFrame.getByRole("textbox", { name: "审阅同步输入" }))
       .toHaveValue("反向动作同步");
     await launched.page.getByRole("button", { name: "同步滚动" }).click();
-    await afterReviewFrame.locator("[data-pageroot-review-region-bar]").first().click();
+    await afterReviewFrame.locator("[data-stemmio-review-region-bar]").first().click();
     await assertReviewFocusPaint(beforeReviewFrame, afterReviewFrame);
     await expect.poll(() => afterReviewFrame.locator(
-      "[data-pageroot-review-mask-hole]",
+      "[data-stemmio-review-mask-hole]",
     ).count()).toBe(1);
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
-        "[data-pageroot-review-overlay-box]",
+        "[data-stemmio-review-overlay-box]",
       ).evaluateAll((boxes) => {
         const validLabel = (label) => {
           const text = label?.textContent?.trim() || "";
           return text.length >= 2 && text.length <= 40 && !text.includes("×");
         };
         return boxes.length <= 1 && boxes.every((box) => {
-          const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
+          const labels = box.querySelectorAll("[data-stemmio-review-overlay-label]");
           return labels.length <= 1 && (labels.length === 0 || validLabel(labels[0]));
         });
       })),
     ).then((states) => states.every(Boolean))).toBe(true);
     const nestedOverlayPairs = await afterReviewFrame.locator(
-      "[data-pageroot-review-overlay-box]",
+      "[data-stemmio-review-overlay-box]",
     ).evaluateAll((boxes) => boxes.flatMap((outer, outerIndex) => {
       const outerRect = outer.getBoundingClientRect();
       return boxes.flatMap((inner, innerIndex) => {
         if (outerIndex === innerIndex) return [];
         const innerRect = inner.getBoundingClientRect();
-        const sameOwner = outer.getAttribute("data-pageroot-review-semantic-owner")
-          === inner.getAttribute("data-pageroot-review-semantic-owner");
-        const sameFact = outer.getAttribute("data-pageroot-review-fact")
-          === inner.getAttribute("data-pageroot-review-fact");
-        const nested = outer.getAttribute("data-pageroot-review-overlay-box")
-          === inner.getAttribute("data-pageroot-review-overlay-box")
+        const sameOwner = outer.getAttribute("data-stemmio-review-semantic-owner")
+          === inner.getAttribute("data-stemmio-review-semantic-owner");
+        const sameFact = outer.getAttribute("data-stemmio-review-fact")
+          === inner.getAttribute("data-stemmio-review-fact");
+        const nested = outer.getAttribute("data-stemmio-review-overlay-box")
+          === inner.getAttribute("data-stemmio-review-overlay-box")
           && sameOwner
           && sameFact
           && innerRect.width * innerRect.height < outerRect.width * outerRect.height * .86
@@ -897,7 +897,7 @@ ${REVIEW_MASK_UNION_BEFORE}
           && innerRect.right <= outerRect.right + 2
           && innerRect.bottom <= outerRect.bottom + 2;
         return nested ? [{
-          changeId: outer.getAttribute("data-pageroot-review-overlay-box"),
+          changeId: outer.getAttribute("data-stemmio-review-overlay-box"),
           outer: {
             summary: outer.textContent,
             tone: outer.getAttribute("data-tone"),
@@ -918,28 +918,28 @@ ${REVIEW_MASK_UNION_BEFORE}
     );
     const removedAtomicOwner = await beforeReviewFrame.locator(
       "[data-review-atomic-removed]",
-    ).getAttribute("data-pageroot-review-semantic-owner");
+    ).getAttribute("data-stemmio-review-semantic-owner");
     const addedAtomicOwner = await afterReviewFrame.locator(
       "[data-review-atomic-added]",
-    ).getAttribute("data-pageroot-review-semantic-owner");
+    ).getAttribute("data-stemmio-review-semantic-owner");
     expect(removedAtomicOwner).toBeTruthy();
     expect(addedAtomicOwner).toBeTruthy();
     await expect(beforeReviewFrame.locator(
-      '[data-review-atomic-removed][data-pageroot-review-structure="removed"]',
+      '[data-review-atomic-removed][data-stemmio-review-structure="removed"]',
     )).toHaveCount(1);
     await expect(afterReviewFrame.locator(
-      '[data-review-atomic-added][data-pageroot-review-structure="added"]',
+      '[data-review-atomic-added][data-stemmio-review-structure="added"]',
     )).toHaveCount(1);
     await expect(beforeReviewFrame.locator(
-      '[data-review-atomic-stable-before] [data-pageroot-review-text], [data-review-atomic-stable-after] [data-pageroot-review-text]',
+      '[data-review-atomic-stable-before] [data-stemmio-review-text], [data-review-atomic-stable-after] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-atomic-stable-before] [data-pageroot-review-text], [data-review-atomic-stable-after] [data-pageroot-review-text]',
+      '[data-review-atomic-stable-before] [data-stemmio-review-text], [data-review-atomic-stable-after] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect.poll(async () => beforeReviewFrame.locator(
-      "[data-pageroot-review-id]",
+      "[data-stemmio-review-id]",
     ).first().evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
-    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+    if (process.env.STEMMIO_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
       await launched.page.screenshot({
@@ -949,51 +949,51 @@ ${REVIEW_MASK_UNION_BEFORE}
     }
     await launched.page.getByRole("button", { name: "文字变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("text");
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-focus",
+      "data-stemmio-review-focus",
     )).not.toBe("all");
     // Switching the filter must select the first matching marker instead of
     // leaving an unmatched target with an empty viewport.
     const filteredFocusChangeId = await beforeReviewFrame.locator("html")
-      .getAttribute("data-pageroot-review-focus");
+      .getAttribute("data-stemmio-review-focus");
     expect(filteredFocusChangeId).toBeTruthy();
     await expect(beforeReviewFrame.locator(
-      '[data-pageroot-review-text="removed"]',
+      '[data-stemmio-review-text="removed"]',
     ).filter({ hasText: ORIGINAL_TEXT })).toBeVisible();
     const filteredFocusBar = beforeReviewFrame.locator(
-      `[data-pageroot-review-region-bar="${filteredFocusChangeId}"]`,
+      `[data-stemmio-review-region-bar="${filteredFocusChangeId}"]`,
     ).first();
     await expect(filteredFocusBar).toBeVisible();
     await filteredFocusBar.evaluate((bar) => bar.click());
     await expect(beforeReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${filteredFocusChangeId}"]`,
+      `[data-stemmio-review-overlay-box="${filteredFocusChangeId}"]`,
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      `[data-pageroot-review-mask-hole="${filteredFocusChangeId}"]`,
+      `[data-stemmio-review-mask-hole="${filteredFocusChangeId}"]`,
     )).toHaveCount(1);
     // Re-selecting the same filter keeps the user's position; page markers
     // remain the explicit way to move to another change.
     await launched.page.getByRole("button", { name: "文字变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html")
-      .getAttribute("data-pageroot-review-focus")).toBe(filteredFocusChangeId);
+      .getAttribute("data-stemmio-review-focus")).toBe(filteredFocusChangeId);
     await expect(beforeReviewFrame.locator(
-      '[data-pageroot-review-text="removed"]',
+      '[data-stemmio-review-text="removed"]',
     ).filter({ hasText: ORIGINAL_TEXT })).toBeVisible();
     await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-text="added"]',
+      '[data-stemmio-review-text="added"]',
     ).filter({ hasText: UPDATED_TEXT })).toBeVisible();
     const deletedPriority = beforeReviewFrame.locator(
-      '[data-review-priority][data-pageroot-review-structure="removed"]',
+      '[data-review-priority][data-stemmio-review-structure="removed"]',
     );
     await expect(deletedPriority).toHaveCount(1);
-    await expect(deletedPriority.locator("[data-pageroot-review-text]")).toHaveCount(0);
+    await expect(deletedPriority.locator("[data-stemmio-review-text]")).toHaveCount(0);
     await expect.poll(() => beforeReviewFrame.locator(
-      '[data-pageroot-review-text-mark="removed"]',
+      '[data-stemmio-review-text-mark="removed"]',
     ).count()).toBeGreaterThan(0);
     const addedText = afterReviewFrame.locator(
-      '[data-pageroot-review-text="added"]',
+      '[data-stemmio-review-text="added"]',
     ).filter({ hasText: UPDATED_TEXT });
     await expect.poll(() => addedText.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
@@ -1006,13 +1006,13 @@ ${REVIEW_MASK_UNION_BEFORE}
     expect(await addedText.evaluate((element) => getComputedStyle(element).fontSize))
       .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).fontSize));
     await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-text-mark="added"]',
+      '[data-stemmio-review-text-mark="added"]',
     ).count()).toBeGreaterThan(0);
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
         "[data-review-injection-stability]",
       ).evaluate((target) => {
-        const marker = target.querySelector("[data-pageroot-review-text]");
+        const marker = target.querySelector("[data-stemmio-review-text]");
         const left = target.querySelector("[data-review-stable-left]");
         const right = target.querySelector("[data-review-stable-right]");
         if (!marker || !left || !right) return false;
@@ -1044,47 +1044,47 @@ ${REVIEW_MASK_UNION_BEFORE}
     ).then((results) => results.every(Boolean))).toBe(true);
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       await expect(frame.locator(
-        '[data-pageroot-review-overlay-box][data-tone^="text-"]',
+        '[data-stemmio-review-overlay-box][data-tone^="text-"]',
       )).toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+      await expect(frame.locator("[data-stemmio-review-mask-hole]")).toHaveCount(1);
     }
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
-      await expect.poll(() => frame.locator("[data-pageroot-review-text-mark]").count())
+      await expect.poll(() => frame.locator("[data-stemmio-review-text-mark]").count())
         .toBeGreaterThan(0);
     }
     const beforeRewriteMarker = beforeReviewFrame.locator(
-      '[data-review-readable-rewrite] [data-pageroot-review-text="removed"]',
+      '[data-review-readable-rewrite] [data-stemmio-review-text="removed"]',
     ).first();
     const afterRewriteMarker = afterReviewFrame.locator(
-      '[data-review-readable-rewrite] [data-pageroot-review-text="added"]',
+      '[data-review-readable-rewrite] [data-stemmio-review-text="added"]',
     ).first();
     await expect(beforeRewriteMarker).toHaveAttribute(
-      "data-pageroot-review-summary",
+      "data-stemmio-review-summary",
       "文本调整",
     );
     await expect(afterRewriteMarker).toHaveAttribute(
-      "data-pageroot-review-summary",
+      "data-stemmio-review-summary",
       "文本调整",
     );
     const beforeRewriteGroup = await beforeRewriteMarker.getAttribute(
-      "data-pageroot-review-text-group",
+      "data-stemmio-review-text-group",
     );
     const afterRewriteGroup = await afterRewriteMarker.getAttribute(
-      "data-pageroot-review-text-group",
+      "data-stemmio-review-text-group",
     );
     expect(beforeRewriteGroup).toBeTruthy();
     expect(afterRewriteGroup).toBeTruthy();
     await activateReviewMarkerGroup(beforeReviewFrame, beforeRewriteMarker);
     const beforeRewriteHole = beforeReviewFrame.locator(
-      `[data-pageroot-review-mask-hole][data-text-group="${beforeRewriteGroup}"]`,
+      `[data-stemmio-review-mask-hole][data-text-group="${beforeRewriteGroup}"]`,
     );
     const afterRewriteHole = afterReviewFrame.locator(
-      `[data-pageroot-review-mask-hole][data-text-group="${afterRewriteGroup}"]`,
+      `[data-stemmio-review-mask-hole][data-text-group="${afterRewriteGroup}"]`,
     );
     await expect(beforeRewriteHole).toHaveCount(1);
     await expect(afterRewriteHole).toHaveCount(1);
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
-      await expect(frame.locator('[data-pageroot-review-overlay-box][data-tone^="text-"]'))
+      await expect(frame.locator('[data-stemmio-review-overlay-box][data-tone^="text-"]'))
         .toHaveCount(0);
     }
     for (const [frame, tone, evidenceCharacter] of [
@@ -1093,7 +1093,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     ]) {
       const lineOwner = frame.locator("[data-review-line-scope]");
       const lineMarkers = lineOwner.locator(
-        `[data-pageroot-review-text="${tone}"]`,
+        `[data-stemmio-review-text="${tone}"]`,
       );
       await expect(lineMarkers).toHaveCount(2);
       expect(await lineMarkers.allTextContents()).toEqual([
@@ -1101,23 +1101,23 @@ ${REVIEW_MASK_UNION_BEFORE}
         evidenceCharacter,
       ]);
       const semanticOwnerId = await lineMarkers.first().getAttribute(
-        "data-pageroot-review-semantic-owner",
+        "data-stemmio-review-semantic-owner",
       );
       expect(semanticOwnerId).toBeTruthy();
       const lineGroups = await lineMarkers.evaluateAll((markers) => (
         [...new Set(markers.map((marker) => (
-          marker.getAttribute("data-pageroot-review-text-group") || ""
+          marker.getAttribute("data-stemmio-review-text-group") || ""
         )).filter(Boolean))]
       ));
       expect(lineGroups).toHaveLength(2);
       await activateReviewMarkerGroup(frame, lineMarkers.first());
       const lineFrame = frame.locator(
-        `[data-pageroot-review-overlay-box][data-tone="text-${tone}"]`
-          + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+        `[data-stemmio-review-overlay-box][data-tone="text-${tone}"]`
+          + `[data-stemmio-review-semantic-owner="${semanticOwnerId}"]`,
       );
       const lineHole = frame.locator(
-        `[data-pageroot-review-mask-hole]`
-          + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+        `[data-stemmio-review-mask-hole]`
+          + `[data-stemmio-review-semantic-owner="${semanticOwnerId}"]`,
       );
       await expect(lineFrame).toHaveCount(0);
       await expect(lineHole).toHaveCount(1);
@@ -1128,38 +1128,38 @@ ${REVIEW_MASK_UNION_BEFORE}
     ]) {
       const promotionOwner = frame.locator("[data-review-scope-promotion]");
       const promotionMarkers = promotionOwner.locator(
-        `[data-pageroot-review-text="${tone}"]`,
+        `[data-stemmio-review-text="${tone}"]`,
       );
       await expect(promotionMarkers).toHaveCount(9);
       expect(await promotionMarkers.allTextContents()).toEqual(
         Array.from({ length: 9 }, () => evidenceCharacter),
       );
       await expect(promotionOwner.locator(
-        `[data-pageroot-review-text="${tone}"]`,
+        `[data-stemmio-review-text="${tone}"]`,
       ).filter({ hasText: "稳定开场" })).toHaveCount(0);
       const semanticOwnerId = await promotionMarkers.first().getAttribute(
-        "data-pageroot-review-semantic-owner",
+        "data-stemmio-review-semantic-owner",
       );
       expect(semanticOwnerId).toBeTruthy();
       const promotionGroups = await promotionMarkers.evaluateAll((markers) => (
         [...new Set(markers.map((marker) => (
-          marker.getAttribute("data-pageroot-review-text-group") || ""
+          marker.getAttribute("data-stemmio-review-text-group") || ""
         )).filter(Boolean))]
       ));
       expect(promotionGroups).toHaveLength(9);
       await activateReviewMarkerGroup(frame, promotionMarkers.first());
       const promotionFrame = frame.locator(
-        `[data-pageroot-review-overlay-box][data-tone="text-${tone}"]`
-          + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+        `[data-stemmio-review-overlay-box][data-tone="text-${tone}"]`
+          + `[data-stemmio-review-semantic-owner="${semanticOwnerId}"]`,
       );
       const promotionHole = frame.locator(
-        `[data-pageroot-review-mask-hole]`
-          + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+        `[data-stemmio-review-mask-hole]`
+          + `[data-stemmio-review-semantic-owner="${semanticOwnerId}"]`,
       );
       await expect(promotionFrame).toHaveCount(0);
       await expect(promotionHole).toHaveCount(1);
     }
-    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+    if (process.env.STEMMIO_CAPTURE_REVIEW) {
       for (const frame of [beforeReviewFrame, afterReviewFrame]) {
         await frame.locator("[data-review-scope-promotion]").evaluate((element) => {
           element.scrollIntoView({ block: "center", inline: "nearest" });
@@ -1173,111 +1173,111 @@ ${REVIEW_MASK_UNION_BEFORE}
       });
     }
     await expect(afterReviewFrame.locator(
-      '[data-review-added-chart][data-pageroot-review-structure="added"]',
+      '[data-review-added-chart][data-stemmio-review-structure="added"]',
     )).toHaveCount(1);
     await expect(afterReviewFrame.locator(
-      '[data-review-added-chart] [data-pageroot-review-text]',
+      '[data-review-added-chart] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      '[data-review-reference] [data-pageroot-review-text-context="removed"]',
+      '[data-review-reference] [data-stemmio-review-text-context="removed"]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
       "[data-review-reference]",
     )).toHaveAttribute(
-      "data-pageroot-review-text-anchors",
+      "data-stemmio-review-text-anchors",
       /text-\d+-\d+@\d+/u,
     );
     await expect(afterReviewFrame.locator(
-      '[data-review-reference] [data-pageroot-review-text="added"]',
+      '[data-review-reference] [data-stemmio-review-text="added"]',
     ).filter({ hasText: "本实验" })).toHaveAttribute(
-      "data-pageroot-review-summary",
+      "data-stemmio-review-summary",
       "新增内容",
     );
     await expect(afterReviewFrame.locator(
-      '[data-review-reference] [data-pageroot-review-text="added"]',
-    )).toHaveAttribute("data-pageroot-review-text-operation", "insert");
+      '[data-review-reference] [data-stemmio-review-text="added"]',
+    )).toHaveAttribute("data-stemmio-review-text-operation", "insert");
     await expect(beforeReviewFrame.locator(
-      '[data-review-delete-only] [data-pageroot-review-text="removed"]',
+      '[data-review-delete-only] [data-stemmio-review-text="removed"]',
     )).toHaveText("换言之，");
     await expect(beforeReviewFrame.locator(
-      '[data-review-delete-only] [data-pageroot-review-text="removed"]',
-    )).toHaveAttribute("data-pageroot-review-summary", "删除内容");
+      '[data-review-delete-only] [data-stemmio-review-text="removed"]',
+    )).toHaveAttribute("data-stemmio-review-summary", "删除内容");
     await expect(afterReviewFrame.locator(
-      '[data-review-delete-only] [data-pageroot-review-text-context="added"]',
+      '[data-review-delete-only] [data-stemmio-review-text-context="added"]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
       "[data-review-delete-only]",
     )).toHaveAttribute(
-      "data-pageroot-review-text-anchors",
+      "data-stemmio-review-text-anchors",
       /text-\d+-\d+@\d+/u,
     );
     await expect(beforeReviewFrame.locator(
-      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
+      '[data-review-anchor-only] [data-stemmio-review-text="removed"]',
     )).toHaveText("只删除这句定位文字。");
     await expect(afterReviewFrame.locator(
-      '[data-review-anchor-only] [data-pageroot-review-text]',
+      '[data-review-anchor-only] [data-stemmio-review-text]',
     )).toHaveCount(0);
     const anchorOnlySectionChangeId = await afterReviewFrame.locator(
       "[data-review-anchor-only-section]",
-    ).getAttribute("data-pageroot-review-id");
+    ).getAttribute("data-stemmio-review-id");
     expect(anchorOnlySectionChangeId).toBeTruthy();
     await expect(afterReviewFrame.locator(
       "[data-review-anchor-only]",
-    )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlySectionChangeId);
+    )).toHaveAttribute("data-stemmio-review-anchor-change", anchorOnlySectionChangeId);
     const anchorOnlyChangeId = await beforeReviewFrame.locator(
-      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
-    ).getAttribute("data-pageroot-review-marker");
+      '[data-review-anchor-only] [data-stemmio-review-text="removed"]',
+    ).getAttribute("data-stemmio-review-marker");
     expect(anchorOnlyChangeId).toBeTruthy();
     await expect(beforeReviewFrame.locator(
-      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
-    )).toHaveAttribute("data-pageroot-review-confirmed", "true");
+      '[data-review-anchor-only] [data-stemmio-review-text="removed"]',
+    )).toHaveAttribute("data-stemmio-review-confirmed", "true");
     const anchorOffsets = await afterReviewFrame.locator(
       "[data-review-anchor-only]",
     ).evaluate((anchor) => String(
-      anchor.getAttribute("data-pageroot-review-text-anchors") || "",
+      anchor.getAttribute("data-stemmio-review-text-anchors") || "",
     ).split(/\s+/).filter(Boolean).map((encoded) => (
       Number(encoded.slice(encoded.lastIndexOf("@") + 1))
     )));
     expect(anchorOffsets).toContain("稳定开头。稳定中段。".length);
     await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${anchorOnlyChangeId}"]`,
+      `[data-stemmio-review-overlay-box="${anchorOnlyChangeId}"]`,
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-mask-hole="${anchorOnlyChangeId}"]`,
+      `[data-stemmio-review-mask-hole="${anchorOnlyChangeId}"]`,
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      '[data-review-numbered-lines] [data-pageroot-review-text]',
+      '[data-review-numbered-lines] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-numbered-lines] [data-pageroot-review-text="added"]',
+      '[data-review-numbered-lines] [data-stemmio-review-text="added"]',
     )).toHaveText("④ 后续重点：继续观察新增商品。");
     await expect(afterReviewFrame.locator(
-      '[data-review-numbered-lines] [data-pageroot-review-text="added"]',
+      '[data-review-numbered-lines] [data-stemmio-review-text="added"]',
     )).toHaveCount(1);
     const numberedLineMarker = afterReviewFrame.locator(
-      '[data-review-numbered-lines] [data-pageroot-review-text="added"]',
+      '[data-review-numbered-lines] [data-stemmio-review-text="added"]',
     );
     const numberedLineGroup = await numberedLineMarker.getAttribute(
-      "data-pageroot-review-text-group",
+      "data-stemmio-review-text-group",
     );
     expect(numberedLineGroup).toBeTruthy();
     await activateReviewMarkerGroup(afterReviewFrame, numberedLineMarker);
     const numberedLineFrame = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${numberedLineGroup}"]`,
+      `[data-stemmio-review-overlay-box][data-tone="text-added"][data-text-group="${numberedLineGroup}"]`,
     );
     await expect(numberedLineFrame).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-text-group="${numberedLineGroup}"]`,
+      `[data-stemmio-review-overlay-box][data-text-group="${numberedLineGroup}"]`,
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      `[data-pageroot-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
+      `[data-stemmio-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
+      `[data-stemmio-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
     )).toHaveCount(1);
     await expect.poll(async () => {
       const holeBox = await afterReviewFrame.locator(
-        `[data-pageroot-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
+        `[data-stemmio-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
       ).boundingBox();
       const ownerBox = await afterReviewFrame.locator(
         "[data-review-numbered-lines]",
@@ -1285,47 +1285,47 @@ ${REVIEW_MASK_UNION_BEFORE}
       return Boolean(holeBox && ownerBox && holeBox.height < ownerBox.height * 0.55);
     }).toBe(true);
     await expect(beforeReviewFrame.locator(
-      '[data-review-list-items] [data-pageroot-review-text]',
+      '[data-review-list-items] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-added-list-item][data-pageroot-review-structure="added"]',
+      '[data-review-added-list-item][data-stemmio-review-structure="added"]',
     )).toHaveCount(1);
     await expect(afterReviewFrame.locator(
-      '[data-review-list-items] [data-pageroot-review-text]',
+      '[data-review-list-items] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      '[data-review-nested-list] [data-pageroot-review-text], [data-review-nested-list][data-pageroot-review-structure]',
+      '[data-review-nested-list] [data-stemmio-review-text], [data-review-nested-list][data-stemmio-review-structure]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-nested-list] [data-pageroot-review-text], [data-review-nested-list][data-pageroot-review-structure]',
+      '[data-review-nested-list] [data-stemmio-review-text], [data-review-nested-list][data-stemmio-review-structure]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      '[data-review-brand-table] [data-pageroot-review-text]',
+      '[data-review-brand-table] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-brand-row="added"] [data-pageroot-review-text]',
+      '[data-review-brand-row="added"] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-brand-row="added"][data-pageroot-review-structure="added"]',
+      '[data-review-brand-row="added"][data-stemmio-review-structure="added"]',
     )).toHaveCount(1);
     await expect(afterReviewFrame.locator(
-      '[data-review-brand-row]:not([data-review-brand-row="added"]) [data-pageroot-review-text]',
+      '[data-review-brand-row]:not([data-review-brand-row="added"]) [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      '[data-review-layout-only] [data-pageroot-review-text], [data-review-layout-only] [data-pageroot-review-text-context]',
+      '[data-review-layout-only] [data-stemmio-review-text], [data-review-layout-only] [data-stemmio-review-text-context]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-layout-only] [data-pageroot-review-text], [data-review-layout-only] [data-pageroot-review-text-context]',
+      '[data-review-layout-only] [data-stemmio-review-text], [data-review-layout-only] [data-stemmio-review-text-context]',
     )).toHaveCount(0);
     const crossLineMarker = afterReviewFrame.locator(
-      '[data-review-cross-line] [data-pageroot-review-text="added"]',
+      '[data-review-cross-line] [data-stemmio-review-text="added"]',
     );
     await expect(crossLineMarker).toHaveAttribute(
-      "data-pageroot-review-text-operation",
+      "data-stemmio-review-text-operation",
       "insert",
     );
     const crossLineGroup = await crossLineMarker.getAttribute(
-      "data-pageroot-review-text-group",
+      "data-stemmio-review-text-group",
     );
     expect(crossLineGroup).toBeTruthy();
     await activateReviewMarkerGroup(afterReviewFrame, crossLineMarker);
@@ -1339,10 +1339,10 @@ ${REVIEW_MASK_UNION_BEFORE}
     });
     expect(crossLineRectCount).toBeGreaterThan(1);
     const crossLineFrames = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`,
+      `[data-stemmio-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`,
     );
     const crossLineHole = afterReviewFrame.locator(
-      `[data-pageroot-review-mask-hole][data-text-group="${crossLineGroup}"]`,
+      `[data-stemmio-review-mask-hole][data-text-group="${crossLineGroup}"]`,
     );
     await expect(crossLineFrames).toHaveCount(0);
     await expect(crossLineHole).toHaveCount(1);
@@ -1351,59 +1351,59 @@ ${REVIEW_MASK_UNION_BEFORE}
       [afterReviewFrame, "added"],
     ]) {
       await activateReviewMarkerGroup(frame, frame.locator(
-        `[data-review-stable-sentence-rewrite] [data-pageroot-review-text="${tone}"]`,
+        `[data-review-stable-sentence-rewrite] [data-stemmio-review-text="${tone}"]`,
       ).first());
       const owner = frame.locator("[data-review-stable-sentence-rewrite]");
       const semanticOwnerId = await owner.locator(
-        `[data-pageroot-review-text="${tone}"]`,
-      ).first().getAttribute("data-pageroot-review-semantic-owner");
+        `[data-stemmio-review-text="${tone}"]`,
+      ).first().getAttribute("data-stemmio-review-semantic-owner");
       expect(semanticOwnerId).toBeTruthy();
       await expect(frame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+        `[data-stemmio-review-overlay-box][data-stemmio-review-semantic-owner="${semanticOwnerId}"]`,
       )).toHaveCount(0);
       await expect(frame.locator(
-        `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+        `[data-stemmio-review-mask-hole][data-stemmio-review-semantic-owner="${semanticOwnerId}"]`,
       )).toHaveCount(1);
-      await expect(owner.locator("[data-pageroot-review-text]").filter({
+      await expect(owner.locator("[data-stemmio-review-text]").filter({
         hasText: /稳定(?:前|后)句/u,
       })).toHaveCount(0);
     }
     const warningRemovedText = await beforeReviewFrame.locator(
-      '[data-review-warning] [data-pageroot-review-text="removed"]',
+      '[data-review-warning] [data-stemmio-review-text="removed"]',
     ).allTextContents();
     expect(warningRemovedText.join(""))
       .not.toContain("7/28)增幅收窄至负值区间，需");
     await expect(beforeReviewFrame.locator(
-      '[data-review-semantic-copy] [data-pageroot-review-text="removed"]',
+      '[data-review-semantic-copy] [data-stemmio-review-text="removed"]',
     )).toHaveText("品均基本持平");
     await expect(afterReviewFrame.locator(
-      '[data-review-semantic-copy] [data-pageroot-review-text="added"]',
+      '[data-review-semantic-copy] [data-stemmio-review-text="added"]',
     )).toHaveText("单品效率整体稳定，增幅仅+0.10%");
     await expect(beforeReviewFrame.locator(
-      '[data-review-deleted-copy] [data-pageroot-review-text="removed"]',
+      '[data-review-deleted-copy] [data-stemmio-review-text="removed"]',
     ).filter({ hasText: /^待删除第/u })).toHaveCount(3);
     await expect(beforeReviewFrame.locator(
-      '[data-review-break-layout] [data-pageroot-review-text-context="removed"]',
+      '[data-review-break-layout] [data-stemmio-review-text-context="removed"]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-break-layout] [data-pageroot-review-text="added"]',
+      '[data-review-break-layout] [data-stemmio-review-text="added"]',
     ).filter({ hasText: "vs" })).toHaveCount(1);
     await expect(beforeReviewFrame.locator(
-      '[data-review-ebita-copy] [data-pageroot-review-text-context="removed"]',
+      '[data-review-ebita-copy] [data-stemmio-review-text-context="removed"]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-ebita-copy] [data-pageroot-review-text="added"]',
+      '[data-review-ebita-copy] [data-stemmio-review-text="added"]',
     ).filter({ hasText: "建议继续保留实验策略" })).toBeVisible();
     await expect(afterReviewFrame.locator(
-      '[data-review-regression-summary] [data-pageroot-review-text]',
+      '[data-review-regression-summary] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
-      '[data-review-metrics] [data-pageroot-review-text]',
+      '[data-review-metrics] [data-stemmio-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-metrics] [data-pageroot-review-text]',
+      '[data-review-metrics] [data-stemmio-review-text]',
     )).toHaveCount(0);
-    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+    if (process.env.STEMMIO_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
       await launched.page.screenshot({
@@ -1412,31 +1412,31 @@ ${REVIEW_MASK_UNION_BEFORE}
       });
     }
     await expect(beforeReviewFrame.locator(
-      '[data-pageroot-review-text]',
+      '[data-stemmio-review-text]',
     ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-text]',
+      '[data-stemmio-review-text]',
     ).filter({ hasText: "第二块完整内容" })).toHaveCount(0);
     const textMask = afterReviewFrame.locator(
-      '[data-pageroot-review-mask-dim]',
+      '[data-stemmio-review-mask-dim]',
     );
     await expect(textMask).toBeAttached();
     await expect.poll(() => textMask.getAttribute("fill-opacity"))
       .toBe("0.75");
     await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-mask-layer]',
+      '[data-stemmio-review-mask-layer]',
     ).evaluate((element) => ({
       background: getComputedStyle(element).backgroundColor,
       borderWidth: getComputedStyle(element).borderTopWidth,
     }))).toEqual({ background: "rgba(0, 0, 0, 0)", borderWidth: "0px" });
     await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-projection-layer], [data-pageroot-review-mask-layer], [data-pageroot-review-overlay-box], [data-pageroot-review-overlay-shape-svg]',
+      '[data-stemmio-review-projection-layer], [data-stemmio-review-mask-layer], [data-stemmio-review-overlay-box], [data-stemmio-review-overlay-shape-svg]',
     ).evaluateAll((elements) => elements.length > 0 && elements.every((element) => (
       getComputedStyle(element).outlineStyle === "none"
     )))).toBe(true);
     await expect.poll(async () => {
       const boxes = await afterReviewFrame.locator(
-        '[data-pageroot-review-overlay-box]',
+        '[data-stemmio-review-overlay-box]',
       ).evaluateAll((elements) => elements.map((element) => ({
         left: Number.parseFloat(element.style.left),
         top: Number.parseFloat(element.style.top),
@@ -1445,7 +1445,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         path: element.getAttribute("data-path"),
       })));
       const holes = await afterReviewFrame.locator(
-        '[data-pageroot-review-mask-hole]',
+        '[data-stemmio-review-mask-hole]',
       ).evaluateAll((elements) => elements.map((element) => ({
         left: Number(element.getAttribute("data-left")),
         top: Number(element.getAttribute("data-top")),
@@ -1465,36 +1465,36 @@ ${REVIEW_MASK_UNION_BEFORE}
     }).toBe(true);
     await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("all");
     await launched.page.getByRole("button", { name: "文字变化" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("text");
     const ebitaMarker = afterReviewFrame.locator(
-      '[data-review-ebita-copy] [data-pageroot-review-text="added"]',
+      '[data-review-ebita-copy] [data-stemmio-review-text="added"]',
     ).filter({ hasText: "建议继续保留实验策略" });
-    const ebitaChangeId = await ebitaMarker.getAttribute("data-pageroot-review-marker");
+    const ebitaChangeId = await ebitaMarker.getAttribute("data-stemmio-review-marker");
     expect(ebitaChangeId).toBeTruthy();
     await activateReviewMarkerGroup(afterReviewFrame, ebitaMarker);
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-focus",
+      "data-stemmio-review-focus",
     )).toBe(ebitaChangeId);
     await expect(beforeReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
+      `[data-stemmio-review-overlay-box="${ebitaChangeId}"]`,
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
+      `[data-stemmio-review-overlay-box="${ebitaChangeId}"]`,
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-mask-hole="${ebitaChangeId}"]`,
+      `[data-stemmio-review-mask-hole="${ebitaChangeId}"]`,
     )).toHaveCount(1);
     await beforeCounter.evaluate((button) => button.click());
     await expect(afterCounter).toHaveAttribute("data-count", "3");
     // The authored counter is unrelated to the review sequence controls and
     // remains a separate page interaction synchronized across both frames.
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("text");
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect(launched.page.getByRole("slider", {
@@ -1502,7 +1502,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     })).toHaveCount(0);
     await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("all");
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
@@ -1511,33 +1511,33 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toBeVisible();
     await launched.page.getByRole("button", { name: "元素变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("structure");
     await activateReviewMarkerGroup(afterReviewFrame, afterReviewFrame.locator(
       '[data-review-brand-row="added"]',
     ));
-    await expect(beforeReviewFrame.locator("[data-pageroot-review-structure]").first())
+    await expect(beforeReviewFrame.locator("[data-stemmio-review-structure]").first())
       .toBeVisible();
     await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="structure"]',
+      '[data-stemmio-review-overlay-box][data-tone="structure"]',
     ).first()).toBeAttached();
     // The active structure group uses the single violet focus outline.
     await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="structure"]',
+      '[data-stemmio-review-overlay-box][data-tone="structure"]',
     ).first().evaluate((element) => {
-      const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
+      const shape = element.querySelector("[data-stemmio-review-overlay-shape]");
       return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
     }))
       .toMatch(/^(?:rgba\(0, 0, 0, 0\)|rgb\(109, 92, 231\))$/u);
     await expect(afterReviewFrame.locator(
-      '[data-review-added-chart][data-pageroot-review-structure]',
+      '[data-review-added-chart][data-stemmio-review-structure]',
     )).toHaveCount(1);
     const structureAddedRowFrame = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="structure"][data-pageroot-review-semantic-owner="${addedRowSemanticOwner}"]`,
+      `[data-stemmio-review-overlay-box][data-tone="structure"][data-stemmio-review-semantic-owner="${addedRowSemanticOwner}"]`,
     );
     await expect(structureAddedRowFrame).toHaveCount(1);
     await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-pageroot-review-semantic-owner="${addedRowSemanticOwner}"]`,
+      `[data-stemmio-review-overlay-box][data-tone="text-added"][data-stemmio-review-semantic-owner="${addedRowSemanticOwner}"]`,
     )).toHaveCount(0);
     await expect.poll(() => structureAddedRowFrame.evaluate((frame) => {
       const row = document.querySelector('[data-review-brand-row="added"]');
@@ -1551,10 +1551,10 @@ ${REVIEW_MASK_UNION_BEFORE}
     })).toBe(true);
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       const metricStructureFacts = await frame.locator(
-        '[data-review-metrics] [data-pageroot-review-structure]',
+        '[data-review-metrics] [data-stemmio-review-structure]',
       ).evaluateAll((elements) => elements.map((element) => ({
         tag: element.tagName,
-        marker: element.getAttribute("data-pageroot-review-structure"),
+        marker: element.getAttribute("data-stemmio-review-structure"),
       })));
       expect(metricStructureFacts).toHaveLength(3);
       expect(metricStructureFacts.every((fact) => (
@@ -1562,14 +1562,14 @@ ${REVIEW_MASK_UNION_BEFORE}
       ))).toBe(true);
     }
     const sourceRewriteSelector = [
-      "[data-review-mixed-copy] [data-pageroot-review-structure]",
-      "[data-review-break-layout] [data-pageroot-review-structure]",
-      "[data-review-ebita-copy] [data-pageroot-review-structure]",
+      "[data-review-mixed-copy] [data-stemmio-review-structure]",
+      "[data-review-break-layout] [data-stemmio-review-structure]",
+      "[data-review-ebita-copy] [data-stemmio-review-structure]",
     ].join(", ");
     const structureChanges = async (frame) => frame.locator(sourceRewriteSelector)
       .evaluateAll((elements) => elements.flatMap((element) => {
         const facts = JSON.parse(
-          element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+          element.getAttribute("data-stemmio-review-projection-facts") || "[]",
         );
         return facts.filter((fact) => fact.type === "structure")
           .map((fact) => fact.structureChange);
@@ -1582,17 +1582,17 @@ ${REVIEW_MASK_UNION_BEFORE}
     const afterSourceRewriteChanges = await structureChanges(afterReviewFrame);
     expect(afterSourceRewriteChanges.every((change) => change === "moved")).toBe(true);
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
-      await expect(frame.locator("[data-pageroot-review-style]")).toHaveCount(0);
+      await expect(frame.locator("[data-stemmio-review-style]")).toHaveCount(0);
       await expect(frame.locator("[data-review-layout-only]"))
-        .toHaveAttribute("data-pageroot-review-structure", "style");
+        .toHaveAttribute("data-stemmio-review-structure", "style");
       await expect(frame.locator("[data-review-layout-only]"))
-        .toHaveAttribute("data-pageroot-review-projection-facts", /"structureChange":"style"/u);
+        .toHaveAttribute("data-stemmio-review-projection-facts", /"structureChange":"style"/u);
       await expect(frame.locator("html"))
-        .not.toHaveAttribute("data-pageroot-review-confirmed", /.+/u);
+        .not.toHaveAttribute("data-stemmio-review-confirmed", /.+/u);
       await expect(frame.locator("html"))
-        .not.toHaveAttribute("data-pageroot-review-projection-facts", /css-source|script-source/u);
+        .not.toHaveAttribute("data-stemmio-review-projection-facts", /css-source|script-source/u);
       await expect(frame.locator(
-        '[data-review-mask-stage] [data-pageroot-review-structure="style"]',
+        '[data-review-mask-stage] [data-stemmio-review-structure="style"]',
       )).toHaveCount(2);
     }
     await launched.page.getByRole("button", {
@@ -1601,7 +1601,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(launched.page.locator('[data-view="before"]')).toBeVisible();
     await expect(launched.page.locator('section[data-side="after"]')).toHaveAttribute("hidden", "");
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("structure");
     // Switching to a single page must widen it to the space available, never leave it at
     // the split width. Alignment of the right edges was the old way to say that, but it
@@ -1619,7 +1619,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     }).click();
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("structure");
     const wholePageButton = launched.page.getByRole("button", {
       name: "双页对比",
@@ -1642,7 +1642,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect(launched.page.locator('[data-view="after"]')).toBeVisible();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
+      "data-stemmio-review-filter",
     )).toBe("all");
     await wholePageButton.click();
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
@@ -1659,11 +1659,11 @@ ${REVIEW_MASK_UNION_BEFORE}
     const activeFocusPresentationState = async () => {
       const sides = await Promise.all([beforeReviewFrame, afterReviewFrame].map((frame) => (
         frame.locator("html").evaluate(() => {
-          const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
-          const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")];
-          const labels = [...document.querySelectorAll("[data-pageroot-review-overlay-label]")];
+          const boxes = [...document.querySelectorAll("[data-stemmio-review-overlay-box]")];
+          const holes = [...document.querySelectorAll("[data-stemmio-review-mask-hole]")];
+          const labels = [...document.querySelectorAll("[data-stemmio-review-overlay-label]")];
           return {
-            focusGroup: document.documentElement.dataset.pagerootReviewFocusGroup || "",
+            focusGroup: document.documentElement.dataset.stemmioReviewFocusGroup || "",
             boxCount: boxes.length,
             holeCount: holes.length,
             labelCount: labels.length,
@@ -1888,7 +1888,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toBe(0);
     await launched.page.waitForTimeout(180);
     const sourceScrollResult = await beforeReviewFrame.locator("html").evaluate(() => {
-      const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+      const outlines = [...document.querySelectorAll("[data-stemmio-outline-id]")]
         .filter((element) => element.getBoundingClientRect().height > 0);
       const target = outlines[Math.floor(outlines.length / 2)];
       if (!target) return { maximum: 0, target: 0, actual: scrollY, count: 0 };
@@ -1922,21 +1922,21 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toBeLessThanOrEqual(1);
     const referenceOutlineAnchor = (frame) => frame.locator("html").evaluate(() => {
       const referenceLine = innerHeight / 3;
-      const outlines = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+      const outlines = [...document.querySelectorAll("[data-stemmio-outline-id]")]
         .filter((element) => element.getBoundingClientRect().height > 0);
       const anchor = outlines.find((element) => element.getBoundingClientRect().bottom > referenceLine)
         || outlines.at(-1);
       if (!anchor) return { outlineId: "", ratio: 0 };
       const rect = anchor.getBoundingClientRect();
       return {
-        outlineId: anchor.getAttribute("data-pageroot-outline-id") || "",
+        outlineId: anchor.getAttribute("data-stemmio-outline-id") || "",
         ratio: Math.max(0, Math.min(1, (referenceLine - rect.top) / Math.max(1, rect.height))),
       };
     });
     const beforeOutlineAnchor = await referenceOutlineAnchor(beforeReviewFrame);
     expect(beforeOutlineAnchor.outlineId).not.toBe("");
     const afterOutlineProgress = () => afterReviewFrame.locator(
-      `[data-pageroot-outline-id="${beforeOutlineAnchor.outlineId}"]`,
+      `[data-stemmio-outline-id="${beforeOutlineAnchor.outlineId}"]`,
     ).evaluate((element) => {
       const referenceLine = innerHeight / 3;
       const rect = element.getBoundingClientRect();
@@ -1985,12 +1985,12 @@ ${REVIEW_MASK_UNION_BEFORE}
     });
     await launched.page.waitForTimeout(120);
     expect(await afterReviewFrame.locator("html").evaluate(() => window.scrollY)).toBe(0);
-    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+    if (process.env.STEMMIO_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
       await wholePageButton.click();
       await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-        "data-pageroot-review-filter",
+        "data-stemmio-review-filter",
       )).toBe("all");
       await Promise.all([
         beforeViewport.evaluate((element) => { element.scrollLeft = 0; }),
@@ -2024,16 +2024,16 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(launched.page.getByRole("button", { name: "继续审阅" }))
       .toBeFocused();
     await launched.page.evaluate(() => {
-      window.__pagerootSawHandoffFlash = false;
-      window.__pagerootHandoffFlashEvents = [];
+      window.__stemmioSawHandoffFlash = false;
+      window.__stemmioHandoffFlashEvents = [];
       // Accepting promotes the Working Copy to a new source path while the
       // review overlay is still visible. The overlay must keep its prepared
       // session identity: a review iframe remounting mid-accept is the
       // user-visible double-jump regression.
-      window.__pagerootReviewAcceptFrames = Array.from(document.querySelectorAll(
+      window.__stemmioReviewAcceptFrames = Array.from(document.querySelectorAll(
         '[data-testid="ai-review-workspace"] iframe',
       ));
-      window.__pagerootHandoffObserver = new MutationObserver(() => {
+      window.__stemmioHandoffObserver = new MutationObserver(() => {
         const review = document.querySelector('[data-testid="ai-review-workspace"]');
         const reviewCoversWindow = Boolean(
           review
@@ -2041,21 +2041,21 @@ ${REVIEW_MASK_UNION_BEFORE}
           && getComputedStyle(review).position === "fixed",
         );
         const disconnectedFrames = reviewCoversWindow
-          ? window.__pagerootReviewAcceptFrames.filter((frame) => !frame.isConnected)
+          ? window.__stemmioReviewAcceptFrames.filter((frame) => !frame.isConnected)
           : [];
         if (disconnectedFrames.length > 0) {
-          window.__pagerootReviewAcceptFrames = window.__pagerootReviewAcceptFrames
+          window.__stemmioReviewAcceptFrames = window.__stemmioReviewAcceptFrames
             .filter((frame) => frame.isConnected);
-          window.__pagerootHandoffFlashEvents.push({
+          window.__stemmioHandoffFlashEvents.push({
             reviewFramesRemounted: disconnectedFrames.length,
             sourceTitle: document.querySelector('.workbench-tab[data-selected="true"] button[role="tab"] > span:last-child')?.textContent || "",
           });
         }
       });
-      window.__pagerootHandoffObserver.observe(document.body, { childList: true, subtree: true });
+      window.__stemmioHandoffObserver.observe(document.body, { childList: true, subtree: true });
     });
     expect(await launched.page.evaluate(
-      () => window.__pagerootReviewAcceptFrames.length,
+      () => window.__stemmioReviewAcceptFrames.length,
     )).toBe(2);
     await launched.page.getByRole("button", { name: "确认并采纳" }).click();
     const opened = await assertReviewAcceptPersistence({
@@ -2065,8 +2065,8 @@ ${REVIEW_MASK_UNION_BEFORE}
     });
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(await launched.page.evaluate(() => {
-      window.__pagerootHandoffObserver?.disconnect();
-      return window.__pagerootHandoffFlashEvents;
+      window.__stemmioHandoffObserver?.disconnect();
+      return window.__stemmioHandoffFlashEvents;
     })).toEqual([]);
     await expect(launched.page.locator(".side-drawer")).toHaveCount(0);
     const openedFrame = await loadedDiskFrame(launched.page, opened.sourcePath);
@@ -2100,7 +2100,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(pickerFrame.locator(caseSelector("list-item")))
       .toHaveText(PICKER_TEXT);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -2108,7 +2108,7 @@ ${REVIEW_MASK_UNION_BEFORE}
 test("two AI versions activate in order and survive relaunch without identity drift", async () => {
   test.setTimeout(240_000);
   const fixture = createSourceFixture("sequential-ai-loop.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   let activeApp = launched.electronApp;
   let activeAppClosed = false;
   try {
@@ -2167,7 +2167,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     expect(projectRoot).toBeTruthy();
     const manifest = JSON.parse(readFileSync(
-      path.join(projectRoot, ".pageroot", "manifest.json"),
+      path.join(projectRoot, ".stemmio", "manifest.json"),
       "utf8",
     ));
     expect(manifest.projectId).toBe(secondRequest.changeRequest.projectId);
@@ -2175,15 +2175,15 @@ test("two AI versions activate in order and survive relaunch without identity dr
     expect(manifest.versions.map((version) => version.versionId))
       .toEqual(["ver_0001", "ver_0002", "ver_0003"]);
 
-    await closePageRootGracefully(launched.electronApp, launched.page);
+    await closeStemmioGracefully(launched.electronApp, launched.page);
     activeAppClosed = true;
-    const relaunched = await launchPageRoot({
+    const relaunched = await launchStemmio({
       isolatedUserData: launched.isolatedUserData,
     });
     activeApp = relaunched.electronApp;
     activeAppClosed = false;
     await expect.poll(async () => (
-      relaunched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+      relaunched.page.evaluate(() => window.stemmioProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
       sourcePath: secondActive.sourcePath,
     });
@@ -2195,7 +2195,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     if (activeAppClosed) {
       removeAiLoopUserData(launched.isolatedUserData);
     } else {
-      await stopPageRoot(activeApp, launched.isolatedUserData);
+      await stopStemmio(activeApp, launched.isolatedUserData);
     }
     removeSourceFixture(fixture.sourceDirectory);
   }
@@ -2205,7 +2205,7 @@ test("returning from review restores the editable pre-AI version and preserves t
   test.setTimeout(180_000);
   const fixture = createSourceFixture("return-before-ai.html");
   const commentText = `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`;
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -2243,7 +2243,7 @@ test("returning from review restores the editable pre-AI version and preserves t
       name: /返回 AI 修改前（版本 \d+）？/u,
     });
     await expect(dialog).toBeVisible();
-    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+    if (process.env.STEMMIO_CAPTURE_REVIEW) {
       const captureDirectory = path.join(productRoot, "output", "design-qa");
       mkdirSync(captureDirectory, { recursive: true });
       await launched.page.screenshot({
@@ -2287,12 +2287,12 @@ test("returning from review restores the editable pre-AI version and preserves t
     await expect(launched.page.locator(".comment-card").filter({ hasText: commentText }))
       .toHaveCount(1);
     const restored = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
+      () => window.stemmioProjects?.getActiveProject(),
     );
     expect(restored.sourcePath).toBe(realpathSync(workingCopyPath));
     const runtime = JSON.parse(readFileSync(path.join(
       projectRoot,
-      ".pageroot",
+      ".stemmio",
       "runtime-state.json",
     ), "utf8"));
     expect(runtime.schemaVersion).toBe("4.0.0");
@@ -2312,7 +2312,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     expect(existsSync(candidateFiles[0])).toBe(true);
     expect(readFileSync(candidateFiles[0], "utf8")).toContain(UPDATED_TEXT);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -2321,7 +2321,7 @@ test("a broad but related AI return is accepted without a target-scope error", {
   tag: ["@gate-smoke","@smoke-review"],
 }, async () => {
   const fixture = createSourceFixture();
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -2331,7 +2331,7 @@ test("a broad but related AI return is accepted without a target-scope error", {
     writeAiOutput(request.requestRoot, (base) => base
       .replace(ORIGINAL_TEXT, UPDATED_TEXT)
       .replace(
-        "<title>PageRoot native DOM editing matrix</title>",
+        "<title>Stemmio native DOM editing matrix</title>",
         "<title>unauthorized title mutation</title>",
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
@@ -2342,7 +2342,7 @@ test("a broad but related AI return is accepted without a target-scope error", {
     await expect(launched.page.getByRole("button", { name: "采用这些额外变化" }))
       .toHaveCount(0);
     const active = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
+      () => window.stemmioProjects?.getActiveProject(),
     );
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
@@ -2353,14 +2353,14 @@ test("a broad but related AI return is accepted without a target-scope error", {
     ));
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
 
 test("a committed version with unreadable current bytes stays blocked and retries without a duplicate", async () => {
   const fixture = createSourceFixture();
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
@@ -2388,7 +2388,7 @@ test("a committed version with unreadable current bytes stays blocked and retrie
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
       .filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     expect(failedReads).toBeGreaterThan(0);
-    const active = await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+    const active = await launched.page.evaluate(() => window.stemmioProjects?.getActiveProject());
     expect(active.sourcePath).toBe(beforeAdoption.sourcePath);
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     const committed = await beforeAdoption.repository.workspace({ sourcePath: active.sourcePath });
@@ -2416,7 +2416,7 @@ test("a committed version with unreadable current bytes stays blocked and retrie
     await assertReviewAcceptPersistence({ page: launched.page, beforeAdoption, expectedText: UPDATED_TEXT });
     expect((await beforeAdoption.repository.listRegisteredProjectVersionSummaries({ projectId: committed.target.projectId })).versions).toHaveLength(2);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -2453,7 +2453,7 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
     <script type="application/json" data-stable-review-script>{"state":"before"}</script>
   </main>`,
   ));
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath);
     const request = await addCommentAndSubmit(
@@ -2526,19 +2526,19 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
     const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html")).toHaveAttribute(
-        "data-pageroot-review-filter",
+        "data-stemmio-review-filter",
         "all",
         { timeout: 30_000 },
       );
     }
 
     const structureKinds = async (locator) => JSON.parse(
-      await locator.getAttribute("data-pageroot-review-projection-facts") || "[]",
+      await locator.getAttribute("data-stemmio-review-projection-facts") || "[]",
     ).filter((fact) => fact.type === "structure")
       .map((fact) => fact.structureChange);
     for (const frame of [beforeFrame, afterFrame]) {
       const card = frame.locator("[data-stable-review-card]");
-      await expect(card).toHaveAttribute("data-pageroot-review-marker", /change-/u);
+      await expect(card).toHaveAttribute("data-stemmio-review-marker", /change-/u);
       await expect.poll(() => structureKinds(card)).toEqual(expect.arrayContaining([
         "moved",
         "attribute",
@@ -2546,7 +2546,7 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
       ]));
       await expect.poll(() => structureKinds(frame.locator("html"))).toEqual([]);
       const falsePresenceFacts = await card.evaluate((element) => (
-        JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
+        JSON.parse(element.getAttribute("data-stemmio-review-projection-facts") || "[]")
           .filter((fact) => fact.structureChange === "added" || fact.structureChange === "removed")
       ));
       expect(falsePresenceFacts).toEqual([]);
@@ -2557,20 +2557,20 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
         expect.arrayContaining(["moved"]),
       );
       await expect(compositeMove).toHaveAttribute(
-        "data-pageroot-review-marker",
+        "data-stemmio-review-marker",
         /change-/u,
       );
     }
     await expect(beforeFrame.locator(
-      '[data-stable-review-transfer-from] [data-pageroot-review-text="removed"], [data-stable-review-transfer-from][data-pageroot-review-text="removed"]',
+      '[data-stable-review-transfer-from] [data-stemmio-review-text="removed"], [data-stable-review-transfer-from][data-stemmio-review-text="removed"]',
     ).first()).toContainText("待转移文字");
     await expect(afterFrame.locator(
-      '[data-stable-review-transfer-to] [data-pageroot-review-text="added"], [data-stable-review-transfer-to][data-pageroot-review-text="added"]',
+      '[data-stable-review-transfer-to] [data-stemmio-review-text="added"], [data-stable-review-transfer-to][data-stemmio-review-text="added"]',
     ).first()).toContainText("待转移文字");
     const movedTextOwners = await beforeFrame.locator(
-      '[data-stable-review-card] [data-pageroot-review-text="removed"], [data-stable-review-transfer-from] [data-pageroot-review-text="removed"]',
+      '[data-stable-review-card] [data-stemmio-review-text="removed"], [data-stable-review-transfer-from] [data-stemmio-review-text="removed"]',
     ).evaluateAll((elements) => elements.map((element) => (
-      element.getAttribute("data-pageroot-review-semantic-owner") || ""
+      element.getAttribute("data-stemmio-review-semantic-owner") || ""
     )).filter(Boolean));
     expect(movedTextOwners).toHaveLength(2);
     expect(new Set(movedTextOwners).size).toBe(2);
@@ -2582,27 +2582,27 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
     ))).toEqual(expect.arrayContaining(["removed"]));
     const addedCss = afterFrame.locator("[data-stable-review-added-css]");
     const addedScript = afterFrame.locator("[data-stable-review-added-script]");
-    await expect(addedCss).toHaveAttribute("data-pageroot-id", /^pr1_[a-f0-9]{32}$/u);
-    await expect(addedScript).toHaveAttribute("data-pageroot-id", /^pr1_[a-f0-9]{32}$/u);
-    expect(await addedCss.getAttribute("data-pageroot-id"))
-      .not.toBe(await addedScript.getAttribute("data-pageroot-id"));
+    await expect(addedCss).toHaveAttribute("data-stemmio-id", /^sm1_[a-f0-9]{32}$/u);
+    await expect(addedScript).toHaveAttribute("data-stemmio-id", /^sm1_[a-f0-9]{32}$/u);
+    expect(await addedCss.getAttribute("data-stemmio-id"))
+      .not.toBe(await addedScript.getAttribute("data-stemmio-id"));
     for (const sourceElement of [addedCss, addedScript]) {
-      await expect(sourceElement).not.toHaveAttribute("data-pageroot-review-marker", /change-/u);
+      await expect(sourceElement).not.toHaveAttribute("data-stemmio-review-marker", /change-/u);
     }
     await expect(beforeFrame.locator(
-      '[data-stable-review-card] [data-pageroot-review-text="removed"], [data-stable-review-card][data-pageroot-review-text="removed"]',
+      '[data-stable-review-card] [data-stemmio-review-text="removed"], [data-stable-review-card][data-stemmio-review-text="removed"]',
     ).first()).toBeAttached();
     await expect(afterFrame.locator(
-      '[data-stable-review-card] [data-pageroot-review-text="added"], [data-stable-review-card][data-pageroot-review-text="added"]',
+      '[data-stable-review-card] [data-stemmio-review-text="added"], [data-stable-review-card][data-stemmio-review-text="added"]',
     ).first()).toBeAttached();
     for (const frame of [beforeFrame, afterFrame]) {
       const unchangedMove = frame.locator("[data-stable-review-unchanged-move]");
       await expect.poll(() => structureKinds(unchangedMove)).toEqual(
         expect.arrayContaining(["moved"]),
       );
-      await expect(unchangedMove.locator("[data-pageroot-review-text]")).toHaveCount(0);
+      await expect(unchangedMove.locator("[data-stemmio-review-text]")).toHaveCount(0);
       await expect.poll(async () => (
-        JSON.parse(await unchangedMove.getAttribute("data-pageroot-review-projection-facts") || "[]")
+        JSON.parse(await unchangedMove.getAttribute("data-stemmio-review-projection-facts") || "[]")
           .filter((fact) => fact.type === "text")
       )).toEqual([]);
     }
@@ -2613,7 +2613,7 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
         "style",
       ]));
       await expect(frame.locator(
-        `[data-stable-review-static] [data-pageroot-review-text="${tone}"], [data-stable-review-static][data-pageroot-review-text="${tone}"]`,
+        `[data-stable-review-static] [data-stemmio-review-text="${tone}"], [data-stable-review-static][data-stemmio-review-text="${tone}"]`,
       ).first()).toBeAttached();
     }
     for (const frame of [beforeFrame, afterFrame]) {
@@ -2622,14 +2622,14 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
       await expect.poll(() => structureKinds(frame.locator("[data-stable-review-root]")))
         .toEqual(expect.arrayContaining(["reordered"]));
       await expect(frame.locator(
-        '[data-stable-review-order="a"] [data-pageroot-review-text], '
-        + '[data-stable-review-order="b"] [data-pageroot-review-text], '
-        + '[data-stable-review-exact="a"] [data-pageroot-review-text], '
-        + '[data-stable-review-exact="b"] [data-pageroot-review-text]',
+        '[data-stable-review-order="a"] [data-stemmio-review-text], '
+        + '[data-stable-review-order="b"] [data-stemmio-review-text], '
+        + '[data-stable-review-exact="a"] [data-stemmio-review-text], '
+        + '[data-stable-review-exact="b"] [data-stemmio-review-text]',
       )).toHaveCount(0);
     }
     await launched.page.getByRole("button", { name: "元素变化" }).click();
-    await expect(afterFrame.locator("html")).toHaveAttribute("data-pageroot-review-filter", "structure");
+    await expect(afterFrame.locator("html")).toHaveAttribute("data-stemmio-review-filter", "structure");
     // Filter state publishes before its scheduled overlay render. Do not click
     // a bar retained from the previous text-inclusive frame.
     await afterFrame.locator("html").evaluate(() => new Promise(resolve => {
@@ -2643,10 +2643,10 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
       afterFrame.locator("[data-stable-review-card]"),
     );
     await expect.poll(() => afterFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="structure"]',
+      '[data-stemmio-review-overlay-box][data-tone="structure"]',
     ).count()).toBeGreaterThan(0);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -2667,7 +2667,7 @@ test("a rewrite outside <main> is still reviewed", {
 </body>`,
     ),
   );
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -2691,7 +2691,7 @@ test("a rewrite outside <main> is still reviewed", {
     const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       await expect(frame.locator("html")).toHaveAttribute(
-        "data-pageroot-review-filter",
+        "data-stemmio-review-filter",
         "all",
         { timeout: 30_000 },
       );
@@ -2699,14 +2699,14 @@ test("a rewrite outside <main> is still reviewed", {
     // The footer is a body-level sibling of <main>, so it must become its own
     // change region carrying text evidence on both sides.
     await expect(beforeReviewFrame.locator("[data-review-outside-main]"))
-      .toHaveAttribute("data-pageroot-review-types", /text/u, { timeout: 30_000 });
+      .toHaveAttribute("data-stemmio-review-types", /text/u, { timeout: 30_000 });
     await expect(afterReviewFrame.locator("[data-review-outside-main]"))
-      .toHaveAttribute("data-pageroot-review-types", /text/u);
+      .toHaveAttribute("data-stemmio-review-types", /text/u);
     await expect(beforeReviewFrame.locator(
-      '[data-review-outside-main] [data-pageroot-review-text="removed"]',
+      '[data-review-outside-main] [data-stemmio-review-text="removed"]',
     ).filter({ hasText: "不同" }).first()).toBeVisible();
     await expect(afterReviewFrame.locator(
-      '[data-review-outside-main] [data-pageroot-review-text="added"]',
+      '[data-review-outside-main] [data-stemmio-review-text="added"]',
     ).filter({ hasText: "一致" }).first()).toBeVisible();
     // 品牌与 About 入口由全局侧边栏统一承担，审阅页不复制同形顶栏图标。
     const sidebar = launched.page.locator(".workbench-global-sidebar");
@@ -2719,7 +2719,7 @@ test("a rewrite outside <main> is still reviewed", {
     await launched.page.getByRole("button", { name: "关闭关于源页" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -2729,7 +2729,7 @@ test("Review keeps Candidate scope diagnostics out of the comparison canvas", {
 }, async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("candidate-impact-review.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -2756,7 +2756,7 @@ test("Review keeps Candidate scope diagnostics out of the comparison canvas", {
     await expect(launched.page.getByRole("button", { name: "采用修改" }))
       .toBeVisible();
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -2885,7 +2885,7 @@ function emptyReviewScenario(scenario) {
         : undefined,
     );
     const original = readFileSync(fixture.sourcePath);
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     try {
       if (scenario.narrow) {
         await launched.electronApp.evaluate(({ BrowserWindow }) => {
@@ -2961,7 +2961,7 @@ function emptyReviewScenario(scenario) {
       const after = launched.page.frameLocator('iframe[title^="修改后"]');
       for (const frame of [before, after]) {
         await expect(frame.locator("body")).toBeVisible();
-        await expect(frame.locator("[data-pageroot-review-marker]")).toHaveCount(0);
+        await expect(frame.locator("[data-stemmio-review-marker]")).toHaveCount(0);
       }
       if (scenario.darkSource) {
         await expect(before.locator("body")).toHaveCSS("background-color", "rgb(8, 10, 14)");
@@ -2970,9 +2970,9 @@ function emptyReviewScenario(scenario) {
       await expectReviewProjectionWithoutObservations(launched.page);
       if (scenario.script) await expect(after.locator("body")).toHaveCSS("background-color", "rgb(210, 230, 250)");
       for (const frame of [before, after]) {
-        await expect(frame.locator("html")).toHaveAttribute("data-pageroot-review-focus", "all");
-        await expect(frame.locator("html")).toHaveAttribute("data-pageroot-review-focus-group", "");
-        await expect(frame.locator("[data-pageroot-review-overlay-box], [data-pageroot-review-mask-hole], [data-pageroot-review-region-bar]"))
+        await expect(frame.locator("html")).toHaveAttribute("data-stemmio-review-focus", "all");
+        await expect(frame.locator("html")).toHaveAttribute("data-stemmio-review-focus-group", "");
+        await expect(frame.locator("[data-stemmio-review-overlay-box], [data-stemmio-review-mask-hole], [data-stemmio-review-region-bar]"))
           .toHaveCount(0);
       }
       await launched.page.screenshot({ path: testInfo.outputPath("empty-review-overview.png"), animations: "disabled" });
@@ -3019,12 +3019,12 @@ function emptyReviewScenario(scenario) {
           .getByRole("button", { name: "返回修改前版本" }).click();
         await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0);
         expect(readFileSync(fixture.sourcePath).equals(original)).toBe(true);
-        const project = await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+        const project = await launched.page.evaluate(() => window.stemmioProjects?.getActiveProject());
         expect(readFileSync(project.sourcePath, "utf8")).not.toContain('document.body.style.backgroundColor');
         await expect(launched.page.locator(".comment-card")).not.toHaveCount(0);
       }
     } finally {
-      await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+      await stopStemmio(launched.electronApp, launched.isolatedUserData);
       removeSourceFixture(fixture.sourceDirectory);
     }
   };
@@ -3050,7 +3050,7 @@ test("a safe simple CSS selector creates one position-bound element change", {
 }, async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("mapped-css-review.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -3072,11 +3072,11 @@ test("a safe simple CSS selector creates one position-bound element change", {
     const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator('[data-native-case="vertical-copy"]'))
-        .toHaveAttribute("data-pageroot-review-structure", "style");
+        .toHaveAttribute("data-stemmio-review-structure", "style");
       await expect(frame.locator('[data-native-case="vertical-copy"]'))
-        .toHaveAttribute("data-pageroot-review-confirmed", "true");
+        .toHaveAttribute("data-stemmio-review-confirmed", "true");
     }
-    await expect(afterFrame.locator('[data-pageroot-review-structure="style"]'))
+    await expect(afterFrame.locator('[data-stemmio-review-structure="style"]'))
       .toHaveCount(1);
     const filters = launched.page.getByRole("group", { name: "变化审阅", exact: true });
     await filters.getByRole("button", { name: "文字变化", exact: true }).click();
@@ -3085,7 +3085,7 @@ test("a safe simple CSS selector creates one position-bound element change", {
     await filters.getByRole("button", { name: "全部变化", exact: true }).click();
     await expect(launched.page.getByTestId("review-empty-changes")).toHaveCount(0);
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -3097,7 +3097,7 @@ for (const scenario of ["confirmed", "mixed", "unverified"]) {
       "  </main>",
       '    <div data-review-observe-style style="color: rgb(20, 40, 60)">可选样式观察</div>\n  </main>',
     ));
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     try {
       await installReviewObservationProbe(launched.page, { dropObservations: scenario === "unverified" });
       const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
@@ -3114,8 +3114,8 @@ for (const scenario of ["confirmed", "mixed", "unverified"]) {
       const before = launched.page.frameLocator('iframe[title^="修改前"]');
       const after = launched.page.frameLocator('iframe[title^="修改后"]');
       const host = after.locator("[data-review-observe-style]");
-      await expect(host).toHaveAttribute("data-pageroot-review-structure", "style");
-      const stableId = await host.getAttribute("data-pageroot-id");
+      await expect(host).toHaveAttribute("data-stemmio-review-structure", "style");
+      const stableId = await host.getAttribute("data-stemmio-id");
       if (scenario === "mixed") {
         await expectReviewProjectionWithoutObservations(launched.page);
       } else {
@@ -3132,23 +3132,23 @@ for (const scenario of ["confirmed", "mixed", "unverified"]) {
           .toBeGreaterThan(0);
       }
       const styleGroup = await host.evaluate((element) => {
-        const facts = JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]");
+        const facts = JSON.parse(element.getAttribute("data-stemmio-review-projection-facts") || "[]");
         const style = facts.find((fact) => fact.structureChange === "style");
         return style ? `focus-${style.displayGroupId || `display-fact-${style.id}`}` : "";
       });
       expect(styleGroup).toBeTruthy();
-      await after.locator(`[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${styleGroup}"]`)
+      await after.locator(`[data-stemmio-review-region-bar][data-stemmio-review-focus-group="${styleGroup}"]`)
         .first().evaluate((bar) => bar.click());
       for (const frame of [before, after]) {
-        await expect(frame.locator("html")).toHaveAttribute("data-pageroot-review-focus-group", styleGroup);
-        await expect(frame.locator("[data-pageroot-review-overlay-box]"))
+        await expect(frame.locator("html")).toHaveAttribute("data-stemmio-review-focus-group", styleGroup);
+        await expect(frame.locator("[data-stemmio-review-overlay-box]"))
           .toHaveCount(scenario === "confirmed" ? 1 : 0);
       }
       await expect(launched.page.getByRole("button", { name: "采用修改", exact: true })).toBeEnabled();
       await expect(launched.page.getByRole("button", { name: "不用这次", exact: true })).toBeEnabled();
       await launched.page.screenshot({ path: testInfo.outputPath(`style-${scenario}-focus.png`), animations: "disabled" });
     } finally {
-      await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+      await stopStemmio(launched.electronApp, launched.isolatedUserData);
       removeSourceFixture(fixture.sourceDirectory);
     }
   });
@@ -3158,20 +3158,20 @@ test("source Review preserves multi-host text evidence and hidden changes withou
   tag: ["@gate-smoke", "@smoke-review"],
 }, async ({}, testInfo) => {
   test.setTimeout(120_000);
-  const SECTION_ID = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
-  const FIRST_ID = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
-  const SECOND_ID = "pr1_cccccccccccc4ccc8ccccccccccccccc";
-  const HIDDEN_ID = "pr1_dddddddddddd4ddd8ddddddddddddddd";
+  const SECTION_ID = "sm1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+  const FIRST_ID = "sm1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const SECOND_ID = "sm1_cccccccccccc4ccc8ccccccccccccccc";
+  const HIDDEN_ID = "sm1_dddddddddddd4ddd8ddddddddddddddd";
   const fixture = createSourceFixture("multi-host-hidden-review.html", (source) => source.replace(
     "  </main>",
-    `    <p data-review-multi-host data-pageroot-id="${SECTION_ID}">
-      <span data-pageroot-id="${FIRST_ID}">第一段旧文字</span>
-      <span data-pageroot-id="${SECOND_ID}">第二段旧文字</span>
+    `    <p data-review-multi-host data-stemmio-id="${SECTION_ID}">
+      <span data-stemmio-id="${FIRST_ID}">第一段旧文字</span>
+      <span data-stemmio-id="${SECOND_ID}">第二段旧文字</span>
     </p>
-    <div style="display:none!important;visibility:hidden;opacity:0" data-review-hidden-source data-pageroot-id="${HIDDEN_ID}">隐藏旧文字</div>
+    <div style="display:none!important;visibility:hidden;opacity:0" data-review-hidden-source data-stemmio-id="${HIDDEN_ID}">隐藏旧文字</div>
   </main>`,
   ));
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     await installReviewObservationProbe(launched.page);
     const request = await addCommentAndSubmit(
@@ -3193,28 +3193,28 @@ test("source Review preserves multi-host text evidence and hidden changes withou
     const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
     const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     const addedMarkers = afterFrame.locator(
-      '[data-review-multi-host] [data-pageroot-review-text="added"]',
+      '[data-review-multi-host] [data-stemmio-review-text="added"]',
     );
     await expect(addedMarkers.filter({ hasText: "新" })).toHaveCount(2);
     const changeIds = await addedMarkers.filter({ hasText: "新" }).evaluateAll((elements) => (
-      elements.map((element) => element.getAttribute("data-pageroot-review-marker"))
+      elements.map((element) => element.getAttribute("data-stemmio-review-marker"))
     ));
     expect(new Set(changeIds).size).toBe(1);
     await expect(beforeFrame.locator(
-      '[data-review-multi-host] [data-pageroot-review-text="removed"]',
+      '[data-review-multi-host] [data-stemmio-review-text="removed"]',
     ).filter({ hasText: "旧" })).toHaveCount(2);
 
     const hiddenAfter = afterFrame.locator("[data-review-hidden-source]");
     await expect(hiddenAfter).toBeAttached();
-    await expect(hiddenAfter.locator('[data-pageroot-review-text="added"]'))
+    await expect(hiddenAfter.locator('[data-stemmio-review-text="added"]'))
       .toBeAttached();
-    await expect(hiddenAfter.locator('[data-pageroot-review-text="added"]'))
-      .toHaveAttribute("data-pageroot-review-confirmed", "true");
+    await expect(hiddenAfter.locator('[data-stemmio-review-text="added"]'))
+      .toHaveAttribute("data-stemmio-review-confirmed", "true");
     await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
     await expectReviewProjectionWithoutObservations(launched.page);
     await launched.page.screenshot({ path: testInfo.outputPath("text-review-overview.png"), animations: "disabled" });
   } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -3224,17 +3224,17 @@ const ACCEPT_SCROLL_ANCHOR = "accept-scroll-anchor";
 
 async function holdEditRuntimePrepare(electronApp) {
   const available = await electronApp.evaluate(
-    () => typeof globalThis.__pagerootE2eHoldEditRuntimePrepare,
+    () => typeof globalThis.__stemmioE2eHoldEditRuntimePrepare,
   );
   expect(available).toBe("function");
   await electronApp.evaluate(() => {
-    globalThis.__pagerootE2eHoldEditRuntimePrepare();
+    globalThis.__stemmioE2eHoldEditRuntimePrepare();
   });
 }
 
 async function releaseEditRuntimePrepare(electronApp) {
   await electronApp.evaluate(() => {
-    globalThis.__pagerootE2eReleaseEditRuntimePrepare();
+    globalThis.__stemmioE2eReleaseEditRuntimePrepare();
   });
 }
 
@@ -3264,10 +3264,10 @@ async function readActiveAcceptSnapshot(page) {
           || /正在采纳/.test(button.getAttribute("aria-label") || "")
         )),
       ),
-      unlockCount: Number(window.__pagerootCommentUnlockCount || 0),
+      unlockCount: Number(window.__stemmioCommentUnlockCount || 0),
     };
   });
-  const project = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+  const project = await page.evaluate(() => window.stemmioProjects?.getActiveProject());
   const frameFacts = {
     listItemText: "",
     scrollY: 0,
@@ -3352,7 +3352,7 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     <div data-scroll-pad="after" style="height:1800px" aria-hidden="true"></div>
   </main>`,
   ));
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   try {
     const openedFrame = await loadedDiskFrame(launched.page, fixture.sourcePath);
     const scrollAnchor = openedFrame.locator(caseSelector(ACCEPT_SCROLL_ANCHOR));
@@ -3396,18 +3396,18 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
       const button = document.querySelector(
         'aside[aria-label="本轮评论"] button[aria-label="全局评论"]',
       );
-      window.__pagerootCommentUnlockCount = 0;
-      window.__pagerootCommentWasDisabled = Boolean(button?.disabled);
-      window.__pagerootCommentUnlockObserver?.disconnect();
-      window.__pagerootCommentUnlockObserver = new MutationObserver(() => {
+      window.__stemmioCommentUnlockCount = 0;
+      window.__stemmioCommentWasDisabled = Boolean(button?.disabled);
+      window.__stemmioCommentUnlockObserver?.disconnect();
+      window.__stemmioCommentUnlockObserver = new MutationObserver(() => {
         const locked = Boolean(button?.disabled);
-        if (window.__pagerootCommentWasDisabled && !locked) {
-          window.__pagerootCommentUnlockCount += 1;
+        if (window.__stemmioCommentWasDisabled && !locked) {
+          window.__stemmioCommentUnlockCount += 1;
         }
-        window.__pagerootCommentWasDisabled = locked;
+        window.__stemmioCommentWasDisabled = locked;
       });
       if (button) {
-        window.__pagerootCommentUnlockObserver.observe(button, {
+        window.__stemmioCommentUnlockObserver.observe(button, {
           attributes: true,
           attributeFilter: ["disabled"],
         });
@@ -3488,7 +3488,7 @@ test("accepting a Version shows static Active and unlocks editing before Runtime
     expect(promoted.listItemText).not.toBe(ORIGINAL_TEXT);
   } finally {
     await releaseEditRuntimePrepare(launched.electronApp).catch(() => {});
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -3497,7 +3497,7 @@ test("two lost committed adoption replies stay pending and recover one decision 
   tag: ["@gate-smoke", "@smoke-review"],
 }, async () => {
   const fixture = createSourceFixture("adoption-unknown-recovery.html");
-  let launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
   let releaseFirst;
   const firstHeld = new Promise((resolve) => { releaseFirst = resolve; });
   let backendCommitted;
@@ -3547,8 +3547,8 @@ test("two lost committed adoption replies stay pending and recover one decision 
     await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
     await expect(sidebar.getByText("已采用本次修改。", { exact: true })).toHaveCount(1);
     const isolatedUserData = launched.isolatedUserData;
-    await closePageRootGracefully(launched.electronApp, launched.page);
-    launched = await launchPageRoot({ isolatedUserData, activeSourcePath: result.sourcePath });
+    await closeStemmioGracefully(launched.electronApp, launched.page);
+    launched = await launchStemmio({ isolatedUserData, activeSourcePath: result.sourcePath });
     await loadedDiskFrame(launched.page, result.sourcePath);
     if (!await launched.page.getByTestId("ai-conversation-sidebar").isVisible()) {
       await launched.page.getByRole("button", { name: /AI 助手/u }).click();
@@ -3557,7 +3557,7 @@ test("two lost committed adoption replies stay pending and recover one decision 
     await launched.page.screenshot({ path: path.join(captures, "trusted-loop-adopted-restarted.png"), animations: "disabled" });
   } finally {
     releaseFirst();
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    await stopStemmio(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
@@ -3570,7 +3570,7 @@ for (const adopt of [true, false]) {
     test.setTimeout(120_000);
     const fixture = createSourceFixture("annotation-capacity-fallback.html");
     const original = readFileSync(fixture.sourcePath);
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     try {
       await installReviewObservationProbe(launched.page);
       const request = await addCommentAndSubmit(launched.page, launched.electronApp, fixture.sourcePath);
@@ -3585,7 +3585,7 @@ for (const adopt of [true, false]) {
         const get = Element.prototype.getAttribute;
         window.__annotationCapacityFault = 0;
         Element.prototype.getAttribute = function(name) {
-          if (name === "data-pageroot-review-projection-facts" && this.ownerDocument !== document
+          if (name === "data-stemmio-review-projection-facts" && this.ownerDocument !== document
             && window.__annotationCapacityFault === 0) {
             window.__annotationCapacityFault += 1;
             Element.prototype.getAttribute = get;
@@ -3607,9 +3607,9 @@ for (const adopt of [true, false]) {
       await expect(before.locator("body")).toContainText(ORIGINAL_TEXT);
       await expect(after.locator("body")).toContainText(UPDATED_TEXT);
       for (const frame of [before, after]) {
-        await expect(frame.locator("[data-pageroot-review-marker], span[data-pageroot-review-text]"))
+        await expect(frame.locator("[data-stemmio-review-marker], span[data-stemmio-review-text]"))
           .toHaveCount(0);
-        await expect(frame.locator("html")).toHaveAttribute("data-pageroot-review-focus", "all");
+        await expect(frame.locator("html")).toHaveAttribute("data-stemmio-review-focus", "all");
       }
       await expectReviewProjectionWithoutObservations(launched.page);
       await expect(launched.page.getByRole("button", { name: "采用修改", exact: true })).toBeEnabled();
@@ -3625,12 +3625,12 @@ for (const adopt of [true, false]) {
           .getByRole("button", { name: "返回修改前版本" }).click();
         await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0);
         expect(readFileSync(fixture.sourcePath).equals(original)).toBe(true);
-        const project = await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+        const project = await launched.page.evaluate(() => window.stemmioProjects?.getActiveProject());
         expect(readFileSync(project.sourcePath, "utf8")).not.toContain(UPDATED_TEXT);
         await expect(launched.page.locator(".comment-card")).not.toHaveCount(0);
       }
     } finally {
-      await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+      await stopStemmio(launched.electronApp, launched.isolatedUserData);
       removeSourceFixture(fixture.sourceDirectory);
     }
   });

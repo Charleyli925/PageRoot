@@ -71,7 +71,7 @@ function evidence(overrides = {}) {
 test("release candidate identity binds tree, version, architecture and run attempt", () => {
   assert.equal(
     artifactName,
-    `PageRoot-release-candidate-${treeSha}-${packageVersion}-arm64-attempt-1`,
+    `Stemmio-release-candidate-${treeSha}-${packageVersion}-arm64-attempt-1`,
   );
   assert.notEqual(
     artifactName,
@@ -148,13 +148,13 @@ test("a rerun resolves only the artifact created by its exact run attempt", () =
 });
 
 test("downloaded candidate verification rejects changed release bytes and malformed provenance", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pageroot-release-candidate-test-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-release-candidate-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const builtAt = "2026-07-24T11:00:00.000Z";
   const identity = fixtureCandidateIdentity({ packageVersion });
-  const zipName = `PageRoot-${packageVersion}-arm64.zip`;
+  const zipName = `Stemmio-${packageVersion}-arm64.zip`;
   const files = {
-    [`PageRoot-${packageVersion}-arm64.dmg`]: Buffer.from("synthetic dmg bytes"),
+    [`Stemmio-${packageVersion}-arm64.dmg`]: Buffer.from("synthetic dmg bytes"),
     [zipName]: Buffer.from("synthetic update zip bytes"),
     [`${zipName}.blockmap`]: Buffer.from("synthetic blockmap bytes"),
     "latest-mac.yml": Buffer.from(
@@ -177,7 +177,7 @@ test("downloaded candidate verification rejects changed release bytes and malfor
       }), null, 2) + "\n",
     ),
   };
-  const dmgName = `PageRoot-${packageVersion}-arm64.dmg`;
+  const dmgName = `Stemmio-${packageVersion}-arm64.dmg`;
   files["SHA256SUMS.txt"] = Buffer.from(
     `${Object.keys(files)
       .sort((left, right) => left.localeCompare(right))
@@ -321,8 +321,8 @@ test("release workflows build before tagging and publish the verified candidate 
   assert.match(candidate, /release-candidate-provenance\.mjs create/u);
   assert.match(candidate, /MAC_CSC_LINK/u);
   assert.match(candidate, /APPLE_APP_SPECIFIC_PASSWORD/u);
-  assert.match(candidate, /PAGEROOT_REQUIRE_NOTARIZATION/u);
-  assert.match(candidate, /PAGEROOT_POSTHOG_TOKEN/u);
+  assert.match(candidate, /STEMMIO_REQUIRE_NOTARIZATION/u);
+  assert.match(candidate, /STEMMIO_POSTHOG_TOKEN/u);
   assert.match(candidate, /https:\/\/us\.i\.posthog\.com/u);
   assert.match(
     candidate,
@@ -345,8 +345,8 @@ test("release workflows build before tagging and publish the verified candidate 
   assert.match(release, /release-candidate-provenance\.mjs verify/u);
   assert.match(release, /git tag -a/u);
   assert.match(release, /gh release create/u);
-  assert.match(release, /PageRoot-\$\{VERSION\}-arm64\.zip/u);
-  assert.match(release, /PageRoot-\$\{VERSION\}-arm64\.zip\.blockmap/u);
+  assert.match(release, /Stemmio-\$\{VERSION\}-arm64\.zip/u);
+  assert.match(release, /Stemmio-\$\{VERSION\}-arm64\.zip\.blockmap/u);
   assert.match(release, /latest-mac\.yml/u);
   assert.match(
     release,

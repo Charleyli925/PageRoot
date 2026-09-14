@@ -16,7 +16,7 @@ import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 
 function html(label) {
-  return `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head data-pageroot-id="pr1_22222222222242229222222222222222"><title data-pageroot-id="pr1_3333333333334333a333333333333333">${label}</title></head><body data-pageroot-id="pr1_4444444444444444b444444444444444"><h1 data-pageroot-id="pr1_55555555555545558555555555555555">${label}</h1></body></html>`;
+  return `<!doctype html><html data-stemmio-id="sm1_11111111111141118111111111111111"><head data-stemmio-id="sm1_22222222222242229222222222222222"><title data-stemmio-id="sm1_3333333333334333a333333333333333">${label}</title></head><body data-stemmio-id="sm1_4444444444444444b444444444444444"><h1 data-stemmio-id="sm1_55555555555545558555555555555555">${label}</h1></body></html>`;
 }
 
 async function json(filePath) {
@@ -64,7 +64,7 @@ async function validateRejects(schemaName, value) {
 }
 
 test("v4 schemas accept repository-produced identity, Working Copy, Candidate and Promotion facts", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-project-file-schema-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-project-file-schema-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sourceRoot = path.join(root, "sources");
   const projectsRoot = path.join(root, "projects");
@@ -78,11 +78,11 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     sourcePath,
     expectedSourceSha256: sha256(Buffer.from(initial, "utf8")),
   });
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const initialManifest = await json(path.join(controlRoot, "manifest.json"));
   const registry = await json(path.join(
     projectsRoot,
-    ".pageroot-registry.json",
+    ".stemmio-registry.json",
   ));
   const initialWorkingCopyState = await json(path.join(
     controlRoot,
@@ -158,7 +158,7 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   const oversizedImpactSample = structuredClone(candidateRecord);
   oversizedImpactSample.assessment.changedElementIdSample = Array.from(
     { length: 101 },
-    () => "pr1_55555555555545558555555555555555",
+    () => "sm1_55555555555545558555555555555555",
   );
   const mixedImpactEvidence = structuredClone(candidateRecord);
   mixedImpactEvidence.assessment.changedStableElementIds = [];
@@ -251,7 +251,7 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   await validateRejects("project-runtime-state.v4.schema.json", malformedHistoryActivation);
 
   // The Runtime is forward compatible per level. Its root and historyActivation
-  // are preserved across a write, so both accept a member a newer PageRoot
+  // are preserved across a write, so both accept a member a newer Stemmio
   // added; activeRequest and lastAiTask are authored and stay strict.
   const futureRuntime = structuredClone(historyRuntime);
   futureRuntime.ownerAccountId = "account_future";
@@ -314,12 +314,12 @@ test("current draft disk schemas validate one member, local snapshots and recove
   await value.repository.saveWorkingCopy({ target, html: html("local"), expectedSourceSha256: target.sourceSha256 });
   const active = (await value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId })).target;
   const saved = await value.repository.createVersionFromCurrent({ target: active, operationId: "schema_local_snapshot", expectedSourceSha256: active.sourceSha256 });
-  await validate("current-version-transaction.v1.schema.json", await json(path.join(target.projectRootPath, ".pageroot/transactions/current_schema_local_snapshot/transaction.json")));
+  await validate("current-version-transaction.v1.schema.json", await json(path.join(target.projectRootPath, ".stemmio/transactions/current_schema_local_snapshot/transaction.json")));
   const local = (await value.repository.resolveRegisteredProjectOpenTarget({ projectId: target.projectId })).target;
   await value.repository.createVersionFromHistory({ target: local, versionId: "ver_0001", operationId: "schema_current_replace", expectedSourceSha256: local.sourceSha256, expectedSnapshotSha256: target.sourceSha256 });
   const records = await value.repository.listPreservedDrafts({ projectId: target.projectId });
-  await validate("preserved-draft.v1.schema.json", await json(path.join(target.projectRootPath, ".pageroot/recovery/preserved-drafts", records[0].recoveryId, "record.json")));
-  const manifest = await json(path.join(target.projectRootPath, ".pageroot/manifest.json"));
+  await validate("preserved-draft.v1.schema.json", await json(path.join(target.projectRootPath, ".stemmio/recovery/preserved-drafts", records[0].recoveryId, "record.json")));
+  const manifest = await json(path.join(target.projectRootPath, ".stemmio/manifest.json"));
   await validate("project-manifest.v4.schema.json", manifest);
   assert.equal(manifest.versions[1].sourceType, "local-save");
   const extra = structuredClone(manifest); extra.workingCopies.push(structuredClone(extra.workingCopies[0]));
@@ -335,8 +335,8 @@ test("retired members retain the complete former Working Copy schema and a uniqu
   const value = await fixture(t); const { target } = await importLegacySource(value);
   const active = await promoteNextVersion(value.repository, target, "retired_schema_next");
   await value.repository.initialize();
-  const manifest = await json(path.join(target.projectRootPath, ".pageroot/manifest.json"));
-  const project = await json(path.join(target.projectRootPath, ".pageroot/project.json"));
+  const manifest = await json(path.join(target.projectRootPath, ".stemmio/manifest.json"));
+  const project = await json(path.join(target.projectRootPath, ".stemmio/project.json"));
   assert.equal(manifest.retiredWorkingCopies.length, 1);
   await validate("project-manifest.v4.schema.json", manifest);
   assert.doesNotThrow(() => assertManifest(manifest, project));

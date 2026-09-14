@@ -13,7 +13,7 @@ import {
   compileTaskSpec,
 } from "../shared/task-spec.mjs";
 
-const ELEMENT_ID = "pr1_11111111111141118111111111111111";
+const ELEMENT_ID = "sm1_11111111111141118111111111111111";
 const SOURCE_SHA = `sha256:${"1".repeat(64)}`;
 
 function target(overrides = {}) {

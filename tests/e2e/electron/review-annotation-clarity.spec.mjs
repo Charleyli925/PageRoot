@@ -4,16 +4,16 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
-import { caseSelector, productRoot } from "../browser/pageroot-driver.mjs";
+import { caseSelector, productRoot } from "../browser/stemmio-driver.mjs";
 import { chooseClipboardDelivery } from "./ai-closed-loop-helpers.mjs";
 import {
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   removeSourceFixture,
   removeValidatedTemporaryDirectory,
-} from "./helpers/pageroot-app-fixture.mjs";
+} from "./helpers/stemmio-app-fixture.mjs";
 
 /**
  * Review annotation clarity against a realistic Chinese report page.
@@ -26,8 +26,8 @@ import {
  * projection, because none of these are provable from unit geometry alone.
  */
 
-const USER_DATA_PREFIX = "pageroot-native-e2e-review-annotation-";
-const SOURCE_PREFIX = "pageroot-review-annotation-source-";
+const USER_DATA_PREFIX = "stemmio-native-e2e-review-annotation-";
+const SOURCE_PREFIX = "stemmio-review-annotation-source-";
 
 const TREND_BEFORE = "内容平台搜索挤压传统搜索引擎与传统电商的趋势不变，但大盘增量呈现增速放缓态势——26Q2 国内主流平台日均搜索请求次数 96.2 亿次，YoY +18%；较 26 年 1&amp;2 月双月大盘增速 +20% 回落 2pp；增速放缓的同时结构变化加剧：抖系份额收缩、微信与小红书接棒增长；大盘增长动能加速向内容平台迁移。";
 const TREND_AFTER = "大盘增量增速放缓（96.2 亿次/日，YoY +18%，较 1&amp;2 月 +20% 回落 2pp），但结构变化加剧：抖系份额收缩，微信、小红书接棒增长。";
@@ -111,7 +111,7 @@ function rewriteReport(source) {
 
 async function addReportComment(page, sourcePath) {
   const active = await page.evaluate(
-    () => window.htmlAIProjects?.getActiveProject(),
+    () => window.stemmioProjects?.getActiveProject(),
   );
   const frame = await loadedDiskFrame(page, active?.sourcePath || sourcePath);
   const target = frame.locator(caseSelector("list-item"));
@@ -196,13 +196,13 @@ function writeCandidate(requestRoot, changeRequest) {
 /** Everything the projection layer actually painted, in page coordinates. */
 async function readProjection(frame) {
   return frame.locator("html").evaluate(() => {
-    const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+    const boxes = [...document.querySelectorAll("[data-stemmio-review-overlay-box]")]
       .map((box) => {
-        const labelElement = box.querySelector("[data-pageroot-review-overlay-label]");
+        const labelElement = box.querySelector("[data-stemmio-review-overlay-label]");
         return {
-          changeId: box.getAttribute("data-pageroot-review-overlay-box") || "",
-          owner: box.getAttribute("data-pageroot-review-semantic-owner") || "",
-          fact: box.getAttribute("data-pageroot-review-fact") || "",
+          changeId: box.getAttribute("data-stemmio-review-overlay-box") || "",
+          owner: box.getAttribute("data-stemmio-review-semantic-owner") || "",
+          fact: box.getAttribute("data-stemmio-review-fact") || "",
           path: box.getAttribute("data-path") || "",
           tone: box.dataset.tone || "",
           types: box.dataset.types || "",
@@ -215,7 +215,7 @@ async function readProjection(frame) {
               && Number(getComputedStyle(labelElement).opacity) > 0
             : false,
           labelCount: Number(labelElement
-            ?.getAttribute("data-pageroot-review-label-count") || 1),
+            ?.getAttribute("data-stemmio-review-label-count") || 1),
           borderWidth: Number.parseFloat(getComputedStyle(box).borderTopWidth || "0"),
           borderColor: getComputedStyle(box).borderTopColor || "",
           left: Number(box.getAttribute("data-left")),
@@ -224,31 +224,31 @@ async function readProjection(frame) {
           height: Number(box.getAttribute("data-height")),
         };
       });
-    const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
+    const holes = [...document.querySelectorAll("[data-stemmio-review-mask-hole]")]
       .map((hole) => ({
-        changeId: hole.getAttribute("data-pageroot-review-mask-hole") || "",
-        owner: hole.getAttribute("data-pageroot-review-semantic-owner") || "",
-        fact: hole.getAttribute("data-pageroot-review-fact") || "",
+        changeId: hole.getAttribute("data-stemmio-review-mask-hole") || "",
+        owner: hole.getAttribute("data-stemmio-review-semantic-owner") || "",
+        fact: hole.getAttribute("data-stemmio-review-fact") || "",
         path: hole.getAttribute("d") || "",
         left: Number(hole.getAttribute("data-left")),
         top: Number(hole.getAttribute("data-top")),
         width: Number(hole.getAttribute("data-width")),
         height: Number(hole.getAttribute("data-height")),
       }));
-    const bars = [...document.querySelectorAll("[data-pageroot-review-region-bar]")]
+    const bars = [...document.querySelectorAll("[data-stemmio-review-region-bar]")]
       .map((bar) => ({
-        changeId: bar.getAttribute("data-pageroot-review-region-bar") || "",
+        changeId: bar.getAttribute("data-stemmio-review-region-bar") || "",
         active: bar.dataset.active || "",
         top: Number(bar.getAttribute("data-top")),
         height: Number(bar.getAttribute("data-height")),
       }));
-    const strikes = [...document.querySelectorAll('[data-pageroot-review-text-mark="removed"]')]
+    const strikes = [...document.querySelectorAll('[data-stemmio-review-text-mark="removed"]')]
       .map((line) => ({
         dashArray: line.getAttribute("stroke-dasharray") || "",
         thickness: Number(line.getAttribute("stroke-width")),
         y: Number(line.getAttribute("y1")),
       }));
-    const dots = [...document.querySelectorAll('[data-pageroot-review-text-mark="added"]')]
+    const dots = [...document.querySelectorAll('[data-stemmio-review-text-mark="added"]')]
       .map((dot) => ({
         x: Number(dot.getAttribute("cx")),
         y: Number(dot.getAttribute("cy")),
@@ -256,14 +256,14 @@ async function readProjection(frame) {
       }));
     // Which character each dot sits under, resolved from the live layout.
     const scroll = { x: scrollX, y: scrollY };
-    const marked = [...document.querySelectorAll("[data-pageroot-review-text]")]
+    const marked = [...document.querySelectorAll("[data-stemmio-review-text]")]
       .map((marker) => ({
-        tone: marker.getAttribute("data-pageroot-review-text") || "",
+        tone: marker.getAttribute("data-stemmio-review-text") || "",
         owner: marker.parentElement?.className || "",
         text: marker.textContent || "",
       }));
     const glyphs = [];
-    document.querySelectorAll('[data-pageroot-review-text="added"]').forEach((marker) => {
+    document.querySelectorAll('[data-stemmio-review-text="added"]').forEach((marker) => {
       const walker = document.createTreeWalker(marker, NodeFilter.SHOW_TEXT);
       let node = walker.nextNode();
       while (node) {
@@ -285,7 +285,7 @@ async function readProjection(frame) {
         node = walker.nextNode();
       }
     });
-    const maskLayer = document.querySelector("[data-pageroot-review-mask-layer]");
+    const maskLayer = document.querySelector("[data-stemmio-review-mask-layer]");
     return {
       boxes,
       holes,
@@ -304,11 +304,11 @@ async function readProjection(frame) {
 
 async function activeFootprintVisibleInOuterViewport(page, frame, side) {
   const footprint = await frame.locator("html").evaluate(() => {
-    const groupId = document.documentElement.dataset.pagerootReviewFocusGroup || "";
+    const groupId = document.documentElement.dataset.stemmioReviewFocusGroup || "";
     const escapedGroupId = CSS.escape(groupId);
     const target = document.querySelector(
-      `[data-pageroot-review-mask-hole][data-pageroot-review-focus-group="${escapedGroupId}"]`,
-    ) || document.querySelector('[data-pageroot-review-overlay-box][data-active="true"]');
+      `[data-stemmio-review-mask-hole][data-stemmio-review-focus-group="${escapedGroupId}"]`,
+    ) || document.querySelector('[data-stemmio-review-overlay-box][data-active="true"]');
     if (!target) return null;
     return {
       left: Number(target.getAttribute("data-left")),
@@ -350,22 +350,22 @@ async function focusGroupForFact(frame, selector, predicate) {
   return frame.locator(selector).evaluate((root, expected) => {
     const elements = [
       root,
-      ...root.querySelectorAll("[data-pageroot-review-projection-facts]"),
+      ...root.querySelectorAll("[data-stemmio-review-projection-facts]"),
     ];
     for (const element of elements) {
       const facts = JSON.parse(
-        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+        element.getAttribute("data-stemmio-review-projection-facts") || "[]",
       );
       const fact = facts.find((candidate) => Object.entries(expected).every(
         ([key, value]) => candidate[key] === value,
       ));
       if (!fact) continue;
-      const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+      const changeId = element.getAttribute("data-stemmio-review-marker") || "";
       const id = fact.structureChange === "style"
         ? `focus-${fact.displayGroupId}`
         : `focus-${changeId}-${fact.displayGroupId}`;
       if (!document.querySelector(
-        `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${CSS.escape(id)}"]`,
+        `[data-stemmio-review-region-bar][data-stemmio-review-focus-group="${CSS.escape(id)}"]`,
       )) continue;
       return { id, changeId, displayGroupId: fact.displayGroupId };
     }
@@ -376,15 +376,15 @@ async function focusGroupForFact(frame, selector, predicate) {
 async function activateFocusGroup(beforeFrame, afterFrame, group) {
   expect(group).toBeTruthy();
   await expect.poll(async () => afterFrame.locator(
-    "[data-pageroot-review-region-bar][data-pageroot-review-focus-group]",
+    "[data-stemmio-review-region-bar][data-stemmio-review-focus-group]",
   ).evaluateAll((bars) => bars.map((bar) => (
-    bar.getAttribute("data-pageroot-review-focus-group") || ""
+    bar.getAttribute("data-stemmio-review-focus-group") || ""
   )))).toContain(group.id);
   await afterFrame.locator(
-    `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${group.id}"]`,
+    `[data-stemmio-review-region-bar][data-stemmio-review-focus-group="${group.id}"]`,
   ).first().evaluate((bar) => bar.click());
   await expect.poll(async () => Promise.all([beforeFrame, afterFrame].map((frame) => (
-    frame.locator("html").getAttribute("data-pageroot-review-focus-group")
+    frame.locator("html").getAttribute("data-stemmio-review-focus-group")
   )))).toEqual([group.id, group.id]);
 }
 
@@ -394,7 +394,7 @@ async function captureAuthoredElement(frame, selector) {
   // schedules a follower scroll and a new projection. Sample after presentation
   // settles, rather than comparing pixels from two navigation instants.
   await target.scrollIntoViewIfNeeded();
-  await expect(frame.locator("[data-pageroot-review-transition-mask]")).toHaveCount(0);
+  await expect(frame.locator("[data-stemmio-review-transition-mask]")).toHaveCount(0);
   await expect.poll(async () => {
     const before = await target.boundingBox();
     await frame.locator("html").evaluate(() => new Promise((resolve) => {
@@ -406,8 +406,8 @@ async function captureAuthoredElement(frame, selector) {
   return target.screenshot({
     animations: "disabled",
     style: `
-      [data-pageroot-review-overlay-box],
-      [data-pageroot-review-region-bar] {
+      [data-stemmio-review-overlay-box],
+      [data-stemmio-review-region-bar] {
         visibility: hidden !important;
       }
     `,
@@ -470,7 +470,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     sourceFixtureName: "review-annotation-report.html",
     sourceDirectoryPrefix: SOURCE_PREFIX,
   });
-  const launched = await launchPageRoot({
+  const launched = await launchStemmio({
     userDataPrefix: USER_DATA_PREFIX,
     activeSourcePath: fixture.sourcePath,
   });
@@ -491,13 +491,13 @@ test("the review projection annotates a dense report cleanly and accurately", as
     const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
     const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     await expect.poll(
-      async () => afterFrame.locator("[data-pageroot-review-region-bar]").count(),
+      async () => afterFrame.locator("[data-stemmio-review-region-bar]").count(),
       { timeout: 30_000 },
     ).toBeGreaterThan(0);
     for (const frame of [beforeFrame, afterFrame]) {
-      await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+      await expect(frame.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+      await expect(frame.locator("[data-stemmio-review-mask-hole]")).toHaveCount(0);
+      await expect(frame.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
     }
     const captureDirectory = path.join(productRoot, "output", "design-qa");
     mkdirSync(captureDirectory, { recursive: true });
@@ -530,11 +530,11 @@ test("the review projection annotates a dense report cleanly and accurately", as
       await activateFocusGroup(beforeFrame, afterFrame, group);
       for (const frame of [beforeFrame, afterFrame]) {
         const boxes = frame.locator(
-          `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
+          `[data-stemmio-review-overlay-box][data-stemmio-review-focus-group="${group.id}"]`,
         );
         await expect(boxes).toHaveCount(0);
-        await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-        await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+        await expect(frame.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+        await expect(frame.locator("[data-stemmio-review-mask-hole]")).toHaveCount(1);
       }
       const selector = index === 0 ? "[data-review-paragraph-one]" : "[data-review-paragraph-two]";
       await expect.poll(() => afterFrame.locator(selector).evaluate((element) => {
@@ -550,7 +550,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
         launched.page, beforeFrame, "before",
       )).toBe(true);
       paragraphFocusTops.push(await afterFrame.locator(
-        `[data-pageroot-review-mask-hole][data-pageroot-review-focus-group="${group.id}"]`,
+        `[data-stemmio-review-mask-hole][data-stemmio-review-focus-group="${group.id}"]`,
       ).evaluate((hole) => Number(hole.getAttribute("data-top"))));
       await launched.page.screenshot({
         path: path.join(captureDirectory, `review-focus-paragraph-${index + 1}.png`),
@@ -574,7 +574,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       await launched.page.locator(selector).press("Escape");
       for (const frame of [beforeFrame, afterFrame]) {
         await expect(frame.locator("html"))
-          .toHaveAttribute("data-pageroot-review-focus-group", paragraphTwoGroup.id);
+          .toHaveAttribute("data-stemmio-review-focus-group", paragraphTwoGroup.id);
       }
     }
     await launched.page.evaluate(() => {
@@ -596,7 +596,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await expect(confirmationDialog).toBeHidden();
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html"))
-        .toHaveAttribute("data-pageroot-review-focus-group", paragraphTwoGroup.id);
+        .toHaveAttribute("data-stemmio-review-focus-group", paragraphTwoGroup.id);
     }
     const preservedReviewPosition = await afterFrame.locator("html").evaluate(() => scrollY);
     const reviewTabs = launched.page.getByRole("tablist", { name: "已打开的页面" });
@@ -609,7 +609,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html"))
-        .toHaveAttribute("data-pageroot-review-focus-group", paragraphTwoGroup.id);
+        .toHaveAttribute("data-stemmio-review-focus-group", paragraphTwoGroup.id);
     }
     const restoredReviewPosition = await afterFrame.locator("html").evaluate((root, requestedTop) => {
       const scrollingElement = root.ownerDocument.scrollingElement;
@@ -624,9 +624,9 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await afterFrame.locator("body").press("Escape");
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html"))
-        .toHaveAttribute("data-pageroot-review-focus-group", "");
-      await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+        .toHaveAttribute("data-stemmio-review-focus-group", "");
+      await expect(frame.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+      await expect(frame.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
     }
     const cssGroup = await focusGroupForFact(
       afterFrame,
@@ -636,14 +636,14 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await activateFocusGroup(beforeFrame, afterFrame, cssGroup);
     for (const frame of [beforeFrame, afterFrame]) {
       const cssBox = frame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${cssGroup.id}"]`,
+        `[data-stemmio-review-overlay-box][data-stemmio-review-focus-group="${cssGroup.id}"]`,
       );
       // A stylesheet rule identifies candidate targets but does not itself
       // provide region-local computed-style evidence. Keep navigation/masking
       // and fail closed on the optional outline until that Stable host has a
       // current pure-style visual verdict.
       await expect(cssBox).toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+      await expect(frame.locator("[data-stemmio-review-mask-hole]")).toHaveCount(1);
     }
     await launched.page.screenshot({
       path: path.join(captureDirectory, "review-focus-css-grid.png"),
@@ -663,16 +663,16 @@ test("the review projection annotates a dense report cleanly and accurately", as
     expect(secondLocalityGroup.displayGroupId).toBe(firstLocalityGroup.displayGroupId);
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator(
-        `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${firstLocalityGroup.id}"]`,
+        `[data-stemmio-review-region-bar][data-stemmio-review-focus-group="${firstLocalityGroup.id}"]`,
       )).toHaveCount(2);
     }
     await activateFocusGroup(beforeFrame, afterFrame, firstLocalityGroup);
     for (const frame of [beforeFrame, afterFrame]) {
       const localityBoxes = frame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${firstLocalityGroup.id}"]`,
+        `[data-stemmio-review-overlay-box][data-stemmio-review-focus-group="${firstLocalityGroup.id}"]`,
       );
       await expect(localityBoxes).toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-hole]"))
+      await expect(frame.locator("[data-stemmio-review-mask-hole]"))
         .toHaveCount(1);
     }
     const singleStyleGroup = await focusGroupForFact(
@@ -683,7 +683,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await activateFocusGroup(beforeFrame, afterFrame, singleStyleGroup);
     for (const frame of [beforeFrame, afterFrame]) {
       const singleBox = frame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${singleStyleGroup.id}"]`,
+        `[data-stemmio-review-overlay-box][data-stemmio-review-focus-group="${singleStyleGroup.id}"]`,
       );
       await expect(singleBox).toHaveCount(1);
       await expect.poll(() => singleBox.evaluate((box) => {
@@ -718,7 +718,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
         authoredStyle.textContent = `
           svg,
           svg rect,
-          [data-pageroot-review-mask-dim] {
+          [data-stemmio-review-mask-dim] {
             filter: blur(20px) !important;
             backdrop-filter: grayscale(1) blur(3px) !important;
             -webkit-backdrop-filter: grayscale(1) blur(3px) !important;
@@ -731,46 +731,46 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await activateFocusGroup(beforeFrame, afterFrame, inlineStyleGroupA);
     for (const frame of [beforeFrame, afterFrame]) {
       const inlineBox = frame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${inlineStyleGroupA.id}"]`,
+        `[data-stemmio-review-overlay-box][data-stemmio-review-focus-group="${inlineStyleGroupA.id}"]`,
       );
       await expect(inlineBox).toHaveCount(1);
       await expect(frame.locator(
-        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${inlineStyleGroupB.id}"]`,
+        `[data-stemmio-review-overlay-box][data-stemmio-review-focus-group="${inlineStyleGroupB.id}"]`,
       )).toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
-      await expect(frame.locator("[data-pageroot-review-mask-layer]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-mask-hole]")).toHaveCount(1);
+      await expect(frame.locator("[data-stemmio-review-mask-layer]")).toHaveCSS(
         "backdrop-filter",
         "none",
       );
-      await expect(frame.locator("[data-pageroot-review-mask-layer]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-mask-layer]")).toHaveCSS(
         "filter",
         "none",
       );
-      await expect(frame.locator("[data-pageroot-review-mask-layer]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-mask-layer]")).toHaveCSS(
         "mix-blend-mode",
         "normal",
       );
-      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-mask-dim]")).toHaveCSS(
         "backdrop-filter",
         "none",
       );
-      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-mask-dim]")).toHaveCSS(
         "filter",
         "none",
       );
-      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-mask-dim]")).toHaveCSS(
         "mix-blend-mode",
         "normal",
       );
-      await expect(frame.locator("[data-pageroot-review-text-marks]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-text-marks]")).toHaveCSS(
         "backdrop-filter",
         "none",
       );
-      await expect(frame.locator("[data-pageroot-review-text-marks]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-text-marks]")).toHaveCSS(
         "filter",
         "none",
       );
-      await expect(frame.locator("[data-pageroot-review-text-marks]")).toHaveCSS(
+      await expect(frame.locator("[data-stemmio-review-text-marks]")).toHaveCSS(
         "mix-blend-mode",
         "normal",
       );
@@ -797,7 +797,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     ));
     await afterFrame.locator("body").press("Escape");
     await expect.poll(async () => Promise.all([beforeFrame, afterFrame].map((frame) => (
-      frame.locator("html").getAttribute("data-pageroot-review-focus-group")
+      frame.locator("html").getAttribute("data-stemmio-review-focus-group")
     )))).toEqual(["", ""]);
     const overviewInsidePixels = await Promise.all([beforeFrame, afterFrame].map(
       (frame) => captureAuthoredElement(frame, "[data-review-inline-a]"),
@@ -843,9 +843,9 @@ test("the review projection annotates a dense report cleanly and accurately", as
     ]).then((visible) => visible.every(Boolean)), { timeout: 30_000 }).toBe(true);
 
     const activePaintBudget = (frame) => frame.locator("html").evaluate(() => {
-      const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+      const boxes = [...document.querySelectorAll("[data-stemmio-review-overlay-box]")]
         .map((box) => box.getAttribute("data-path") || "").sort();
-      const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
+      const holes = [...document.querySelectorAll("[data-stemmio-review-mask-hole]")]
         .map((hole) => hole.getAttribute("d") || "").sort();
       return holes.length === 1
         && boxes.length <= 1
@@ -880,7 +880,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       path: path.join(captureDirectory, "review-annotation-all.png"),
       animations: "disabled",
     });
-    if (process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP) {
+    if (process.env.STEMMIO_CAPTURE_TOOLBAR_CLEANUP) {
       const visibleToast = launched.page.locator(".toast.show");
       await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
       if (await visibleToast.isVisible().catch(() => false)) {
@@ -889,7 +889,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       }
       const toolbarCaptureDirectory = path.resolve(
         productRoot,
-        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+        process.env.STEMMIO_CAPTURE_TOOLBAR_CLEANUP_DIR
           || path.join("output", "design-qa", "toolbar-cleanup"),
       );
       mkdirSync(toolbarCaptureDirectory, { recursive: true });
@@ -951,30 +951,30 @@ test("the review projection annotates a dense report cleanly and accurately", as
     }
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
       expect(
-        await frame.locator(".tabs .tab[data-pageroot-review-structure]").count(),
+        await frame.locator(".tabs .tab[data-stemmio-review-structure]").count(),
         `${side}: ambiguous reorder must not guess one tab`,
       ).toBe(0);
       await expect(frame.locator(".tabs"))
-        .toHaveAttribute("data-pageroot-review-structure", "reordered");
+        .toHaveAttribute("data-stemmio-review-structure", "reordered");
     }
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
       await expect(frame.locator(".metrics"))
-        .toHaveAttribute("data-pageroot-review-structure", "reordered");
+        .toHaveAttribute("data-stemmio-review-structure", "reordered");
       const jdEvidence = await frame.locator('[data-report-metric="jd-retail-profit"]')
         .evaluate((card) => {
-          const markerText = [...card.querySelectorAll("[data-pageroot-review-text]")]
+          const markerText = [...card.querySelectorAll("[data-stemmio-review-text]")]
             .map((marker) => marker.textContent || "").join("");
           const note = card.querySelector("[data-review-jd-note]");
           return {
             cardStructure: JSON.parse(
-              card.getAttribute("data-pageroot-review-projection-facts") || "[]",
+              card.getAttribute("data-stemmio-review-projection-facts") || "[]",
             ).filter((fact) => fact.type === "structure")
               .map((fact) => fact.structureChange),
             stableCopyMarked: ["京东零售经营利润", "135", "-3.3%"]
               .some((value) => markerText.includes(value)),
-            noteStructure: note?.getAttribute("data-pageroot-review-structure") || "",
-            descendantStructure: note?.querySelectorAll("[data-pageroot-review-structure]").length || 0,
-            descendantText: note?.querySelectorAll("[data-pageroot-review-text]").length || 0,
+            noteStructure: note?.getAttribute("data-stemmio-review-structure") || "",
+            descendantStructure: note?.querySelectorAll("[data-stemmio-review-structure]").length || 0,
+            descendantText: note?.querySelectorAll("[data-stemmio-review-text]").length || 0,
           };
         });
       expect(jdEvidence.cardStructure, `${side}: ambiguous sibling order stays on the parent`)
@@ -991,9 +991,9 @@ test("the review projection annotates a dense report cleanly and accurately", as
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
       const ordinary = await frame.locator("[data-review-ordinary-replacement]")
         .evaluate((element) => ({
-          structure: element.getAttribute("data-pageroot-review-structure") || "",
-          descendantText: element.querySelectorAll("[data-pageroot-review-text]").length,
-          descendantStructure: element.querySelectorAll("[data-pageroot-review-structure]").length,
+          structure: element.getAttribute("data-stemmio-review-structure") || "",
+          descendantText: element.querySelectorAll("[data-stemmio-review-text]").length,
+          descendantStructure: element.querySelectorAll("[data-stemmio-review-structure]").length,
         }));
       expect(ordinary.structure, `${side}: ordinary titled div must not earn relocation identity`)
         .toBe(side === "before" ? "removed" : "added");
@@ -1001,10 +1001,10 @@ test("the review projection annotates a dense report cleanly and accurately", as
       expect(ordinary.descendantStructure, `${side}: unmatched ordinary div repeats structure facts`).toBe(0);
     }
     const edgeChangeId = await afterFrame.locator("[data-review-edge-added]")
-      .getAttribute("data-pageroot-review-marker");
+      .getAttribute("data-stemmio-review-marker");
     const edgeDisplayGroupId = await afterFrame.locator("[data-review-edge-added]")
       .evaluate((element) => JSON.parse(
-        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+        element.getAttribute("data-stemmio-review-projection-facts") || "[]",
       )[0]?.displayGroupId || "");
     const edgeFocusGroupId = `focus-${edgeChangeId}-${edgeDisplayGroupId}`;
     // A prior focus action can still be scrolling after its overlay is ready.
@@ -1032,19 +1032,19 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await settleReviewScroll();
     const beforeFirstReveal = await beforeFrame.locator("html").evaluate(() => scrollY);
     await afterFrame.locator(
-      `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
+      `[data-stemmio-review-region-bar][data-stemmio-review-focus-group="${edgeFocusGroupId}"]`,
     ).first().evaluate((bar) => bar.click());
     await expect(afterFrame.locator("html"))
-      .toHaveAttribute("data-pageroot-review-focus-group", edgeFocusGroupId);
+      .toHaveAttribute("data-stemmio-review-focus-group", edgeFocusGroupId);
     await expect(beforeFrame.locator("html"))
-      .toHaveAttribute("data-pageroot-review-focus-group", edgeFocusGroupId);
+      .toHaveAttribute("data-stemmio-review-focus-group", edgeFocusGroupId);
     await expect(afterFrame.locator(
-      `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
+      `[data-stemmio-review-overlay-box][data-stemmio-review-focus-group="${edgeFocusGroupId}"]`,
     )).toHaveCount(1);
     await expect(beforeFrame.locator(
-      `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
+      `[data-stemmio-review-overlay-box][data-stemmio-review-focus-group="${edgeFocusGroupId}"]`,
     )).toHaveCount(0);
-    await expect(beforeFrame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+    await expect(beforeFrame.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
     await settleReviewScroll();
     expect(await beforeFrame.locator("html").evaluate(() => scrollY)).toBe(beforeFirstReveal);
     const edgeProjection = await readProjection(afterFrame);
@@ -1084,23 +1084,23 @@ test("the review projection annotates a dense report cleanly and accurately", as
       viewport.evaluate((element) => { element.scrollLeft = 0; })
     )));
     await afterFrame.locator(
-      `[data-pageroot-review-overlay-box="${edgeChangeId}"] [data-pageroot-review-overlay-label]`,
+      `[data-stemmio-review-overlay-box="${edgeChangeId}"] [data-stemmio-review-overlay-label]`,
     ).evaluate((label) => label.click());
     // Re-selecting is navigation, not an implicit exit toggle.
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html"))
-        .toHaveAttribute("data-pageroot-review-focus-group", edgeFocusGroupId);
+        .toHaveAttribute("data-stemmio-review-focus-group", edgeFocusGroupId);
     }
     await afterFrame.locator("body").press("Escape");
     for (const frame of [beforeFrame, afterFrame]) {
       await expect(frame.locator("html"))
-        .toHaveAttribute("data-pageroot-review-focus-group", "");
-      await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+        .toHaveAttribute("data-stemmio-review-focus-group", "");
+      await expect(frame.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+      await expect(frame.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
     }
     const missingSideState = () => beforeFrame.locator("html").evaluate(() => ({
       scrollY,
-      panels: [...document.querySelectorAll("[data-pageroot-review-panel-container]")]
+      panels: [...document.querySelectorAll("[data-stemmio-review-panel-container]")]
         .map((panel) => ({
           hidden: panel.hidden,
           ariaHidden: panel.getAttribute("aria-hidden"),
@@ -1114,7 +1114,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       (element) => element.scrollLeft,
     );
     await afterFrame.locator(
-      `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
+      `[data-stemmio-review-region-bar][data-stemmio-review-focus-group="${edgeFocusGroupId}"]`,
     ).first().evaluate((bar) => bar.click());
     await expect.poll(() => outerViewports.before.evaluate((element) => element.scrollLeft))
       .toBe(missingSideOuterLeft);
@@ -1212,7 +1212,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
 
     // 1b. Focus claims exactly one semantic group; an outline is optional and
     //     only the active locality may receive one.
-    await afterFrame.locator("[data-pageroot-review-region-bar]").first().click();
+    await afterFrame.locator("[data-stemmio-review-region-bar]").first().click();
     await expect.poll(async () => {
       const sides = {
         before: await readProjection(beforeFrame),
@@ -1294,7 +1294,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     // 4. Text the reader can still see is neither struck through nor announced
     //    as new. The trend paragraph reuses most of its numbers.
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
-      const marked = await frame.locator("[data-pageroot-review-text]")
+      const marked = await frame.locator("[data-stemmio-review-text]")
         .evaluateAll((markers) => markers.map((marker) => marker.textContent).join(""));
       for (const survivor of ["96.2", "YoY", "+18%", "回落", "2pp", "结构变化加剧", "抖系份额收缩"]) {
         expect(
@@ -1309,15 +1309,15 @@ test("the review projection annotates a dense report cleanly and accurately", as
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
       const nested = await frame.locator("html").evaluate(() => {
         const whollyChanged = [...document.querySelectorAll(
-          '[data-pageroot-review-structure="added"], [data-pageroot-review-structure="removed"]',
+          '[data-stemmio-review-structure="added"], [data-stemmio-review-structure="removed"]',
         )];
         return {
           whollyChanged: whollyChanged.length,
           structure: whollyChanged.reduce((count, root) => (
-            count + root.querySelectorAll("[data-pageroot-review-structure]").length
+            count + root.querySelectorAll("[data-stemmio-review-structure]").length
           ), 0),
           text: whollyChanged.reduce((count, root) => (
-            count + root.querySelectorAll("[data-pageroot-review-text]").length
+            count + root.querySelectorAll("[data-stemmio-review-text]").length
           ), 0),
         };
       });
@@ -1331,15 +1331,15 @@ test("the review projection annotates a dense report cleanly and accurately", as
     for (const [filter, name] of [["文字变化", "text"], ["元素变化", "structure"]]) {
       await launched.page.getByRole("button", { name: filter, exact: true }).click();
       await expect.poll(
-        async () => afterFrame.locator("html").getAttribute("data-pageroot-review-filter"),
+        async () => afterFrame.locator("html").getAttribute("data-stemmio-review-filter"),
         { timeout: 15_000 },
       ).toBe(name);
       for (const frame of [beforeFrame, afterFrame]) {
         await expect(frame.locator("html"))
-          .toHaveAttribute("data-pageroot-review-focus-group", "");
-        await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-        await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(0);
-        await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+          .toHaveAttribute("data-stemmio-review-focus-group", "");
+        await expect(frame.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+        await expect(frame.locator("[data-stemmio-review-mask-hole]")).toHaveCount(0);
+        await expect(frame.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
       }
       await launched.page.screenshot({
         path: path.join(captureDirectory, `review-annotation-${name}.png`),
@@ -1355,7 +1355,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     // review toolbar is outside the page region and does not alter the clip.
     await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect.poll(
-      async () => afterFrame.locator("html").getAttribute("data-pageroot-review-filter"),
+      async () => afterFrame.locator("html").getAttribute("data-stemmio-review-filter"),
       { timeout: 15_000 },
     ).toBe("all");
     await launched.page.getByRole("button", { name: "原始大小", exact: true }).click();
@@ -1384,7 +1384,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       });
     }
   } finally {
-    await closePageRootGracefully(launched.electronApp, launched.page, { timeout: 20_000 });
+    await closeStemmioGracefully(launched.electronApp, launched.page, { timeout: 20_000 });
     removeSourceFixture(fixture.sourceDirectory, SOURCE_PREFIX);
     removeValidatedTemporaryDirectory(launched.isolatedUserData, USER_DATA_PREFIX);
   }

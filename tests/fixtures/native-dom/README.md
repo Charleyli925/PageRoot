@@ -12,7 +12,7 @@ fixed pass total:
   must satisfy the complete caret, Selection, beforeinput, clipboard and IME
   contract.
 - `select-comment`: native text selection remains, but no editable caret is
-  shown; PageRoot must offer a plain-language comment route.
+  shown; Stemmio must offer a plain-language comment route.
 - `comment-only`: the surface stays non-editable and has an element comment
   route.
 
@@ -26,7 +26,7 @@ copy in Git.
 
 The edit canvas is a same-origin `srcDoc` iframe with exactly
 `sandbox="allow-same-origin"`. It intentionally has no `allow-scripts` token.
-PageRoot additionally rewrites executable author scripts and refresh meta tags
+Stemmio additionally rewrites executable author scripts and refresh meta tags
 before assigning `srcDoc`. Native editing tests therefore run inside the edit
 document, while the fixture's author scripts must remain inert. Nested frames,
 canvas pixels, generated pseudo content and shadow content do not cross this

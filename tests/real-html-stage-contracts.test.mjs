@@ -67,8 +67,8 @@ test("mixed newline markers retain both edits and reject either missing half", (
 });
 
 test("mixed binding shifts bytes only outside a verified fixed text island", () => {
-  const id = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
-  const before = Buffer.from(`<p data-pageroot-id="${id}">文字</p><span>Copy</span><!--keep-->`);
+  const id = "sm1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+  const before = Buffer.from(`<p data-stemmio-id="${id}">文字</p><span>Copy</span><!--keep-->`);
   const after = Buffer.from(before.toString().replace("文字", "文字 added"));
   const text = { selectedId: id, selectedTag: "p", textEntry: { path: [0], offset: 0, textSha256: frozenDigest("文字") } };
   const structure = { copyBinding: { byteOffset: before.indexOf("<!--"), parentId: "fixed" } };
@@ -83,7 +83,7 @@ test("mixed binding shifts bytes only outside a verified fixed text island", () 
   assert.throws(() => bindMixedSource(before, after, text, { ...same, copyBinding: { ...same.copyBinding, originalElementSha256: "wrong" } }));
   assert.equal(bindMixedSource(before, after, text, { copyBinding: { byteOffset: 0 } }).structure.copyBinding.byteOffset, 0);
   for (const bad of [after.toString().replace("keep", "wrong"), after.toString().replace("Copy", "wrong"),
-    after.toString().replace(id, "wrong"), after.toString() + `<p data-pageroot-id="${id}">duplicate</p>`])
+    after.toString().replace(id, "wrong"), after.toString() + `<p data-stemmio-id="${id}">duplicate</p>`])
     assert.throws(() => bindMixedSource(before, Buffer.from(bad), text, structure));
   assert.throws(() => bindMixedSource(before, after, { ...text, selectedTag: "span" }, structure));
   assert.throws(() => bindMixedSource(before, after, text, { copyBinding: { byteOffset: 5 } }));
@@ -157,7 +157,7 @@ function textSnapshot(id, overrides = {}) {
   return {
     id,
     tag: "p",
-    parentId: "pr1_00000000000040008000000000000001",
+    parentId: "sm1_00000000000040008000000000000001",
     documentOrder: 1,
     textLength: 24,
     childCount: 0,
@@ -174,10 +174,10 @@ function textSnapshot(id, overrides = {}) {
 
 test("text preflight freezes one format-off host plus two ordinary hosts without fallback", () => {
   const snapshots = [
-    textSnapshot("pr1_00000000000040008000000000000010", { tag: "h1", format: { bold: true, italic: false, underline: false } }),
-    textSnapshot("pr1_00000000000040008000000000000011", { documentOrder: 2 }),
-    textSnapshot("pr1_00000000000040008000000000000012", { documentOrder: 3 }),
-    textSnapshot("pr1_00000000000040008000000000000013", { documentOrder: 4 }),
+    textSnapshot("sm1_00000000000040008000000000000010", { tag: "h1", format: { bold: true, italic: false, underline: false } }),
+    textSnapshot("sm1_00000000000040008000000000000011", { documentOrder: 2 }),
+    textSnapshot("sm1_00000000000040008000000000000012", { documentOrder: 3 }),
+    textSnapshot("sm1_00000000000040008000000000000013", { documentOrder: 4 }),
   ];
   const plan = createFixedTextTargetPlan(snapshots);
   assert.equal(plan.ok, true);
@@ -190,25 +190,25 @@ test("text preflight freezes one format-off host plus two ordinary hosts without
 });
 
 test("text preflight keeps the visible snapshot of one Stable ID across authored tabs", () => {
-  const sharedId = "pr1_00000000000040008000000000000010";
+  const sharedId = "sm1_00000000000040008000000000000010";
   const plan = createFixedTextTargetPlan([
     textSnapshot(sharedId, { visible: false, tabId: "tab-a" }),
     textSnapshot(sharedId, { visible: true, tabId: "tab-b" }),
-    textSnapshot("pr1_00000000000040008000000000000011", { documentOrder: 2 }),
-    textSnapshot("pr1_00000000000040008000000000000012", { documentOrder: 3 }),
+    textSnapshot("sm1_00000000000040008000000000000011", { documentOrder: 2 }),
+    textSnapshot("sm1_00000000000040008000000000000012", { documentOrder: 3 }),
   ]);
   assert.equal(plan.ok, true);
   assert.equal(plan.targets.find((target) => target.id === sharedId)?.tabId, "tab-b");
 });
 
 test("text preflight rejects invalid DOM identity and invalid samples instead of selecting a replacement", () => {
-  const duplicate = textSnapshot("pr1_00000000000040008000000000000010", {
+  const duplicate = textSnapshot("sm1_00000000000040008000000000000010", {
     domIdentityValid: false,
   });
   const duplicatePlan = createFixedTextTargetPlan([
     duplicate,
     { ...duplicate, documentOrder: 2 },
-    textSnapshot("pr1_00000000000040008000000000000011", { documentOrder: 3 }),
+    textSnapshot("sm1_00000000000040008000000000000011", { documentOrder: 3 }),
   ]);
   assert.equal(duplicatePlan.ok, false);
   assert.equal(duplicatePlan.reasonCode, TEXT_TARGET_REASON_CODES.SNAPSHOT_INCOMPLETE);
@@ -218,11 +218,11 @@ test("text preflight rejects invalid DOM identity and invalid samples instead of
   );
 
   const rejectedPlan = createFixedTextTargetPlan([
-    textSnapshot("pr1_00000000000040008000000000000010", {
-      descendantSourceIds: ["pr1_00000000000040008000000000000099"],
+    textSnapshot("sm1_00000000000040008000000000000010", {
+      descendantSourceIds: ["sm1_00000000000040008000000000000099"],
     }),
-    textSnapshot("pr1_00000000000040008000000000000011", { visible: false, documentOrder: 2 }),
-    textSnapshot("pr1_00000000000040008000000000000012", { sourceEditable: false, documentOrder: 3 }),
+    textSnapshot("sm1_00000000000040008000000000000011", { visible: false, documentOrder: 2 }),
+    textSnapshot("sm1_00000000000040008000000000000012", { sourceEditable: false, documentOrder: 3 }),
   ]);
   assert.equal(rejectedPlan.ok, false);
   assert.equal(rejectedPlan.reasonCode, TEXT_TARGET_REASON_CODES.SNAPSHOT_INCOMPLETE);
@@ -235,12 +235,12 @@ test("text preflight rejects invalid DOM identity and invalid samples instead of
 
 test("text execution revalidates frozen source identity but ignores self-authored order shifts", () => {
   const plan = createFixedTextTargetPlan([
-    textSnapshot("pr1_00000000000040008000000000000010"),
-    textSnapshot("pr1_00000000000040008000000000000011", { documentOrder: 2 }),
-    textSnapshot("pr1_00000000000040008000000000000012", { documentOrder: 3 }),
+    textSnapshot("sm1_00000000000040008000000000000010"),
+    textSnapshot("sm1_00000000000040008000000000000011", { documentOrder: 2 }),
+    textSnapshot("sm1_00000000000040008000000000000012", { documentOrder: 3 }),
   ]).targets[0];
   const drifted = validateFrozenTextTarget(
-    textSnapshot(plan.id, { parentId: "pr1_00000000000040008000000000000002", documentOrder: 8 }),
+    textSnapshot(plan.id, { parentId: "sm1_00000000000040008000000000000002", documentOrder: 8 }),
     plan,
   );
   assert.equal(drifted.ok, false);
@@ -526,7 +526,7 @@ test("qualification audit rejects unresolved rows and non-applicable rows withou
 });
 
 function capabilityId(number) {
-  return `pr1_${String(number).padStart(32, "0")}`;
+  return `sm1_${String(number).padStart(32, "0")}`;
 }
 
 function capabilityEvidence({ allTop = false } = {}) {
@@ -541,8 +541,8 @@ function capabilityEvidence({ allTop = false } = {}) {
   ].map(([tagName, capabilityFamily, behaviorFamily, tabId, region], index) => ({
     id: capabilityId(index + 1),
     tagName,
-    pagerootId: capabilityId(index + 1),
-    pagerootIdentityStatus: "valid",
+    stemmioId: capabilityId(index + 1),
+    stemmioIdentityStatus: "valid",
     sourceOrder: index,
     capabilityFamilies: [capabilityFamily],
     behaviorFamilies: [behaviorFamily],
@@ -561,16 +561,16 @@ function capabilityEvidence({ allTop = false } = {}) {
   const sourceElements = entries.map((entry) => ({
     id: entry.id,
     tagName: entry.tagName,
-    pagerootId: entry.pagerootId,
-    pagerootIdentityStatus: entry.pagerootIdentityStatus,
+    stemmioId: entry.stemmioId,
+    stemmioIdentityStatus: entry.stemmioIdentityStatus,
     sourceOrder: entry.sourceOrder,
     capabilityFamilies: entry.capabilityFamilies,
     behaviorFamilies: entry.behaviorFamilies,
   }));
   const sourceIndex = {
     elements: sourceElements,
-    byPagerootId: new Map(sourceElements.map((entry) => [entry.pagerootId, entry])),
-    pagerootIdentity: { issues: [] },
+    byStemmioId: new Map(sourceElements.map((entry) => [entry.stemmioId, entry])),
+    stemmioIdentity: { issues: [] },
   };
   return {
     sourceIndex,
@@ -586,7 +586,7 @@ test("capability manifest requires dual authored/source-index and live-DOM Stabl
   const id = capabilityId(1);
   const sourceOnly = capabilityId(90);
   const liveOnly = capabilityId(91);
-  const invalid = "pr1_not-a-stable-id";
+  const invalid = "sm1_not-a-stable-id";
   const evidence = capabilityEvidence();
   evidence.sourceIndex.elements.push({
     nodeId: "element:private-parser-handle",
@@ -595,15 +595,15 @@ test("capability manifest requires dual authored/source-index and live-DOM Stabl
     capabilityFamilies: ["text"],
   });
   evidence.sourceIndex.elements.push({
-    pagerootId: sourceOnly,
-    pagerootIdentityStatus: "valid",
+    stemmioId: sourceOnly,
+    stemmioIdentityStatus: "valid",
     tagName: "p",
     sourceOrder: 90,
     capabilityFamilies: ["text"],
   });
   evidence.sourceIndex.elements.push({
-    pagerootId: invalid,
-    pagerootIdentityStatus: "invalid",
+    stemmioId: invalid,
+    stemmioIdentityStatus: "invalid",
     tagName: "p",
     sourceOrder: 91,
     capabilityFamilies: ["text"],
@@ -633,14 +633,14 @@ test("capability manifest excludes duplicate, hidden, inert, generated and no-ca
   const evidence = capabilityEvidence();
   const add = (id, sourceOverrides, liveOverrides) => {
     const source = {
-      pagerootId: id,
-      pagerootIdentityStatus: "valid",
+      stemmioId: id,
+      stemmioIdentityStatus: "valid",
       tagName: "div",
       sourceOrder: 100 + evidence.sourceIndex.elements.length,
       ...sourceOverrides,
     };
     evidence.sourceIndex.elements.push(source);
-    evidence.sourceIndex.byPagerootId.set(id, source);
+    evidence.sourceIndex.byStemmioId.set(id, source);
     evidence.liveDom.push({
       stableId: id,
       visible: true,
@@ -654,8 +654,8 @@ test("capability manifest excludes duplicate, hidden, inert, generated and no-ca
   const duplicateId = capabilityId(101);
   add(duplicateId, { capabilityFamilies: ["text"] }, { capabilityFamilies: ["text"] });
   evidence.sourceIndex.elements.push({
-    pagerootId: duplicateId,
-    pagerootIdentityStatus: "valid",
+    stemmioId: duplicateId,
+    stemmioIdentityStatus: "valid",
     tagName: "div",
     sourceOrder: 102,
     capabilityFamilies: ["text"],
@@ -677,7 +677,7 @@ test("canonical normalization preserves raw live duplicate evidence for the mani
   const evidence = capabilityEvidence();
   const duplicate = {
     ...evidence.liveDom[0],
-    stableId: evidence.sourceIndex.elements[0].pagerootId,
+    stableId: evidence.sourceIndex.elements[0].stemmioId,
     capabilityFamilies: [],
     behaviorFamilies: [],
     probeReason: "LIVE_DUPLICATE_STABLE_ID",
@@ -749,8 +749,8 @@ test("canonical diagnostics retain only valid planned and observed Stable IDs", 
 
 test("capability draft keeps contract, source, and live conflicts pending review", () => {
   const operation = {
-    pagerootId: capabilityId(220),
-    pagerootIdentityStatus: "valid",
+    stemmioId: capabilityId(220),
+    stemmioIdentityStatus: "valid",
     parentId: null,
     sourceOrder: 0,
     sourceEditable: true,
@@ -777,42 +777,42 @@ test("capability draft keeps contract, source, and live conflicts pending review
   assert.equal(expectations.find((entry) => entry.family === "copy")?.live.reason, "runtime-subtree-diverged");
   assert.deepEqual(capabilityManifestDraftIssues({
     authoredDenominator: [{
-      probeStableId: operation.pagerootId,
-      operationStableId: operation.pagerootId,
+      probeStableId: operation.stemmioId,
+      operationStableId: operation.stemmioId,
       expectations,
     }],
     operationGroups: [{ expectations }],
-    unresolvedProbes: [{ probeStableId: operation.pagerootId }],
+    unresolvedProbes: [{ probeStableId: operation.stemmioId }],
   }), ["UNRESOLVED_PROBES_PRESENT", "CAPABILITY_EXPECTATIONS_PENDING_REVIEW"]);
   assert.deepEqual(capabilityManifestDraftIssues({
     authoredDenominator: [{
-      probeStableId: operation.pagerootId,
-      operationStableId: operation.pagerootId,
+      probeStableId: operation.stemmioId,
+      operationStableId: operation.stemmioId,
       expectations,
     }],
     operationGroups: [{ expectations }],
     unresolvedProbes: [],
-    observationConflicts: [{ operationStableId: operation.pagerootId }],
+    observationConflicts: [{ operationStableId: operation.stemmioId }],
   }), [
     "CAPABILITY_EXPECTATIONS_PENDING_REVIEW",
     "CAPABILITY_OBSERVATION_CONFLICTS_PENDING_REVIEW",
   ]);
   assert.deepEqual(capabilityManifestDraftIssues({
-    authoredDenominator: [{ probeStableId: operation.pagerootId, operationStableId: null }],
+    authoredDenominator: [{ probeStableId: operation.stemmioId, operationStableId: null }],
     operationGroups: [],
     unresolvedProbes: [],
   }), ["UNRESOLVED_DENOMINATOR_IDENTITIES", "INCOMPLETE_CAPABILITY_EXPECTATIONS"]);
   const normalizedConflict = normalizeCapabilityProbeObservations([
     {
-      stableId: operation.pagerootId,
-      operationStableId: operation.pagerootId,
+      stableId: operation.stemmioId,
+      operationStableId: operation.stemmioId,
       probeStableId: capabilityId(221),
       capabilityFamilies: ["selection"],
       region: "top",
     },
     {
-      stableId: operation.pagerootId,
-      operationStableId: operation.pagerootId,
+      stableId: operation.stemmioId,
+      operationStableId: operation.stemmioId,
       probeStableId: capabilityId(222),
       capabilityFamilies: ["selection"],
       region: "middle",
@@ -821,10 +821,10 @@ test("capability draft keeps contract, source, and live conflicts pending review
   const constructed = createCapabilityManifestDraft({
     authoredDenominator: [{
       probeStableId: capabilityId(221),
-      operationStableId: operation.pagerootId,
+      operationStableId: operation.stemmioId,
       expectations,
     }],
-    operationGroups: [{ operationStableId: operation.pagerootId, expectations }],
+    operationGroups: [{ operationStableId: operation.stemmioId, expectations }],
     observationConflicts: normalizedConflict.conflicts,
   });
   assert.equal(constructed.observationConflicts.length, 1);
@@ -920,7 +920,7 @@ test("frozen copy boundary proves exact source witness and fails every missing c
   for (const [kind, tag, attribute] of [["attribute-extra", "div", "style"], ["attribute-extra", "svg", "viewBox"],
     ["attribute-extra", "div", "_echarts_instance_"], ["opaque-canvas", "canvas"], ["empty-container-populated", "div"]]) {
     const rootId = capabilityId(601), witnessId = capabilityId(602);
-    const raw = `<div data-pageroot-id="${rootId}">\n<${tag} data-pageroot-id="${witnessId}"></${tag}></div>`;
+    const raw = `<div data-stemmio-id="${rootId}">\n<${tag} data-stemmio-id="${witnessId}"></${tag}></div>`;
     const source = Buffer.from(raw), identity = { path: "synthetic.html", sha256: frozenDigest(source), size: source.length };
     const proof = { kind, witnessId, witnessTag: tag, diagnosticPath: "root/div[1]", sourceElementSha256: frozenDigest(raw), ...(attribute ? { attribute } : {}) };
     const target = { clickId: rootId, selectedId: rootId, clickTag: "div", selectedTag: "div", mapping: "self",
@@ -948,7 +948,7 @@ test("frozen copy boundary proves exact source witness and fails every missing c
     for (const change of [{ sourceElementSha256: "b".repeat(64) }, { diagnosticPath: "root/div[0]" }, { witnessId: rootId }]) {
       assert.throws(() => verifyFrozenDenialWitness(source, { ...target, denialEvidence: { ...proof, ...change } }, live));
     }
-    const changed = raw.replace(`data-pageroot-id="${witnessId}"`, `data-pageroot-id="${witnessId}"${attribute ? ` ${attribute}="already-authored"` : ""}`)
+    const changed = raw.replace(`data-stemmio-id="${witnessId}"`, `data-stemmio-id="${witnessId}"${attribute ? ` ${attribute}="already-authored"` : ""}`)
       .replace(`></${tag}>`, `>authored</${tag}>`);
     assert.throws(() => verifyFrozenDenialWitness(Buffer.from(changed), target, live));
   }
@@ -1015,7 +1015,7 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
     const bytes = Buffer.from(JSON.stringify({ ...deniedPlan, targets: [{ ...deniedPlan.targets[0], ...change }] }));
     assert.throws(() => readFrozenSelection(bytes, frozenDigest(bytes)), { code: "FROZEN_COPY_DENIED_CONTRACT_INVALID" });
   }
-  for (const attribute of ["data-runtime-proof", "data-pageroot-edit-runtime-source", "data-html-canvas-selected", "data-pageroot-v2-editing"]) {
+  for (const attribute of ["data-runtime-proof", "data-stemmio-edit-runtime-source", "data-html-canvas-selected", "data-stemmio-editing"]) {
     const bytes = Buffer.from(JSON.stringify({ ...deniedPlan, targets: [{ ...deniedPlan.targets[0],
       denialEvidence: { ...deniedPlan.targets[0].denialEvidence, attribute },
       copyCapability: { ...deniedPlan.targets[0].copyCapability, diagnostic: `root:attribute-extra:${attribute}` } }] }));
@@ -1444,12 +1444,12 @@ function fullContinuityEvidence() {
       size: 200,
     },
     selection: {
-      expectedElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      after: { elementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", connected: true },
+      expectedElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      after: { elementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", connected: true },
       focus: {
-        activeElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        anchorElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        focusElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        activeElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        anchorElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        focusElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
     },
     previousTargetRetired: true,
@@ -1459,11 +1459,11 @@ function fullContinuityEvidence() {
     },
     continuation: {
       mode: "session-ended",
-      expectedElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      expectedElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       directInputApplied: false,
       directTargetId: null,
       sessionEnded: true,
-      relocatedElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      relocatedElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       relocatedInputApplied: true,
     },
   };
@@ -1546,7 +1546,7 @@ test("continuity chain compares Candidate to the rebuild snapshot, not later con
 
 test("continuity chain rejects wrong or detached selection, ordinary rebuild, unknown and timeout evidence", () => {
   const wrongSelection = fullContinuityEvidence();
-  wrongSelection.selection.after.elementId = "pr1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  wrongSelection.selection.after.elementId = "sm1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   const wrong = evaluateContinuityChain(wrongSelection);
   assert.equal(wrong.parts.selection.reasonCode, CONTINUITY_CHAIN_REASONS.SELECTION_ELEMENT_MISMATCH);
 
@@ -1585,9 +1585,9 @@ test("continuity chain rejects wrong or detached selection, ordinary rebuild, un
   const wrongContinuation = fullContinuityEvidence();
   wrongContinuation.continuation = {
     mode: "without-refocus",
-    expectedElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    expectedElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     directInputApplied: true,
-    directTargetId: "pr1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    directTargetId: "sm1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   };
   const wrongContinuationResult = evaluateContinuityChain(wrongContinuation);
   assert.equal(
@@ -1642,11 +1642,11 @@ function fullStaleCandidateEvidence() {
     heldSource: { hash: "sha256:held", size: 180 },
     latestSource: { hash: "sha256:latest", size: 195 },
     continuation: {
-      expectedElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      expectedElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       directInputApplied: false,
       directTargetId: null,
       sessionEnded: true,
-      relocatedElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      relocatedElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       relocatedInputApplied: true,
     },
     finalSource: {
@@ -1665,9 +1665,9 @@ test("stale Candidate fence accepts both safe continuation modes and preserves t
 
   const direct = fullStaleCandidateEvidence();
   direct.continuation = {
-    expectedElementId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    expectedElementId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     directInputApplied: true,
-    directTargetId: "pr1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    directTargetId: "sm1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     sessionEnded: false,
     relocatedElementId: null,
     relocatedInputApplied: false,
@@ -1685,7 +1685,7 @@ test("stale Candidate fence rejects wrong delivery and stale overwrite independe
 
   const wrongTarget = fullStaleCandidateEvidence();
   wrongTarget.continuation.directInputApplied = true;
-  wrongTarget.continuation.directTargetId = "pr1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  wrongTarget.continuation.directTargetId = "sm1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   assert.equal(
     evaluateStaleCandidateFence(wrongTarget).parts.continuation.reasonCode,
     STALE_CANDIDATE_REASONS.CONTINUATION_WRONG_TARGET,

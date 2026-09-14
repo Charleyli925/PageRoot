@@ -16,10 +16,10 @@ import {
 } from "../desktop/usage-telemetry.mjs";
 import { writeUsageTelemetryBuildConfig } from "../scripts/build-package.mjs";
 
-const TEST_TOKEN = "phc_pagerootsynthetic";
+const TEST_TOKEN = "phc_stemmiosynthetic";
 
 async function temporaryUserData(t) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pageroot-usage-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-usage-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -155,7 +155,7 @@ test("renderer data is reduced to the allowlist before queueing or sending", asy
   }
 
   const notice = calls[0].payload.batch.find(
-    (item) => item.event === "pageroot notification presented",
+    (item) => item.event === "stemmio notification presented",
   );
   assert.ok(notice);
   assert.match(notice.properties.project_key, /^project_[a-f0-9]{24}$/u);
@@ -166,7 +166,7 @@ test("renderer data is reduced to the allowlist before queueing or sending", asy
   assert.equal(notice.properties.source_path, undefined);
   assert.equal(notice.properties.error_message, undefined);
   assert.ok(calls[0].payload.batch.some((item) => (
-    item.event === "pageroot notification presented"
+    item.event === "stemmio notification presented"
     && item.properties.notice_code === "ai_run_cancelled"
   )));
   await telemetry.shutdown();
@@ -212,16 +212,16 @@ test("direct edits and successful saves are aggregated before delivery", async (
   await telemetry.flush();
   const events = calls.flatMap((call) => call.payload.batch);
   assert.equal(
-    events.some((item) => item.event === "pageroot direct edit committed"),
+    events.some((item) => item.event === "stemmio direct edit committed"),
     false,
   );
   assert.equal(
-    events.find((item) => item.event === "pageroot direct edit batch")
+    events.find((item) => item.event === "stemmio direct edit batch")
       ?.properties.edit_count,
     3,
   );
   assert.equal(
-    events.find((item) => item.event === "pageroot source save batch")
+    events.find((item) => item.event === "stemmio source save batch")
       ?.properties.save_count,
     2,
   );
@@ -272,7 +272,7 @@ test("failed batches retain only sanitized events and preserve their original se
   await second.flush();
   const restoredFault = calls
     .flatMap((call) => call.payload.batch)
-    .find((item) => item.event === "pageroot renderer fault");
+    .find((item) => item.event === "stemmio renderer fault");
   assert.ok(restoredFault);
   assert.equal(restoredFault.properties.$session_id, firstSessionId);
   assert.notEqual(restoredFault.properties.$session_id, secondSessionId);
@@ -326,8 +326,8 @@ test("the bounded queue cannot delete newer events when an older batch completes
 test("release config accepts only a public Project token and HTTPS origin", async (t) => {
   assert.deepEqual(
     createTelemetryBuildConfig({
-      PAGEROOT_POSTHOG_TOKEN: TEST_TOKEN,
-      PAGEROOT_POSTHOG_HOST: "https://us.i.posthog.com/",
+      STEMMIO_POSTHOG_TOKEN: TEST_TOKEN,
+      STEMMIO_POSTHOG_HOST: "https://us.i.posthog.com/",
     }),
     {
       version: 1,
@@ -338,13 +338,13 @@ test("release config accepts only a public Project token and HTTPS origin", asyn
   );
   assert.throws(
     () => createTelemetryBuildConfig({
-      PAGEROOT_POSTHOG_TOKEN: "phx_secret_key",
+      STEMMIO_POSTHOG_TOKEN: "phx_secret_key",
     }),
     /phc_ project-token format/u,
   );
   assert.throws(
     () => createTelemetryBuildConfig({
-      PAGEROOT_POSTHOG_HOST: "http://us.i.posthog.com",
+      STEMMIO_POSTHOG_HOST: "http://us.i.posthog.com",
     }),
     /HTTPS origin/u,
   );
@@ -353,9 +353,9 @@ test("release config accepts only a public Project token and HTTPS origin", asyn
   const result = await writeUsageTelemetryBuildConfig({
     productRoot,
     environment: {
-      PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1",
-      PAGEROOT_POSTHOG_TOKEN: TEST_TOKEN,
-      PAGEROOT_POSTHOG_HOST: DEFAULT_POSTHOG_HOST,
+      STEMMIO_REQUIRE_TELEMETRY_CONFIG: "1",
+      STEMMIO_POSTHOG_TOKEN: TEST_TOKEN,
+      STEMMIO_POSTHOG_HOST: DEFAULT_POSTHOG_HOST,
     },
   });
   const restored = await readTelemetryBuildConfig(result.destination);
@@ -366,10 +366,10 @@ test("release config accepts only a public Project token and HTTPS origin", asyn
     writeUsageTelemetryBuildConfig({
       productRoot,
       environment: {
-        PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1",
+        STEMMIO_REQUIRE_TELEMETRY_CONFIG: "1",
       },
     }),
-    /PAGEROOT_POSTHOG_TOKEN is required/u,
+    /STEMMIO_POSTHOG_TOKEN is required/u,
   );
 });
 

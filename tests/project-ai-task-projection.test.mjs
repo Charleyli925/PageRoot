@@ -74,7 +74,7 @@ test("AI task projections are re-creatable, collision-safe and never Candidate a
   assert.equal(hiddenCandidate.content, candidateHtml);
   const beforePromotion = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(beforePromotion.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -218,7 +218,7 @@ test("AI task display publication cannot make a sealed Candidate unavailable", a
   const request = await prepareAiTaskRequest(value.repository, imported.target, requestId);
   const recoveryRoot = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "recovery",
     "ai-task-projections",
   );
@@ -287,7 +287,7 @@ test("AI task projection replays every publication failpoint without a second Ca
       attemptId: "attempt_001",
     });
     assert.equal(projection.candidatePath, null, stage);
-    const manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
+    const manifest = await json(path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"));
     assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"], stage);
   }
 
@@ -334,10 +334,10 @@ test("AI task projection replays every publication failpoint without a second Ca
   assert.equal(hiddenCandidate.content, candidateHtml);
   const requests = await readdir(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
   ));
   assert.equal(requests.filter((name) => name === requestId).length, 1);
-  const manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
+  const manifest = await json(path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });

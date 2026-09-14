@@ -28,7 +28,7 @@ export function submitRequest(bridge, request, requestOptions) {
 /**
  * Writes only the product-selected Attempt HTML artifact under output/.
  * Historic Attempts use output/index.html; current Attempts use the frozen
- * original-name-plus-Version file selected by PageRoot.
+ * original-name-plus-Version file selected by Stemmio.
  */
 export async function writeAttemptOutput(run, html) {
   assertRunIdentity(run);

@@ -4,10 +4,10 @@ import {
   activateNativeEdit,
   bridgeJson,
   caseSelector,
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture,
   keyShortcut,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame,
   managedWorkingCopyPath,
   mkdtempSync,
@@ -20,7 +20,7 @@ import {
   renameSync,
   sameDesktopSourcePath,
   setTextSelection,
-  stopPageRoot,
+  stopStemmio,
   tmpdir,
   waitForActiveSourcePath,
   waitForTitleStem,
@@ -31,11 +31,11 @@ test("an unavailable recovery journal root degrades without blocking the main wi
   tag: ["@smoke-recovery"],
 }, async () => {
   const fixture = createSourceFixture("journal-root-unavailable.html");
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-"));
   writeFileSync(path.join(isolatedUserData, "recovery-journals-v1"), "not-a-directory");
   let electronApp = null;
   try {
-    const launched = await launchPageRoot({
+    const launched = await launchStemmio({
       isolatedUserData,
       activeSourcePath: fixture.sourcePath,
     });
@@ -44,13 +44,13 @@ test("an unavailable recovery journal root degrades without blocking the main wi
     await expect(launched.page.locator("main.workbench"))
       .toHaveAttribute("data-project-state", "ready");
     await expect.poll(() => launched.page.evaluate(() => (
-      window.htmlAIProjects?.listRecoveryJournals?.()
+      window.stemmioProjects?.listRecoveryJournals?.()
     ))).toMatchObject({ entries: [], unavailable: true });
     await launched.page.getByRole("button", { name: "更多" }).click();
     await expect(launched.page.getByRole("menuitem", { name: "导出当前 HTML…" }))
       .toBeVisible();
   } finally {
-    if (electronApp) await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    if (electronApp) await stopStemmio(electronApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
@@ -64,9 +64,9 @@ test("permanent autosave failure keeps H0, protects H1, navigates, closes, and r
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({
+    const launched = await launchStemmio({
       activeSourcePath: fixture.sourcePath,
-      injectedEnv: { PAGEROOT_E2E_AUTOSAVE_FAILURE: "1" },
+      injectedEnv: { STEMMIO_E2E_AUTOSAVE_FAILURE: "1" },
     });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
@@ -124,11 +124,11 @@ test("permanent autosave failure keeps H0, protects H1, navigates, closes, and r
       .locator(caseSelector("list-item"))
       .textContent())).toBe(h1Text);
 
-    await closePageRootGracefully(electronApp, launched.page);
+    await closeStemmioGracefully(electronApp, launched.page);
     electronApp = null;
-    const restarted = await launchPageRoot({
+    const restarted = await launchStemmio({
       isolatedUserData,
-      injectedEnv: { PAGEROOT_E2E_AUTOSAVE_FAILURE: "1" },
+      injectedEnv: { STEMMIO_E2E_AUTOSAVE_FAILURE: "1" },
     });
     electronApp = restarted.electronApp;
     const { frame: recoveredFrame } = await loadedDiskFrame(
@@ -153,7 +153,7 @@ test("permanent autosave failure keeps H0, protects H1, navigates, closes, and r
       .toHaveAttribute("data-start-page", "true");
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+      await stopStemmio(electronApp, isolatedUserData, { cleanup: false });
     }
     if (isolatedUserData) removeIsolatedUserData(isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -167,9 +167,9 @@ test("Desktop fails closed when the Working Copy is replaced between Bridge reco
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({
+    const launched = await launchStemmio({
       activeSourcePath: fixture.sourcePath,
-      injectedEnv: { PAGEROOT_E2E_RECONCILE_REPLACE_BEFORE_READ: "1" },
+      injectedEnv: { STEMMIO_E2E_RECONCILE_REPLACE_BEFORE_READ: "1" },
     });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
@@ -190,7 +190,7 @@ test("Desktop fails closed when the Working Copy is replaced between Bridge reco
     // the E2E injection replaces its bytes before Desktop reads them again.
     const outcome = await launched.page.evaluate(async (payload) => {
       try {
-        const result = await window.htmlAIProjects.reconcileActiveManagedSource(payload);
+        const result = await window.stemmioProjects.reconcileActiveManagedSource(payload);
         return { resolved: true, result };
       } catch (error) {
         return {
@@ -238,12 +238,12 @@ test("Desktop fails closed when the Working Copy is replaced between Bridge reco
     expect(afterState.activeManagedLocator).toEqual(beforeState.activeManagedLocator);
 
     const activeProject = await launched.page.evaluate(() => (
-      window.htmlAIProjects?.getActiveProject()
+      window.stemmioProjects?.getActiveProject()
     ));
     expect(sameDesktopSourcePath(activeProject?.sourcePath, managedSourcePath)).toBe(true);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData);
+      await stopStemmio(electronApp, isolatedUserData);
     }
     removeSourceFixture(fixture.sourceDirectory);
   }
@@ -256,7 +256,7 @@ test("Electron restores a Finder rename after the process is killed", {
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchStemmio({ activeSourcePath: fixture.sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
@@ -275,9 +275,9 @@ test("Electron restores a Finder rename after the process is killed", {
     await waitForTitleStem(launched.page, path.basename(finderName, ".html"));
     await waitForActiveSourcePath(launched.page, finderPath);
 
-    await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    await stopStemmio(electronApp, isolatedUserData, { cleanup: false });
     electronApp = null;
-    const relaunched = await launchPageRoot({ isolatedUserData });
+    const relaunched = await launchStemmio({ isolatedUserData });
     electronApp = relaunched.electronApp;
     await waitForTitleStem(relaunched.page, path.basename(finderName, ".html"));
     await waitForActiveSourcePath(relaunched.page, finderPath);
@@ -292,7 +292,7 @@ test("Electron restores a Finder rename after the process is killed", {
     expect(readFileSync(finderPath, "utf8")).toContain(ORIGINAL_LIST_TEXT);
   } finally {
     if (electronApp && isolatedUserData) {
-      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+      await stopStemmio(electronApp, isolatedUserData, { cleanup: false });
     }
     if (isolatedUserData) removeIsolatedUserData(isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

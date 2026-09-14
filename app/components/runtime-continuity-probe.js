@@ -1,4 +1,4 @@
-const GLOBAL_KEY = "__PAGEROOT_RUNTIME_CONTINUITY__";
+const GLOBAL_KEY = "__STEMMIO_RUNTIME_CONTINUITY__";
 
 function now() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -75,9 +75,9 @@ function isVisuallyPresentFrame(frame, target) {
 
 export function installRuntimeContinuityTestHooks(target = typeof window === "undefined" ? null : window) {
   if (!target) return;
-  target.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__ = () => enableRuntimeContinuityProbe(target);
-  target.__PAGEROOT_READ_RUNTIME_CONTINUITY__ = () => readRuntimeContinuityTrace(target);
-  target.__PAGEROOT_SUMMARIZE_RUNTIME_CONTINUITY__ = () => (
+  target.__STEMMIO_ENABLE_RUNTIME_CONTINUITY__ = () => enableRuntimeContinuityProbe(target);
+  target.__STEMMIO_READ_RUNTIME_CONTINUITY__ = () => readRuntimeContinuityTrace(target);
+  target.__STEMMIO_SUMMARIZE_RUNTIME_CONTINUITY__ = () => (
     summarizeRuntimeContinuity(readRuntimeContinuityTrace(target))
   );
 }
@@ -164,7 +164,7 @@ export function sampleRuntimeContinuityVisuals(
     visibleFrameCount: visibleFrames.length,
     frameGeneration: iframe?.getAttribute?.("data-frame-generation") || null,
     candidatePresent: Boolean(candidate),
-    selectionStableId: selected?.getAttribute("data-pageroot-id") || null,
+    selectionStableId: selected?.getAttribute("data-stemmio-id") || null,
   };
   const state = readState(target);
   if (state.enabled) state.samples.push(sample);

@@ -73,11 +73,11 @@ const DEVICE_SCOPED_MANIFEST_MEMBERS = {
 };
 
 function html(label) {
-  return `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head data-pageroot-id="pr1_22222222222242229222222222222222"><title data-pageroot-id="pr1_3333333333334333a333333333333333">${label}</title></head><body data-pageroot-id="pr1_4444444444444444b444444444444444"><h1 data-pageroot-id="pr1_55555555555545558555555555555555">${label}</h1></body></html>`;
+  return `<!doctype html><html data-stemmio-id="sm1_11111111111141118111111111111111"><head data-stemmio-id="sm1_22222222222242229222222222222222"><title data-stemmio-id="sm1_3333333333334333a333333333333333">${label}</title></head><body data-stemmio-id="sm1_4444444444444444b444444444444444"><h1 data-stemmio-id="sm1_55555555555545558555555555555555">${label}</h1></body></html>`;
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-portable-record-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-portable-record-"));
   const sources = path.join(root, "sources");
   const projects = path.join(root, "projects");
   await mkdir(sources, { recursive: true });
@@ -163,7 +163,7 @@ test("a written manifest carries no absolute path from this machine", async (t) 
   });
 
   const manifest = JSON.parse(await readFile(
-    path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"),
+    path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"),
     "utf8",
   ));
   assert.deepEqual(absolutePathsIn(manifest), []);

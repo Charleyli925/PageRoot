@@ -486,7 +486,7 @@ export function createDefaultProviderRegistry({
     if (!listed) {
       throw agentProviderError(
         "AGENT_PROVIDER_UNSUPPORTED",
-        "The selected Agent is not in PageRoot's ACP catalog.",
+        "The selected Agent is not in Stemmio's ACP catalog.",
         { status: 404 },
       );
     }
@@ -523,7 +523,7 @@ export function createDefaultProviderRegistry({
     if (!listed) {
       throw agentProviderError(
         "AGENT_PROVIDER_UNSUPPORTED",
-        "The selected Agent is not in PageRoot's ACP catalog.",
+        "The selected Agent is not in Stemmio's ACP catalog.",
         { status: 404 },
       );
     }

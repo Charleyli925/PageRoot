@@ -31,7 +31,7 @@ export function workspaceUnavailableFromCode(code) {
     case "MANAGED_SOURCE_IDENTITY_MISMATCH":
       return {
         title: "无法核对工作文件",
-        message: "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+        message: "当前工作文件身份无法核对，Stemmio 没有切换路径。",
         source: "locator",
       };
     default:

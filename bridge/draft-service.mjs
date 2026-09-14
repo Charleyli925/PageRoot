@@ -11,7 +11,7 @@ const EVENT_ID_KEYS = ["eventId"];
 const APPLIED_OPERATION_LIMIT = 256;
 
 // Forward compatibility. Every member this build owns is rebuilt from the
-// authoritative aggregate, and every member a newer PageRoot added is carried
+// authoritative aggregate, and every member a newer Stemmio added is carried
 // through read -> modify -> write unchanged.
 //
 // The five envelope members are known for a different reason. The repository

@@ -2,8 +2,8 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { expect } from "@playwright/test";
-import { closePageRootGracefully, keyShortcut, launchPageRoot, managedWorkingCopyPath,
-  removeIsolatedUserData, stopPageRoot, waitForProjectReady, waitForRuntimeHandoffSettled }
+import { closeStemmioGracefully, keyShortcut, launchStemmio, managedWorkingCopyPath,
+  removeIsolatedUserData, stopStemmio, waitForProjectReady, waitForRuntimeHandoffSettled }
   from "./electron-native-harness.mjs";
 import { waitForElectronClipboardText, withRestoredElectronClipboard } from "./helpers/clipboard-snapshot.mjs";
 import { readPublishedWorkingCopy } from "./helpers/working-copy-publication.mjs";
@@ -61,7 +61,7 @@ async function selectExact(page, editor, target, calls) {
     const selected = frame.locator("[data-html-canvas-selected]");
     const count = await selected.count();
     requireFact(count <= 1, "EXTENDED_PRIOR_SELECTION_NOT_UNIQUE", { count });
-    const priorSelectionId = count === 1 ? await selected.getAttribute("data-pageroot-id") : null;
+    const priorSelectionId = count === 1 ? await selected.getAttribute("data-stemmio-id") : null;
     requireFact(priorSelectionId === null || permittedSelectionIds.has(priorSelectionId),
       "EXTENDED_PRIOR_SELECTION_NOT_FROZEN", { priorSelectionId });
     const result = await executeFrozenSelection({ access: frozenFrameAccess(frame, target, local),
@@ -145,7 +145,7 @@ async function textMutation({ page, editor, target, calls, readSource, marker, n
       normalizationPolicy: newline ? SOURCE_SCOPE_POLICIES.TEXT_NEWLINE : SOURCE_SCOPE_POLICIES.TEXT_INPUT_DELETE,
       allowAttributeOrderOnly: true, expectedAfterContains: inserted, expectedAppendedPattern: newline
         ? new RegExp(`${escapeRegex(inserted[0])} ${escapeRegex(inserted[1])}`
-          + `<br data-pageroot-id="pr1_[0-9a-f]{32}">${escapeRegex(inserted[2])}`, "u")
+          + `<br data-stemmio-id="sm1_[0-9a-f]{32}">${escapeRegex(inserted[2])}`, "u")
         : new RegExp(escapeRegex(marker), "u") });
     requireFact(oracle.ok, "EXTENDED_TEXT_SOURCE_SCOPE_FAILED", oracle);
     const restore = await restoreBaseline({ page, editor, readSource, baseline });
@@ -240,14 +240,14 @@ async function moveMutation({ page, editor, target, calls, readSource }) {
   const baseline = await readSource(), { frame } = await selectExact(page, editor, target, calls);
   const locator = frozenFrameAccess(frame, target, calls).target(target.selectedId);
   const before = await locator.evaluate(element => [...element.parentElement.children]
-    .map(child => child.getAttribute("data-pageroot-id")).filter(Boolean));
+    .map(child => child.getAttribute("data-stemmio-id")).filter(Boolean));
   const label = target.moveDirection === "up" ? "上移" : "下移";
   await editor.getByRole("button", { name: label, exact: true }).click({ timeout: 2_000 });
   const moved = await saveChanged(page, readSource, baseline);
   await waitForRuntimeHandoffSettled(page, { timeout: 7_000, expectedSourceRevision: `sha256:${frozenDigest(moved)}` });
   const movedFrame = await activeFrame(editor), movedLocator = frozenFrameAccess(movedFrame, target, calls).target(target.selectedId);
   const after = await movedLocator.evaluate(element => [...element.parentElement.children]
-    .map(child => child.getAttribute("data-pageroot-id")).filter(Boolean));
+    .map(child => child.getAttribute("data-stemmio-id")).filter(Boolean));
   const oracle = verifyAdjacentMove({ before, after, targetId: target.selectedId, direction: target.moveDirection });
   await selectExact(page, editor, target, calls);
   await editor.getByRole("button", { name: target.moveDirection === "up" ? "下移" : "上移", exact: true }).click({ timeout: 2_000 });
@@ -301,9 +301,9 @@ async function rebuildContinuationMutation({ page, editor, target, calls, readSo
     const liveText = await handle.textContent();
     const selected = frame.locator("[data-html-canvas-selected]");
     const selectedId = await selected.count() === 1
-      ? await selected.getAttribute("data-pageroot-id") : null;
+      ? await selected.getAttribute("data-stemmio-id") : null;
     const focusedId = await handle.evaluate(element => element.ownerDocument.activeElement
-      ?.closest?.("[data-pageroot-id]")?.getAttribute("data-pageroot-id") || null);
+      ?.closest?.("[data-stemmio-id]")?.getAttribute("data-stemmio-id") || null);
     const after = await saveChanged(page, readSource, baseline);
     const sourceText = after.toString("utf8");
     const oracle = compareElementScopedMutation({ before: baseline, after, sourceId: target.selectedId,
@@ -375,9 +375,9 @@ async function runTarget({ electronApp, page, editor, target, targetIndex, round
   return actual;
 }
 
-const manifestPath = process.env.PAGEROOT_EXTENDED_MANIFEST;
-const manifestSha256 = process.env.PAGEROOT_EXTENDED_MANIFEST_SHA256;
-const requestedFileId = process.env.PAGEROOT_EXTENDED_FILE_ID;
+const manifestPath = process.env.STEMMIO_EXTENDED_MANIFEST;
+const manifestSha256 = process.env.STEMMIO_EXTENDED_MANIFEST_SHA256;
+const requestedFileId = process.env.STEMMIO_EXTENDED_FILE_ID;
 const manifestBytes = readFileSync(manifestPath);
 const plan = readFrozenExtendedManifest(manifestBytes, manifestSha256, frozenDigest);
 const file = plan.files.find(item => item.fileId === requestedFileId);
@@ -396,7 +396,7 @@ const report = { scope: plan.scope, qualification: false, fileId: file.fileId, v
   checkpoints: [], calls: [] };
 let session, workingPath, editor, observerStarted = false;
 try {
-  session = await launchPageRoot({ activeSourcePath: importPath }); const page = session.page;
+  session = await launchStemmio({ activeSourcePath: importPath }); const page = session.page;
   await waitForProjectReady(page);
   editor = page.getByTestId("html-canvas-editor").filter({ visible: true });
   await expect(editor).toHaveCount(1); await expect(editor).toHaveAttribute("aria-readonly", "false");
@@ -404,7 +404,7 @@ try {
   await editor.evaluate(startRuntimeLifecycleObservation); observerStarted = true;
   workingPath = await managedWorkingCopyPath(page, importPath);
   verifyFrozenBytes(readFileSync(workingPath), file.seed, "IMPORTED_IDENTITY_BYTES_CHANGED");
-  const control = path.join(path.dirname(workingPath), ".pageroot");
+  const control = path.join(path.dirname(workingPath), ".stemmio");
   const manifest = JSON.parse(readFileSync(path.join(control, "manifest.json")));
   requireFact(manifest.workingCopies?.length === 1, "EXTENDED_WORKING_COPY_NOT_UNIQUE");
   const draftPath = path.join(control, "drafts", `${manifest.workingCopies[0].workingCopyId}.json`);
@@ -437,8 +437,8 @@ try {
   }
   report.lifecycle = await editor.evaluate(stopRuntimeLifecycleObservation); observerStarted = false;
   report.lifecycle.requestAttributions = attributeRuntimeObserverRequests(report.lifecycle.records);
-  await closePageRootGracefully(session.electronApp, page); session.electronApp = null;
-  session = await launchPageRoot({ isolatedUserData: session.isolatedUserData });
+  await closeStemmioGracefully(session.electronApp, page); session.electronApp = null;
+  session = await launchStemmio({ isolatedUserData: session.isolatedUserData });
   await waitForProjectReady(session.page);
   const reopened = session.page.getByTestId("html-canvas-editor").filter({ visible: true });
   await expect(reopened).toHaveCount(1);
@@ -468,7 +468,7 @@ try {
   }
 } finally {
   if (session) {
-    try { if (session.electronApp) await stopPageRoot(session.electronApp, session.isolatedUserData);
+    try { if (session.electronApp) await stopStemmio(session.electronApp, session.isolatedUserData);
       else removeIsolatedUserData(session.isolatedUserData); report.cleanup = "PASS"; }
     catch (error) { report.state = "FAIL"; report.cleanup = "FAIL"; report.cleanupError = error.message; }
   }

@@ -39,7 +39,7 @@ test("exact immutable classifier canonicalizes fragments, retains queries, and r
 });
 
 test("network bytes persist by hash and survive store recreation", async (t) => {
-  const userDataPath = await mkdtemp(path.join(tmpdir(), "pageroot-library-store-"));
+  const userDataPath = await mkdtemp(path.join(tmpdir(), "stemmio-library-store-"));
   t.after(() => rm(userDataPath, { recursive: true, force: true }));
   const bytes = Buffer.from("window.echarts={version:'5.4.3'};");
   let fetches = 0;
@@ -66,7 +66,7 @@ test("network bytes persist by hash and survive store recreation", async (t) => 
 });
 
 test("corrupt blobs and unknown indexes fail open to verified network bytes", async (t) => {
-  const userDataPath = await mkdtemp(path.join(tmpdir(), "pageroot-library-corrupt-"));
+  const userDataPath = await mkdtemp(path.join(tmpdir(), "stemmio-library-corrupt-"));
   t.after(() => rm(userDataPath, { recursive: true, force: true }));
   const store = createEditRuntimeLibraryStore({ userDataPath });
   const first = await store.load(URL_543, async () => Buffer.from("first-valid"));
@@ -96,7 +96,7 @@ test("corrupt blobs and unknown indexes fail open to verified network bytes", as
 });
 
 test("a later cache read removes bounded orphan blobs and abandoned temporary files", async (t) => {
-  const userDataPath = await mkdtemp(path.join(tmpdir(), "pageroot-library-reconcile-"));
+  const userDataPath = await mkdtemp(path.join(tmpdir(), "stemmio-library-reconcile-"));
   t.after(() => rm(userDataPath, { recursive: true, force: true }));
   const store = createEditRuntimeLibraryStore({ userDataPath });
   await store.load(URL_543, async () => Buffer.from("referenced"));
@@ -113,7 +113,7 @@ test("a later cache read removes bounded orphan blobs and abandoned temporary fi
 });
 
 test("concurrent misses share one per-URL remote load", async (t) => {
-  const userDataPath = await mkdtemp(path.join(tmpdir(), "pageroot-library-flight-"));
+  const userDataPath = await mkdtemp(path.join(tmpdir(), "stemmio-library-flight-"));
   t.after(() => rm(userDataPath, { recursive: true, force: true }));
   const store = createEditRuntimeLibraryStore({ userDataPath });
   let release = null;
@@ -142,8 +142,8 @@ test("concurrent misses share one per-URL remote load", async (t) => {
 });
 
 test("LRU enforces maxEntries and maxBytes independently", async (t) => {
-  const countRoot = await mkdtemp(path.join(tmpdir(), "pageroot-library-count-"));
-  const bytesRoot = await mkdtemp(path.join(tmpdir(), "pageroot-library-bytes-"));
+  const countRoot = await mkdtemp(path.join(tmpdir(), "stemmio-library-count-"));
+  const bytesRoot = await mkdtemp(path.join(tmpdir(), "stemmio-library-bytes-"));
   t.after(() => Promise.all([
     rm(countRoot, { recursive: true, force: true }),
     rm(bytesRoot, { recursive: true, force: true }),
@@ -180,7 +180,7 @@ test("LRU enforces maxEntries and maxBytes independently", async (t) => {
 });
 
 test("atomic persistence failure never blocks already verified network bytes", async (t) => {
-  const userDataPath = await mkdtemp(path.join(tmpdir(), "pageroot-library-atomic-"));
+  const userDataPath = await mkdtemp(path.join(tmpdir(), "stemmio-library-atomic-"));
   t.after(() => rm(userDataPath, { recursive: true, force: true }));
   const store = createEditRuntimeLibraryStore({
     userDataPath,
@@ -203,7 +203,7 @@ test("atomic persistence failure never blocks already verified network bytes", a
 });
 
 test("store refuses to persist mutable or unknown library URLs", async (t) => {
-  const userDataPath = await mkdtemp(path.join(tmpdir(), "pageroot-library-refuse-"));
+  const userDataPath = await mkdtemp(path.join(tmpdir(), "stemmio-library-refuse-"));
   t.after(() => rm(userDataPath, { recursive: true, force: true }));
   const store = createEditRuntimeLibraryStore({ userDataPath });
   await assert.rejects(

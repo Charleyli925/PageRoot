@@ -34,15 +34,15 @@ const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const SHA_PATTERN = /^[a-f0-9]{40}$/u;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
 const CHECKPOINT_FILE = "signed-app-checkpoint.json";
-const ARCHIVE_FILE = "PageRoot-signed-app.zip";
+const ARCHIVE_FILE = "Stemmio-signed-app.zip";
 const DRY_RUN_CHECKPOINT_FILE = "release-dry-run-checkpoint.json";
-const DRY_RUN_ARCHIVE_FILE = "PageRoot-release-dry-run-app.zip";
+const DRY_RUN_ARCHIVE_FILE = "Stemmio-release-dry-run-app.zip";
 const LEGAL_RESOURCES = [
   "LICENSE",
   "NOTICE",
   "PRIVACY.md",
   "THIRD_PARTY_NOTICES.md",
-  "PageRoot 用户声明与免责声明.txt",
+  "源页 用户声明与免责声明.txt",
 ];
 
 function assertArchitecture(value) {
@@ -167,7 +167,7 @@ export function releaseAppCheckpointArtifactName({
   runAttempt,
 }) {
   return [
-    "PageRoot-signed-app",
+    "Stemmio-signed-app",
     assertSha(treeSha, "tree SHA"),
     assertVersion(packageVersion, "package version"),
     assertArchitecture(architecture),
@@ -182,7 +182,7 @@ export function releaseDryRunCheckpointArtifactName({
   runAttempt,
 }) {
   return [
-    "PageRoot-release-dry-run",
+    "Stemmio-release-dry-run",
     assertSha(treeSha, "tree SHA"),
     assertVersion(packageVersion, "package version"),
     assertArchitecture(architecture),

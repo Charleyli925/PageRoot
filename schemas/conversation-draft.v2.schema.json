@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/conversation-draft.v2.schema.json",
+  "$id": "https://stemmio.local/schemas/conversation-draft.v2.schema.json",
   "title": "Stemmio AI conversation composer draft v2",
   "type": "object",
   "required": ["schemaVersion", "conversationId", "revision", "updatedAt", "text", "intent"],

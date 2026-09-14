@@ -106,7 +106,7 @@ export function BoundAgentSetupPanel({
           return onConnectApiKey(card.selection, "", {
             vendorId: card.connection?.vendorId,
             baseUrl: card.connection?.baseUrl,
-            modelId: modelId.replace(/^pageroot:/u, ""),
+            modelId: modelId.replace(/^stemmio:/u, ""),
           });
         }
         const candidateSelection = {

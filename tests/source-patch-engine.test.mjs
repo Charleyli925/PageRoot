@@ -20,7 +20,7 @@ function identify(html) {
 }
 
 function stripIdentity(html) {
-  return String(html).replace(/\s*data-pageroot-id="[^"]*"/gu, "");
+  return String(html).replace(/\s*data-stemmio-id="[^"]*"/gu, "");
 }
 function elementBy(index, predicate) {
   const element = index.elements.find(predicate);
@@ -203,7 +203,7 @@ test("text range style wraps only selected characters across mixed inline conten
 });
 
 test("text range style assigns persistent IDs to wrappers in an identified source", () => {
-  const html = identify(`<p data-pageroot-id="pr1_11111111111141118111111111111111">Alpha Beta</p>`);
+  const html = identify(`<p data-stemmio-id="sm1_11111111111141118111111111111111">Alpha Beta</p>`);
   const index = buildSourceIndex(html);
   const paragraph = index.elements[0];
   const textNode = index.byNodeId.get(paragraph.textNodeIds[0]);
@@ -217,9 +217,9 @@ test("text range style assigns persistent IDs to wrappers in an identified sourc
 
   assert.match(
     result.html,
-    /^<p data-pageroot-id="pr1_11111111111141118111111111111111"><span style="all: unset; display: inline !important; font-weight: 700" data-pageroot-id="pr1_[a-f0-9]{32}">Alpha<\/span> Beta<\/p>$/u,
+    /^<p data-stemmio-id="sm1_11111111111141118111111111111111"><span style="all: unset; display: inline !important; font-weight: 700" data-stemmio-id="sm1_[a-f0-9]{32}">Alpha<\/span> Beta<\/p>$/u,
   );
-  assert.equal(buildSourceIndex(result.html).pagerootIdentity.complete, true);
+  assert.equal(buildSourceIndex(result.html).stemmioIdentity.complete, true);
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
@@ -1004,7 +1004,7 @@ test("native text formatting never invents a persistent layout wrapper", () => {
     expectedSourceSha256: index.sourceSha256,
   }, index), html);
 
-  assert.doesNotMatch(result.html, /data-pageroot-text-flow-item/u);
+  assert.doesNotMatch(result.html, /data-stemmio-text-flow-item/u);
   assert.match(
     result.html,
     /<p id="b"[^>]*>打开<span[^>]*><span[^>]*font-size: 18px[^>]*>原生<\/span><\/span><span[^>]*>对话<\/span>框<\/p>/u,
@@ -1123,7 +1123,7 @@ test("live elementId plus matching source hash patches that island without finge
   const result = applyPatchPlan(planSourcePatch({
     type: "replace-editable-island",
     targetRef: firstRef,
-    elementId: paragraphs[1].pagerootId,
+    elementId: paragraphs[1].stemmioId,
     beforeInnerHtml: "相同",
     nextInnerHtml: "第二段",
     expectedSourceSha256: index.sourceSha256,
@@ -1156,7 +1156,7 @@ test("live Stable ID plus matching source hash patches the whole mixed island", 
   const result = applyPatchPlan(planSourcePatch({
     type: "replace-editable-island",
     targetRef,
-    elementId: parent.pagerootId,
+    elementId: parent.stemmioId,
     beforeInnerHtml: island.innerHtml,
     nextInnerHtml,
     expectedSourceSha256: index.sourceSha256,
@@ -1174,7 +1174,7 @@ test("live elementId never bypasses a stale source hash", () => {
   assertPatchError("STALE_SOURCE_HASH", () => planSourcePatch({
     type: "replace-editable-island",
     targetRef: createTargetRef(index, paragraphs[0].nodeId, { level: "subregion" }),
-    elementId: paragraphs[1].pagerootId,
+    elementId: paragraphs[1].stemmioId,
     beforeInnerHtml: "相同",
     nextInnerHtml: "第二段",
     expectedSourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1188,7 +1188,7 @@ test("live elementId that left the current source fails closed without fingerpri
   assertPatchError("TARGET_ORPHANED", () => planSourcePatch({
     type: "replace-editable-island",
     targetRef: createTargetRef(index, paragraph.nodeId, { level: "subregion" }),
-    elementId: "pr1_99999999999949999999999999999999",
+    elementId: "sm1_99999999999949999999999999999999",
     beforeInnerHtml: "唯一",
     nextInnerHtml: "新版",
     expectedSourceSha256: index.sourceSha256,

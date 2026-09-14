@@ -46,13 +46,13 @@ export function reviewBootstrapElementBinding(
   if (current !== root) return null;
   const nonReviewAttributes = [...element.attributes].filter((attribute) => (
     (
-      attribute.name === "data-pageroot-id"
-      || !attribute.name.startsWith("data-pageroot-")
+      attribute.name === "data-stemmio-id"
+      || !attribute.name.startsWith("data-stemmio-")
     )
     && !REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES.includes(attribute.name)
   ));
   const identityAttributePriority = (name: string) => {
-    if (name === "data-pageroot-id") return 0;
+    if (name === "data-stemmio-id") return 0;
     if (name === "id") return 1;
     if (name === "name" || name === "aria-label") return 2;
     if (name.startsWith("data-")) return 3;
@@ -399,7 +399,7 @@ function reviewBootstrap(
       !event.isTrusted
       || event.source !== reviewParent
       || !message
-      || message.source !== "pageroot-ai-review-parent"
+      || message.source !== "stemmio-ai-review-parent"
       || message.sessionId !== sessionId
       || (!requestsCommentChannel && !requestsVisualChannel)
     ) return;
@@ -413,7 +413,7 @@ function reviewBootstrap(
   };
   runtimeVisualAddEventListener("message", capturePrivateChannelRequest, { capture: true });
   const post = (type, extra = {}) => postToParent({
-    source: "pageroot-ai-review",
+    source: "stemmio-ai-review",
     sessionId,
     side,
     type,
@@ -425,7 +425,7 @@ function reviewBootstrap(
     if (!reviewCommentChannel || reviewCommentChannelTransferred) return;
     reviewCommentChannelTransferred = true;
     postToParent({
-      source: "pageroot-ai-review",
+      source: "stemmio-ai-review",
       sessionId,
       side,
       type: "review-comment-channel",
@@ -437,7 +437,7 @@ function reviewBootstrap(
     if (runtimeVisualRegExpExec(/^[a-f0-9]{32}$/u, challenge) === null) return;
     if (!reviewVisualChannel || reviewVisualChannelTransferred) return;
     reviewVisualChannelTransferred = true;
-    postToParent({ source: "pageroot-ai-review", sessionId, side, type: "review-visual-channel", challenge }, "*", [reviewVisualChannel.port2]);
+    postToParent({ source: "stemmio-ai-review", sessionId, side, type: "review-visual-channel", challenge }, "*", [reviewVisualChannel.port2]);
   };
   const drainPrivateChannelRequests = () => {
     const commentChallenge = pendingReviewCommentChannelChallenge;
@@ -483,7 +483,7 @@ function reviewBootstrap(
       if (!node) continue;
       let owner = node;
       while (owner && owner !== host) {
-        if (runtimeVisualElementGetAttribute(owner, "data-pageroot-id")) break;
+        if (runtimeVisualElementGetAttribute(owner, "data-stemmio-id")) break;
         owner = owner.parentElement;
       }
       if (owner === host) runtimeVisualArrayPush(result, node);
@@ -506,7 +506,7 @@ function reviewBootstrap(
     const rootStyle = runtimeVisualGetComputedStyle(element);
     const rootRect = runtimeVisualElementGetBoundingClientRect(element);
     let stableParent = element.parentElement;
-    while (stableParent && !runtimeVisualElementGetAttribute(stableParent, "data-pageroot-id")) {
+    while (stableParent && !runtimeVisualElementGetAttribute(stableParent, "data-stemmio-id")) {
       stableParent = stableParent.parentElement;
     }
     const stableParentRect = stableParent
@@ -693,7 +693,7 @@ function reviewBootstrap(
   };
   let reviewVisualObservationSequence = 0;
   const renderReviewCommentHighlight = (stableIds, rawContextVisibility = 15) => {
-    document.querySelector('[data-pageroot-review-comment-highlight-layer]')?.remove();
+    document.querySelector('[data-stemmio-review-comment-highlight-layer]')?.remove();
     if (!stableIds.length) return;
     const stableId = stableIds[0];
     const element = reviewVisualStableElement(stableId);
@@ -715,7 +715,7 @@ function reviewBootstrap(
     const boxHeight = bottom - top;
     if (width <= 0 || boxHeight <= 0) return;
     const layer = document.createElement("div");
-    layer.setAttribute("data-pageroot-review-comment-highlight-layer", "true");
+    layer.setAttribute("data-stemmio-review-comment-highlight-layer", "true");
     layer.style.setProperty("position", "absolute", "important");
     layer.style.setProperty("inset", "0", "important");
     layer.style.setProperty("z-index", "2147483000", "important");
@@ -742,14 +742,14 @@ function reviewBootstrap(
       node.style.setProperty("stroke", "none", "important");
     };
     const svg = document.createElementNS(namespace, "svg");
-    svg.setAttribute("data-pageroot-review-comment-mask", "true");
+    svg.setAttribute("data-stemmio-review-comment-mask", "true");
     svg.setAttribute("width", String(documentWidth));
     svg.setAttribute("height", String(height));
     svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
     svg.style.setProperty("position", "absolute", "important");
     svg.style.setProperty("inset", "0", "important");
     resetCommentPrimitive(svg);
-    const maskId = "pageroot-review-comment-mask-"
+    const maskId = "stemmio-review-comment-mask-"
       + reviewMaskSessionKey + "-" + side + "-" + (++overlayMaskSequence);
     const mask = document.createElementNS(namespace, "mask");
     mask.setAttribute("id", maskId);
@@ -764,7 +764,7 @@ function reviewBootstrap(
     maskBackground.setAttribute("fill", "#ffffff");
     resetCommentPrimitive(maskBackground, "#ffffff");
     const hole = document.createElementNS(namespace, "rect");
-    hole.setAttribute("data-pageroot-review-comment-mask-hole", stableId);
+    hole.setAttribute("data-stemmio-review-comment-mask-hole", stableId);
     hole.setAttribute("x", String(left));
     hole.setAttribute("y", String(top));
     hole.setAttribute("width", String(width));
@@ -776,7 +776,7 @@ function reviewBootstrap(
     resetCommentPrimitive(defs);
     defs.append(mask);
     const dim = document.createElementNS(namespace, "rect");
-    dim.setAttribute("data-pageroot-review-comment-mask-dim", "true");
+    dim.setAttribute("data-stemmio-review-comment-mask-dim", "true");
     dim.setAttribute("x", "0");
     dim.setAttribute("y", "0");
     dim.setAttribute("width", String(documentWidth));
@@ -791,7 +791,7 @@ function reviewBootstrap(
     dim.style.setProperty("fill-opacity", dimOpacity, "important");
     svg.append(defs, dim);
     const box = document.createElement("div");
-    box.setAttribute("data-pageroot-review-comment-highlight", "true");
+    box.setAttribute("data-stemmio-review-comment-highlight", "true");
     box.setAttribute("data-left", String(left));
     box.setAttribute("data-top", String(top));
     box.setAttribute("data-width", String(width));
@@ -826,13 +826,13 @@ function reviewBootstrap(
         ? runtimeVisualArraySlice(request.stableIds, 0, 1)
         : [];
       commentHighlightActive = stableIds.length > 0;
-      document.documentElement.dataset.pagerootReviewCommentFocus = commentHighlightActive
+      document.documentElement.dataset.stemmioReviewCommentFocus = commentHighlightActive
         ? "true"
         : "false";
-      document.documentElement.dataset.pagerootReviewFocusGroup = commentHighlightActive
+      document.documentElement.dataset.stemmioReviewFocusGroup = commentHighlightActive
         ? ""
         : currentState.activeFocusGroupId || "";
-      document.documentElement.dataset.pagerootReviewFocusRegion = commentHighlightActive
+      document.documentElement.dataset.stemmioReviewFocusRegion = commentHighlightActive
         ? ""
         : currentState.activeFocusRegionId || "";
       renderReviewCommentHighlight(stableIds, request.contextVisibility);
@@ -841,14 +841,14 @@ function reviewBootstrap(
     }
     if (request?.type === "verdicts" && request.sessionId === sessionId && request.side === side
       && Array.isArray(request.changed)) {
-      runtimeVisualArrayForEach(runtimeVisualQueryElements('[data-pageroot-review-confirmed="true"]'), (element) => {
-        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-confirmed");
+      runtimeVisualArrayForEach(runtimeVisualQueryElements('[data-stemmio-review-confirmed="true"]'), (element) => {
+        runtimeVisualElementRemoveAttribute(element, "data-stemmio-review-confirmed");
       });
-      runtimeVisualArrayForEach(runtimeVisualQueryElements('[data-pageroot-review-runtime-visual-marker="true"]'), (element) => {
-        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker");
-        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker-types");
-        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-summary");
-        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-runtime-visual-marker");
+      runtimeVisualArrayForEach(runtimeVisualQueryElements('[data-stemmio-review-runtime-visual-marker="true"]'), (element) => {
+        runtimeVisualElementRemoveAttribute(element, "data-stemmio-review-marker");
+        runtimeVisualElementRemoveAttribute(element, "data-stemmio-review-marker-types");
+        runtimeVisualElementRemoveAttribute(element, "data-stemmio-review-summary");
+        runtimeVisualElementRemoveAttribute(element, "data-stemmio-review-runtime-visual-marker");
       });
       const nextConfirmed = new RuntimeVisualSet();
       runtimeVisualArrayForEach(request.changed, (candidate) => {
@@ -858,24 +858,24 @@ function reviewBootstrap(
         const stableId = RuntimeVisualString(candidate?.stableId || "");
         const element = reviewVisualStableElement(stableId);
         if (!element) return;
-        if (runtimeVisualElementGetAttribute(element, "data-pageroot-review-marker")) return;
-        runtimeVisualElementSetAttribute(element, "data-pageroot-review-marker", changeId);
+        if (runtimeVisualElementGetAttribute(element, "data-stemmio-review-marker")) return;
+        runtimeVisualElementSetAttribute(element, "data-stemmio-review-marker", changeId);
         runtimeVisualElementSetAttribute(
           element,
-          "data-pageroot-review-marker-types",
+          "data-stemmio-review-marker-types",
           candidate.types ? runtimeVisualArrayJoin(candidate.types, " ") : "structure",
         );
-        runtimeVisualElementSetAttribute(element, "data-pageroot-review-summary", "元素变化");
-        runtimeVisualElementSetAttribute(element, "data-pageroot-review-active", "true");
-        runtimeVisualElementSetAttribute(element, "data-pageroot-review-runtime-visual-marker", "true");
+        runtimeVisualElementSetAttribute(element, "data-stemmio-review-summary", "元素变化");
+        runtimeVisualElementSetAttribute(element, "data-stemmio-review-active", "true");
+        runtimeVisualElementSetAttribute(element, "data-stemmio-review-runtime-visual-marker", "true");
       });
-      runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-pageroot-review-marker]"), (element) => {
+      runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-stemmio-review-marker]"), (element) => {
         const changeId = safeKey(runtimeVisualElementGetAttribute(
           element,
-          "data-pageroot-review-marker",
+          "data-stemmio-review-marker",
         ));
         if (runtimeVisualSetHas(nextConfirmed, changeId)) {
-          runtimeVisualElementSetAttribute(element, "data-pageroot-review-confirmed", "true");
+          runtimeVisualElementSetAttribute(element, "data-stemmio-review-confirmed", "true");
         }
       });
       projectedSourceChangeIds = nextConfirmed;
@@ -1001,7 +1001,7 @@ function reviewBootstrap(
   };
   const safeStableId = (value) => {
     const stableId = RuntimeVisualString(value || "");
-    return runtimeVisualRegExpExec(/^pr1_[0-9a-f]{32}$/iu, stableId) !== null
+    return runtimeVisualRegExpExec(/^sm1_[0-9a-f]{32}$/iu, stableId) !== null
       ? stableId
       : "";
   };
@@ -1073,7 +1073,7 @@ function reviewBootstrap(
   );
   const runtimeVisualInitialBindingIdentityAttributes = (binding) => {
     const runtimeVisualBindingAttributeNamePattern = /^[a-z_:][a-z0-9:._-]{0,127}$/iu;
-    const runtimeVisualOwnedAttributeNamePattern = /^data-pageroot-/iu;
+    const runtimeVisualOwnedAttributeNamePattern = /^data-stemmio-/iu;
     const rawAttributes = binding?.identityAttributes;
     if (
       !runtimeVisualArrayIsArray(rawAttributes)
@@ -1093,7 +1093,7 @@ function reviewBootstrap(
         runtimeVisualRegExpExec(runtimeVisualBindingAttributeNamePattern, name) === null
         || (
           ownedAttribute
-          && runtimeVisualStringToLowerCase(name) !== "data-pageroot-id"
+          && runtimeVisualStringToLowerCase(name) !== "data-stemmio-id"
         )
         || value.length > 1024
       ) return null;
@@ -1340,7 +1340,7 @@ function reviewBootstrap(
     while (candidate) {
       const currentIds = RuntimeVisualString(runtimeVisualElementGetAttribute(
         candidate,
-        "data-pageroot-review-display-owner",
+        "data-stemmio-review-display-owner",
       ) || "");
       if (runtimeVisualArraySome(
         runtimeVisualStringSplit(currentIds, /\s+/u),
@@ -1355,7 +1355,7 @@ function reviewBootstrap(
     const serializedOwnerIds = RuntimeVisualString(
       rawOwnerIds || runtimeVisualElementGetAttribute(
         element,
-        "data-pageroot-review-display-owner",
+        "data-stemmio-review-display-owner",
       ) || "",
     );
     runtimeVisualArrayForEach(runtimeVisualStringSplit(serializedOwnerIds, /\s+/u), (ownerId) => {
@@ -1374,11 +1374,11 @@ function reviewBootstrap(
     if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return;
     const changeId = safeKey(rawChangeId || runtimeVisualElementGetAttribute(
       element,
-      "data-pageroot-review-marker",
+      "data-stemmio-review-marker",
     ));
     const serializedFacts = RuntimeVisualString(rawSerializedFacts || runtimeVisualElementGetAttribute(
       element,
-      "data-pageroot-review-projection-facts",
+      "data-stemmio-review-projection-facts",
     ) || "");
     if (!changeId || !serializedFacts) return;
     runtimeVisualArrayForEach(projectionFactsForSerialized(serializedFacts), (fact) => {
@@ -1412,7 +1412,7 @@ function reviewBootstrap(
         textContent: RuntimeVisualString(runtimeVisualNodeTextContent(element) || ""),
         textTone: RuntimeVisualString(rawTextTone || runtimeVisualElementGetAttribute(
           element,
-          "data-pageroot-review-text",
+          "data-stemmio-review-text",
         ) || ""),
         serializedFacts,
       });
@@ -1423,12 +1423,12 @@ function reviewBootstrap(
     if (!runtimeVisualIsInstance(RuntimeVisualElement, node)) return;
     captureReviewFocusOwner(node);
     runtimeVisualArrayForEach(
-      runtimeVisualElementQuerySelectorAll(node, "[data-pageroot-review-display-owner]"),
+      runtimeVisualElementQuerySelectorAll(node, "[data-stemmio-review-display-owner]"),
       (element) => captureReviewFocusOwner(element),
     );
     captureReviewFocusAtom(node);
     runtimeVisualArrayForEach(
-      runtimeVisualElementQuerySelectorAll(node, "[data-pageroot-review-marker]"),
+      runtimeVisualElementQuerySelectorAll(node, "[data-stemmio-review-marker]"),
       (element) => captureReviewFocusAtom(element),
     );
   };
@@ -1437,7 +1437,7 @@ function reviewBootstrap(
   const captureReviewVisualElement = (element, rawStableId = "") => {
     if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return;
     const stableId = RuntimeVisualString(
-      rawStableId || runtimeVisualElementGetAttribute(element, "data-pageroot-id") || "",
+      rawStableId || runtimeVisualElementGetAttribute(element, "data-stemmio-id") || "",
     );
     if (!runtimeVisualSetHas(reviewVisualAllowedStableIds, stableId)) return;
     const existing = runtimeVisualMapGet(reviewVisualIdentityElements, stableId);
@@ -1452,16 +1452,16 @@ function reviewBootstrap(
     captureReviewVisualElement(node);
     captureReviewFocusTree(node);
     runtimeVisualArrayForEach(
-      runtimeVisualElementQuerySelectorAll(node, "[data-pageroot-id]"),
+      runtimeVisualElementQuerySelectorAll(node, "[data-stemmio-id]"),
       (element) => captureReviewVisualElement(element),
     );
   };
   runtimeVisualArrayForEach(
-    runtimeVisualQueryElements("[data-pageroot-id]"),
+    runtimeVisualQueryElements("[data-stemmio-id]"),
     (element) => captureReviewVisualElement(element),
   );
   runtimeVisualArrayForEach(
-    runtimeVisualQueryElements("[data-pageroot-review-display-owner]"),
+    runtimeVisualQueryElements("[data-stemmio-review-display-owner]"),
     (element) => captureReviewFocusOwner(element),
   );
   let privateInitialBindingsBootstrapped = false;
@@ -1483,31 +1483,31 @@ function reviewBootstrap(
       if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return;
       const attributeName = runtimeVisualMutationRecordAttributeName(record);
       if (
-        attributeName !== "data-pageroot-review-marker"
-        && attributeName !== "data-pageroot-review-projection-facts"
-        && attributeName !== "data-pageroot-review-text"
+        attributeName !== "data-stemmio-review-marker"
+        && attributeName !== "data-stemmio-review-projection-facts"
+        && attributeName !== "data-stemmio-review-text"
       ) return;
       let history = runtimeVisualMapGet(atomAttributeHistories, element);
       if (!history) {
         history = { marker: [], facts: [], tones: [] };
         runtimeVisualArrayPush(history.marker, runtimeVisualElementGetAttribute(
           element,
-          "data-pageroot-review-marker",
+          "data-stemmio-review-marker",
         ) || "");
         runtimeVisualArrayPush(history.facts, runtimeVisualElementGetAttribute(
           element,
-          "data-pageroot-review-projection-facts",
+          "data-stemmio-review-projection-facts",
         ) || "");
         runtimeVisualArrayPush(history.tones, runtimeVisualElementGetAttribute(
           element,
-          "data-pageroot-review-text",
+          "data-stemmio-review-text",
         ) || "");
         runtimeVisualMapSet(atomAttributeHistories, element, history);
       }
       const oldValue = runtimeVisualMutationRecordOldValue(record) || "";
-      if (attributeName === "data-pageroot-review-marker") runtimeVisualArrayPush(history.marker, oldValue);
-      if (attributeName === "data-pageroot-review-projection-facts") runtimeVisualArrayPush(history.facts, oldValue);
-      if (attributeName === "data-pageroot-review-text") runtimeVisualArrayPush(history.tones, oldValue);
+      if (attributeName === "data-stemmio-review-marker") runtimeVisualArrayPush(history.marker, oldValue);
+      if (attributeName === "data-stemmio-review-projection-facts") runtimeVisualArrayPush(history.facts, oldValue);
+      if (attributeName === "data-stemmio-review-text") runtimeVisualArrayPush(history.tones, oldValue);
     });
     runtimeVisualMapForEach(atomAttributeHistories, (history, element) => {
       runtimeVisualArrayForEach(history.marker, (changeId) => {
@@ -1574,11 +1574,11 @@ function reviewBootstrap(
         attributes: true,
         attributeOldValue: true,
         attributeFilter: [
-          "data-pageroot-id",
-          "data-pageroot-review-display-owner",
-          "data-pageroot-review-marker",
-          "data-pageroot-review-projection-facts",
-          "data-pageroot-review-text",
+          "data-stemmio-id",
+          "data-stemmio-review-display-owner",
+          "data-stemmio-review-marker",
+          "data-stemmio-review-projection-facts",
+          "data-stemmio-review-text",
         ],
       },
     );
@@ -1604,10 +1604,10 @@ function reviewBootstrap(
     if (
       !element
       || !runtimeVisualNodeIsConnected(element)
-      || runtimeVisualElementGetAttribute(element, "data-pageroot-id") !== stableId
+      || runtimeVisualElementGetAttribute(element, "data-stemmio-id") !== stableId
     ) return null;
     const matches = runtimeVisualQueryElements(
-      "[data-pageroot-id=\"" + stableId + "\"]",
+      "[data-stemmio-id=\"" + stableId + "\"]",
     );
     return matches.length === 1 && matches[0] === element ? element : null;
   };
@@ -1621,7 +1621,7 @@ function reviewBootstrap(
     if (!element || !runtimeVisualNodeIsConnected(element)) return null;
     const currentIds = RuntimeVisualString(runtimeVisualElementGetAttribute(
       element,
-      "data-pageroot-review-display-owner",
+      "data-stemmio-review-display-owner",
     ) || "");
     return runtimeVisualArraySome(
       runtimeVisualStringSplit(currentIds, /\s+/u),
@@ -1641,7 +1641,7 @@ function reviewBootstrap(
       if (!runtimeVisualNodeIsConnected(entry.element)) return;
       const currentOwnerIds = RuntimeVisualString(runtimeVisualElementGetAttribute(
         entry.displayOwnerElement,
-        "data-pageroot-review-display-owner",
+        "data-stemmio-review-display-owner",
       ) || "");
       if (
         !runtimeVisualNodeIsConnected(entry.displayOwnerElement)
@@ -1655,17 +1655,17 @@ function reviewBootstrap(
           && reviewFocusOwnerElement(entry.displayOwnerId) !== entry.displayOwnerElement
         )
       ) return;
-      if (runtimeVisualElementGetAttribute(entry.element, "data-pageroot-review-marker") !== entry.changeId) return;
+      if (runtimeVisualElementGetAttribute(entry.element, "data-stemmio-review-marker") !== entry.changeId) return;
       if ((runtimeVisualElementGetAttribute(
         entry.element,
-        "data-pageroot-review-projection-facts",
+        "data-stemmio-review-projection-facts",
       ) || "") !== entry.serializedFacts) return;
       if (entry.fact.type === "text" && (
         RuntimeVisualString(runtimeVisualNodeTextContent(entry.element) || "") !== entry.textContent
         || entry.textTone !== entry.fact.tone
         || runtimeVisualElementGetAttribute(
           entry.element,
-          "data-pageroot-review-text",
+          "data-stemmio-review-text",
         ) !== entry.textTone
       )) return;
       runtimeVisualArrayPush(valid, entry);
@@ -1673,20 +1673,20 @@ function reviewBootstrap(
     return valid.length === entries.length ? valid : [];
   };
   const isSafePanelControl = (element) => element instanceof Element && element.matches(
-    '[data-pageroot-review-panel-control="true"]',
+    '[data-stemmio-review-panel-control="true"]',
   );
   const panelControlForKey = (panelKey) => [...document.querySelectorAll(
-    '[data-pageroot-review-panel-control="true"][data-pageroot-review-panel-key]',
-  )].find((candidate) => candidate.getAttribute("data-pageroot-review-panel-key") === panelKey) || null;
+    '[data-stemmio-review-panel-control="true"][data-stemmio-review-panel-key]',
+  )].find((candidate) => candidate.getAttribute("data-stemmio-review-panel-key") === panelKey) || null;
   const panelForKey = (panelKey) => [...document.querySelectorAll(
-    '[data-pageroot-review-panel-container="true"][data-pageroot-review-panel-key]',
+    '[data-stemmio-review-panel-container="true"][data-stemmio-review-panel-key]',
   )].find((candidate) => (
-    candidate.getAttribute("data-pageroot-review-panel-key") === panelKey
+    candidate.getAttribute("data-stemmio-review-panel-key") === panelKey
   )) || null;
   const actionForKey = (actionKey) => [...document.querySelectorAll(
-    '[data-pageroot-review-action-key]',
+    '[data-stemmio-review-action-key]',
   )].find((candidate) => (
-    candidate.getAttribute("data-pageroot-review-action-key") === actionKey
+    candidate.getAttribute("data-stemmio-review-action-key") === actionKey
   )) || null;
   const scheduleOverlayRender = () => {
     if (projectionTransitioning || !initialProjectionCommitted) return;
@@ -1753,10 +1753,10 @@ function reviewBootstrap(
   const reportScrollGeometry = () => {
     if (projectionTransitioning) return;
     geometryRevision += 1;
-    const anchors = [...document.querySelectorAll("[data-pageroot-outline-id]")]
+    const anchors = [...document.querySelectorAll("[data-stemmio-outline-id]")]
       .flatMap((element) => {
         const rect = element.getBoundingClientRect();
-        const id = safeKey(element.getAttribute("data-pageroot-outline-id"));
+        const id = safeKey(element.getAttribute("data-stemmio-outline-id"));
         if (!id || rect.width <= 0 || rect.height <= 0) return [];
         return [{ id, top: Math.max(0, scrollY + rect.top), height: rect.height }];
       });
@@ -1834,7 +1834,7 @@ function reviewBootstrap(
       const message = event.data;
       if (
         !message
-        || message.source !== "pageroot-ai-review-comment-targets"
+        || message.source !== "stemmio-ai-review-comment-targets"
         || message.sessionId !== sessionId
         || message.side !== side
         || message.type !== "comment-targets"
@@ -1844,9 +1844,9 @@ function reviewBootstrap(
     reviewCommentChannel.port1.start();
   }
   const renderTransitionMask = () => {
-    document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
+    document.querySelector('[data-stemmio-review-transition-mask]')?.remove();
     const mask = document.createElement("div");
-    mask.setAttribute("data-pageroot-review-transition-mask", "true");
+    mask.setAttribute("data-stemmio-review-transition-mask", "true");
     mask.style.setProperty("width", Math.max(
       innerWidth,
       document.documentElement.scrollWidth,
@@ -1872,8 +1872,8 @@ function reviewBootstrap(
     clearTimeout(layoutReportTimer);
     cancelAnimationFrame(overlayFrame);
     cancelAnimationFrame(layoutReportFrame);
-    document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
-    document.documentElement.dataset.pagerootReviewTransitioning = "true";
+    document.querySelector('[data-stemmio-review-projection-layer]')?.remove();
+    document.documentElement.dataset.stemmioReviewTransitioning = "true";
     renderTransitionMask();
     post("comment-layout", { commentLayouts: [] });
     return projectionEpoch;
@@ -1894,23 +1894,23 @@ function reviewBootstrap(
     if (epoch && epoch !== projectionEpoch) return;
     clearTimeout(presentationReadyTimer);
     projectionTransitioning = false;
-    document.documentElement.removeAttribute("data-pageroot-review-transitioning");
-    document.querySelector('[data-pageroot-review-transition-mask]')?.remove();
+    document.documentElement.removeAttribute("data-stemmio-review-transitioning");
+    document.querySelector('[data-stemmio-review-transition-mask]')?.remove();
     renderReviewOverlays();
     scheduleLayoutReport(true);
   };
   const applyPanelGroupState = (panelKey) => {
     const panel = panelForKey(panelKey);
-    const groupKey = panel?.getAttribute("data-pageroot-review-panel-group") || "";
+    const groupKey = panel?.getAttribute("data-stemmio-review-panel-group") || "";
     if (!groupKey) return;
     const members = [...document.querySelectorAll(
-      '[data-pageroot-review-panel-group="' + groupKey + '"]',
+      '[data-stemmio-review-panel-group="' + groupKey + '"]',
     )];
     const stateClasses = [...new Set(members.flatMap((member) => String(
-      member.getAttribute("data-pageroot-review-panel-active-classes") || "",
+      member.getAttribute("data-stemmio-review-panel-active-classes") || "",
     ).split(/\s+/).filter(Boolean)))];
     members.forEach((candidate) => {
-      const active = candidate.getAttribute("data-pageroot-review-panel-key") === panelKey;
+      const active = candidate.getAttribute("data-stemmio-review-panel-key") === panelKey;
       stateClasses.forEach((className) => candidate.classList.toggle(className, active));
       if (isSafePanelControl(candidate)) {
         candidate.setAttribute("aria-selected", active ? "true" : "false");
@@ -1918,7 +1918,7 @@ function reviewBootstrap(
         if (candidate.hasAttribute("tabindex") || candidate.getAttribute("role") === "tab") {
           candidate.tabIndex = active ? 0 : -1;
         }
-      } else if (candidate.getAttribute("data-pageroot-review-panel-container") === "true") {
+      } else if (candidate.getAttribute("data-stemmio-review-panel-container") === "true") {
         candidate.toggleAttribute("hidden", !active);
         candidate.setAttribute("aria-hidden", active ? "false" : "true");
       }
@@ -1955,7 +1955,7 @@ function reviewBootstrap(
         return;
       }
       const details = document.querySelector(
-        'details[data-pageroot-id="' + step.stableId + '"]',
+        'details[data-stemmio-id="' + step.stableId + '"]',
       );
       if (details instanceof HTMLDetailsElement) details.open = true;
     });
@@ -1967,7 +1967,7 @@ function reviewBootstrap(
     let action = actionForKey(actionKey);
     const actionActivatesRequestedPanel = action
       && isSafePanelControl(action)
-      && action.getAttribute("data-pageroot-review-panel-key") === safeKey(message.panelKey);
+      && action.getAttribute("data-stemmio-review-panel-key") === safeKey(message.panelKey);
     if (message.panelPath?.length) activatePanelPath(message.panelPath);
     else if (message.panelKey && !actionActivatesRequestedPanel) activatePanelKey(message.panelKey);
     action = actionForKey(actionKey);
@@ -1998,14 +1998,14 @@ function reviewBootstrap(
     }
   };
   const matchingPanelControl = (panel) => {
-    const panelKey = panel.getAttribute("data-pageroot-review-panel-key") || "";
+    const panelKey = panel.getAttribute("data-stemmio-review-panel-key") || "";
     if (panelKey) return panelControlForKey(panelKey);
     const panelId = panel.id
       || panel.getAttribute("data-page")
       || panel.getAttribute("data-tab-panel")
       || "";
     if (!panelId) return null;
-    return [...document.querySelectorAll('[data-pageroot-review-panel-control="true"]')]
+    return [...document.querySelectorAll('[data-stemmio-review-panel-control="true"]')]
       .find((candidate) => (
         candidate.getAttribute("aria-controls") === panelId
         || candidate.getAttribute("data-p") === panelId
@@ -2025,7 +2025,7 @@ function reviewBootstrap(
     let candidate = target;
     while (candidate && candidate !== document.body) {
       if (
-        candidate.hasAttribute("data-pageroot-review-panel-key")
+        candidate.hasAttribute("data-stemmio-review-panel-key")
         || candidate.hasAttribute("hidden")
         || candidate.getAttribute("aria-hidden") === "true"
         || candidate.getAttribute("role") === "tabpanel"
@@ -2034,7 +2034,7 @@ function reviewBootstrap(
       candidate = candidate.parentElement;
     }
     ancestors.forEach((panel) => {
-      const panelKey = panel.getAttribute("data-pageroot-review-panel-key") || "";
+      const panelKey = panel.getAttribute("data-stemmio-review-panel-key") || "";
       if (panelKey) activatePanelKey(panelKey);
       const control = matchingPanelControl(panel);
       if (!panelKey && control instanceof HTMLElement) {
@@ -2078,7 +2078,7 @@ function reviewBootstrap(
     recordFocusScrollCommand(token);
   };
   const anchorTextNodes = (anchor) => {
-    const ownerId = anchor.getAttribute("data-pageroot-review-geometry-owner") || "";
+    const ownerId = anchor.getAttribute("data-stemmio-review-geometry-owner") || "";
     const nodes = [];
     const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
@@ -2087,11 +2087,11 @@ function reviewBootstrap(
       let nestedOwner = parent;
       let crossesOwner = false;
       while (nestedOwner && nestedOwner !== anchor) {
-        const candidateOwner = nestedOwner.getAttribute("data-pageroot-review-geometry-owner") || "";
+        const candidateOwner = nestedOwner.getAttribute("data-stemmio-review-geometry-owner") || "";
         if (
           candidateOwner
           && candidateOwner !== ownerId
-          && !nestedOwner.hasAttribute("data-pageroot-review-text")
+          && !nestedOwner.hasAttribute("data-stemmio-review-text")
         ) {
           crossesOwner = true;
           break;
@@ -2102,16 +2102,16 @@ function reviewBootstrap(
         parent
         && !crossesOwner
         && parent.namespaceURI === "http://www.w3.org/1999/xhtml"
-        && !parent.closest("script, style, noscript, template, [data-pageroot-review-projection-layer]")
+        && !parent.closest("script, style, noscript, template, [data-stemmio-review-projection-layer]")
       ) nodes.push(node);
       node = walker.nextNode();
     }
     return nodes;
   };
   const collapsedAnchorRect = (anchor, changeId) => {
-    if (anchor.getAttribute("data-pageroot-review-anchor-change") !== changeId) return null;
+    if (anchor.getAttribute("data-stemmio-review-anchor-change") !== changeId) return null;
     const encoded = String(
-      anchor.getAttribute("data-pageroot-review-text-anchors") || "",
+      anchor.getAttribute("data-stemmio-review-text-anchors") || "",
     ).split(/\s+/).find(Boolean) || "";
     const offset = Math.max(0, Math.trunc(Number(encoded.slice(encoded.lastIndexOf("@") + 1)) || 0));
     const nodes = anchorTextNodes(anchor);
@@ -2220,11 +2220,11 @@ function reviewBootstrap(
         });
       };
       const visibleFocusGeometry = document.querySelector(regionId
-        ? '[data-pageroot-review-mask-hole][data-pageroot-review-focus-region="' + regionId + '"]'
-        : '[data-pageroot-review-mask-hole="' + changeId + '"]')
+        ? '[data-stemmio-review-mask-hole][data-stemmio-review-focus-region="' + regionId + '"]'
+        : '[data-stemmio-review-mask-hole="' + changeId + '"]')
         || document.querySelector(regionId
-          ? '[data-pageroot-review-overlay-box][data-pageroot-review-focus-region="' + regionId + '"]'
-          : '[data-pageroot-review-overlay-box="' + changeId + '"]');
+          ? '[data-stemmio-review-overlay-box][data-stemmio-review-focus-region="' + regionId + '"]'
+          : '[data-stemmio-review-overlay-box="' + changeId + '"]');
       let reportedFocusGeometry = false;
       if (visibleFocusGeometry) {
         reportHorizontalFootprint({
@@ -2240,7 +2240,7 @@ function reviewBootstrap(
       }
       if (!regionId) {
         const anchors = [...document.querySelectorAll(
-          '[data-pageroot-review-anchor-change="' + changeId + '"]',
+          '[data-stemmio-review-anchor-change="' + changeId + '"]',
         )];
         for (const anchor of anchors) {
           const rect = collapsedAnchorRect(anchor, changeId);
@@ -2291,7 +2291,7 @@ function reviewBootstrap(
     scrollTo({ top, left, behavior: "auto" });
   };
   const markerTypes = (element) => String(
-    element.getAttribute("data-pageroot-review-marker-types") || "",
+    element.getAttribute("data-stemmio-review-marker-types") || "",
   ).split(/\s+/).filter(Boolean);
   const safeProjectionFactKey = (value) => {
     const key = String(value || "").trim();
@@ -2397,15 +2397,15 @@ function reviewBootstrap(
     return [];
   };
   const projectionFactsForElement = (element, fallbackSequence) => {
-    const serialized = element.getAttribute("data-pageroot-review-projection-facts");
+    const serialized = element.getAttribute("data-stemmio-review-projection-facts");
     if (serialized) return projectionFactsForSerialized(serialized);
-    const changeId = element.getAttribute("data-pageroot-review-marker") || "";
-    const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
+    const changeId = element.getAttribute("data-stemmio-review-marker") || "";
+    const semanticOwnerId = element.getAttribute("data-stemmio-review-semantic-owner")
       || ("fallback-owner-" + changeId + "-" + fallbackSequence);
-    const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+    const geometryOwnerId = element.getAttribute("data-stemmio-review-geometry-owner") || "";
     const facts = [];
-    if (element.hasAttribute("data-pageroot-review-text")) {
-      const textGroup = element.getAttribute("data-pageroot-review-text-group")
+    if (element.hasAttribute("data-stemmio-review-text")) {
+      const textGroup = element.getAttribute("data-stemmio-review-text-group")
         || ("text-marker-" + fallbackSequence);
       facts.push({
         id: textGroup,
@@ -2413,18 +2413,18 @@ function reviewBootstrap(
         semanticOwnerId,
         ...(geometryOwnerId ? { geometryOwnerId } : {}),
         scope: "text",
-        tone: element.getAttribute("data-pageroot-review-text") === "removed" ? "removed" : "added",
+        tone: element.getAttribute("data-stemmio-review-text") === "removed" ? "removed" : "added",
         textGroup,
         displayGroupId: "display-fact-" + textGroup,
         displayOwnerId: geometryOwnerId || semanticOwnerId,
         displayScope: "paragraph",
         geometryMode: "text-content",
-        operation: element.getAttribute("data-pageroot-review-text-operation") || "",
-        summary: element.getAttribute("data-pageroot-review-summary") || "",
+        operation: element.getAttribute("data-stemmio-review-text-operation") || "",
+        summary: element.getAttribute("data-stemmio-review-summary") || "",
       });
     }
     if (runtimeVisualArrayIncludes(markerTypes(element), "structure")) {
-      const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
+      const structureChange = element.getAttribute("data-stemmio-review-structure") || "changed";
       facts.push({
         id: "structure-" + semanticOwnerId + "-" + structureChange,
         type: "structure",
@@ -2436,7 +2436,7 @@ function reviewBootstrap(
         displayScope: "container",
         geometryMode: "element-box",
         structureChange,
-        summary: element.getAttribute("data-pageroot-review-summary")
+        summary: element.getAttribute("data-stemmio-review-summary")
           || structureSummary(structureChange),
       });
     }
@@ -2546,11 +2546,11 @@ function reviewBootstrap(
   const crossesGeometryOwner = (node, owner, ownerId) => {
     let candidate = node.parentElement;
     while (candidate && candidate !== owner) {
-      const candidateId = candidate.getAttribute("data-pageroot-review-geometry-owner") || "";
+      const candidateId = candidate.getAttribute("data-stemmio-review-geometry-owner") || "";
       if (
         candidateId
         && candidateId !== ownerId
-        && !candidate.hasAttribute("data-pageroot-review-text")
+        && !candidate.hasAttribute("data-stemmio-review-text")
       ) return true;
       candidate = candidate.parentElement;
     }
@@ -2605,7 +2605,7 @@ function reviewBootstrap(
   };
   const contentTextRects = (element, respectGeometryOwners = false, atoms = []) => {
     const rects = [];
-    const ownerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+    const ownerId = element.getAttribute("data-stemmio-review-geometry-owner") || "";
     const directFlowSegments = directFlowSegmentsForAtoms(element, atoms);
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
@@ -2828,7 +2828,7 @@ function reviewBootstrap(
   }, { passive: true });
   function renderReviewOverlays() {
     if (projectionTransitioning) return;
-    document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
+    document.querySelector('[data-stemmio-review-projection-layer]')?.remove();
     const filter = currentState.filter || "all";
     // Phase 1: collect immutable source-backed atoms. Their exact identities
     // continue to own evidence marks and never become display grouping keys.
@@ -2863,7 +2863,7 @@ function reviewBootstrap(
               textGroup,
               textOperation: fact.operation || "",
               scope: "text",
-              summary: fact.summary || element.getAttribute("data-pageroot-review-summary") || "文本调整",
+              summary: fact.summary || element.getAttribute("data-stemmio-review-summary") || "文本调整",
               tone: textTone,
               tones: [textTone],
               types: ["text"],
@@ -3065,7 +3065,7 @@ function reviewBootstrap(
     });
     overlayElementsByChange = new RuntimeVisualMap();
     const layer = document.createElement("div");
-    layer.setAttribute("data-pageroot-review-projection-layer", "true");
+    layer.setAttribute("data-stemmio-review-projection-layer", "true");
     layer.style.setProperty("width", documentWidth + "px", "important");
     layer.style.setProperty("height", height + "px", "important");
     const namespace = "http://www.w3.org/2000/svg";
@@ -3089,7 +3089,7 @@ function reviewBootstrap(
     };
     if (contextMaskRecords.length) {
     const svg = document.createElementNS(namespace, "svg");
-    svg.setAttribute("data-pageroot-review-mask-layer", "true");
+    svg.setAttribute("data-stemmio-review-mask-layer", "true");
     svg.setAttribute("width", String(documentWidth));
     svg.setAttribute("height", String(height));
     svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
@@ -3097,9 +3097,9 @@ function reviewBootstrap(
     svg.style.setProperty("height", height + "px", "important");
     resetMaskPrimitive(svg);
     const mask = document.createElementNS(namespace, "mask");
-    const maskId = "pageroot-review-mask-"
+    const maskId = "stemmio-review-mask-"
       + reviewMaskSessionKey + "-" + side + "-" + projectionEpoch + "-" + (++overlayMaskSequence);
-    mask.setAttribute("data-pageroot-review-mask", "true");
+    mask.setAttribute("data-stemmio-review-mask", "true");
     mask.setAttribute("id", maskId);
     mask.setAttribute("maskUnits", "userSpaceOnUse");
     mask.setAttribute("maskContentUnits", "userSpaceOnUse");
@@ -3111,7 +3111,7 @@ function reviewBootstrap(
     resetMaskPrimitive(mask);
     mask.style.setProperty("mask-type", "luminance", "important");
     const maskBackground = document.createElementNS(namespace, "rect");
-    maskBackground.setAttribute("data-pageroot-review-mask-background", "true");
+    maskBackground.setAttribute("data-stemmio-review-mask-background", "true");
     maskBackground.setAttribute("x", "0");
     maskBackground.setAttribute("y", "0");
     maskBackground.setAttribute("width", String(documentWidth));
@@ -3122,18 +3122,18 @@ function reviewBootstrap(
     const emphasizedRecords = contextMaskRecords;
     runtimeVisualArrayForEach(emphasizedRecords, (record) => {
       const hole = document.createElementNS(namespace, "path");
-      hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
-      hole.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
-      hole.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
-      hole.setAttribute("data-pageroot-review-fact", record.factKey || "");
-      hole.setAttribute("data-pageroot-review-focus-group", record.focusGroupId || "");
-      hole.setAttribute("data-pageroot-review-focus-region", record.focusRegionId || "");
+      hole.setAttribute("data-stemmio-review-mask-hole", record.changeId);
+      hole.setAttribute("data-stemmio-review-semantic-owner", record.semanticOwnerId || "");
+      hole.setAttribute("data-stemmio-review-geometry-owner", record.geometryOwnerId || "");
+      hole.setAttribute("data-stemmio-review-fact", record.factKey || "");
+      hole.setAttribute("data-stemmio-review-focus-group", record.focusGroupId || "");
+      hole.setAttribute("data-stemmio-review-focus-region", record.focusRegionId || "");
       if (record.textGroup) hole.setAttribute("data-text-group", record.textGroup);
       if (record.textGroups?.length) {
         hole.setAttribute("data-text-groups", runtimeVisualArrayJoin(record.textGroups, " "));
       }
       if (record.ownerKey) {
-        hole.setAttribute("data-pageroot-review-mask-owner", record.ownerKey);
+        hole.setAttribute("data-stemmio-review-mask-owner", record.ownerKey);
       }
       const width = record.right - record.left;
       const holeHeight = record.bottom - record.top;
@@ -3150,7 +3150,7 @@ function reviewBootstrap(
     defs.append(mask);
     svg.append(defs);
     const dim = document.createElementNS(namespace, "rect");
-    dim.setAttribute("data-pageroot-review-mask-dim", "true");
+    dim.setAttribute("data-stemmio-review-mask-dim", "true");
     dim.setAttribute("x", "0");
     dim.setAttribute("y", "0");
     dim.setAttribute("width", String(documentWidth));
@@ -3172,7 +3172,7 @@ function reviewBootstrap(
     if (filter === "all" || filter === "text") {
       const uiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
       const marksSvg = document.createElementNS(namespace, "svg");
-      marksSvg.setAttribute("data-pageroot-review-text-marks", "true");
+      marksSvg.setAttribute("data-stemmio-review-text-marks", "true");
       marksSvg.setAttribute("width", String(documentWidth));
       marksSvg.setAttribute("height", String(height));
       marksSvg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
@@ -3200,7 +3200,7 @@ function reviewBootstrap(
           // A marker span normally holds one text node, but the walker would also
           // descend into a nested marker and draw its characters twice at two
           // slightly different baselines. Let the innermost marker own its text.
-          if (node.parentElement?.closest("[data-pageroot-review-text]") !== marker) {
+          if (node.parentElement?.closest("[data-stemmio-review-text]") !== marker) {
             node = walker.nextNode();
             continue;
           }
@@ -3245,7 +3245,7 @@ function reviewBootstrap(
       });
       runtimeVisualArrayForEach(alignReviewTextEvidenceDotRows(addedDots), (dot) => {
         const circle = document.createElementNS(namespace, "circle");
-        circle.setAttribute("data-pageroot-review-text-mark", "added");
+        circle.setAttribute("data-stemmio-review-text-mark", "added");
         circle.setAttribute("cx", String(dot.x));
         circle.setAttribute("cy", String(dot.y));
         circle.setAttribute("r", String(dot.radius));
@@ -3274,7 +3274,7 @@ function reviewBootstrap(
       });
       runtimeVisualArrayForEach(mergedStrikes, (run) => {
         const line = document.createElementNS(namespace, "line");
-        line.setAttribute("data-pageroot-review-text-mark", "removed");
+        line.setAttribute("data-stemmio-review-text-mark", "removed");
         line.setAttribute("x1", String(run.strikeLeft));
         line.setAttribute("y1", String(run.strikeY));
         line.setAttribute("x2", String(run.strikeRight));
@@ -3287,15 +3287,15 @@ function reviewBootstrap(
     }
     runtimeVisualArrayForEach(focusOutlineRecords, (record) => {
       const box = document.createElement("div");
-      box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
-      box.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
-      box.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
-      box.setAttribute("data-pageroot-review-fact", record.factKey || "");
-      box.setAttribute("data-pageroot-review-focus-group", record.focusGroupId || "");
-      box.setAttribute("data-pageroot-review-focus-region", record.focusRegionId || "");
-      box.setAttribute("data-pageroot-review-display-group", record.displayGroupId || "");
+      box.setAttribute("data-stemmio-review-overlay-box", record.changeId);
+      box.setAttribute("data-stemmio-review-semantic-owner", record.semanticOwnerId || "");
+      box.setAttribute("data-stemmio-review-geometry-owner", record.geometryOwnerId || "");
+      box.setAttribute("data-stemmio-review-fact", record.factKey || "");
+      box.setAttribute("data-stemmio-review-focus-group", record.focusGroupId || "");
+      box.setAttribute("data-stemmio-review-focus-region", record.focusRegionId || "");
+      box.setAttribute("data-stemmio-review-display-group", record.displayGroupId || "");
       if (record.ownerKey) {
-        box.setAttribute("data-pageroot-review-overlay-owner", record.ownerKey);
+        box.setAttribute("data-stemmio-review-overlay-owner", record.ownerKey);
       }
       box.dataset.tone = record.tone;
       box.dataset.tones = runtimeVisualArrayJoin(record.tones, " ");
@@ -3309,7 +3309,7 @@ function reviewBootstrap(
       if (record.textOperation) box.dataset.textOperation = record.textOperation;
       if (record.visualLine) box.dataset.visualLine = record.visualLine;
       box.setAttribute(
-        "data-pageroot-review-fragment-count",
+        "data-stemmio-review-fragment-count",
         String((record.renderFragments || []).length || 1),
       );
       box.dataset.active = "true";
@@ -3330,11 +3330,11 @@ function reviewBootstrap(
       if (!textOnly && (record.renderFragments || []).length > 1) {
         box.dataset.shaped = "true";
         const shapeSvg = document.createElementNS(namespace, "svg");
-        shapeSvg.setAttribute("data-pageroot-review-overlay-shape-svg", "true");
+        shapeSvg.setAttribute("data-stemmio-review-overlay-shape-svg", "true");
         shapeSvg.setAttribute("viewBox", "0 0 " + width + " " + boxHeight);
         shapeSvg.setAttribute("preserveAspectRatio", "none");
         const shape = document.createElementNS(namespace, "path");
-        shape.setAttribute("data-pageroot-review-overlay-shape", "true");
+        shape.setAttribute("data-stemmio-review-overlay-shape", "true");
         shape.setAttribute("d", unionPath(record.renderFragments, left, top));
         shapeSvg.append(shape);
         box.append(shapeSvg);
@@ -3343,10 +3343,10 @@ function reviewBootstrap(
       if (regionLabel) {
         if (top < 28 * badgeUiScale) box.dataset.labelInside = "true";
         const label = document.createElement("span");
-        label.setAttribute("data-pageroot-review-overlay-label", "true");
+        label.setAttribute("data-stemmio-review-overlay-label", "true");
         if (regionLabel.clusterCount > 1) {
           label.setAttribute(
-            "data-pageroot-review-label-count",
+            "data-stemmio-review-label-count",
             String(regionLabel.clusterCount),
           );
         }
@@ -3374,11 +3374,11 @@ function reviewBootstrap(
       ));
       const regionElements = runtimeVisualMapGet(overlayElementsByChange, region.changeId) || [];
       const bar = document.createElement("div");
-      bar.setAttribute("data-pageroot-review-region-bar", region.changeId);
-      bar.setAttribute("data-pageroot-review-focus-group", region.focusGroupId || "");
-      bar.setAttribute("data-pageroot-review-focus-region", region.regionId || "");
-      bar.setAttribute("data-pageroot-review-navigation-cluster", region.navigationClusterId || "");
-      bar.setAttribute("data-pageroot-review-region-count", String(region.members.length));
+      bar.setAttribute("data-stemmio-review-region-bar", region.changeId);
+      bar.setAttribute("data-stemmio-review-focus-group", region.focusGroupId || "");
+      bar.setAttribute("data-stemmio-review-focus-region", region.regionId || "");
+      bar.setAttribute("data-stemmio-review-navigation-cluster", region.navigationClusterId || "");
+      bar.setAttribute("data-stemmio-review-region-count", String(region.members.length));
       bar.dataset.active = focusedRegion ? "true" : "false";
       const barTop = Math.max(0, region.top - inset);
       const barHeight = 10 * badgeUiScale;
@@ -3411,7 +3411,7 @@ function reviewBootstrap(
     hoveredChangeId = "";
     setHoverChange(rehover);
     document.body.append(layer);
-    document.documentElement.dataset.pagerootReviewOverlays = resolvedGroups.length ? "true" : "false";
+    document.documentElement.dataset.stemmioReviewOverlays = resolvedGroups.length ? "true" : "false";
     scheduleLayoutReport();
   }
   const applyState = (state) => {
@@ -3452,33 +3452,33 @@ function reviewBootstrap(
         : null,
     };
     const root = document.documentElement;
-    root.dataset.pagerootReviewFilter = currentState.filter || "all";
-    root.dataset.pagerootReviewFocus = currentState.focus || "all";
-    root.dataset.pagerootReviewFocusGroup = commentHighlightActive
+    root.dataset.stemmioReviewFilter = currentState.filter || "all";
+    root.dataset.stemmioReviewFocus = currentState.focus || "all";
+    root.dataset.stemmioReviewFocusGroup = commentHighlightActive
       ? ""
       : currentState.activeFocusGroupId || "";
-    root.dataset.pagerootReviewFocusRegion = commentHighlightActive
+    root.dataset.stemmioReviewFocusRegion = commentHighlightActive
       ? ""
       : currentState.activeFocusRegionId || "";
     const transparency = Math.max(
       0,
       Math.min(100, Number(currentState.transparency ?? 25)),
     ) / 100;
-    root.style.setProperty("--pageroot-review-context-opacity", String(transparency));
-    root.style.setProperty("--pageroot-review-ui-scale", String(1 / Math.max(
+    root.style.setProperty("--stemmio-review-context-opacity", String(transparency));
+    root.style.setProperty("--stemmio-review-ui-scale", String(1 / Math.max(
       .32,
       Math.min(1, Number(currentState.scale || 1)),
     )));
-    runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-pageroot-outline-id]"), (element) => {
-      element.dataset.pagerootReviewActive = currentState.focus === "all"
-        || element.dataset.pagerootReviewId === currentState.focus
-        || element.dataset.pagerootOutlineId === currentState.focus
+    runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-stemmio-outline-id]"), (element) => {
+      element.dataset.stemmioReviewActive = currentState.focus === "all"
+        || element.dataset.stemmioReviewId === currentState.focus
+        || element.dataset.stemmioOutlineId === currentState.focus
         ? "true"
         : "false";
     });
-    runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-pageroot-review-marker]"), (element) => {
-      element.dataset.pagerootReviewActive = currentState.focus !== "all"
-        && element.getAttribute("data-pageroot-review-marker") === currentState.focus
+    runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-stemmio-review-marker]"), (element) => {
+      element.dataset.stemmioReviewActive = currentState.focus !== "all"
+        && element.getAttribute("data-stemmio-review-marker") === currentState.focus
         ? "true"
         : "false";
     });
@@ -3492,7 +3492,7 @@ function reviewBootstrap(
       !event.isTrusted
       || event.source !== reviewParent
       || !message
-      || message.source !== "pageroot-ai-review-parent"
+      || message.source !== "stemmio-ai-review-parent"
       || message.sessionId !== sessionId
     ) return;
     if (message.type === "state") applyState(message.state || {});
@@ -3529,7 +3529,7 @@ function reviewBootstrap(
       const target = focusRegion
         ? reviewFocusOwnerElement(focusRegion.displayOwnerIds[0])
         : !focusGroupId && !regionId
-          ? document.querySelector('[data-pageroot-review-id="' + changeId + '"]')
+          ? document.querySelector('[data-stemmio-review-id="' + changeId + '"]')
           : null;
       if ((focusGroupId || regionId) && (!focusRegion || !target)) {
         if (commandId && cancelledNavigationCommandId !== commandId) {
@@ -3565,23 +3565,23 @@ function reviewBootstrap(
     }
     if (message.type === "focus-outline") {
       const outlineId = String(message.outlineId || "").replace(/[^a-z0-9-]/gi, "");
-      const target = document.querySelector('[data-pageroot-outline-id="' + outlineId + '"]');
+      const target = document.querySelector('[data-stemmio-outline-id="' + outlineId + '"]');
       focusTarget(target, message.panelPath?.length ? message.panelPath : message.panelKey);
     }
   }, true);
   addEventListener("click", (event) => {
     post("interaction");
     const action = event.target instanceof Element
-      ? event.target.closest("[data-pageroot-review-action-key]")
+      ? event.target.closest("[data-stemmio-review-action-key]")
       : null;
     if (action && !mirroringAction && !mirroringPanel) {
-      const actionKey = action.getAttribute("data-pageroot-review-action-key") || "";
-      const panelKey = action.closest("[data-pageroot-review-panel-key]")
-        ?.getAttribute("data-pageroot-review-panel-key") || "";
+      const actionKey = action.getAttribute("data-stemmio-review-action-key") || "";
+      const panelKey = action.closest("[data-stemmio-review-panel-key]")
+        ?.getAttribute("data-stemmio-review-panel-key") || "";
       const panelPath = safePanelPath(
-        action.getAttribute("data-pageroot-review-panel-path")
-        || action.closest("[data-pageroot-review-panel-path]")
-          ?.getAttribute("data-pageroot-review-panel-path"),
+        action.getAttribute("data-stemmio-review-panel-path")
+        || action.closest("[data-stemmio-review-panel-path]")
+          ?.getAttribute("data-stemmio-review-panel-path"),
       );
       scheduleOverlayRender();
       requestAnimationFrame(() => {
@@ -3595,12 +3595,12 @@ function reviewBootstrap(
       });
     }
     const control = event.target instanceof Element
-      ? event.target.closest('[data-pageroot-review-panel-control="true"][data-pageroot-review-panel-key]')
+      ? event.target.closest('[data-stemmio-review-panel-control="true"][data-stemmio-review-panel-key]')
       : null;
     if (control && !mirroringPanel && !mirroringAction) {
-      const panelKey = control.getAttribute("data-pageroot-review-panel-key") || "";
+      const panelKey = control.getAttribute("data-stemmio-review-panel-key") || "";
       const panelPath = safePanelPath(
-        control.getAttribute("data-pageroot-review-panel-path") || panelKey,
+        control.getAttribute("data-stemmio-review-panel-path") || panelKey,
       );
       const localEpoch = beginProjectionTransition(projectionEpoch + 1);
       requestAnimationFrame(() => {
@@ -3614,17 +3614,17 @@ function reviewBootstrap(
   const postControlState = (event) => {
     if (mirroringAction || mirroringPanel) return;
     const action = event.target instanceof Element
-      ? event.target.closest("[data-pageroot-review-action-key]")
+      ? event.target.closest("[data-stemmio-review-action-key]")
       : null;
     if (!(action instanceof HTMLInputElement || action instanceof HTMLSelectElement || action instanceof HTMLTextAreaElement)) return;
     post("control-state", {
-      actionKey: action.getAttribute("data-pageroot-review-action-key") || "",
-      panelKey: action.closest("[data-pageroot-review-panel-key]")
-        ?.getAttribute("data-pageroot-review-panel-key") || "",
+      actionKey: action.getAttribute("data-stemmio-review-action-key") || "",
+      panelKey: action.closest("[data-stemmio-review-panel-key]")
+        ?.getAttribute("data-stemmio-review-panel-key") || "",
       panelPath: safePanelPath(
-        action.getAttribute("data-pageroot-review-panel-path")
-        || action.closest("[data-pageroot-review-panel-path]")
-          ?.getAttribute("data-pageroot-review-panel-path"),
+        action.getAttribute("data-stemmio-review-panel-path")
+        || action.closest("[data-stemmio-review-panel-path]")
+          ?.getAttribute("data-stemmio-review-panel-path"),
       ),
       value: action.value,
       checked: action instanceof HTMLInputElement ? action.checked : undefined,
@@ -3744,8 +3744,8 @@ function reviewBootstrap(
       const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
       return changedNodes.length > 0 && changedNodes.every((node) => (
         node instanceof Element
-        && (node.matches("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")
-          || runtimeVisualBoolean(node.closest("[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]")))
+        && (node.matches("[data-stemmio-review-projection-layer], [data-stemmio-review-transition-mask]")
+          || runtimeVisualBoolean(node.closest("[data-stemmio-review-projection-layer], [data-stemmio-review-transition-mask]")))
       ));
     });
     if (!onlyOverlayChanges) handleLayoutChange();
@@ -3769,10 +3769,10 @@ function reviewBootstrap(
     // Static facts are independently complete. Runtime projection may arrive
     // later, fail, or be unavailable without delaying or clearing them.
     const sourceChangeIds = new RuntimeVisualSet();
-    runtimeVisualQueryElements("[data-pageroot-review-marker]").forEach((element) => {
+    runtimeVisualQueryElements("[data-stemmio-review-marker]").forEach((element) => {
       const changeId = safeKey(runtimeVisualElementGetAttribute(
         element,
-        "data-pageroot-review-marker",
+        "data-stemmio-review-marker",
       ));
       if (changeId) runtimeVisualSetAdd(sourceChangeIds, changeId);
     });

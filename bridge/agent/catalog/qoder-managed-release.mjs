@@ -255,14 +255,14 @@ export function assertInstallableCatalogEntry(entry, providerId) {
   if (!entry) {
     throw agentProviderError(
       "AGENT_PROVIDER_UNSUPPORTED",
-      "The selected Agent is not in PageRoot's ACP catalog.",
+      "The selected Agent is not in Stemmio's ACP catalog.",
       { status: 404 },
     );
   }
   if (entry.installable !== true || entry.distribution?.type !== "npm") {
     throw agentProviderError(
       "AGENT_INSTALL_UNSUPPORTED",
-      "This Agent cannot be installed from PageRoot.",
+      "This Agent cannot be installed from Stemmio.",
       { status: 409 },
     );
   }

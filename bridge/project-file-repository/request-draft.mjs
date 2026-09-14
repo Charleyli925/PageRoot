@@ -21,7 +21,7 @@ import {
   resolveRelative,
 } from "./path-safety.mjs";
 
-export const FROZEN_REQUEST_RULES = `# PageRoot HTML Candidate Rules
+export const FROZEN_REQUEST_RULES = `# Stemmio HTML Candidate Rules
 
 ## Authority
 
@@ -42,11 +42,11 @@ export const FROZEN_REQUEST_RULES = `# PageRoot HTML Candidate Rules
 
 ## Source identity
 
-- Treat every existing data-pageroot-id as an opaque authored-source identity.
+- Treat every existing data-stemmio-id as an opaque authored-source identity.
 - Preserve the same ID on every surviving corresponding authored element, including when the element moves, changes parent or changes tag.
 - Never create, copy, normalize, transfer, duplicate or reuse an ID.
 - When an element is deleted, its ID disappears with it.
-- New elements must omit data-pageroot-id; PageRoot assigns IDs after validation.
+- New elements must omit data-stemmio-id; Stemmio assigns IDs after validation.
 
 ## Source and runtime
 

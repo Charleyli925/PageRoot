@@ -18,16 +18,16 @@ import {
   loadFixture,
   replaceEditableIslandTextBytes,
   sha256,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 const repositoryRealHtmlPath = fileURLToPath(
   new URL("../../fixtures/native-dom/complex-layout.html", import.meta.url),
 );
-const realHtmlPath = process.env.PAGEROOT_REAL_HTML_PATH || repositoryRealHtmlPath;
+const realHtmlPath = process.env.STEMMIO_REAL_HTML_PATH || repositoryRealHtmlPath;
 
 function validatedRealHtmlPath() {
   if (!path.isAbsolute(realHtmlPath) || path.extname(realHtmlPath).toLowerCase() !== ".html") {
-    throw new Error(`PAGEROOT_REAL_HTML_PATH must be an absolute .html path: ${realHtmlPath}`);
+    throw new Error(`STEMMIO_REAL_HTML_PATH must be an absolute .html path: ${realHtmlPath}`);
   }
   return realHtmlPath;
 }
@@ -57,14 +57,14 @@ function editableSourceElementIds(source) {
     if (!element.textContent?.trim()) return [];
     const targetRef = createTargetRef(index, element, { level: "subregion" });
     return isEditableIslandTarget(index, targetRef).editable
-      ? [element.pagerootId || element.nodeId]
+      ? [element.stemmioId || element.nodeId]
       : [];
   }));
 }
 
 async function discoverVisibleEditableHosts(frame, source) {
   const eligibleIds = [...editableSourceElementIds(source)];
-  return frame.locator("[data-pageroot-id]").evaluateAll(
+  return frame.locator("[data-stemmio-id]").evaluateAll(
     (elements, allowedSourceIds) => {
       const allowed = new Set(allowedSourceIds);
       const transparent = new Set([
@@ -72,9 +72,9 @@ async function discoverVisibleEditableHosts(frame, source) {
         "em", "i", "ins", "kbd", "label", "mark", "q", "s", "samp", "small",
         "span", "strong", "sub", "sup", "time", "u", "var",
       ]);
-      const sourceIdOf = (element) => element.getAttribute("data-pageroot-id");
+      const sourceIdOf = (element) => element.getAttribute("data-stemmio-id");
       const sourceParent = (element) => element.parentElement?.closest(
-        "[data-pageroot-id]",
+        "[data-stemmio-id]",
       ) ?? null;
       const stableDomSelector = (element) => {
         const parts = [];
@@ -94,7 +94,7 @@ async function discoverVisibleEditableHosts(frame, source) {
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const match = /\S/u.exec(node.data);
         if (!match || !node.parentElement) continue;
-        let host = node.parentElement.closest("[data-pageroot-id]");
+        let host = node.parentElement.closest("[data-stemmio-id]");
         while (host) {
           const style = getComputedStyle(host);
           const standalone = style.display !== "inline" && style.display !== "contents";
@@ -317,7 +317,7 @@ async function waitForEditableHost(frame, editor, expectedTarget, label) {
     const active = frame.locator('[contenteditable="true"]');
     const activeCount = await active.count();
     const activeId = activeCount > 0
-      ? await active.first().getAttribute("data-pageroot-id")
+      ? await active.first().getAttribute("data-stemmio-id")
       : null;
     throw new Error(
       `${label} did not activate. `
@@ -408,7 +408,7 @@ function uniqueLiteralForCandidate(source, text) {
 }
 
 async function discoverEditableCandidate(frame, source) {
-  const candidates = await frame.locator("[data-pageroot-id]").evaluateAll((elements) => {
+  const candidates = await frame.locator("[data-stemmio-id]").evaluateAll((elements) => {
     const preferredTags = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"]);
     const tagPriority = new Map([
       ["p", 0],
@@ -436,7 +436,7 @@ async function discoverEditableCandidate(frame, source) {
       const style = getComputedStyle(element);
       return {
         index,
-        sourceId: element.getAttribute("data-pageroot-id"),
+        sourceId: element.getAttribute("data-stemmio-id"),
         tagName: element.localName,
         text: element.textContent || "",
         childElementCount: element.childElementCount,
@@ -490,7 +490,7 @@ async function discoverEditableCandidate(frame, source) {
 }
 
 async function discoverCommentCandidate(frame) {
-  const candidates = await frame.locator("[data-pageroot-id]").evaluateAll((elements) => {
+  const candidates = await frame.locator("[data-stemmio-id]").evaluateAll((elements) => {
     const dedicatedEditorRoots = new Set([
       "input", "textarea", "select", "option", "script", "style", "template", "title",
       "canvas", "iframe", "svg", "math",
@@ -516,7 +516,7 @@ async function discoverCommentCandidate(frame) {
       );
       return {
         index,
-        sourceId: element.getAttribute("data-pageroot-id"),
+        sourceId: element.getAttribute("data-stemmio-id"),
         tagName,
         text: (element.textContent || "").trim().slice(0, 80),
         rendered: rect.width > 2 && rect.height > 2
@@ -560,7 +560,7 @@ async function visualGeometrySnapshot(handle) {
       width: Math.round(rect.width * 10) / 10,
       height: Math.round(rect.height * 10) / 10,
     });
-    const visibleSourceRects = Array.from(document.querySelectorAll("[data-pageroot-id]"))
+    const visibleSourceRects = Array.from(document.querySelectorAll("[data-stemmio-id]"))
       .filter((element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
@@ -570,7 +570,7 @@ async function visualGeometrySnapshot(handle) {
           && style.display !== "none" && style.visibility !== "hidden";
       })
       .map((element) => ({
-        sourceId: element.getAttribute("data-pageroot-id"),
+        sourceId: element.getAttribute("data-stemmio-id"),
         rect: roundedRect(element.getBoundingClientRect()),
       }));
     const targetRect = target.getBoundingClientRect();
@@ -702,7 +702,7 @@ test("DOM editing compatibility scan keeps layout and editable-island source aut
   const beforeDocument = await documentToken(frame);
 
   const candidate = await discoverEditableCandidate(frame, identified);
-  const sourceNodes = frame.locator("[data-pageroot-id]");
+  const sourceNodes = frame.locator("[data-stemmio-id]");
   const target = await sourceNodes.nth(candidate.index).elementHandle();
   if (!target) throw new Error(`Editable candidate detached before activation: ${JSON.stringify(candidate)}`);
   await target.scrollIntoViewIfNeeded();
@@ -755,7 +755,7 @@ test("DOM editing compatibility scan keeps layout and editable-island source aut
   expect(caret).toMatchObject({ collapsed: true, active: true, inside: true });
   expect(caret.rectHeight).toBeGreaterThan(0);
 
-  const replacement = "PageRoot真实原位门禁";
+  const replacement = "Stemmio真实原位门禁";
   if (identified.includes(Buffer.from(replacement))) {
     throw new Error(`Replacement oracle already exists in source: ${replacement}`);
   }
@@ -797,7 +797,7 @@ test("DOM editing compatibility scan keeps layout and editable-island source aut
   const commentCandidate = await discoverCommentCandidate(currentFrame);
   const commentTarget = currentFrame
     .locator(
-      `[data-pageroot-id="${escapeAttributeValue(commentCandidate.sourceId)}"]`,
+      `[data-stemmio-id="${escapeAttributeValue(commentCandidate.sourceId)}"]`,
     );
   await expect(commentTarget, `Comment candidate must stay uniquely source-backed: ${JSON.stringify(commentCandidate)}`)
     .toHaveCount(1);
@@ -828,7 +828,7 @@ const REAL_CENSUS_SHARD_COUNT = 32;
 for (let shardIndex = 0; shardIndex < REAL_CENSUS_SHARD_COUNT; shardIndex += 1) {
 test(`DOM editing compatibility scan covers every visible V2 host (${shardIndex + 1}/${REAL_CENSUS_SHARD_COUNT})`, async ({ page }, testInfo) => {
   test.skip(
-    !process.env.PAGEROOT_REAL_HTML_PATH,
+    !process.env.STEMMIO_REAL_HTML_PATH,
     "The exhaustive census runs only when an explicit real HTML path is supplied.",
   );
   test.setTimeout(15 * 60_000);
@@ -839,9 +839,9 @@ test(`DOM editing compatibility scan covers every visible V2 host (${shardIndex 
   const identified = identifiedHtmlBuffer(original);
   let loaded = await loadRealHtml(page, sourcePath, identified);
   const hosts = await discoverVisibleEditableHosts(loaded.frame, identified);
-  const onlyIndex = process.env.PAGEROOT_CENSUS_ONLY_INDEX === undefined
+  const onlyIndex = process.env.STEMMIO_CENSUS_ONLY_INDEX === undefined
     ? null
-    : Number.parseInt(process.env.PAGEROOT_CENSUS_ONLY_INDEX, 10);
+    : Number.parseInt(process.env.STEMMIO_CENSUS_ONLY_INDEX, 10);
   const scheduledHosts = Number.isInteger(onlyIndex)
     ? hosts.map((host, index) => ({ host, hostIndex: index }))
       .filter(({ hostIndex }) => (
@@ -854,9 +854,9 @@ test(`DOM editing compatibility scan covers every visible V2 host (${shardIndex 
       ));
   if (Number.isInteger(onlyIndex) && scheduledHosts.length === 0) test.skip();
   if (scheduledHosts.length === 0) {
-    throw new Error(`PAGEROOT_CENSUS_ONLY_INDEX did not match a host: ${onlyIndex}`);
+    throw new Error(`STEMMIO_CENSUS_ONLY_INDEX did not match a host: ${onlyIndex}`);
   }
-  console.log(`PageRootV2 real census discovered ${hosts.length} visible hosts.`);
+  console.log(`StemmioV2 real census discovered ${hosts.length} visible hosts.`);
   const stats = {
     sourcePath: path.basename(sourcePath),
     discoveredEditableHosts: 0,
@@ -916,7 +916,7 @@ test(`DOM editing compatibility scan covers every visible V2 host (${shardIndex 
       await activate();
       const active = loaded.frame.locator('[contenteditable="true"]');
       await expect(active).toHaveCount(1);
-      const activeId = await active.getAttribute("data-pageroot-id");
+      const activeId = await active.getAttribute("data-stemmio-id");
       if (!activeId) throw new Error("Activated host lost its source identity.");
       if (testedHostPaths.has(host.domSelector)) {
         throw new Error(`Duplicate editable-host DOM path: ${host.domSelector}`);
@@ -955,7 +955,7 @@ test(`DOM editing compatibility scan covers every visible V2 host (${shardIndex 
       await expect(loaded.frame.locator('[contenteditable="true"]')).toHaveCount(0);
       stats.successfulHosts += 1;
       if (stats.successfulHosts % 50 === 0) {
-        console.log(`PageRootV2 real census progress: ${stats.successfulHosts}/${hosts.length}`);
+        console.log(`StemmioV2 real census progress: ${stats.successfulHosts}/${hosts.length}`);
       }
     } catch (error) {
       hostResult.status = "failed";
@@ -969,23 +969,23 @@ test(`DOM editing compatibility scan covers every visible V2 host (${shardIndex 
         text: host.text.trim().slice(0, 120),
         error: hostResult.error,
       });
-      console.log(`PageRootV2 census failure: ${JSON.stringify(stats.failures.at(-1))}`);
+      console.log(`StemmioV2 census failure: ${JSON.stringify(stats.failures.at(-1))}`);
       await page.keyboard.press("Escape").catch(() => undefined);
-      if (process.env.PAGEROOT_CENSUS_STOP_AFTER_FAILURE === "1") break;
+      if (process.env.STEMMIO_CENSUS_STOP_AFTER_FAILURE === "1") break;
       loaded = await loadRealHtml(page, sourcePath, identified);
     }
     stats.hosts.push(hostResult);
   }
 
   stats.discoveredEditableHosts = scheduledHosts.length;
-  console.log(`PageRootV2 real census summary: ${JSON.stringify({
+  console.log(`StemmioV2 real census summary: ${JSON.stringify({
     discoveredEditableHosts: stats.discoveredEditableHosts,
     successfulHosts: stats.successfulHosts,
     failedHosts: stats.failedHosts,
     successfulOperations: stats.successfulOperations,
     failedOperations: stats.failedOperations,
   })}`);
-  await testInfo.attach("pageroot-v2-real-editability-census.json", {
+  await testInfo.attach("stemmio-v2-real-editability-census.json", {
     body: Buffer.from(JSON.stringify(stats, null, 2)),
     contentType: "application/json",
   });
@@ -1006,7 +1006,7 @@ test("DOM compatibility scan preserves nested-list headings and wbr structure", 
   page,
 }) => {
   test.skip(
-    !process.env.PAGEROOT_REAL_HTML_PATH,
+    !process.env.STEMMIO_REAL_HTML_PATH,
     "The reported structural regressions run only against the explicit real HTML.",
   );
   const sourcePath = validatedRealHtmlPath();
@@ -1022,7 +1022,7 @@ test("DOM compatibility scan preserves nested-list headings and wbr structure", 
   const nested = frame.locator("#panel-outline > ol > li").first();
   const nestedHandle = await nested.elementHandle();
   if (!nestedHandle) throw new Error("The reported nested-list heading is missing.");
-  const nestedSourceId = await nested.getAttribute("data-pageroot-id");
+  const nestedSourceId = await nested.getAttribute("data-stemmio-id");
   if (!nestedSourceId) throw new Error("The nested-list heading lost source identity.");
   await nested.dblclick({
     position: await renderedTokenPosition(nestedHandle, "发现阶段"),
@@ -1053,10 +1053,10 @@ test("DOM compatibility scan preserves nested-list headings and wbr structure", 
   const wbrCandidate = frame.locator("#panel-terms p").filter({
     hasText: "软换行机会：HypertextMarkupLanguage",
   });
-  const wbrSourceId = await wbrCandidate.getAttribute("data-pageroot-id");
+  const wbrSourceId = await wbrCandidate.getAttribute("data-stemmio-id");
   if (!wbrSourceId) throw new Error("The wbr paragraph lost source identity.");
   const wbr = frame.locator(
-    `[data-pageroot-id="${escapeAttributeValue(wbrSourceId)}"]`,
+    `[data-stemmio-id="${escapeAttributeValue(wbrSourceId)}"]`,
   );
   const wbrHandle = await wbr.elementHandle();
   if (!wbrHandle) throw new Error("The reported wbr paragraph is missing.");
@@ -1094,7 +1094,7 @@ test("DOM compatibility scan preserves nested-list headings and wbr structure", 
 
 test("DOM compatibility scan round-trips end boundaries with only island normalization", async ({ page }, testInfo) => {
   test.skip(
-    !process.env.PAGEROOT_REAL_HTML_PATH,
+    !process.env.STEMMIO_REAL_HTML_PATH,
     "Named regressions run only when an explicit real HTML path is supplied.",
   );
   test.setTimeout(3 * 60_000);
@@ -1105,22 +1105,22 @@ test("DOM compatibility scan round-trips end boundaries with only island normali
   const scenarios = [
     {
       name: "header brand",
-      selector: "header.site-header a.brand-lockup > span:last-child[data-pageroot-id]",
+      selector: "header.site-header a.brand-lockup > span:last-child[data-stemmio-id]",
       boundaryToken: "2030",
     },
     {
       name: "hero real-world paragraph",
-      selector: ".hero .hero-lede[data-pageroot-id]",
+      selector: ".hero .hero-lede[data-stemmio-id]",
       boundaryToken: "保存。",
     },
     {
       name: "start-browsing link",
-      selector: '.hero .button-row > a.button[href="#dashboard"][data-pageroot-id]',
+      selector: '.hero .button-row > a.button[href="#dashboard"][data-stemmio-id]',
       boundaryToken: "开始浏览",
     },
     {
       name: "module-ordering paragraph",
-      selector: "#dashboard .section-heading > p:not(.kicker)[data-pageroot-id]",
+      selector: "#dashboard .section-heading > p:not(.kicker)[data-stemmio-id]",
       boundaryToken: "模块排序。",
     },
   ];
@@ -1137,7 +1137,7 @@ test("DOM compatibility scan round-trips end boundaries with only island normali
       position: await renderedTokenPosition(handle, scenario.boundaryToken),
     });
     await waitForEditableHost(frame, editor, target, scenario.name);
-    const sourceId = await target.getAttribute("data-pageroot-id");
+    const sourceId = await target.getAttribute("data-stemmio-id");
     if (!sourceId) throw new Error(`${scenario.name} lost its source identity.`);
     const beforeText = await target.textContent();
     const boundaryStart = beforeText.lastIndexOf(scenario.boundaryToken);
@@ -1173,7 +1173,7 @@ test("DOM compatibility scan round-trips end boundaries with only island normali
     report.push({ ...scenario, status: "passed", operations: 4 });
   }
 
-  await testInfo.attach("pageroot-v2-reported-boundaries.json", {
+  await testInfo.attach("stemmio-v2-reported-boundaries.json", {
     body: Buffer.from(JSON.stringify({
       targets: scenarios.length,
       successfulTargets: report.length,

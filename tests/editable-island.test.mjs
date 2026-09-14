@@ -22,7 +22,7 @@ function identify(html) {
 }
 
 function stripIdentity(html) {
-  return String(html).replace(/\s*data-pageroot-id="[^"]*"/gu, "");
+  return String(html).replace(/\s*data-stemmio-id="[^"]*"/gu, "");
 }
 
 function targetFor(rawHtml, tagName = "p") {
@@ -64,7 +64,7 @@ test("editable island normalizes only the edited content range and inverts byte-
       "<strong class='accent'",
       "<strong class=\"accent\" data-html-ai-source-node-id=\"stale\"",
     )
-    .replace("<!--keep-->", "<br data-pageroot-runtime=\"ignored\">末尾<!--keep-->");
+    .replace("<!--keep-->", "<br data-stemmio-runtime=\"ignored\">末尾<!--keep-->");
   const plan = planEditableIslandPatch(index, {
     targetRef,
     beforeInnerHtml: before,
@@ -126,11 +126,11 @@ test("editable island admits mixed inline markup, empty text and hard breaks", (
 });
 
 test("managed native line breaks receive one fresh persistent identity", () => {
-  const htmlId = "pr1_10000000000040008000000000000001";
-  const headId = "pr1_10000000000040008000000000000002";
-  const bodyId = "pr1_10000000000040008000000000000003";
-  const paragraphId = "pr1_10000000000040008000000000000004";
-  const html = `<html data-pageroot-id="${htmlId}"><head data-pageroot-id="${headId}"></head><body data-pageroot-id="${bodyId}"><p data-pageroot-id="${paragraphId}">first</p></body></html>`;
+  const htmlId = "sm1_10000000000040008000000000000001";
+  const headId = "sm1_10000000000040008000000000000002";
+  const bodyId = "sm1_10000000000040008000000000000003";
+  const paragraphId = "sm1_10000000000040008000000000000004";
+  const html = `<html data-stemmio-id="${htmlId}"><head data-stemmio-id="${headId}"></head><body data-stemmio-id="${bodyId}"><p data-stemmio-id="${paragraphId}">first</p></body></html>`;
   const { index, targetRef } = targetFor(html);
   const plan = planEditableIslandPatch(index, {
     targetRef,
@@ -138,16 +138,16 @@ test("managed native line breaks receive one fresh persistent identity", () => {
     nextInnerHtml: "first<br>second",
     expectedSourceSha256: index.sourceSha256,
   });
-  const createdPagerootIds = plan.metadata.createdPagerootIds;
-  assert.equal(createdPagerootIds.length, 1);
-  assert.match(createdPagerootIds[0], /^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u);
+  const createdStemmioIds = plan.metadata.createdStemmioIds;
+  assert.equal(createdStemmioIds.length, 1);
+  assert.match(createdStemmioIds[0], /^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u);
   assert.match(
     plan.metadata.nextInnerHtml,
-    new RegExp(`<br data-pageroot-id="${createdPagerootIds[0]}">`, "u"),
+    new RegExp(`<br data-stemmio-id="${createdStemmioIds[0]}">`, "u"),
   );
   const result = applyPatchPlan(plan, html);
-  assert.equal(result.sourceIndex.pagerootIdentity.complete, true);
-  assert.equal(result.sourceIndex.byPagerootId.has(createdPagerootIds[0]), true);
+  assert.equal(result.sourceIndex.stemmioIdentity.complete, true);
+  assert.equal(result.sourceIndex.byStemmioId.has(createdStemmioIds[0]), true);
   assert.equal(editableIslandDraftHtml(plan.metadata.nextInnerHtml, {
     baselineInnerHtml: "first",
   }), "first<br>second");
@@ -157,36 +157,36 @@ test("managed native line breaks receive one fresh persistent identity", () => {
     () => planEditableIslandPatch(index, {
       targetRef,
       beforeInnerHtml: "first",
-      nextInnerHtml: `first<br data-pageroot-id="pr1_20000000000040008000000000000001">second`,
+      nextInnerHtml: `first<br data-stemmio-id="sm1_20000000000040008000000000000001">second`,
       expectedSourceSha256: index.sourceSha256,
     }),
   );
 });
 
 test("editable island allows deleting an identified hard break", () => {
-  const strongId = "pr1_11111111111141118111111111111111";
-  const breakId = "pr1_22222222222242229222222222222222";
+  const strongId = "sm1_11111111111141118111111111111111";
+  const breakId = "sm1_22222222222242229222222222222222";
   assert.equal(
     normalizeEditableIslandHtml(
-      `<strong data-pageroot-id="${strongId}">文</strong>下一行`,
+      `<strong data-stemmio-id="${strongId}">文</strong>下一行`,
       {
         baselineInnerHtml:
-          `<strong data-pageroot-id="${strongId}">文</strong><br data-pageroot-id="${breakId}">下一行`,
+          `<strong data-stemmio-id="${strongId}">文</strong><br data-stemmio-id="${breakId}">下一行`,
       },
     ),
-    `<strong data-pageroot-id="${strongId}">文</strong>下一行`,
+    `<strong data-stemmio-id="${strongId}">文</strong>下一行`,
   );
   assert.equal(
     normalizeEditableIslandHtml("firstsecond", {
-      baselineInnerHtml: `first<br data-pageroot-id="${breakId}">second`,
+      baselineInnerHtml: `first<br data-stemmio-id="${breakId}">second`,
     }),
     "firstsecond",
   );
 });
 
 test("editable island replays multiple line-break identities in DOM order", () => {
-  const firstBreakId = "pr1_92000000000040008000000000000001";
-  const secondBreakId = "pr1_92000000000040008000000000000002";
+  const firstBreakId = "sm1_92000000000040008000000000000001";
+  const secondBreakId = "sm1_92000000000040008000000000000002";
   const allocated = materializeEditableIslandHtml("first<br>second<br>third", {
     baselineInnerHtml: "first",
     randomUUID: (() => {
@@ -197,40 +197,40 @@ test("editable island replays multiple line-break identities in DOM order", () =
       return () => values.shift();
     })(),
   });
-  assert.deepEqual(allocated.createdPagerootIds, [firstBreakId, secondBreakId]);
+  assert.deepEqual(allocated.createdStemmioIds, [firstBreakId, secondBreakId]);
   assert.equal(
     allocated.html,
-    `first<br data-pageroot-id="${firstBreakId}">second<br data-pageroot-id="${secondBreakId}">third`,
+    `first<br data-stemmio-id="${firstBreakId}">second<br data-stemmio-id="${secondBreakId}">third`,
   );
   assert.deepEqual(materializeEditableIslandHtml(allocated.html, {
     baselineInnerHtml: "first",
-    replayPagerootIds: [firstBreakId, secondBreakId],
+    replayStemmioIds: [firstBreakId, secondBreakId],
   }), allocated);
   assertIslandError(
     "EDITABLE_ISLAND_IDENTITY_EVIDENCE_MISMATCH",
     () => materializeEditableIslandHtml(allocated.html, {
       baselineInnerHtml: "first",
-      replayPagerootIds: [secondBreakId, firstBreakId],
+      replayStemmioIds: [secondBreakId, firstBreakId],
     }),
   );
 });
 
 test("editable island preserves persistent IDs while allowing identified new inline structure", () => {
-  const strongId = "pr1_11111111111141118111111111111111";
-  const breakId = "pr1_22222222222242229222222222222222";
-  const baseline = `<strong data-pageroot-id="${strongId}">原文</strong><em data-pageroot-id="pr1_3333333333334333a333333333333333"></em>`;
+  const strongId = "sm1_11111111111141118111111111111111";
+  const breakId = "sm1_22222222222242229222222222222222";
+  const baseline = `<strong data-stemmio-id="${strongId}">原文</strong><em data-stemmio-id="sm1_3333333333334333a333333333333333"></em>`;
   assert.equal(
     normalizeEditableIslandHtml(
-      `<strong data-pageroot-id="${strongId}">新文</strong><br data-pageroot-id="${breakId}"><em data-pageroot-id="pr1_3333333333334333a333333333333333"></em>`,
+      `<strong data-stemmio-id="${strongId}">新文</strong><br data-stemmio-id="${breakId}"><em data-stemmio-id="sm1_3333333333334333a333333333333333"></em>`,
       { baselineInnerHtml: baseline },
     ),
-    `<strong data-pageroot-id="${strongId}">新文</strong><br data-pageroot-id="${breakId}"><em data-pageroot-id="pr1_3333333333334333a333333333333333"></em>`,
+    `<strong data-stemmio-id="${strongId}">新文</strong><br data-stemmio-id="${breakId}"><em data-stemmio-id="sm1_3333333333334333a333333333333333"></em>`,
   );
   assertIslandError(
     "EDITABLE_ISLAND_PERSISTENT_ID_CHANGED",
     () => normalizeEditableIslandHtml(
-      `<strong data-pageroot-id="pr1_4444444444444444b444444444444444">新文</strong>`,
-      { baselineInnerHtml: `<strong data-pageroot-id="${strongId}">原文</strong>` },
+      `<strong data-stemmio-id="sm1_4444444444444444b444444444444444">新文</strong>`,
+      { baselineInnerHtml: `<strong data-stemmio-id="${strongId}">原文</strong>` },
     ),
   );
 });

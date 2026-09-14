@@ -45,18 +45,18 @@ test("contained document base ignores inert and href-less base elements", () => 
 
 test("contained document base rejects absolute and scheme-relative sentinel URLs", () => {
   assert.equal(
-    resolveContainedDocumentBase('<base href="https://pageroot-preview.invalid/assets/">'),
+    resolveContainedDocumentBase('<base href="https://stemmio-preview.invalid/assets/">'),
     null,
   );
   assert.equal(
-    resolveContainedDocumentBase('<base href="//pageroot-preview.invalid/assets/">'),
+    resolveContainedDocumentBase('<base href="//stemmio-preview.invalid/assets/">'),
     null,
   );
 });
 
 test("declared asset discovery caps missing-reference probes before they can delay a preview session", async (t) => {
   const temporaryRoot = await mkdtemp(
-    path.join(tmpdir(), "pageroot-preview-declared-asset-cap-"),
+    path.join(tmpdir(), "stemmio-preview-declared-asset-cap-"),
   );
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   await writeFile(path.join(temporaryRoot, "later.png"), "later asset");
@@ -78,7 +78,7 @@ test("declared asset discovery caps missing-reference probes before they can del
 
 test("declared asset discovery applies an authored base only for the Edit runtime caller", async (t) => {
   const temporaryRoot = await mkdtemp(
-    path.join(tmpdir(), "pageroot-preview-document-base-"),
+    path.join(tmpdir(), "stemmio-preview-document-base-"),
   );
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   await mkdir(path.join(temporaryRoot, "assets"));
@@ -177,12 +177,12 @@ test("private preview bootstrap bytes are consumed before authored fetches", asy
   const session = await controller.createSession({
     html: [
       "<!doctype html>",
-      '<script data-pageroot-ai-review-bootstrap="true"',
+      '<script data-stemmio-ai-review-bootstrap="true"',
       ` src="${PREVIEW_BOOTSTRAP_PATH}"></script>`,
       "<main>public preview bytes</main>",
     ].join(""),
     bootstrapJavaScript: [
-      "const reviewCommentInitialBindings = ['pr1_11111111111141118111111111111111'];",
+      "const reviewCommentInitialBindings = ['sm1_11111111111141118111111111111111'];",
       "const runtimeProjectionInitialBindings = ['runtime-host-1'];",
     ].join("\n"),
     bootstrapFallbackJavaScript: "const publicBootstrap = true;",
@@ -194,7 +194,7 @@ test("private preview bootstrap bytes are consumed before authored fetches", asy
     /reviewCommentInitialBindings|runtimeProjectionInitialBindings|runtime-host-1/u,
   );
 
-  const bootstrapUrl = `pageroot-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`;
+  const bootstrapUrl = `stemmio-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`;
   const firstBootstrap = await controller.handleRequest(new Request(bootstrapUrl));
   const firstBootstrapSource = await firstBootstrap.text();
   assert.match(firstBootstrapSource, /reviewCommentInitialBindings/u);
@@ -217,7 +217,7 @@ test("private preview bootstrap bytes are consumed before authored fetches", asy
 
 test("independent preview protocol serves one volatile document and bounded local assets", async (t) => {
   const temporaryRoot = await mkdtemp(
-    path.join(tmpdir(), "pageroot-preview-protocol-"),
+    path.join(tmpdir(), "stemmio-preview-protocol-"),
   );
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const siteRoot = path.join(temporaryRoot, "site");
@@ -316,7 +316,7 @@ test("independent preview protocol serves one volatile document and bounded loca
   });
   assert.deepEqual(session, {
     sessionId: "0123456789abcdef0123456789abcdef",
-    url: "pageroot-preview://0123456789abcdef0123456789abcdef/index.html",
+    url: "stemmio-preview://0123456789abcdef0123456789abcdef/index.html",
   });
   assert.equal(controller.sessionCount(), 1);
 
@@ -333,13 +333,13 @@ test("independent preview protocol serves one volatile document and bounded loca
   );
 
   const bootstrapResponse = await handler(new Request(
-    `pageroot-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`,
+    `stemmio-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`,
   ));
   assert.equal(bootstrapResponse.status, 200);
   assert.match(await bootstrapResponse.text(), /previewBootstrap/);
 
   const assetResponse = await handler(new Request(
-    `pageroot-preview://${session.sessionId}/chart.js`,
+    `stemmio-preview://${session.sessionId}/chart.js`,
   ));
   assert.equal(assetResponse.status, 200);
   assert.equal(await assetResponse.text(), "asset response");
@@ -398,7 +398,7 @@ test("independent preview protocol serves one volatile document and bounded loca
   assert.equal(unlistedAsset.status, 404);
 
   const escapedAsset = await handler(new Request(
-    `pageroot-preview://${session.sessionId}/escape.js`,
+    `stemmio-preview://${session.sessionId}/escape.js`,
   ));
   assert.equal(escapedAsset.status, 404);
   assert.equal(fetched.length, 10);
@@ -421,13 +421,13 @@ test("preview protocol rejects malformed methods, payloads, and unknown sessions
   assert.equal(
     (await controller.handleRequest({
       method: "POST",
-      url: "pageroot-preview://fedcba9876543210fedcba9876543210/index.html",
+      url: "stemmio-preview://fedcba9876543210fedcba9876543210/index.html",
     })).status,
     400,
   );
   assert.equal(
     (await controller.handleRequest(new Request(
-      "pageroot-preview://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/index.html",
+      "stemmio-preview://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/index.html",
     ))).status,
     404,
   );
@@ -457,7 +457,7 @@ test("a preview navigation attempt activates one scriptless bootstrap fallback",
   const session = await controller.createSession({
     html: [
       "<!doctype html>",
-      '<html><head><script data-pageroot-ai-review-bootstrap="true"',
+      '<html><head><script data-stemmio-ai-review-bootstrap="true"',
       ` src="${PREVIEW_BOOTSTRAP_PATH}"></script>`,
       '<script src="author-chart.js"></script></head>',
       '<body onload="location.replace(\'data:text/html,forged\')">',
@@ -479,9 +479,9 @@ test("a preview navigation attempt activates one scriptless bootstrap fallback",
   const fallbackHtml = await fallbackResponse.text();
   assert.match(
     fallbackHtml,
-    /data-pageroot-preview-navigation-fallback="true"/u,
+    /data-stemmio-preview-navigation-fallback="true"/u,
   );
-  assert.match(fallbackHtml, /data-pageroot-ai-review-bootstrap="true"/u);
+  assert.match(fallbackHtml, /data-stemmio-ai-review-bootstrap="true"/u);
   assert.doesNotMatch(fallbackHtml, /authorNavigationRan|author-chart\.js/u);
   assert.equal((fallbackHtml.match(/<script\b/gu) || []).length, 1);
   const fallbackCsp = fallbackResponse.headers.get("content-security-policy") || "";
@@ -494,14 +494,14 @@ test("a preview navigation attempt activates one scriptless bootstrap fallback",
   assert.match(fallbackCsp, /frame-src 'none'/u);
 
   const bootstrapResponse = await controller.handleRequest(new Request(
-    `pageroot-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`,
+    `stemmio-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`,
   ));
   assert.match(await bootstrapResponse.text(), /ownedBootstrapRan/u);
 });
 
 test("preview keeps sibling assets beside the original after HTML is copied into a project", async (t) => {
   const temporaryRoot = await mkdtemp(
-    path.join(tmpdir(), "pageroot-preview-imported-siblings-"),
+    path.join(tmpdir(), "stemmio-preview-imported-siblings-"),
   );
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const originalDirectory = path.join(temporaryRoot, "原稿");
@@ -615,7 +615,7 @@ test("a full preview session map evicts the least-recently-accessed idle session
 
 test("refreshing a preview session keeps its id and replaces declared sibling assets", async (t) => {
   const temporaryRoot = await mkdtemp(
-    path.join(tmpdir(), "pageroot-preview-session-refresh-"),
+    path.join(tmpdir(), "stemmio-preview-session-refresh-"),
   );
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   await writeFile(path.join(temporaryRoot, "first.png"), "first");
@@ -646,10 +646,10 @@ test("refreshing a preview session keeps its id and replaces declared sibling as
   assert.equal(refreshed.url, first.url);
   assert.equal(controller.sessionCount(), 1);
   assert.equal((await controller.handleRequest(new Request(
-    `pageroot-preview://${first.sessionId}/second.png`,
+    `stemmio-preview://${first.sessionId}/second.png`,
   ))).status, 200);
   assert.equal((await controller.handleRequest(new Request(
-    `pageroot-preview://${first.sessionId}/first.png`,
+    `stemmio-preview://${first.sessionId}/first.png`,
   ))).status, 404);
   assert.equal(fetched.length, 1);
 });

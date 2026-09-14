@@ -159,8 +159,8 @@ test("macOS /var aliases preserve a started preparation identity", async () => {
       revoke: async () => {},
     },
   });
-  const temporaryPath = "/var/folders/example/pageroot/report-V1.html";
-  const privateTemporaryPath = "/private/var/folders/example/pageroot/report-V1.html";
+  const temporaryPath = "/var/folders/example/stemmio/report-V1.html";
+  const privateTemporaryPath = "/private/var/folders/example/stemmio/report-V1.html";
 
   session.refresh(input({ sourcePath: temporaryPath }));
   assert.equal(session.startPreparation(input({ sourcePath: temporaryPath })), true);

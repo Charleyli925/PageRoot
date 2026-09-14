@@ -1,4 +1,4 @@
-name: Setup PageRoot npm
+name: Setup Stemmio npm
 description: Restore or populate the OS/lockfile node_modules cache.
 
 inputs:

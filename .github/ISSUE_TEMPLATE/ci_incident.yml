@@ -1,5 +1,5 @@
 name: CI incident
-description: Classify a repeated PageRoot test, runner or artifact failure on one exact SHA.
+description: Classify a repeated Stemmio test, runner or artifact failure on one exact SHA.
 title: "ci: "
 body:
   - type: markdown
@@ -35,7 +35,7 @@ body:
     id: signature
     attributes:
       label: Normalized failure signature
-      placeholder: pageroot-ci-v1:...
+      placeholder: stemmio-ci-v1:...
     validations:
       required: true
   - type: dropdown

@@ -87,7 +87,7 @@ export function mutateOpenAiCompatibleCandidateHtml(html, reasoning) {
   return source
     .replace(
       /<body([^>]*)>/iu,
-      `<body$1 data-pageroot-http-agent="e2e" data-pageroot-http-reasoning="${applied}">`,
+      `<body$1 data-stemmio-http-agent="e2e" data-stemmio-http-reasoning="${applied}">`,
     )
     .replace(
       /(<h1\b[^>]*>)\u771f\u5b9e /iu,
@@ -133,7 +133,7 @@ export function startOpenAiCompatibleHttpAgent({
           } catch {
             payload = {};
           }
-          const isPreflight = raw.includes("PageRoot preflight")
+          const isPreflight = raw.includes("Stemmio preflight")
             || payload.max_tokens === 256
             || payload.max_completion_tokens === 256;
           if (mode === "runtime-balance" && !isPreflight) {

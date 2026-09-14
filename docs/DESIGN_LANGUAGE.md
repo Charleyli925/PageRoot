@@ -1,4 +1,4 @@
-# PageRoot 设计语言
+# Stemmio 设计语言
 
 - 设计体系入口：[PRODUCT_DESIGN_SYSTEM](PRODUCT_DESIGN_SYSTEM.md)；审阅协议：[DESIGN_REVIEW_PROTOCOL](DESIGN_REVIEW_PROTOCOL.md)。
 - 状态：v1。全部原则从既有产品事实提炼——`app/globals.css` 级联入口导入的
@@ -16,7 +16,7 @@
 
 ## 1. 设计立场
 
-PageRoot 的设计只追求两件事：
+Stemmio 的设计只追求两件事：
 
 1. **秒懂**。用户理解成本最低：复杂度低、交互和文字提示一眼即懂、
    全产品一致。用户心智模型必须能压缩到几句话

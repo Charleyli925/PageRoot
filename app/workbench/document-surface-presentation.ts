@@ -123,7 +123,7 @@ export function useDocumentSurfaceHandoff({
   }, [controller]);
   const markFirstScroll = useCallback((tabId: string, scrollTop: number) => {
     controller?.deferDocumentSurfacePrewarm();
-    performance.mark("pageroot:tab-cache:first-scroll-response", {
+    performance.mark("stemmio:tab-cache:first-scroll-response", {
       detail: Object.freeze({ tabId, scrollTop }),
     });
   }, [controller]);

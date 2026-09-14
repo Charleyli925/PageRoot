@@ -5,7 +5,7 @@ import {
   exportCurrentHtml,
   identifiedHtmlBuffer,
   loadFixture,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 function computedStyleFixture() {
   return identifiedHtmlBuffer(Buffer.from(`<!doctype html>

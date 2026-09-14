@@ -1,5 +1,5 @@
 export const AGENT_SERVICE_LABELS = Object.freeze({
-  pageroot: "内置 AI",
+  stemmio: "内置 AI",
   qoder: "Qoder",
   codex: "Codex",
 });
@@ -28,5 +28,5 @@ export function shouldPersistDefaultAgentProvider({
 } = {}) {
   if (!preferredId || preferredId === storedDefaultId) return false;
   if (storedDefaultId && disabledAgentProviderIds.includes(storedDefaultId)) return false;
-  return preferredId === "pageroot" || preferredId === "qoder" || preferredId === "codex";
+  return preferredId === "stemmio" || preferredId === "qoder" || preferredId === "codex";
 }

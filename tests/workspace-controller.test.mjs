@@ -151,7 +151,7 @@ function registrationPayload({
     currentHtmlSha256: sourceSha256,
     content: html,
     project: { displayName: "Canonical project" },
-    paths: { projectRecords: "/tmp/PageRoot/project_registration" },
+    paths: { projectRecords: "/tmp/Stemmio/project_registration" },
     versions: [{ id: "V1" }],
     runtimeState: { draft },
     recoveryIdentity: { token: "recovery_identity" },
@@ -504,12 +504,12 @@ test("workspace controller publishes one recovered Working Copy signal from Brid
 });
 
 test("managed registration activates the exact V1 Working Copy before publishing Sessions", async (t) => {
-  const workingCopyPath = "/tmp/PageRoot/项目/managed/managed-V1.html";
+  const workingCopyPath = "/tmp/Stemmio/项目/managed/managed-V1.html";
   const managedHtml = "<main>managed V1 source</main>";
   const target = {
     projectId: "project_managed",
     documentId: "document_managed",
-    projectRootPath: "/tmp/PageRoot/项目/managed",
+    projectRootPath: "/tmp/Stemmio/项目/managed",
     targetKind: "working-copy",
     workingCopyId: "work_ver_0001",
     versionId: "ver_0001",
@@ -619,7 +619,7 @@ test("managed registration activates the exact V1 Working Copy before publishing
     documentId: "document_managed",
     workingCopyId: "work_ver_0001",
     versionId: "ver_0001",
-    projectRootPath: "/tmp/PageRoot/项目/managed",
+    projectRootPath: "/tmp/Stemmio/项目/managed",
   });
 });
 
@@ -638,7 +638,7 @@ test("managed registration resumes a post-commit publication under the same oper
   const target = {
     projectId: "project_registration_continuation",
     documentId: "document_registration_continuation",
-    projectRootPath: "/tmp/PageRoot/项目/registration-continuation",
+    projectRootPath: "/tmp/Stemmio/项目/registration-continuation",
     targetKind: "working-copy",
     workingCopyId: "work_registration_continuation",
     versionId: "ver_registration_continuation",
@@ -743,7 +743,7 @@ test("first autosave resumes registration before persisting a later same-documen
   const target = {
     projectId: "project_registration_autosave",
     documentId: "document_registration_autosave",
-    projectRootPath: "/tmp/PageRoot/项目/registration-autosave",
+    projectRootPath: "/tmp/Stemmio/项目/registration-autosave",
     targetKind: "working-copy",
     workingCopyId: "work_registration_autosave",
     versionId: "ver_registration_autosave",
@@ -1086,7 +1086,7 @@ test("late registration reconciliation preserves edits and comments made after a
   const target = {
     projectId: "project_registration_history_continuation",
     documentId: "document_registration_history_continuation",
-    projectRootPath: "/tmp/PageRoot/项目/registration-history-continuation",
+    projectRootPath: "/tmp/Stemmio/项目/registration-history-continuation",
     targetKind: "working-copy",
     workingCopyId: "work_registration_history_continuation",
     versionId: "ver_registration_history_continuation",
@@ -1264,7 +1264,7 @@ test("managed registration rejects an incomplete OpenTarget before Desktop or Se
   const baseTarget = {
     projectId: "project_incomplete_target",
     documentId: "document_incomplete_target",
-    projectRootPath: "/tmp/PageRoot/项目/incomplete-target",
+    projectRootPath: "/tmp/Stemmio/项目/incomplete-target",
     targetKind: "working-copy",
     workingCopyId: "work_ver_0001",
     versionId: "ver_0001",
@@ -1274,7 +1274,7 @@ test("managed registration rejects an incomplete OpenTarget before Desktop or Se
 
   for (const [label, mutateTarget] of [
     ["missing exactSourcePath", (target) => { delete target.exactSourcePath; }],
-    ["wrong exactSourcePath", (target) => { target.exactSourcePath = "/tmp/PageRoot/项目/incomplete-target/other-V1.html"; }],
+    ["wrong exactSourcePath", (target) => { target.exactSourcePath = "/tmp/Stemmio/项目/incomplete-target/other-V1.html"; }],
     ["wrong sourceSha256", (target) => { target.sourceSha256 = `sha256:${"0".repeat(64)}`; }],
     ["missing OpenTarget", null],
   ]) {
@@ -1352,7 +1352,7 @@ test("managed registration fails closed when its destination locator already own
   const target = {
     projectId: "project_registration",
     documentId: "document_registration",
-    projectRootPath: "/tmp/PageRoot/项目/occupied",
+    projectRootPath: "/tmp/Stemmio/项目/occupied",
     targetKind: "working-copy",
     workingCopyId: "work_ver_0001",
     versionId: "ver_0001",
@@ -1432,7 +1432,7 @@ test("managed activation reports unknown when a destination collision appears af
   const target = {
     projectId: "project_registration_race",
     documentId: "document_registration_race",
-    projectRootPath: "/tmp/PageRoot/项目/race",
+    projectRootPath: "/tmp/Stemmio/项目/race",
     targetKind: "working-copy",
     workingCopyId: "work_ver_race",
     versionId: "ver_race",
@@ -1553,7 +1553,7 @@ test("managed registration fences edits during host activation and rebinds the l
   const target = {
     projectId: "project_registration_edit_race",
     documentId: "document_registration_edit_race",
-    projectRootPath: "/tmp/PageRoot/项目/edit-race",
+    projectRootPath: "/tmp/Stemmio/项目/edit-race",
     targetKind: "working-copy",
     workingCopyId: "work_ver_edit_race",
     versionId: "ver_edit_race",
@@ -1763,12 +1763,12 @@ test("managed registration fences edits during host activation and rebinds the l
 });
 
 test("managed registration fails closed when its desktop Working Copy activation is unavailable", async () => {
-  const workingCopyPath = "/tmp/PageRoot/项目/unavailable/unavailable-V1.html";
+  const workingCopyPath = "/tmp/Stemmio/项目/unavailable/unavailable-V1.html";
   const managedHtml = "<main>managed V1 source</main>";
   const target = {
     projectId: "project_unavailable",
     documentId: "document_unavailable",
-    projectRootPath: "/tmp/PageRoot/项目/unavailable",
+    projectRootPath: "/tmp/Stemmio/项目/unavailable",
     targetKind: "working-copy",
     workingCopyId: "work_ver_0001",
     versionId: "ver_0001",

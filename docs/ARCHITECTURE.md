@@ -1,6 +1,6 @@
 # Architecture
 
-PageRoot is an Electron application with a React renderer and a local Bridge process.
+Stemmio is an Electron application with a React renderer and a local Bridge process.
 
 ```text
 User HTML bytes
@@ -26,7 +26,7 @@ Token, OpenAI-compatible HTTPS), a managed Qoder or Codex ACP session, or the
 existing clipboard fallback. Internally, current execution binds by canonical
 provider/runtime selection. Historical `mode: "qoder-acp"` Request records are
 projected to the `qoder` provider and shared `acp` runtime at the delivery
-codec; Codex uses the same runtime with `providerId: "codex"`; 源页 Agent uses `pageroot` /
+codec; Codex uses the same runtime with `providerId: "codex"`; 源页 Agent uses `stemmio` /
 `http`, with model and thinking-depth choice on the conversation sidebar.
 Unknown providers and runtimes fail closed. The packaged application
 contains no private Codex runtime or native Codex package; Codex is resolved
@@ -80,8 +80,8 @@ the historical synthetic-spike decision.
 - A clean projection mismatch is repaired automatically by one authoritative
   source reread and one bounded Canvas rebuild. Failure stays fail-closed and
   never asks the user to reconcile internal Hash state manually.
-- Pure-browser preview is a supported read-only route. It may run authored page interactions inside the sandbox, but it exposes no PageRoot edit, comment, attachment, project-write, or AI-submit authority.
-- Desktop interactive preview uses a short-lived `pageroot-preview:` document
+- Pure-browser preview is a supported read-only route. It may run authored page interactions inside the sandbox, but it exposes no Stemmio edit, comment, attachment, project-write, or AI-submit authority.
+- Desktop interactive preview uses a short-lived `stemmio-preview:` document
   instead of `srcdoc`, so the authored page does not inherit the renderer's
   `script-src 'self'` policy. The main process owns the volatile session and
   serves only its prepared HTML, its fixed bootstrap and a session-specific
@@ -97,7 +97,7 @@ the historical synthetic-spike decision.
 - On desktop, a clean persisted document with a supported executable `script`
   program may receive one Main-authorized resource closure. The visible Edit
   iframe parses source with author scripts inert, proves the complete parser-
-  authored object set, then activates those scripts in source order; PageRoot does not
+  authored object set, then activates those scripts in source order; Stemmio does not
   wait for arbitrary script completion, freeze activity or audit Runtime DOM against source.
   Same-origin `window.parent` access, including renderer-exposed preload APIs,
   remains the accepted in-place-editing cost. Unsupported programs fail closed
@@ -205,7 +205,7 @@ the historical synthetic-spike decision.
   before-side comment targeting; neither capability changes the diff authority.
 
   Frozen comments use a separate private locator capability. Review reads
-  `data-pageroot-id` already present in frozen source HTML and never writes a
+  `data-stemmio-id` already present in frozen source HTML and never writes a
   parseKey or second identity attribute onto the prepared document. For every
   source-resolved before target the analyzer keeps an opaque initial-bootstrap
   binding: the Stable ID plus a parser path and a narrow static fingerprint.
@@ -273,7 +273,7 @@ the historical synthetic-spike decision.
   progress through frame-to-frame convergence instead of a single jump;
   Scroll mode controls only scroll following. No review state or authored
   runtime mutation has source, Version or project authority.
-- `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
+- `IslandEditingController` is the only production text-edit engine in Stemmio 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - Transparent inline host discovery records the nearest safe editable island while climbing. Nested non-inline HTML, embeds and foreign subtrees stay frozen atoms inside that island; they are never a second text engine or a disposable fragment host.
 - `native-edit-policy` owns shared session attributes and checkpoint timing. `native-layout-fingerprint` records geometry and text style so `HtmlCanvasEditor` can observe post-entry drift; it does not refuse to enter an island. MutationObserver rollback and checkpoint scope remain the fail-closed safety net. The retired `nativeRuntimePreflight` / `RuntimeDomSourceMap` stack is not on the production path; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
@@ -308,11 +308,11 @@ services.
 | Renderer Agent catalog, provider-keyed diagnostic projection, selected provider/runtime/model/reasoning, bounded public model catalog, selection-keyed use-time preflight and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Settings consumes `AgentDiagnosticSnapshot` and never creates an execution ticket. Neither card receives command, version, path, npm prefix or Token bytes |
 | Product ACP allowlist, managed-install inventory, in-flight install/login jobs and install/login drain | `bridge/agent/catalog/agent-catalog.mjs`, `agent-installer.mjs` and `agent-access-auth.mjs`; Coordinator does not own install or login. Login operations keep a Bridge-minted `operationId` through succeeded/cancelled/failed; diagnosis cannot finish or clear them. Qoder and Codex ACP are the installable shipped ACP entries. 源页 Agent is not installable |
 | Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `bridge/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; current execution binds by canonical selection only; historical `mode: "qoder-acp"` conversion stays in the delivery codec; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
-| Trusted-local Qoder installation discovery, read-only diagnosis, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; diagnosis uses only version/model-list commands and does not open ACP. Candidates are collected before selecting a valid user CLI, then a PageRoot-managed installation. A broken lower-priority candidate is diagnostic only when a valid higher-priority candidate exists. Historical `mode: "qoder-acp"` remains readable at the delivery codec and status projection; current execution does not map a leftover driver alias |
-| Codex ACP installation discovery, pinned adapter+native closure, read-only login diagnosis, ACP initialize/session preflight and client-mediated launch | `bridge/agent/providers/codex-acp-provider.mjs`; candidates are collected before selecting explicit test configuration, PageRoot-managed installation, then user-global installation. A broken lower-priority candidate is diagnostic only when a valid higher-priority candidate exists. Start-time verification rechecks both the adapter and native executable identities against the ticket |
-| PageRoot native OpenAI-compatible HTTP Agent, bounded diagnosis, vendor Token preflight and model catalog | `bridge/agent/providers/openai-compatible-provider.mjs` plus `shared/openai-compatible-vendors.mjs`; built-in vendors may diagnose through `/models`, while Custom validates saved configuration without assuming that route. Session Token stays in Coordinator memory; an explicit remember writes only Main `safeStorage` ciphertext. Anthropic is not registered |
+| Trusted-local Qoder installation discovery, read-only diagnosis, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; diagnosis uses only version/model-list commands and does not open ACP. Candidates are collected before selecting a valid user CLI, then a Stemmio-managed installation. A broken lower-priority candidate is diagnostic only when a valid higher-priority candidate exists. Historical `mode: "qoder-acp"` remains readable at the delivery codec and status projection; current execution does not map a leftover driver alias |
+| Codex ACP installation discovery, pinned adapter+native closure, read-only login diagnosis, ACP initialize/session preflight and client-mediated launch | `bridge/agent/providers/codex-acp-provider.mjs`; candidates are collected before selecting explicit test configuration, Stemmio-managed installation, then user-global installation. A broken lower-priority candidate is diagnostic only when a valid higher-priority candidate exists. Start-time verification rechecks both the adapter and native executable identities against the ticket |
+| Stemmio native OpenAI-compatible HTTP Agent, bounded diagnosis, vendor Token preflight and model catalog | `bridge/agent/providers/openai-compatible-provider.mjs` plus `shared/openai-compatible-vendors.mjs`; built-in vendors may diagnose through `/models`, while Custom validates saved configuration without assuming that route. Session Token stays in Coordinator memory; an explicit remember writes only Main `safeStorage` ciphertext. Anthropic is not registered |
 | Provider-neutral ACP protocol, process supervisor and immutable standard event envelope | `bridge/agent/runtimes/acp-runtime.mjs`, `acp-protocol.mjs`, `acp-process.mjs` and `acp-verified-javascript.mjs`; `bridge/qoder-acp-client.mjs` is a compatibility façade |
-| PageRoot native HTTP runtime: streaming `/chat/completions`, unique output write and official finalizer | `bridge/agent/runtimes/http-runtime.mjs`; SSE content is accumulated only inside Bridge, while reasoning/usage/heartbeat update activity without entering narration. HTTP and ACP turns use a 45-minute sliding inactivity watchdog rather than a total-duration deadline. A disconnect, cancellation or timeout before protocol completion writes no Candidate; Candidate authority remains the official finalizer |
+| Stemmio native HTTP runtime: streaming `/chat/completions`, unique output write and official finalizer | `bridge/agent/runtimes/http-runtime.mjs`; SSE content is accumulated only inside Bridge, while reasoning/usage/heartbeat update activity without entering narration. HTTP and ACP turns use a 45-minute sliding inactivity watchdog rather than a total-duration deadline. A disconnect, cancellation or timeout before protocol completion writes no Candidate; Candidate authority remains the official finalizer |
 | Public Agent failure recovery | `agent-runtime-coordinator.mjs` computes `safeToRetry` independently from `recoveryKind`; `agent-session-projector.mjs` exposes only that structured pair plus a bounded error. Renderer actions never infer recovery from provider text and remain capped at two |
 | Frozen execution policy and single-output client-mediated Host Port | `bridge/agent/policies/` and `bridge/agent/hosts/`; these constrain only requests made through the ACP Client Host, never native filesystem/command actions inside an Agent process |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
@@ -355,7 +355,7 @@ services.
 | AI run conversation and live narration presentation | `app/workbench/run-conversation-outlet.tsx`, `app/workbench/AiConversationSidebar.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
-| Persistent source element ID format, generation and attribute classification | `app/lib/pageroot-element-identity.js`; ADR 0059 |
+| Persistent source element ID format, generation and attribute classification | `app/lib/stemmio-element-identity.js`; ADR 0059 |
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
 | Formal AI review text and element-presence analysis, first-bootstrap exact comment binding, global mask and overlay projection | `app/workbench/review-document.ts` orchestrates `app/workbench/review/` pipeline modules (parse, semantic pairing, element-presence diff, text diff, comment binding, projection and serialize) |
 | Formal AI review composition, private comment/projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
@@ -374,11 +374,11 @@ FormatSkeleton and structural planner have been removed. The architecture gate
 rejects reintroducing those files or imports; production text editing has one
 V2 controller route with one element-island transaction scope.
 
-`SourceIndex` also recognizes the ADR 0059 `data-pageroot-id` contract and maps
+`SourceIndex` also recognizes the ADR 0059 `data-stemmio-id` contract and maps
 only valid, document-unique values back to exact source element records. Missing,
 malformed and duplicated identities are diagnostics, not an instruction from
 the parser to rewrite HTML. The persistent element identity is only
-`data-pageroot-id`. Parser-local handles (`nodeId` / `parseKey`) stay inside
+`data-stemmio-id`. Parser-local handles (`nodeId` / `parseKey`) stay inside
 `SourceIndex` / `SourcePatchEngine` for one parse of one revision: they never
 enter Runtime DOM, TargetRef, Selection, comments, Review or history.
 ADR 0060 gives `ProjectFileRepository` the separate one-time migration
@@ -511,7 +511,7 @@ copy.
 
 A durable command for an already registered v4 Project File carries one captured
 `projectId + documentId + sourcePath` context plus the OpenTarget. The Bridge
-resolves only the v4 Project File Registry (`.pageroot-registry.json`); it does
+resolves only the v4 Project File Registry (`.stemmio-registry.json`); it does
 not read `project-registry.json` or historical Documents workspace roots. It
 never creates a project while serving a registered mutation. Only
 `/project/ensure` may import unregistered HTML as a new v4 V1. An HTML file
@@ -614,8 +614,8 @@ second write authority.
 When no desktop project can be restored, the main process provisions the built-in welcome content once as a regular HTML source beside the selected workspace and immediately registers its initial V1 through the authenticated Bridge. Existing welcome bytes are never replaced on startup. From that point onward it uses the same source, comment, Request, handoff and Version boundaries as any user-opened HTML.
 
 For newly imported project files, the Finder project root is the durable
-container: `.pageroot/project.json` owns `projectId`/`documentId`,
-`.pageroot/manifest.json` owns relative Version/Working Copy mapping, and the
+container: `.stemmio/project.json` owns `projectId`/`documentId`,
+`.stemmio/manifest.json` owns relative Version/Working Copy mapping, and the
 v4 Registry is the canonical `projectId → registeredProjectRootPath` write
 whitelist. Optional `importSourceKey` / `importSourceSha256` on a project
 record are a long-lived lookup from one canonical external path to that
@@ -722,18 +722,18 @@ never participates in editor authority or close/navigation drains.
 
 ## Trust model
 
-The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, project identity, Hash, path, complete/displayable-document and source-element identity checks succeed. A unique retained stable ID remains the sole element identity even when tag, parent, order or content changes; malformed, duplicate, forged or demonstrably lost IDs fail closed. PageRoot assigns IDs only to identity-free elements proven new after that validation, seals submitted and normalized output Hashes plus an identity report, and gives Review/Promotion the normalized complete HTML. Authored scripts, handlers, executable URLs and refresh directives are accepted as candidate content without detection or UI signaling; their execution remains contained by the existing preview, edit and review sandboxes. A coarse continuity fingerprint compares visible text, stable anchors, classes, assets and title with the frozen base. Strong continuity enters the normal ready flow; weak continuity preserves the immutable candidate but removes direct-open and requires side-by-side review. Frozen comment targets remain generation and review context, not a subtree-exact acceptance gate. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
+The renderer is sandboxed with context isolation and no Node integration. The preload exposes narrow validated IPC methods. The Bridge uses a per-process authentication token and only operates on managed project paths. AI output is untrusted until protocol, project identity, Hash, path, complete/displayable-document and source-element identity checks succeed. A unique retained stable ID remains the sole element identity even when tag, parent, order or content changes; malformed, duplicate, forged or demonstrably lost IDs fail closed. Stemmio assigns IDs only to identity-free elements proven new after that validation, seals submitted and normalized output Hashes plus an identity report, and gives Review/Promotion the normalized complete HTML. Authored scripts, handlers, executable URLs and refresh directives are accepted as candidate content without detection or UI signaling; their execution remains contained by the existing preview, edit and review sandboxes. A coarse continuity fingerprint compares visible text, stable anchors, classes, assets and title with the frozen base. Strong continuity enters the normal ready flow; weak continuity preserves the immutable candidate but removes direct-open and requires side-by-side review. Frozen comment targets remain generation and review context, not a subtree-exact acceptance gate. Telemetry schemas have no fields for HTML, user text, attachments, clipboard data, filenames, paths, raw exceptions, account identity or hardware identity.
 
 Every renderer request to the Bridge is bounded: ordinary state/file operations use 15 seconds, attachments use 30 seconds, and Request creation uses 60 seconds. Busy refs are released in `finally`, so an unresponsive local service cannot leave a permanent UI lock. An unknown Request POST outcome remains fail-closed and is reconciled against the durable workspace state before editing resumes.
 
 If the utility Bridge exits after startup, the main process retains one
 workspace-recovery issue. It sends the narrow
-`html-app:workspace-unavailable` event only after the Workbench listener
+`stemmio-app:workspace-unavailable` event only after the Workbench listener
 acknowledges readiness; a late listener or renderer reload receives the retained
 issue through the readiness handshake. Before that acknowledgement, the
 two-path native recovery dialog remains the fail-closed fallback. The renderer
 keeps in-memory content visible and exportable while blocking new Bridge-backed
-mutations. `html-app:relaunch` still runs the normal renderer close-readiness
+mutations. `stemmio-app:relaunch` still runs the normal renderer close-readiness
 handshake; an unsafe relaunch is rejected until the user exports or resolves
 pending writes.
 

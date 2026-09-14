@@ -3,10 +3,10 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 
 import { parseHtmlSource } from "../../bridge/html-source-parser.mjs";
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
-  isValidPagerootElementId,
-} from "./pageroot-element-identity.js";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
+  isValidStemmioElementId,
+} from "./stemmio-element-identity.js";
 import { recordEditPipelineCount } from "./edit-pipeline-counters.js";
 
 export const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
@@ -119,7 +119,7 @@ function sealBuiltSourceIndex(index) {
   const skip = new Set();
   if (index.document) skip.add(index.document);
   index.byNodeId = readOnlyMap(index.byNodeId);
-  index.byPagerootId = readOnlyMap(index.byPagerootId);
+  index.byStemmioId = readOnlyMap(index.byStemmioId);
   index.elementsByTagName = readOnlyMap(index.elementsByTagName);
   for (const element of index.elements) {
     if (element.attributesByName instanceof Map) {
@@ -465,9 +465,9 @@ export function buildSourceIndex(html, options = {}) {
     comments: [],
     rootNodeIds: [],
     byNodeId: new Map(),
-    byPagerootId: new Map(),
+    byStemmioId: new Map(),
     elementsByTagName: new Map(),
-    pagerootIdentity: null,
+    stemmioIdentity: null,
   };
 
   const attach = (record, parentId) => {
@@ -542,10 +542,10 @@ export function buildSourceIndex(html, options = {}) {
         label: "",
         selector: "",
         fingerprint: null,
-        declaredPagerootId: null,
-        pagerootId: null,
-        pagerootIdAttribute: null,
-        pagerootIdentityStatus: "missing",
+        declaredStemmioId: null,
+        stemmioId: null,
+        stemmioIdAttribute: null,
+        stemmioIdentityStatus: "missing",
         explicitEndTag: Boolean(endTagRange),
         isVoid: VOID_ELEMENTS.has(tagName),
         boundarySafe: true,
@@ -678,26 +678,26 @@ export function buildSourceIndex(html, options = {}) {
     element.selector = selectorFor(element, index);
   }
 
-  const pagerootIdentityIssues = [];
-  const claimsByPagerootId = new Map();
-  const claimPagerootId = (pagerootId, element, attribute) => {
-    const claims = claimsByPagerootId.get(pagerootId) ?? [];
+  const stemmioIdentityIssues = [];
+  const claimsByStemmioId = new Map();
+  const claimStemmioId = (stemmioId, element, attribute) => {
+    const claims = claimsByStemmioId.get(stemmioId) ?? [];
     claims.push({ element, attribute });
-    claimsByPagerootId.set(pagerootId, claims);
+    claimsByStemmioId.set(stemmioId, claims);
   };
   for (const element of index.elements) {
-    const attributes = element.attributesByName.get(PAGEROOT_ELEMENT_ID_ATTRIBUTE) ?? [];
+    const attributes = element.attributesByName.get(STEMMIO_ELEMENT_ID_ATTRIBUTE) ?? [];
     if (attributes.length === 0) continue;
-    element.pagerootIdAttribute = attributes[0];
+    element.stemmioIdAttribute = attributes[0];
     if (attributes.length !== 1) {
       for (const attribute of attributes) {
-        if (isValidPagerootElementId(attribute.rawValue)) {
-          claimPagerootId(attribute.rawValue, element, attribute);
+        if (isValidStemmioElementId(attribute.rawValue)) {
+          claimStemmioId(attribute.rawValue, element, attribute);
         }
       }
-      element.pagerootIdentityStatus = "invalid";
-      pagerootIdentityIssues.push({
-        code: "PAGEROOT_ID_ATTRIBUTE_REPEATED",
+      element.stemmioIdentityStatus = "invalid";
+      stemmioIdentityIssues.push({
+        code: "STEMMIO_ID_ATTRIBUTE_REPEATED",
         nodeId: element.nodeId,
         attributeRanges: attributes.map((attribute) => ({ ...attribute.range })),
       });
@@ -705,11 +705,11 @@ export function buildSourceIndex(html, options = {}) {
     }
     const [attribute] = attributes;
     const value = attribute.rawValue;
-    element.declaredPagerootId = value;
-    if (!isValidPagerootElementId(value)) {
-      element.pagerootIdentityStatus = "invalid";
-      pagerootIdentityIssues.push({
-        code: "PAGEROOT_ID_INVALID_FORMAT",
+    element.declaredStemmioId = value;
+    if (!isValidStemmioElementId(value)) {
+      element.stemmioIdentityStatus = "invalid";
+      stemmioIdentityIssues.push({
+        code: "STEMMIO_ID_INVALID_FORMAT",
         nodeId: element.nodeId,
         value,
         attributeRange: { ...attribute.range },
@@ -717,48 +717,48 @@ export function buildSourceIndex(html, options = {}) {
       });
       continue;
     }
-    element.pagerootIdentityStatus = "candidate";
-    claimPagerootId(value, element, attribute);
+    element.stemmioIdentityStatus = "candidate";
+    claimStemmioId(value, element, attribute);
   }
 
-  for (const [pagerootId, claims] of claimsByPagerootId) {
+  for (const [stemmioId, claims] of claimsByStemmioId) {
     const claimedElements = [...new Set(claims.map((claim) => claim.element))];
     if (
       claims.length === 1
-      && claimedElements[0]?.pagerootIdentityStatus === "candidate"
+      && claimedElements[0]?.stemmioIdentityStatus === "candidate"
     ) {
       const [element] = claimedElements;
-      element.pagerootId = pagerootId;
-      element.pagerootIdentityStatus = "valid";
-      index.byPagerootId.set(pagerootId, element);
+      element.stemmioId = stemmioId;
+      element.stemmioIdentityStatus = "valid";
+      index.byStemmioId.set(stemmioId, element);
       continue;
     }
     if (claimedElements.length < 2) continue;
     for (const element of claimedElements) {
-      if (element.pagerootIdentityStatus === "candidate") {
-        element.pagerootIdentityStatus = "duplicate";
+      if (element.stemmioIdentityStatus === "candidate") {
+        element.stemmioIdentityStatus = "duplicate";
       }
     }
-    pagerootIdentityIssues.push({
-      code: "PAGEROOT_ID_DUPLICATE_VALUE",
-      pagerootId,
+    stemmioIdentityIssues.push({
+      code: "STEMMIO_ID_DUPLICATE_VALUE",
+      stemmioId,
       nodeIds: claimedElements.map((element) => element.nodeId),
       elementRanges: claimedElements.map((element) => ({ ...element.range })),
       attributeRanges: claims.map((claim) => ({ ...claim.attribute.range })),
     });
   }
 
-  const identifiedElementCount = index.byPagerootId.size;
+  const identifiedElementCount = index.byStemmioId.size;
   const invalidElementCount = index.elements.filter(
-    (element) => element.pagerootIdentityStatus === "invalid"
-      || element.pagerootIdentityStatus === "duplicate",
+    (element) => element.stemmioIdentityStatus === "invalid"
+      || element.stemmioIdentityStatus === "duplicate",
   ).length;
   const missingElementCount = index.elements.filter(
-    (element) => element.pagerootIdentityStatus === "missing",
+    (element) => element.stemmioIdentityStatus === "missing",
   ).length;
-  index.pagerootIdentity = {
-    schemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
-    attributeName: PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+  index.stemmioIdentity = {
+    schemaVersion: STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
+    attributeName: STEMMIO_ELEMENT_ID_ATTRIBUTE,
     status: invalidElementCount > 0
       ? "invalid"
       : missingElementCount === 0
@@ -766,13 +766,13 @@ export function buildSourceIndex(html, options = {}) {
         : identifiedElementCount === 0
           ? "absent"
           : "partial",
-    valid: pagerootIdentityIssues.length === 0,
+    valid: stemmioIdentityIssues.length === 0,
     complete: invalidElementCount === 0 && missingElementCount === 0,
     totalElementCount: index.elements.length,
     identifiedElementCount,
     missingElementCount,
     invalidElementCount,
-    issues: pagerootIdentityIssues,
+    issues: stemmioIdentityIssues,
   };
 
   for (const element of index.elements) {

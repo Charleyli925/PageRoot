@@ -14,14 +14,14 @@
 // `canLocateTarget` and `commentHasContent` also live here so the predicate
 // has one home; comment-model.ts re-exports them for existing consumers.
 
-import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
+import { isValidStemmioElementId } from "../../shared/stemmio-element-identity.mjs";
 import { buildSourceIndex } from "../lib/source-index.js";
 
 /** @param {{ resolution?: string, elementId?: string, commentAnchor?: { resolution?: string, elementId?: string } }} target */
 export function canLocateTarget(target) {
   const persist = target?.commentAnchor || target;
   return (persist?.resolution === "exact" || persist?.resolution === "rebound")
-    && isValidPagerootElementId(persist?.elementId);
+    && isValidStemmioElementId(persist?.elementId);
 }
 
 /**
@@ -44,10 +44,10 @@ export function canLocateTarget(target) {
 export function globalPageCommentTargetFromHtml(html) {
   const index = buildSourceIndex(String(html || ""));
   const body = index.elements.find((element) => element.tagName === "body");
-  if (!isValidPagerootElementId(body?.pagerootId)) return null;
+  if (!isValidStemmioElementId(body?.stemmioId)) return null;
   return Object.freeze({
     id: "target_global_page",
-    elementId: body.pagerootId,
+    elementId: body.stemmioId,
     label: "整个页面",
     selector: "body",
     level: "module",

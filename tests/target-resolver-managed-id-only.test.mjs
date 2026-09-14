@@ -8,11 +8,11 @@ import {
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
 
-const ID_ROOT = "pr1_11111111111141118111111111111111";
-const ID_ALPHA = "pr1_22222222222242229222222222222222";
-const ID_BETA = "pr1_3333333333334333a333333333333333";
+const ID_ROOT = "sm1_11111111111141118111111111111111";
+const ID_ALPHA = "sm1_22222222222242229222222222222222";
+const ID_BETA = "sm1_3333333333334333a333333333333333";
 
-const MANAGED = `<!doctype html><html data-pageroot-id="${ID_ROOT}"><head data-pageroot-id="${ID_BETA}"><title data-pageroot-id="pr1_4444444444444444b444444444444444">t</title></head><body data-pageroot-id="pr1_55555555555545558555555555555555"><section data-pageroot-id="${ID_ALPHA}" class="old" data-key="a"><h2 data-pageroot-id="pr1_66666666666646669666666666666666">Alpha 唯一标题</h2></section></body></html>`;
+const MANAGED = `<!doctype html><html data-stemmio-id="${ID_ROOT}"><head data-stemmio-id="${ID_BETA}"><title data-stemmio-id="sm1_4444444444444444b444444444444444">t</title></head><body data-stemmio-id="sm1_55555555555545558555555555555555"><section data-stemmio-id="${ID_ALPHA}" class="old" data-key="a"><h2 data-stemmio-id="sm1_66666666666646669666666666666666">Alpha 唯一标题</h2></section></body></html>`;
 
 test("incomplete identity HTML cannot use selector or fingerprint fallback", () => {
   const html = `<main id="root"><section class="old" data-key="a"><h2>Alpha 唯一标题</h2></section><section data-key="b"><h2>Beta</h2></section></main>`;
@@ -25,15 +25,15 @@ test("incomplete identity HTML cannot use selector or fingerprint fallback", () 
   const rebound = resolveTargetRef(buildSourceIndex(reordered), alphaRef, {
     surface: "edit",
   });
-  assert.equal(index.pagerootIdentity.complete, false);
+  assert.equal(index.stemmioIdentity.complete, false);
   assert.equal(rebound.resolution, "orphaned");
   assert.equal(rebound.reason, "managed-element-id-required");
 });
 
 test("managed Working Copy locates only by elementId", () => {
   const index = buildSourceIndex(MANAGED);
-  assert.equal(index.pagerootIdentity.complete, true);
-  const alpha = index.byPagerootId.get(ID_ALPHA);
+  assert.equal(index.stemmioIdentity.complete, true);
+  const alpha = index.byStemmioId.get(ID_ALPHA);
   const withId = createTargetRef(index, alpha.nodeId);
   const official = resolveTargetRef(index, withId, { surface: "edit" });
   assert.equal(official.resolution, "exact");
@@ -74,11 +74,11 @@ test("managed documents orphan ID-less historical refs", () => {
 
 test("a deleted managed ID stays orphaned even if a similar node remains", () => {
   const index = buildSourceIndex(MANAGED);
-  const alpha = index.byPagerootId.get(ID_ALPHA);
+  const alpha = index.byStemmioId.get(ID_ALPHA);
   const target = createTargetRef(index, alpha.nodeId);
   const replaced = MANAGED.replace(
-    `data-pageroot-id="${ID_ALPHA}"`,
-    `data-pageroot-id="pr1_8888888888884888a888888888888888"`,
+    `data-stemmio-id="${ID_ALPHA}"`,
+    `data-stemmio-id="sm1_8888888888884888a888888888888888"`,
   );
   const official = resolveTargetRef(buildSourceIndex(replaced), target, {
     surface: "review",
@@ -103,13 +103,13 @@ test("whole-page comments require the body Stable ID", () => {
 
   const withId = resolveTargetRef(index, {
     targetId: "target_page",
-    elementId: body.pagerootId,
+    elementId: body.stemmioId,
     label: "整个页面",
     level: "module",
     resolution: "exact",
   }, { surface: "comments" });
   assert.equal(withId.resolution, "exact");
-  assert.equal(withId.target?.pagerootId, body.pagerootId);
+  assert.equal(withId.target?.stemmioId, body.stemmioId);
 });
 
 test("managed insertion points require a parent elementId", () => {
@@ -129,14 +129,14 @@ test("managed insertion points require a parent elementId", () => {
 
 test("insertion targets never guess a parent from an invalid or ambiguous Stable ID", () => {
   const index = buildSourceIndex(MANAGED);
-  const parent = index.byPagerootId.get(ID_ALPHA);
+  const parent = index.byStemmioId.get(ID_ALPHA);
   const insertion = createInsertionPointTargetRef(index, { parentId: parent.nodeId });
   for (const elementId of [undefined, null, "", false, 0, NaN, " ", "invalid-id"]) {
     const result = resolveTargetRef(index, { ...insertion, elementId }, { surface: "edit" });
     assert.equal(result.resolution, "orphaned", String(elementId));
     assert.equal(result.target, null);
   }
-  const missing = MANAGED.replace(ID_ALPHA, "pr1_8888888888884888a888888888888888");
+  const missing = MANAGED.replace(ID_ALPHA, "sm1_8888888888884888a888888888888888");
   const duplicate = MANAGED.replace(ID_BETA, ID_ALPHA);
   for (const html of [missing, duplicate]) {
     const result = resolveTargetRef(buildSourceIndex(html), insertion, { surface: "edit" });
@@ -147,11 +147,11 @@ test("insertion targets never guess a parent from an invalid or ambiguous Stable
 
 test("a valid insertion parent still rebinds its child boundary after a source shift", () => {
   const index = buildSourceIndex(MANAGED);
-  const parent = index.byPagerootId.get(ID_ALPHA);
+  const parent = index.byStemmioId.get(ID_ALPHA);
   const insertion = createInsertionPointTargetRef(index, { parentId: parent.nodeId });
   const shifted = buildSourceIndex(`<!-- source shift -->${MANAGED}`);
   const result = resolveTargetRef(shifted, insertion, { surface: "edit" });
   assert.equal(result.resolution, "rebound");
-  assert.equal(result.target.parentId, shifted.byPagerootId.get(ID_ALPHA).nodeId);
-  assert.equal(result.target.offset, shifted.byPagerootId.get(ID_ALPHA).contentRange.endOffset);
+  assert.equal(result.target.parentId, shifted.byStemmioId.get(ID_ALPHA).nodeId);
+  assert.equal(result.target.offset, shifted.byStemmioId.get(ID_ALPHA).contentRange.endOffset);
 });

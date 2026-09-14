@@ -393,8 +393,8 @@ test("candidate assessment exposes only the renderer fields needed for review", 
 });
 
 test("candidate assessment projects retired full-array impact into bounded Review facts", () => {
-  const changedId = "pr1_00000000000040008000000000000000";
-  const outsideId = "pr1_11111111111141118000000000000000";
+  const changedId = "sm1_00000000000040008000000000000000";
+  const outsideId = "sm1_11111111111141118000000000000000";
   const assessment = candidateAssessmentFromRecord({
     status: "ready",
     issueCodes: [],
@@ -424,7 +424,7 @@ test("candidate assessment projects retired full-array impact into bounded Revie
 
 test("candidate assessment truncates historical full-array impact at the sample limit", () => {
   const changed = Array.from({ length: 101 }, (_item, index) => (
-    `pr1_${index.toString(16).padStart(12, "0")}40008${"0".repeat(15)}`
+    `sm1_${index.toString(16).padStart(12, "0")}40008${"0".repeat(15)}`
   ));
   const assessment = candidateAssessmentFromRecord({
     status: "attention",
@@ -446,7 +446,7 @@ test("candidate assessment truncates historical full-array impact at the sample 
 });
 
 test("candidate assessment ignores mixed legacy and bounded impact facts", () => {
-  const changedId = "pr1_00000000000040008000000000000000";
+  const changedId = "sm1_00000000000040008000000000000000";
   const assessment = candidateAssessmentFromRecord({
     status: "ready",
     issueCodes: [],
@@ -471,8 +471,8 @@ test("candidate assessment ignores mixed legacy and bounded impact facts", () =>
 });
 
 test("bounded Candidate impact facts reach Review without expanding the renderer payload", () => {
-  const changedId = "pr1_00000000000040008000000000000000";
-  const outsideId = "pr1_11111111111141118000000000000000";
+  const changedId = "sm1_00000000000040008000000000000000";
+  const outsideId = "sm1_11111111111141118000000000000000";
   assert.deepEqual(candidateAssessmentFromRecord({
     status: "attention",
     issueCodes: [],

@@ -85,12 +85,12 @@ function legacyConversation() {
   };
 }
 
-test("v1 conversation reads as a v2 projection without changing input bytes", () => {
+test("v1 conversation reads as a v3 projection without changing input bytes", () => {
   const legacy = legacyConversation();
   const bytes = JSON.stringify(legacy);
   const projected = normalizeConversation(legacy, { projectId, documentId });
   assert.equal(JSON.stringify(legacy), bytes);
-  assert.equal(projected.schemaVersion, "2.0.0");
+  assert.equal(projected.schemaVersion, "3.0.0");
   assert.equal(projected.messages[0].actor, "agent");
   assert.equal(projected.messages[0].providerId, "qoder");
   assert.equal(projected.turns[0].providerSelection.reasoning.resolution, "provider-default");
@@ -100,7 +100,7 @@ test("v1 conversation reads as a v2 projection without changing input bytes", ()
   assert.equal(projected.messages[0].futureMessage, true);
 });
 
-test("v2 writer stores generic Agent actor and provider-bound actual model", () => {
+test("v3 writer stores generic Agent actor and provider-bound actual model", () => {
   let conversation = createEmptyConversation({
     conversationId: "conversation_writerv2test",
     projectId,
@@ -140,9 +140,22 @@ test("v2 writer stores generic Agent actor and provider-bound actual model", () 
       text: "done",
     }],
   }, { now });
-  assert.equal(conversation.schemaVersion, "2.0.0");
+  assert.equal(conversation.schemaVersion, "3.0.0");
   assert.equal(conversation.messages[0].actor, "agent");
   assert.equal(JSON.stringify(conversation).includes('"actor":"qoder"'), false);
+});
+
+test("v2 conversation records are explicitly unsupported", () => {
+  const current = createEmptyConversation({
+    conversationId: "conversation_v2unsupported",
+    projectId,
+    documentId,
+    now,
+  });
+  assert.throws(
+    () => normalizeConversation({ ...current, schemaVersion: "2.0.0" }, { projectId, documentId }),
+    (error) => error.code === "UNSUPPORTED_CONVERSATION_SCHEMA",
+  );
 });
 
 test("v1 draft reads as v2 without mutation and preserves unknown members", () => {

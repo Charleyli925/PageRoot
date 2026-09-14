@@ -32,15 +32,15 @@ export function expectedPackagedAppIdentity({
 }) {
   return Object.freeze({
     name: requiredString(
-      environment.PAGEROOT_EXPECTED_PRODUCT_NAME ?? packageJson?.build?.productName,
+      environment.STEMMIO_EXPECTED_PRODUCT_NAME ?? packageJson?.build?.productName,
       "expected packaged product name",
     ),
     version: requiredString(
-      environment.PAGEROOT_EXPECTED_APP_VERSION ?? packageJson?.version,
+      environment.STEMMIO_EXPECTED_APP_VERSION ?? packageJson?.version,
       "expected packaged app version",
     ),
     bundleId: requiredString(
-      environment.PAGEROOT_EXPECTED_BUNDLE_ID ?? packageJson?.build?.appId,
+      environment.STEMMIO_EXPECTED_BUNDLE_ID ?? packageJson?.build?.appId,
       "expected packaged bundle id",
     ),
   });

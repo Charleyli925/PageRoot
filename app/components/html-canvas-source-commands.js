@@ -19,7 +19,7 @@ export function inlineStyleOperation(sourceIndex, options) {
 }
 
 export function textRangeStyleOperation(sourceIndex, options) {
-  const target = sourceIndex.byPagerootId.get(options.elementId);
+  const target = sourceIndex.byStemmioId.get(options.elementId);
   if (target?.type !== "element") {
     throw new Error("语义文字样式需要稳定源码元素。");
   }
@@ -64,7 +64,7 @@ export function textRangeStyleCreatesWrapper(materialization) {
 }
 
 export function siblingReorderOperation(sourceIndex, options) {
-  const target = sourceIndex.byPagerootId.get(options.elementId);
+  const target = sourceIndex.byStemmioId.get(options.elementId);
   const parent = target?.parentId
     ? sourceIndex.byNodeId.get(target.parentId)
     : null;
@@ -80,7 +80,7 @@ export function siblingReorderOperation(sourceIndex, options) {
     baseRevision: options.baseRevision,
     operationId: options.operationId,
     elementId: options.elementId,
-    parentElementId: parent.pagerootId,
-    beforeElementId: before?.pagerootId ?? null,
+    parentElementId: parent.stemmioId,
+    beforeElementId: before?.stemmioId ?? null,
   });
 }

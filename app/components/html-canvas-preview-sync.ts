@@ -11,7 +11,7 @@ import {
   sourceElementId,
   uniqueSourceElement,
 } from "./html-canvas-source-element";
-import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
+import { STEMMIO_ELEMENT_ID_ATTRIBUTE } from "../../shared/stemmio-element-identity.mjs";
 import type {
   SourceElementValue,
   SourceIndexValue,
@@ -19,13 +19,13 @@ import type {
   TextRangeSegment,
 } from "./html-canvas-internal-types";
 
-function sourceParentPagerootId(
+function sourceParentStemmioId(
   sourceIndex: SourceIndexValue,
   sourceElement: SourceElementValue,
 ): string | null {
   if (!sourceElement.parentId) return null;
   const parent = sourceIndex.byNodeId.get(sourceElement.parentId);
-  return parent?.type === "element" ? parent.pagerootId ?? null : null;
+  return parent?.type === "element" ? parent.stemmioId ?? null : null;
 }
 
 export function sourceTextNodeForDomText(
@@ -51,13 +51,13 @@ export function isCanonicalSourceElement(
   sourceIndex: SourceIndexValue,
 ): boolean {
   const sourceElement = sourceElementFromDom(element, sourceIndex);
-  const pagerootId = sourceElement?.pagerootId ?? null;
-  if (!sourceElement || !pagerootId) return false;
-  if (sourceElementId(element) !== pagerootId) return false;
+  const stemmioId = sourceElement?.stemmioId ?? null;
+  if (!sourceElement || !stemmioId) return false;
+  if (sourceElementId(element) !== stemmioId) return false;
   const domParent = element.parentElement?.closest<HTMLElement>(
     `[${SOURCE_ELEMENT_ATTRIBUTE}]`,
   ) ?? null;
-  return sourceElementId(domParent) === sourceParentPagerootId(sourceIndex, sourceElement);
+  return sourceElementId(domParent) === sourceParentStemmioId(sourceIndex, sourceElement);
 }
 
 export function nativeEditHostForElement(
@@ -153,17 +153,17 @@ export function canonicalNativeHostPreview(
 ): HTMLElement | null {
   const view = rootElement.ownerDocument.defaultView;
   if (!view || !nextElementId) return null;
-  const sourceElement = nextIndex.byPagerootId.get(nextElementId)
+  const sourceElement = nextIndex.byStemmioId.get(nextElementId)
     ?? nextIndex.byNodeId.get(nextElementId);
-  const pagerootId = sourceElement?.type === "element"
-    ? sourceElement.pagerootId
+  const stemmioId = sourceElement?.type === "element"
+    ? sourceElement.stemmioId
     : nextElementId;
-  if (!pagerootId) return null;
+  if (!stemmioId) return null;
   const detachedDocument = new view.DOMParser().parseFromString(
     disableExecutableMarkup(nextIndex.source),
     "text/html",
   );
-  const detachedTarget = uniqueSourceElement(detachedDocument, pagerootId);
+  const detachedTarget = uniqueSourceElement(detachedDocument, stemmioId);
   return detachedTarget?.tagName === rootElement.tagName ? detachedTarget : null;
 }
 
@@ -185,7 +185,7 @@ export function remountNativeHostFromSource(
 
 export type StableMountedSourceNodeRefresh = Readonly<{
   element: HTMLElement;
-  pagerootId: string;
+  stemmioId: string;
 }>;
 
 /**
@@ -199,15 +199,15 @@ export function refreshStableMountedPreviewSourceNodeIds(
   const ViewHTMLElement = documentNode.defaultView?.HTMLElement;
   return sourceBackedPreviewElements(documentNode).flatMap((element) => {
     if (!ViewHTMLElement || !(element instanceof ViewHTMLElement)) return [];
-    const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-    const nextElement = pagerootId ? nextIndex.byPagerootId.get(pagerootId) : null;
+    const stemmioId = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
+    const nextElement = stemmioId ? nextIndex.byStemmioId.get(stemmioId) : null;
     if (
-      !pagerootId
+      !stemmioId
       || !nextElement
       || nextElement.type !== "element"
       || nextElement.tagName !== element.tagName.toLowerCase()
     ) return [];
-    return [{ element, pagerootId }];
+    return [{ element, stemmioId }];
   });
 }
 
@@ -234,7 +234,7 @@ export function adoptCanonicalHistoryIslandInPlace(options: {
     || nextResolution.resolution !== "exact"
     || previousResolution.target?.type !== "element"
     || nextResolution.target?.type !== "element"
-    || sourceElementId(rootElement) !== previousResolution.target.pagerootId
+    || sourceElementId(rootElement) !== previousResolution.target.stemmioId
   ) return false;
 
   const previousCapability = isEditableIslandTarget(
@@ -246,8 +246,8 @@ export function adoptCanonicalHistoryIslandInPlace(options: {
   const previousIsland = previousCapability.island;
   const nextIsland = nextCapability.island;
   if (
-    previousIsland.element.pagerootId !== previousResolution.target.pagerootId
-    || nextIsland.element.pagerootId !== nextResolution.target.pagerootId
+    previousIsland.element.stemmioId !== previousResolution.target.stemmioId
+    || nextIsland.element.stemmioId !== nextResolution.target.stemmioId
     || previousIsland.element.tagName !== nextIsland.element.tagName
     || previousIndex.source.slice(0, previousIsland.contentRange.startOffset)
       !== nextIndex.source.slice(0, nextIsland.contentRange.startOffset)
@@ -257,7 +257,7 @@ export function adoptCanonicalHistoryIslandInPlace(options: {
 
   const canonicalTarget = canonicalNativeHostPreview(
     rootElement,
-    String(nextIsland.element.pagerootId || nextIsland.element.nodeId || ""),
+    String(nextIsland.element.stemmioId || nextIsland.element.nodeId || ""),
     nextIndex,
   );
   if (!canonicalTarget) return false;
@@ -278,9 +278,9 @@ export function adoptCanonicalHistoryIslandInPlace(options: {
   ];
   const mountedIds = new Set<string>();
   const invalidMountedElement = mountedElements.some((element) => {
-    const pagerootId = element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
-    if (!pagerootId || mountedIds.has(pagerootId)) return true;
-    mountedIds.add(pagerootId);
+    const stemmioId = element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
+    if (!stemmioId || mountedIds.has(stemmioId)) return true;
+    mountedIds.add(stemmioId);
     return !isCanonicalSourceElement(element as HTMLElement, nextIndex);
   });
   // Executed author <script> objects are intentionally consumed by the Runtime
@@ -319,8 +319,8 @@ export function reconcileRangeStyleInPlace(
     const element = canonical as Element;
     const id = element.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
     const live = id ? liveById.get(id) : null;
-    const previous = id ? previousIndex.byPagerootId.get(id) : null;
-    const next = id ? nextIndex.byPagerootId.get(id) : null;
+    const previous = id ? previousIndex.byStemmioId.get(id) : null;
+    const next = id ? nextIndex.byStemmioId.get(id) : null;
     if (live && previous?.raw === next?.raw && previous?.raw) return live;
     if (live && live.tagName !== element.tagName) throw new Error("Changed source shape");
     if (live && Array.from(live.children).some((child) => !child.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE))) {
@@ -418,7 +418,7 @@ export function runtimeSurfacesReady(
       if (surface.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE) && !authoredCanvas) continue;
       const host = surface.closest(`[${SOURCE_ELEMENT_ATTRIBUTE}]`);
       const id = host?.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
-      if (id && host && nextIndex.byPagerootId.has(id)) {
+      if (id && host && nextIndex.byStemmioId.has(id)) {
         const existing = activeHostIds.get(id);
         activeHostIds.set(id, {
           allowAuthoredCanvas: existing?.allowAuthoredCanvas === true || authoredCanvas,
@@ -440,7 +440,7 @@ export function runtimeSurfacesReady(
     const id = host.getAttribute(SOURCE_ELEMENT_ATTRIBUTE);
     if (
       id
-      && nextIndex.byPagerootId.has(id)
+      && nextIndex.byStemmioId.has(id)
       && runtimeHostReady(host, candidate, {
         requireEchartsInstance: requireCandidateEchartsInstance,
       })

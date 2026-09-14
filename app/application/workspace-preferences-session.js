@@ -22,7 +22,7 @@ export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
 });
 
 const WORKSPACE_KEYS = new Set(Object.keys(DEFAULT_WORKSPACE_PREFERENCES));
-const AGENT_PROVIDER_IDS = new Set(["pageroot", "qoder", "codex"]);
+const AGENT_PROVIDER_IDS = new Set(["stemmio", "qoder", "codex"]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

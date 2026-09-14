@@ -15,18 +15,18 @@ import { openaiCompatibleVendor } from "../shared/openai-compatible-vendors.mjs"
 
 const TRUST = "trusted-local-agent-v1";
 const SECRET_BY_VENDOR = Object.freeze({
-  deepseek: "PAGEROOT_SMOKE_DEEPSEEK_API_KEY",
-  zhipu: "PAGEROOT_SMOKE_ZHIPU_API_KEY",
-  dashscope: "PAGEROOT_SMOKE_DASHSCOPE_API_KEY",
-  openai: "PAGEROOT_SMOKE_OPENAI_API_KEY",
+  deepseek: "STEMMIO_SMOKE_DEEPSEEK_API_KEY",
+  zhipu: "STEMMIO_SMOKE_ZHIPU_API_KEY",
+  dashscope: "STEMMIO_SMOKE_DASHSCOPE_API_KEY",
+  openai: "STEMMIO_SMOKE_OPENAI_API_KEY",
 });
 
 function selection(model) {
   return Object.freeze({
-    providerId: "pageroot",
+    providerId: "stemmio",
     runtimeId: "http",
-    requestedModelId: `pageroot:${model.modelId}`,
-    resolvedModelId: `pageroot:${model.modelId}`,
+    requestedModelId: `stemmio:${model.modelId}`,
+    resolvedModelId: `stemmio:${model.modelId}`,
     reasoning: Object.freeze({ requested: null, applied: null, resolution: "provider-default" }),
   });
 }
@@ -41,7 +41,7 @@ async function waitForCompletion(coordinator, identity) {
 }
 
 async function runFormalChainSmoke(model, apiKey) {
-  const root = await mkdtemp(path.join(os.tmpdir(), `pageroot-vendor-smoke-${model.vendorId}-`));
+  const root = await mkdtemp(path.join(os.tmpdir(), `stemmio-vendor-smoke-${model.vendorId}-`));
   try {
     const sourceRoot = path.join(root, "sources");
     const sourcePath = path.join(sourceRoot, "page.html");
@@ -61,7 +61,7 @@ async function runFormalChainSmoke(model, apiKey) {
     });
     let authority = null;
     const coordinator = new AgentRuntimeCoordinator({
-      environment: { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" },
+      environment: { STEMMIO_ENABLE_BETA_AGENT_MODELS: "1" },
       providerRegistry: registry,
       resolveTask: async () => authority,
       leaseStore: {
@@ -70,7 +70,7 @@ async function runFormalChainSmoke(model, apiKey) {
       },
     });
     try {
-      const connected = await coordinator.updateAgentConfiguration("pageroot", {
+      const connected = await coordinator.updateAgentConfiguration("stemmio", {
         apiKey,
         vendorId: model.vendorId,
         selection: selection(model),
@@ -90,7 +90,7 @@ async function runFormalChainSmoke(model, apiKey) {
           summary: "Run the real provider release smoke",
           comments: [{
             commentId: "comment_vendor_smoke",
-            text: "Change only the document title from Before smoke to PageRoot smoke. Return the complete HTML and preserve every PageRoot Stable ID.",
+            text: "Change only the document title from Before smoke to Stemmio smoke. Return the complete HTML and preserve every Stemmio Stable ID.",
             target: { targetId: "target_vendor_smoke" },
             attachments: [],
           }],
@@ -105,7 +105,7 @@ async function runFormalChainSmoke(model, apiKey) {
         },
         prompt: "Apply the frozen task and produce one complete HTML Candidate.",
       });
-      const requestRoot = path.join(imported.target.projectRootPath, ".pageroot", "requests", request.requestId);
+      const requestRoot = path.join(imported.target.projectRootPath, ".stemmio", "requests", request.requestId);
       authority = {
         run: {
           projectId: imported.target.projectId,
@@ -116,7 +116,7 @@ async function runFormalChainSmoke(model, apiKey) {
           status: "processing",
           requestPath: requestRoot,
           promptPath: path.join(requestRoot, "PROMPT.md"),
-          outputPath: path.join(imported.target.projectRootPath, ".pageroot", ...request.outputRelativePath.split("/")),
+          outputPath: path.join(imported.target.projectRootPath, ".stemmio", ...request.outputRelativePath.split("/")),
           completionPath: path.join(requestRoot, "attempts", request.attemptId, "completion.json"),
         },
         request: { request: { agentDelivery: request.request.agentDelivery } },
@@ -137,7 +137,7 @@ async function runFormalChainSmoke(model, apiKey) {
       });
       if (status.status !== "candidate-ready") throw Object.assign(new Error("candidate not review-ready"), { code: "SMOKE_NOT_REVIEW_READY" });
       const candidate = await readFile(authority.run.outputPath, "utf8");
-      if (!/<title>PageRoot smoke<\/title>/iu.test(candidate)) throw Object.assign(new Error("expected edit missing"), { code: "SMOKE_EDIT_MISSING" });
+      if (!/<title>Stemmio smoke<\/title>/iu.test(candidate)) throw Object.assign(new Error("expected edit missing"), { code: "SMOKE_EDIT_MISSING" });
       if (await readFile(imported.target.exactSourcePath, "utf8") !== workingBefore) {
         throw Object.assign(new Error("Working Copy changed"), { code: "SMOKE_WORKING_COPY_CHANGED" });
       }

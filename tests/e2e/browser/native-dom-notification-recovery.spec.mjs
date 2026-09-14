@@ -4,7 +4,7 @@ import {
   caseSelector,
   fixtureBuffer,
   loadFixture,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 async function openFixture(page, name = "notification-recovery.html") {
   await page.goto("/");

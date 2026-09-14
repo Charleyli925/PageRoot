@@ -45,7 +45,7 @@ export function withBomAndCrLf(buffer) {
 function pageForFrame(frameOrPage) {
   if (frameOrPage && typeof frameOrPage.mainFrame === "function") return frameOrPage;
   if (frameOrPage && typeof frameOrPage.page === "function") return frameOrPage.page();
-  throw new TypeError("Expected a Playwright Page or PageRoot edit Frame.");
+  throw new TypeError("Expected a Playwright Page or Stemmio edit Frame.");
 }
 
 async function dismissCanvasToolbar(page) {
@@ -87,7 +87,7 @@ export async function currentEditorFrame(frameOrPage) {
     if (frame && !frame.isDetached()) return frame;
     await page.waitForTimeout(10);
   }
-  throw new Error("PageRoot edit iframe did not expose a current same-origin Frame.");
+  throw new Error("Stemmio edit iframe did not expose a current same-origin Frame.");
 }
 
 export function currentNativeTarget(frameOrPage, id) {
@@ -109,7 +109,7 @@ function resilientEditorFrame(page) {
         if (!wasReplaced) throw error;
       }
     }
-    throw lastError || new Error("PageRoot edit Frame was repeatedly replaced.");
+    throw lastError || new Error("Stemmio edit Frame was repeatedly replaced.");
   };
 
   return {
@@ -144,10 +144,10 @@ function rendererHarnessProject(name, buffer) {
 
 export async function ensureDesktopRendererTestHarness(page, initialProject = null) {
   const hasDesktopHost = await page.evaluate(() => (
-    window.__PAGEROOT_RENDERER_TEST_HARNESS__?.kind === "desktop-preload"
+    window.__STEMMIO_RENDERER_TEST_HARNESS__?.kind === "desktop-preload"
     || (
-      window.htmlAIRuntime?.capabilities?.projectOpening === "desktop-dialog"
-      && typeof window.htmlAIProjects?.openHtml === "function"
+      window.stemmioRuntime?.capabilities?.projectOpening === "desktop-dialog"
+      && typeof window.stemmioProjects?.openHtml === "function"
     )
   ));
   if (hasDesktopHost) return;
@@ -159,11 +159,11 @@ export async function ensureDesktopRendererTestHarness(page, initialProject = nu
       openQueue: [],
       previewUrls: new Map(),
     };
-    Object.defineProperty(window, "__PAGEROOT_RENDERER_TEST_HARNESS__", {
+    Object.defineProperty(window, "__STEMMIO_RENDERER_TEST_HARNESS__", {
       configurable: true,
       value: state,
     });
-    Object.defineProperty(window, "htmlAIRuntime", {
+    Object.defineProperty(window, "stemmioRuntime", {
       configurable: true,
       value: {
         bridgePort: "1",
@@ -183,7 +183,7 @@ export async function ensureDesktopRendererTestHarness(page, initialProject = nu
         },
       },
     });
-    Object.defineProperty(window, "htmlAIProjects", {
+    Object.defineProperty(window, "stemmioProjects", {
       configurable: true,
       value: {
         getActiveProject: async () => state.activeProject,
@@ -197,7 +197,7 @@ export async function ensureDesktopRendererTestHarness(page, initialProject = nu
         listRegisteredProjects: async () => [],
       },
     });
-    Object.defineProperty(window, "htmlAIPreview", {
+    Object.defineProperty(window, "stemmioPreview", {
       configurable: true,
       value: {
         createSession: async ({ html, bootstrapJavaScript }) => {
@@ -218,7 +218,7 @@ export async function ensureDesktopRendererTestHarness(page, initialProject = nu
         },
       },
     });
-    Object.defineProperty(window, "htmlAIAppLifecycle", {
+    Object.defineProperty(window, "stemmioAppLifecycle", {
       configurable: true,
       value: {
         onPrepareClose: () => () => {},
@@ -249,7 +249,7 @@ async function openFixtureThroughDesktopHarness({
     }
     const project = rendererHarnessProject(name, buffer);
     await page.evaluate((queuedProject) => {
-      const harness = window.__PAGEROOT_RENDERER_TEST_HARNESS__;
+      const harness = window.__STEMMIO_RENDERER_TEST_HARNESS__;
       if (!harness || harness.kind !== "desktop-preload") {
         throw new Error("Desktop Renderer Test Harness is unavailable.");
       }
@@ -297,7 +297,7 @@ async function openFixtureThroughDesktopHarness({
     .textContent()
     .catch(() => "");
   throw new Error(
-    `PageRoot did not open fixture ${JSON.stringify(name)} after ${FIXTURE_OPEN_ATTEMPTS} bounded submissions; current title: ${JSON.stringify(currentTitle?.trim() || "")}.`,
+    `Stemmio did not open fixture ${JSON.stringify(name)} after ${FIXTURE_OPEN_ATTEMPTS} bounded submissions; current title: ${JSON.stringify(currentTitle?.trim() || "")}.`,
     { cause: lastError },
   );
 }
@@ -318,9 +318,9 @@ export async function loadFixture(
     ? Buffer.from(materializeSourceElementIdentity(buffer.toString("utf8")).html, "utf8")
     : buffer;
   const host = await page.evaluate(() => ({
-    harness: window.__PAGEROOT_RENDERER_TEST_HARNESS__?.kind === "desktop-preload",
-    desktop: window.htmlAIRuntime?.capabilities?.projectOpening === "desktop-dialog"
-      && typeof window.htmlAIProjects?.openHtml === "function",
+    harness: window.__STEMMIO_RENDERER_TEST_HARNESS__?.kind === "desktop-preload",
+    desktop: window.stemmioRuntime?.capabilities?.projectOpening === "desktop-dialog"
+      && typeof window.stemmioProjects?.openHtml === "function",
   }));
   // Fast browser tests exercise the Renderer through a simulated Desktop
   // preload boundary. They do not expose or validate a second Browser product.
@@ -362,9 +362,9 @@ export function caseSelector(id) {
 
 export async function documentToken(frameOrPage) {
   return currentEditorIframe(frameOrPage).evaluate((frameElement) => {
-    const key = "__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__";
+    const key = "__STEMMIO_NATIVE_QA_DOCUMENT_TOKEN__";
     const view = frameElement.contentWindow;
-    if (!view) throw new Error("PageRoot edit iframe has no active window.");
+    if (!view) throw new Error("Stemmio edit iframe has no active window.");
     if (!view[key]) view[key] = crypto.randomUUID();
     return view[key];
   });
@@ -686,7 +686,7 @@ export async function reverseTextSelection(frame, id, start, end) {
 export async function installInputRecorder(frame) {
   const iframe = await frame.frameElement();
   await iframe.evaluate((frameElement) => {
-    frameElement.__PAGEROOT_NATIVE_QA_MUTATION_OBSERVER__?.disconnect();
+    frameElement.__STEMMIO_NATIVE_QA_MUTATION_OBSERVER__?.disconnect();
     const events = [];
     let sequence = 0;
     const documentNode = frameElement.contentDocument;
@@ -763,7 +763,7 @@ export async function installInputRecorder(frame) {
       };
       events.push(entry);
       // The recorder is attached at document capture so it can see the exact
-      // platform event before PageRoot handles it. Refresh this one field in a
+      // platform event before Stemmio handles it. Refresh this one field in a
       // microtask so diagnostics also preserve the final preventDefault state.
       view.queueMicrotask(() => {
         entry.defaultPrevented = event.defaultPrevented;
@@ -825,15 +825,15 @@ export async function installInputRecorder(frame) {
       attributes: true,
       attributeOldValue: true,
     });
-    frameElement.__PAGEROOT_NATIVE_QA_INPUT_EVENTS__ = events;
-    frameElement.__PAGEROOT_NATIVE_QA_MUTATION_OBSERVER__ = mutationObserver;
+    frameElement.__STEMMIO_NATIVE_QA_INPUT_EVENTS__ = events;
+    frameElement.__STEMMIO_NATIVE_QA_MUTATION_OBSERVER__ = mutationObserver;
   });
 }
 
 export async function recordedInputEvents(frame) {
   const iframe = await frame.frameElement();
   return iframe.evaluate(
-    (frameElement) => frameElement.__PAGEROOT_NATIVE_QA_INPUT_EVENTS__ || [],
+    (frameElement) => frameElement.__STEMMIO_NATIVE_QA_INPUT_EVENTS__ || [],
   );
 }
 
@@ -846,15 +846,15 @@ export async function installLongTaskRecorder(frame) {
       for (const entry of list.getEntries()) durations.push(entry.duration);
     });
     observer.observe({ type: "longtask", buffered: false });
-    frameElement.__PAGEROOT_NATIVE_QA_LONG_TASKS__ = durations;
-    frameElement.__PAGEROOT_NATIVE_QA_LONG_TASK_OBSERVER__ = observer;
+    frameElement.__STEMMIO_NATIVE_QA_LONG_TASKS__ = durations;
+    frameElement.__STEMMIO_NATIVE_QA_LONG_TASK_OBSERVER__ = observer;
   });
 }
 
 export async function recordedLongTasks(frame) {
   const iframe = await frame.frameElement();
   return iframe.evaluate(
-    (frameElement) => frameElement.__PAGEROOT_NATIVE_QA_LONG_TASKS__ || [],
+    (frameElement) => frameElement.__STEMMIO_NATIVE_QA_LONG_TASKS__ || [],
   );
 }
 
@@ -1012,7 +1012,7 @@ export function replaceEditableIslandTextBytes(
   const buffer = Buffer.isBuffer(source) ? source : Buffer.from(source);
   const sourceText = buffer.toString("utf8");
   const index = buildSourceIndex(sourceText);
-  const element = index.byPagerootId.get(sourceNodeId)
+  const element = index.byStemmioId.get(sourceNodeId)
     ?? index.byNodeId.get(sourceNodeId);
   if (!element || element.type !== "element") {
     throw new Error(`Editable island source element is missing: ${sourceNodeId}`);

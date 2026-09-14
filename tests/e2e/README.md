@@ -1,6 +1,6 @@
 # Native DOM browser and Electron gates
 
-These suites exercise the real PageRoot canvas in Chromium and Electron. Fast
+These suites exercise the real Stemmio canvas in Chromium and Electron. Fast
 Chromium fixtures run behind a simulated Desktop preload host; the Electron
 disk-transaction gate starts from an isolated desktop recent-project record
 and opens a real temporary HTML file through the production project IPC. Both
@@ -13,7 +13,7 @@ The gates require the authored fixture element itself to become the measured
 with browser-native Selection, caret, `beforeinput`, composition and guarded
 mutation behavior. A passing build keeps the iframe `Document` alive during
 typing, creates no substitute editing surface, and persists only the minimal
-PageRoot SourcePatch transaction.
+Stemmio SourcePatch transaction.
 
 ## Dependency condition
 
@@ -29,11 +29,11 @@ An explicitly chosen already-running server can be used without letting the
 config start one:
 
 ```sh
-PAGEROOT_BASE_URL=http://127.0.0.1:3000 \
+STEMMIO_BASE_URL=http://127.0.0.1:3000 \
   npx playwright test --config tests/e2e/browser/playwright.config.mjs
 ```
 
-Without `PAGEROOT_BASE_URL`, the gate starts this checkout's production server
+Without `STEMMIO_BASE_URL`, the gate starts this checkout's production server
 and refuses to silently reuse another process already listening on port 3000.
 
 For Electron, build the renderer first, then run the isolated app tests:
@@ -61,13 +61,13 @@ The suite never pauses for a person or an external model. Its oracle is the
 frozen input, generated output, scope report, finalizer records and exact files
 opened by the production application.
 
-Electron tests pass a dedicated `PAGEROOT_E2E_USER_DATA_DIR` that is accepted
-only when `PAGEROOT_E2E=1` and the path is an isolated
-`pageroot-native-e2e-*` directory under the system temporary directory. They
+Electron tests pass a dedicated `STEMMIO_E2E_USER_DATA_DIR` that is accepted
+only when `STEMMIO_E2E=1` and the path is an isolated
+`stemmio-native-e2e-*` directory under the system temporary directory. They
 run the native window hidden by default, keep its renderer unthrottled, place
 the bridge workspace inside that directory, remove only validated test
 directories, and never change `HOME` or open the user's real HTML project. Set
-`PAGEROOT_E2E_FOREGROUND=1` only for deliberate visual debugging. Background
+`STEMMIO_E2E_FOREGROUND=1` only for deliberate visual debugging. Background
 mode keeps the macOS Dock icon (click it to inspect or minimize the window)
 and all E2E modes suppress automatically triggered native dialogs, logging
 them instead. The real-file case checkpoints and autosaves a temporary disk
@@ -134,7 +134,7 @@ An absolute local sample can optionally replace that input without changing
 the test logic:
 
 ```sh
-PAGEROOT_REAL_HTML_PATH='/absolute/path/to/complex-page.html' npm run test:dom-editing-compatibility
+STEMMIO_REAL_HTML_PATH='/absolute/path/to/complex-page.html' npm run test:dom-editing-compatibility
 ```
 
 An override path must be an absolute existing `.html` file. The test reads it into a
@@ -150,7 +150,7 @@ dispatches synthetic DOM input events and is reported only as a **DOM editing
 compatibility scan**; it is not real mouse/keyboard acceptance. The fixed
 Electron sample in `electron-native-input.spec.mjs` owns real click/dblclick,
 keyboard input, Backspace, Delete and Enter. Private
-corpus acceptance remains `PAGEROOT_REAL_HTML_DIR=... npm run
+corpus acceptance remains `STEMMIO_REAL_HTML_DIR=... npm run
 test:real-html:electron` and reports A text, B structure and C Runtime/iframe
 as separate file/stage/operation rows. Operations execute and report in the
 same order; every A mutation freezes and checks its own source baseline. The

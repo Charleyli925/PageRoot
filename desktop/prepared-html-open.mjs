@@ -55,17 +55,17 @@ export function formatProjectsRootLabel(projectsRoot, {
   pathApi = path,
 } = {}) {
   if (typeof projectsRoot !== "string" || !projectsRoot.trim()) {
-    return "文稿 › PageRoot › 项目";
+    return "文稿 › Stemmio › 项目";
   }
   const resolved = pathApi.resolve(projectsRoot);
   const home = typeof homedir === "string" && homedir
     ? pathApi.resolve(homedir)
     : "";
   const defaultRoot = home
-    ? pathApi.resolve(pathApi.join(home, "Documents", "PageRoot", "项目"))
+    ? pathApi.resolve(pathApi.join(home, "Documents", "Stemmio", "项目"))
     : "";
   if (home && resolved === defaultRoot) {
-    return "文稿 › PageRoot › 项目";
+    return "文稿 › Stemmio › 项目";
   }
   const display = home && (
     resolved === home || resolved.startsWith(`${home}${pathApi.sep}`)
@@ -165,7 +165,7 @@ export function publicFactsFromClassification(classified, {
     ),
     visibleV1FileName: String(classified.visibleV1FileName || ""),
     projectsRootLabel: String(
-      classified.projectsRootLabel || projectsRootLabel || "文稿 › PageRoot › 项目",
+      classified.projectsRootLabel || projectsRootLabel || "文稿 › Stemmio › 项目",
     ),
   });
 }
@@ -203,7 +203,7 @@ export function publicPreparedDescriptor(intent) {
       sourceFileName: String(facts.sourceFileName || ""),
       visibleV1FileName: String(facts.visibleV1FileName || ""),
       projectsRootLabel: String(
-        facts.projectsRootLabel || "文稿 › PageRoot › 项目",
+        facts.projectsRootLabel || "文稿 › Stemmio › 项目",
       ),
     });
   }

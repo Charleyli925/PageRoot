@@ -7,7 +7,7 @@ import {
   loadFixture,
   replaceEditableIslandTextByCase,
   waitForFramePaint,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 const source = Buffer.from(`<!doctype html>
 <html lang="zh-CN">
@@ -101,8 +101,8 @@ test("a transparent inline text hit selects its canonical source host", async ({
   const { frame } = await openFixture(page);
   const host = frame.locator('[data-native-case="exact-boundaries"]');
   const inline = host.locator("strong");
-  const inlineId = await inline.getAttribute("data-pageroot-id");
-  expect(inlineId).toMatch(/^pr1_/u);
+  const inlineId = await inline.getAttribute("data-stemmio-id");
+  expect(inlineId).toMatch(/^sm1_/u);
 
   await inline.dblclick();
 
@@ -118,15 +118,15 @@ test("a wrong canonical parent identity rejects the same inline text hit", async
   const { frame } = await openFixture(page);
   const host = frame.locator('[data-native-case="exact-boundaries"]');
   const inline = host.locator("strong");
-  const inlineId = await inline.getAttribute("data-pageroot-id");
-  expect(inlineId).toMatch(/^pr1_/u);
+  const inlineId = await inline.getAttribute("data-stemmio-id");
+  expect(inlineId).toMatch(/^sm1_/u);
   await host.evaluate((element) => {
     element.setAttribute(
-      "data-pageroot-id",
-      "pr1_ffffffffffff4fff8fffffffffffffff",
+      "data-stemmio-id",
+      "sm1_ffffffffffff4fff8fffffffffffffff",
     );
   });
-  await expect(inline).toHaveAttribute("data-pageroot-id", inlineId);
+  await expect(inline).toHaveAttribute("data-stemmio-id", inlineId);
 
   await inline.dblclick();
 
@@ -179,11 +179,11 @@ async function authoredInnerHtml(target) {
     const clone = element.cloneNode(true);
     if (!(clone instanceof HTMLElement)) throw new Error("Expected an HTML element clone.");
     clone.querySelectorAll("*").forEach((node) => {
-      node.removeAttribute("data-pageroot-id");
-      node.removeAttribute("data-pageroot-edit-runtime-source");
+      node.removeAttribute("data-stemmio-id");
+      node.removeAttribute("data-stemmio-edit-runtime-source");
     });
-    clone.removeAttribute("data-pageroot-id");
-    clone.removeAttribute("data-pageroot-edit-runtime-source");
+    clone.removeAttribute("data-stemmio-id");
+    clone.removeAttribute("data-stemmio-edit-runtime-source");
     return clone.innerHTML;
   });
 }
@@ -191,10 +191,10 @@ async function authoredInnerHtml(target) {
 async function installHandledInputRecorder(frame) {
   const iframe = await frame.frameElement();
   await iframe.evaluate((frameElement) => {
-    frameElement.__PAGEROOT_BOUNDARY_HANDLED_INPUT_EVENTS__ = [];
+    frameElement.__STEMMIO_BOUNDARY_HANDLED_INPUT_EVENTS__ = [];
     for (const type of ["beforeinput", "input"]) {
       frameElement.contentDocument.addEventListener(type, (event) => {
-        frameElement.__PAGEROOT_BOUNDARY_HANDLED_INPUT_EVENTS__.push({
+        frameElement.__STEMMIO_BOUNDARY_HANDLED_INPUT_EVENTS__.push({
           type: event.type,
           inputType: event.inputType || null,
           defaultPrevented: event.defaultPrevented,
@@ -207,7 +207,7 @@ async function installHandledInputRecorder(frame) {
 async function handledInputEvents(frame) {
   const iframe = await frame.frameElement();
   return iframe.evaluate(
-    (frameElement) => frameElement.__PAGEROOT_BOUNDARY_HANDLED_INPUT_EVENTS__ || [],
+    (frameElement) => frameElement.__STEMMIO_BOUNDARY_HANDLED_INPUT_EVENTS__ || [],
   );
 }
 
@@ -589,7 +589,7 @@ test("an IME boundary epoch canonicalizes a wrong-side delivery into the left st
       isComposing: true,
     }));
 
-    // PageRoot normalized this A/B boundary to the left (A). Reproduce a
+    // Stemmio normalized this A/B boundary to the left (A). Reproduce a
     // hostile platform delivery that nevertheless lands in the right text.
     trailingText.data = "你B";
     const selection = document.getSelection();

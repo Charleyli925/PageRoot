@@ -26,7 +26,7 @@ import {
 function factMessage(overrides = {}) {
   return {
     messageId: "message_fact12345678",
-    actor: "pageroot",
+    actor: "stemmio",
     kind: "result-summary",
     status: "completed",
     text: "候选版本 5 已准备好",
@@ -97,7 +97,7 @@ test("no pending decision means the action bar occupies no space", () => {
 
 test("an attention candidate is not offered for blind adoption", () => {
   // Before the user has looked, a large change offers only the comparison:
-  // adopting it unseen is not a choice PageRoot should present.
+  // adopting it unseen is not a choice Stemmio should present.
   const unseen = sidebarActionBar({
     state: "ready-to-open",
     candidateVersionLabel: "候选版本 7",
@@ -361,10 +361,10 @@ test("the Composer names the current model and opens only for a real choice", ()
   });
   assert.deepEqual(sidebarAgentLine({
     catalogStatus: "checking",
-    modelDisplayName: "PageRoot-E2E",
+    modelDisplayName: "Stemmio-E2E",
     modelChoiceCount: 2,
   }), {
-    kind: "checking", text: "PageRoot-E2E", choosable: true,
+    kind: "checking", text: "Stemmio-E2E", choosable: true,
   });
 
   assert.equal(sidebarAgentLine({ catalogStatus: "ready" }), null);
@@ -373,8 +373,8 @@ test("the Composer names the current model and opens only for a real choice", ()
   assert.equal(sidebarAgentLine({ catalogStatus: "not-installed" }), null);
   assert.equal(sidebarAgentLine({ catalogStatus: "unavailable" }), null);
 
-  const single = sidebarAgentLine({ modelDisplayName: "PageRoot-E2E", modelChoiceCount: 1 });
-  assert.equal(single.text, "PageRoot-E2E");
+  const single = sidebarAgentLine({ modelDisplayName: "Stemmio-E2E", modelChoiceCount: 1 });
+  assert.equal(single.text, "Stemmio-E2E");
   assert.equal(single.choosable, false);
 
   const many = sidebarAgentLine({ modelDisplayName: "gpt-5", modelChoiceCount: 3 });
@@ -943,7 +943,7 @@ test("the clipboard round says what is actually happening and keeps the task rea
   }
 });
 
-test("the selected Agent narrates the round while PageRoot states the stage", () => {
+test("the selected Agent narrates the round while Stemmio states the stage", () => {
   const steps = [
     { key: "handoff", label: "Qoder CLI 已启动", state: "done" },
     { key: "agent", label: "等待 AI 完成", detail: "正在执行本轮要求", state: "current" },
@@ -996,9 +996,9 @@ test("public Agent narration remains available with the completed Candidate deci
       { key: "agent", label: "Codex 已完成", state: "done" },
       { key: "result", label: "AI 修改已完成，可以审阅", state: "current" },
     ],
-    agentText: "Candidate 已交给 PageRoot 校验。",
+    agentText: "Candidate 已交给 Stemmio 校验。",
   });
-  assert.equal(progress.narration, "Candidate 已交给 PageRoot 校验。");
+  assert.equal(progress.narration, "Candidate 已交给 Stemmio 校验。");
   assert.equal(progress.liveLabel, null);
 });
 
@@ -1031,7 +1031,7 @@ test("every speaker has an avatar mark, so the thread reads as a chat", () => {
   // panel parked in the sidebar instead of someone speaking in it.
   assert.equal(sidebarActorInitial("user"), "你");
   assert.equal(sidebarActorInitial("qoder"), "Q");
-  assert.equal(sidebarActorInitial("pageroot"), "P");
+  assert.equal(sidebarActorInitial("stemmio"), "P");
   // An unknown actor still gets a mark rather than an empty square.
   assert.equal(sidebarActorInitial("someone-else"), "P");
 });
@@ -1078,17 +1078,17 @@ test("turn presentation preserves Conversation sequence across Agent and Stemmio
 
 
 test("stored provider identities keep their names instead of becoming a generic AI Agent", () => {
-  assert.deepEqual(sidebarMessageStream(["qoder", "codex", "pageroot"].map((providerId) => factMessage({ actor: "agent", providerId }))).map((message) => message.actorLabel), ["Qoder", "Codex", "Stemmio AI"]);
+  assert.deepEqual(sidebarMessageStream(["qoder", "codex", "stemmio"].map((providerId) => factMessage({ actor: "agent", providerId }))).map((message) => message.actorLabel), ["Qoder", "Codex", "Stemmio AI"]);
 });
 
 test("process blocks preserve executor boundaries and narration sentences survive display", async () => {
   const { sidebarTurnPresentation, sidebarNarrationParagraphs } = await import('../app/workbench/ai-conversation-model.js');
   const messages = [
-    { messageId: 'a', actor: 'pageroot', actorLabel: 'Stemmio', kind: 'progress', text: '交付任务' },
+    { messageId: 'a', actor: 'stemmio', actorLabel: 'Stemmio', kind: 'progress', text: '交付任务' },
     { messageId: 'b', actor: 'agent', actorLabel: 'Codex', kind: 'progress', text: '读取资料' },
-    { messageId: 'c', actor: 'pageroot', actorLabel: 'Stemmio', kind: 'progress', text: '准备审阅' },
+    { messageId: 'c', actor: 'stemmio', actorLabel: 'Stemmio', kind: 'progress', text: '准备审阅' },
   ];
-  assert.deepEqual(sidebarTurnPresentation(messages).timeline.map(block => block.messages[0].actor), ['pageroot', 'agent', 'pageroot']);
+  assert.deepEqual(sidebarTurnPresentation(messages).timeline.map(block => block.messages[0].actor), ['stemmio', 'agent', 'stemmio']);
   assert.deepEqual(sidebarNarrationParagraphs('读取资料。生成结果。\n\n版本 1.2 保持原样。'), ['读取资料。', '生成结果。', '版本 1.2 保持原样。']);
 });
 

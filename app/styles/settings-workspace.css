@@ -591,14 +591,14 @@
 
 .settings-agent-rows .qoder-availability-card,
 .settings-agent-rows .codex-availability-card,
-.settings-agent-rows .pageroot-availability-card {
+.settings-agent-rows .stemmio-availability-card {
   border-top: 0;
   border-bottom: 1px solid #ecebf0;
 }
 
 .settings-agent-rows .qoder-availability-card:last-child,
 .settings-agent-rows .codex-availability-card:last-child,
-.settings-agent-rows .pageroot-availability-card:last-child {
+.settings-agent-rows .stemmio-availability-card:last-child {
   border-bottom: 0;
 }
 
@@ -680,7 +680,7 @@
 
 .qoder-availability-card,
 .codex-availability-card,
-.pageroot-availability-card {
+.stemmio-availability-card {
   width: 100%;
   overflow: hidden;
   border-top: 1px solid #e3e0eb;
@@ -796,13 +796,13 @@
 
 .qoder-availability-card[data-status="not-installed"] .qoder-card-status i,
 .codex-availability-card[data-status="not-installed"] .qoder-card-status i,
-.pageroot-availability-card[data-status="not-installed"] .qoder-card-status i {
+.stemmio-availability-card[data-status="not-installed"] .qoder-card-status i {
   background: #5147d6;
 }
 
 .qoder-availability-card[data-status="unavailable"] .qoder-card-status i,
 .codex-availability-card[data-status="unavailable"] .qoder-card-status i,
-.pageroot-availability-card[data-status="unavailable"] .qoder-card-status i {
+.stemmio-availability-card[data-status="unavailable"] .qoder-card-status i {
   background: #d25248;
 }
 
@@ -905,7 +905,7 @@
   align-items: center;
 }
 
-:is(.pageroot-availability-card, .qoder-availability-card, .codex-availability-card)[data-surface="settings"] { padding-top: 12px; }
+:is(.stemmio-availability-card, .qoder-availability-card, .codex-availability-card)[data-surface="settings"] { padding-top: 12px; }
 
 [data-surface="delivery"] .qoder-card-credential-summary {
   grid-template-columns: 72px minmax(0, 1fr);

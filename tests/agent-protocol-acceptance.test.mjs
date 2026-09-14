@@ -15,7 +15,7 @@ import { publicOpenAiCompatibleVendors } from "../shared/openai-compatible-vendo
 import { SUPPORTED_AGENT_MODELS } from "../shared/supported-agent-models.mjs";
 
 test("every built-in model and ACP provider is protocol-unverified until real proof", () => {
-  const httpIds = SUPPORTED_AGENT_MODELS.map((model) => `pageroot:${model.modelId}`);
+  const httpIds = SUPPORTED_AGENT_MODELS.map((model) => `stemmio:${model.modelId}`);
   const ids = AGENT_PROTOCOL_ACCEPTANCE.map((row) => row.id);
   for (const id of httpIds) assert.ok(ids.includes(id), id);
   assert.ok(ids.includes("qoder"));
@@ -26,7 +26,7 @@ test("every built-in model and ACP provider is protocol-unverified until real pr
 });
 
 test("product-visible DeepSeek is still marked 未验收 and mock catalogs cannot accept it", () => {
-  const deepseek = AGENT_PROTOCOL_ACCEPTANCE.find((row) => row.id === "pageroot:deepseek-v4-pro");
+  const deepseek = AGENT_PROTOCOL_ACCEPTANCE.find((row) => row.id === "stemmio:deepseek-v4-pro");
   assert.equal(deepseek.productChannel, "stable");
   assert.equal(deepseek.protocolAcceptance, "unverified");
   assert.deepEqual(publicOpenAiCompatibleVendors().map(({ id }) => id), ["deepseek", "custom"]);
@@ -42,7 +42,7 @@ test("accepted rows cannot use synthetic CI evidence and must bind real proof", 
   assert.equal(inspectAgentProtocolAcceptance().ok, true);
   const forged = inspectAgentProtocolAcceptance([
     {
-      id: "pageroot:deepseek-v4-pro",
+      id: "stemmio:deepseek-v4-pro",
       protocolAcceptance: "accepted",
       evidence: "ci-synthetic",
     },

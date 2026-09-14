@@ -6,7 +6,7 @@ import browserConfig from "./playwright.config.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
-const smokeId = process.env.PAGEROOT_SMOKE_SUITE || "browser-smoke";
+const smokeId = process.env.STEMMIO_SMOKE_SUITE || "browser-smoke";
 
 export default defineConfig({
   ...browserConfig,

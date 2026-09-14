@@ -1,7 +1,7 @@
 import type { AgentSelection } from "../domain/agent-provider-state.js";
 
 export const AGENT_SERVICE_LABELS: Readonly<{
-  pageroot: "内置 AI";
+  stemmio: "内置 AI";
   qoder: "Qoder";
   codex: "Codex";
 }>;

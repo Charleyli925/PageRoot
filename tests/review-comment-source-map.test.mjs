@@ -41,10 +41,10 @@ test("review comment projection keeps identified class targets source-distinct w
 
   assert.equal(new Set(targets.map((target) => target.selector)).size, 3);
   targets.forEach((target, index) => {
-    assert.equal(target.elementId, cards[index].pagerootId);
+    assert.equal(target.elementId, cards[index].stemmioId);
     assert.equal(
       target.selector,
-      `article[data-pageroot-id="${cards[index].pagerootId}"]`,
+      `article[data-stemmio-id="${cards[index].stemmioId}"]`,
     );
   });
 
@@ -57,12 +57,12 @@ test("review comment projection keeps identified class targets source-distinct w
     selectionFor(target),
   ));
   assert.equal(resolved.every(Boolean), true);
-  assert.equal(new Set(resolved.map((element) => element.pagerootId)).size, 3);
+  assert.equal(new Set(resolved.map((element) => element.stemmioId)).size, 3);
   resolved.forEach((element) => {
-    assert.equal(element.pagerootIdentityStatus, "valid");
+    assert.equal(element.stemmioIdentityStatus, "valid");
     assert.match(
       projection.html,
-      new RegExp(`data-pageroot-id="${element.pagerootId}"`, "u"),
+      new RegExp(`data-stemmio-id="${element.stemmioId}"`, "u"),
     );
   });
 });

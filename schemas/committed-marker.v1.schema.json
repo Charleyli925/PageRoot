@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/committed-marker.v1.schema.json",
-  "title": "HTML AI Version commit marker v1",
+  "$id": "https://stemmio.local/schemas/committed-marker.v1.schema.json",
+  "title": "Stemmio Version commit marker v1",
   "description": "The single commit point that makes an initial or internal-AI Version visible to history and latest-Version discovery.",
   "oneOf": [
     {

@@ -11,7 +11,7 @@ import {
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
-const ARTIFACT_DIRECTORY_PATTERN = /^PageRoot-(.+)-evidence-(\d+)-(\d+)$/u;
+const ARTIFACT_DIRECTORY_PATTERN = /^Stemmio-(.+)-evidence-(\d+)-(\d+)$/u;
 
 export function parseEvidenceArtifactDirectory(name) {
   const match = ARTIFACT_DIRECTORY_PATTERN.exec(String(name || ""));

@@ -45,7 +45,7 @@ function checkpoint(overrides = {}) {
 }
 
 async function fixture(t) {
-  const parent = await mkdtemp(path.join(os.tmpdir(), "pageroot-recovery-journal-"));
+  const parent = await mkdtemp(path.join(os.tmpdir(), "stemmio-recovery-journal-"));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(parent, { recursive: true, force: true });
@@ -271,7 +271,7 @@ test("recovery journal serializes one document without blocking another", async 
 });
 
 test("recovery journal scan paginates every verified entry within total byte bounds", async (t) => {
-  const parent = await mkdtemp(path.join(os.tmpdir(), "pageroot-recovery-bounded-"));
+  const parent = await mkdtemp(path.join(os.tmpdir(), "stemmio-recovery-bounded-"));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(parent, { recursive: true, force: true });

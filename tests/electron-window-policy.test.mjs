@@ -34,7 +34,7 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   const nativeAndAiSuites = productSuites.slice(0, -2);
 
   const desktopSource = `${mainProcess}\n${appLifecycle}`;
-  assert.match(mainProcess, /PAGEROOT_E2E_FOREGROUND === "1"/u);
+  assert.match(mainProcess, /STEMMIO_E2E_FOREGROUND === "1"/u);
   // 后台 E2E 不再使用 accessory 激活策略彻底隐藏应用：Dock 图标保留，
   // 窗口仍默认不显示，只有用户主动点击 Dock 图标才调到前台。
   assert.doesNotMatch(desktopSource, /setActivationPolicy\("accessory"\)/u);
@@ -47,11 +47,11 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   );
   assert.match(
     mainProcess,
-    /if \(process\.env\.PAGEROOT_E2E === "1"\) \{[\s\S]*?__pagerootE2eHoldEditRuntimePrepare/u,
+    /if \(process\.env\.STEMMIO_E2E === "1"\) \{[\s\S]*?__stemmioE2eHoldEditRuntimePrepare/u,
   );
   assert.match(
     mainProcess,
-    /if \(process\.env\.PAGEROOT_E2E === "1" && e2eEditRuntimePrepareGate\.held\)/u,
+    /if \(process\.env\.STEMMIO_E2E === "1" && e2eEditRuntimePrepareGate\.held\)/u,
   );
   assert.match(
     appLifecycle,
@@ -70,13 +70,13 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   assert.doesNotMatch(mainProcess, /dialog\.showMessageBox/u);
 
   assert.match(appFixture, /window\.isVisible\(\)/u);
-  assert.match(appFixture, /PAGEROOT_E2E_FOREGROUND/u);
+  assert.match(appFixture, /STEMMIO_E2E_FOREGROUND/u);
   assert.doesNotMatch(appFixture, /page\.bringToFront\(\)/u);
   assert.doesNotMatch(appFixture, /app\.focus\(\{\s*steal:\s*true\s*\}\)/u);
   assert.doesNotMatch(appFixture, /window\?\.show\(\)/u);
   assert.doesNotMatch(appFixture, /window\?\.focus\(\)/u);
 
-  assert.match(nativeAndAiSuites[0], /\.\/helpers\/pageroot-app-fixture\.mjs/u);
+  assert.match(nativeAndAiSuites[0], /\.\/helpers\/stemmio-app-fixture\.mjs/u);
   for (const productSuite of nativeAndAiSuites) {
     assert.doesNotMatch(productSuite, /page\.bringToFront\(\)/u);
     assert.doesNotMatch(productSuite, /app\.focus\(\{\s*steal:\s*true\s*\}\)/u);

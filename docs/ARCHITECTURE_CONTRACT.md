@@ -124,10 +124,10 @@ The renderer's main workspace facts are partitioned as follows:
   the registry. The Qoder provider owns installation identity,
   version, login/model preflight and raw-error normalization. The Codex ACP
   provider owns the same facts for `providerId: "codex"`; missing login is
-  `session/new` JSON-RPC `-32000`, not advertised `authMethods`. The PageRoot
+  `session/new` JSON-RPC `-32000`, not advertised `authMethods`. The Stemmio
   native provider owns read-only reachability diagnosis, vendor Token preflight
   and streaming `/chat/completions` for
-  `providerId: "pageroot"` / `runtimeId: "http"`. Unknown IDs fail
+  `providerId: "stemmio"` / `runtimeId: "http"`. Unknown IDs fail
   closed; opaque installation facts, digests and capabilities stay inside the
   ticket;
 - Bridge Agent runtimes: HTTP SSE and ACP session updates share a sliding
@@ -143,7 +143,7 @@ The renderer's main workspace facts are partitioned as follows:
   jobs, Bridge-minted login `operationId` values, terminal login snapshots and
   login drain. Coordinator does not own install or login. This
   is a product allowlist, not a live public registry; Qoder and Codex ACP are
-  the installable shipped ACP entries. `pageroot`/`http` is a non-installable
+  the installable shipped ACP entries. `stemmio`/`http` is a non-installable
   shipped HTTP Agent (ADR 0069). The packaged application contains no
   private Codex runtime or native Codex package;
   public catalog snapshots also hydrate Bridge-owned `installState`, including
@@ -477,7 +477,7 @@ confirmation or downgrade a completed rename/created-history open to unknown.
 Request or verified Candidate already exists, the Repository validates the
 frozen project/request/attempt/candidate lineage and hashes, then delegates
 only those verified bytes to the narrow `ai-task-projection` materializer. Its
-receipt under `.pageroot/recovery/ai-task-projections/` records display recovery
+receipt under `.stemmio/recovery/ai-task-projections/` records display recovery
 progress; it cannot recreate an active Request, Candidate, Version or runtime
 state. The materializer publishes a frozen `PROMPT.md`, then a finalizer-verified
 `*-Vn-待审阅.html`, using exclusive directories and no-replace files. It neither
@@ -499,10 +499,10 @@ comment/attachment identity, project-relative path, regular-file status, size
 and SHA-256 before creating any Request-owned attachment; it then copies and
 re-reads each byte into `input/attachments/<commentId>/`. The complete frozen
 Request bundle, including those copies, is first assembled under
-`.pageroot/recovery/request-freeze/<requestId>/`. A verified recovery marker is
+`.stemmio/recovery/request-freeze/<requestId>/`. A verified recovery marker is
 written only after every bundle file and manifest digest has been checked; the
 staging directory is then atomically renamed to
-`.pageroot/requests/<requestId>/` before Runtime authority is published. A
+`.stemmio/requests/<requestId>/` before Runtime authority is published. A
 restart verifies and resumes a ready marker, discards only markerless
 unpublished staging, and fails closed if staging and a published directory both
 exist. The annotations, `change-request.json`, `PROMPT.md` and
@@ -666,7 +666,7 @@ version, core filename and query identity before those bytes can enter the
 exact cache.
 Main enforces two concurrent preparations and a bounded recent request-ID replay
 window. Completed identities age out, so repeated ordinary use never exhausts a
-permanent application-lifetime allowance or requires PageRoot to restart. An
+permanent application-lifetime allowance or requires Stemmio to restart. An
 unavailable resource remains a recoverable preparation state while its
 independent bounded download is active. A terminal preparation, exact-resource
 load, provenance or unfinished execution-deadline failure selects an explicit
@@ -704,9 +704,9 @@ Hash.
 Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
 
-`data-pageroot-id` is persistent source identity, not Runtime edit authority.
+`data-stemmio-id` is persistent source identity, not Runtime edit authority.
 An equal ID on another DOM object grants nothing by itself. Runtime source
-proof is a private `WeakMap<Element, PagerootElementId>` sealed before author
+proof is a private `WeakMap<Element, StemmioElementId>` sealed before author
 Script activation: it answers whether this DOM object is the original parsed
 source object. It is not a second identity. Offset-derived Source Node IDs are
 not written onto Runtime DOM or Review HTML, do not authorize edits, and are never refreshed
@@ -716,7 +716,7 @@ before author Script activation and is then sealed. A registered object may be
 revoked when its live identity fails, but author code can never add another
 trusted object after activation; generated, copied and forged nodes remain
 display/comment-only. Exact parser-time execution order is not an Edit Runtime
-contract: PageRoot may finish source parsing and authority registration before
+contract: Stemmio may finish source parsing and authority registration before
 activating parser-blocking, `async`, `defer` or module scripts. Reproducing every
 edge timing must not reintroduce Runtime snapshots, freeze, per-node provenance
 reconciliation or Script execution-state migration.
@@ -862,7 +862,7 @@ copy. The retired shell callback/document builder and unused prepared-copy size
 estimator are absent; only complete formal projection publishes Review pages.
 Parsing and annotation yield between phases,
 and stale work stops before publication. Complete, valid and unique
-`data-pageroot-id` enables exact persistent continuity and current-frame visual
+`data-stemmio-id` enables exact persistent continuity and current-frame visual
 enhancement. Absent, partial, malformed or duplicate identity makes visual
 enhancement `unsupported`, but does not cancel source Review: the existing
 semantic matcher remains the historical-source fallback. When Stable-ID
@@ -1089,7 +1089,7 @@ replacement can authorize an additional source change. The shared planner also
 owns the safe parent boundary and explicit-end/void/source-self-closing sibling
 preconditions, preventing Repository from accepting a reorder Canvas rejects.
 Native editable-island input forms `setText` with logical text and canonical
-`contentHtml` but no `createdPagerootIds`. When IDs are absent, the Kernel runs
+`contentHtml` but no `createdStemmioIds`. When IDs are absent, the Kernel runs
 the fresh editable-island planner and passes the caller's `randomUUID` through
 to `materializeEditableIslandHtml`; the ordered IDs it allocates become
 `allocation.allocatedElementIds` and are sealed into the accepted operation
@@ -1229,7 +1229,7 @@ boundary. A forward edit after undo truncates redo. Source mismatch never
 attempts best-effort patching and never serializes preview DOM; it clears the
 session history or reports the existing source conflict.
 
-An inode change is not by itself proof of a new document because PageRoot's
+An inode change is not by itself proof of a new document because Stemmio's
 same-directory atomic replacement intentionally changes it. The Bridge may
 repair the registered file identity only when current source bytes match the
 registered current Hash, a compatible legacy document stamp, or the durable
@@ -1362,32 +1362,14 @@ producer. Each fallback must state the old producer, removal condition and
 focused coverage. Domain and view code use only current canonical states.
 Inline aliases and permanent “just in case” branches are not allowed.
 
-The supported compatibility adapters are:
-
-- An exact pre-hardening V4 `.pageroot-registry.json` may complete its missing
-  Registry-only root identity metadata through `ProjectFileRepository`. The
-  current shape is validated and read without a write. The historical shape
-  must have exactly `schemaVersion: "4.0.0"`, no `pendingImports`, and only
-  `{ projectRootPath, updatedAt }` project records. Every record must prove its
-  ID, direct-child non-symlink root, real-path containment and matching
-  `.pageroot/project.json`; current `rootFileIdentity` comes from that live
-root stat, never a filename or HTML Hash. A short-lived exclusive migration
-lock serializes this replacement across Bridge processes; sealed dead-owner
-reclamation first atomically claims the exact token-named marker, while an
-unsealed or malformed lock fails busy. After acquiring it,
-the repository re-reads the Registry and returns a current record without a
-write when another process already completed it. All entries validate before
-the old raw bytes are backed up by Hash and the full current Registry is
-atomically published. A failure preserves the old Registry, cannot reset or
-reassociate a project, and grants no write authority. Remove this migration
-  only after a read-only Registry census proves the exact historical shape is
-  outside the supported upgrade window.
-- Complete PageRoot 0.9.0 v3 project records whose registry, `project.json`,
-  initial Version and existing `projects/<projectId>` directory prove one
-  identity may gain `displayName`, `createdAt` and
-  `storageDirectoryName=projectId` in place without renaming or scanning
-  directories. Remove this adapter only when 0.9.0 project records leave the
-  supported upgrade window. v1/v2 and incomplete records remain unsupported.
+The current Stemmio runtime has no compatibility adapter for legacy PageRoot
+management data. It does not read, complete, migrate or delete an old
+`.pageroot-registry.json`, `.pageroot/project.json`, Application Support root,
+or Keychain entry. A user-selected legacy HTML file is an explicit external
+import: it is copied into a new Stemmio project with a new identity while the
+original bytes and its old control directory remain untouched. Historical
+pre-hardening registry shapes remain unsupported and are retained only as
+read-only negative evidence.
 - Draft commands must carry a current `draftop_` identifier. Missing
   `operationId` values fail closed. Previously persisted
   `draftop_legacy_*` acknowledgements remain readable opaque IDs; nothing

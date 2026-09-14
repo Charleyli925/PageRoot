@@ -11,7 +11,7 @@ import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import { architectureLabel } from "./update-presentation";
 
-export type AboutPageRootDialogProps = {
+export type AboutStemmioDialogProps = {
   open: boolean;
   appVersion: string;
   architecture?: string | null;
@@ -22,7 +22,7 @@ export type AboutPageRootDialogProps = {
   onOpenUserNotice: () => void;
 };
 
-export default function AboutPageRootDialog({
+export default function AboutStemmioDialog({
   open,
   appVersion,
   architecture,
@@ -31,7 +31,7 @@ export default function AboutPageRootDialog({
   onClose,
   onOpenRepository,
   onOpenUserNotice,
-}: AboutPageRootDialogProps) {
+}: AboutStemmioDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -56,8 +56,8 @@ export default function AboutPageRootDialog({
     <dialog
       ref={dialogRef}
       className="about-dialog"
-      aria-labelledby="about-pageroot-title"
-      aria-describedby="about-pageroot-description"
+      aria-labelledby="about-stemmio-title"
+      aria-describedby="about-stemmio-description"
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -81,8 +81,8 @@ export default function AboutPageRootDialog({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="./brand-logo.png" alt="" />
           <div>
-            <h2 id="about-pageroot-title">源页</h2>
-            <p id="about-pageroot-description">
+            <h2 id="about-stemmio-title">源页</h2>
+            <p id="about-stemmio-description">
               源码级本地 HTML 编辑器。
               <br />
               所见即可改，源文件始终可追溯。
@@ -104,7 +104,7 @@ export default function AboutPageRootDialog({
             <GithubLogoIcon size={24} weight="fill" />
           </span>
           <span>
-            <strong>PageRoot on GitHub</strong>
+            <strong>Stemmio on GitHub</strong>
             <small>查看源代码、问题与正式发布记录</small>
           </span>
           <ArrowSquareOutIcon aria-hidden="true" size={17} weight="bold" />

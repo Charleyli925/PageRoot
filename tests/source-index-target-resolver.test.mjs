@@ -320,7 +320,7 @@ test("insertion exact validates zero-width in-bounds child boundary and parent i
     parentId: parent.nodeId,
     beforeSiblingId: before.nodeId,
   });
-  assert.equal(valid.elementId, parent.pagerootId);
+  assert.equal(valid.elementId, parent.stemmioId);
   assert.equal(resolveTargetRef(index, valid).resolution, "exact");
 
   const nonZeroWidth = {

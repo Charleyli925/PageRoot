@@ -8,7 +8,7 @@ Dependabot checks monthly. Coupled React packages are updated together, and mino
 
 ## Temporary reviewed exceptions
 
-`echarts` 5.4.3 and 5.6.0 remain pinned because PageRoot resolves exact
+`echarts` 5.4.3 and 5.6.0 remain pinned because Stemmio resolves exact
 cdnjs/jsDelivr/unpkg minified URLs for those two authored versions to their
 same-version packaged bytes. GHSA-fgmj-fm8m-jvvx (CVE-2026-45249) is a
 Lines-series tooltip XSS fixed only in 6.1.0, a major bump that would miss those
@@ -83,7 +83,7 @@ separate package identities and integrity pins are checked. `semver` is pinned
 at the package root so the updater closure has no hidden nested runtime copy.
 The dependency audit rejects missing, nested or undeclared modules in this exact
 packaged allowlist.
-The artifact verifier also walks every PageRoot-owned Resources subtree with
+The artifact verifier also walks every Stemmio-owned Resources subtree with
 `lstat`, rejects symlinks and all non-regular entries (including FIFOs and Unix
 sockets), rejects ASAR link entries, and byte-compares each allowlisted package
 against the clean source closure. A packaged Electron Helper then starts the

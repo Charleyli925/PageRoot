@@ -1,9 +1,9 @@
-# PageRoot AI 对话与 Agent 工作区产品需求
+# Stemmio AI 对话与 Agent 工作区产品需求
 
 - 文档版本：PRD v0.2
 - 最近更新：2026-08-21（Asia/Shanghai，UTC+8）
 - 状态：历史方案；Discussion 产品线已于 2026-08-26 退役
-- 适用范围：PageRoot 桌面版单 HTML 项目的评论、预览、Qoder CLI 对话、受管 AI 修改、Candidate 审阅、正式版本晋升与对话历史
+- 适用范围：Stemmio 桌面版单 HTML 项目的评论、预览、Qoder CLI 对话、受管 AI 修改、Candidate 审阅、正式版本晋升与对话历史
 - 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[设计语言](DESIGN_LANGUAGE.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md)、[状态所有权](STATE_OWNERSHIP.md)、[安全模型](SECURITY_MODEL.md)、[ADR 0032](decisions/0032-qoder-acp-agent-bridge.md)
 
 > **当前产品覆盖规则（2026-08-26）：** Qoder 与 Codex 都不再提供新 Discussion Turn。
@@ -16,26 +16,26 @@
 > **当前展示补充（2026-09-09）：** 执行记录默认展开并按时间保留；常驻下一轮草稿仅保存文字，
 > 不恢复 Discussion 或新发送入口。当前行为唯一合同见 [交互流程](INTERACTION_FLOW.md)。
 
-本文定义 PageRoot 下一阶段的目标产品规则。它不是对现有 Agent 交付弹窗或处理抽屉的局部换皮，而是把编辑、评论、AI 讨论、受管执行、Candidate 决策与审阅统一为一个围绕真实 HTML 的连续工作流。
+本文定义 Stemmio 下一阶段的目标产品规则。它不是对现有 Agent 交付弹窗或处理抽屉的局部换皮，而是把编辑、评论、AI 讨论、受管执行、Candidate 决策与审阅统一为一个围绕真实 HTML 的连续工作流。
 
 本文只定义目标产品与验收合同。实施时必须同步更新协议、Schema、状态所有权、安全模型、测试和 ADR；不能只增加一个聊天侧栏，也不能让 Renderer 或 Qoder 会话绕过现有 Request、Candidate、Version 与 Working Copy 权威。
 
 ## 1. 产品结论
 
-PageRoot 只保留两个顶层页面模式：
+Stemmio 只保留两个顶层页面模式：
 
 1. **编辑模式**：用户编辑真实 HTML，并通过右侧空间评论栏创建、修改和删除评论。AI 对话不在编辑模式中显示，Qoder 在此模式没有读取或修改授权。
 2. **预览模式**：用户查看只读页面、页面上的“评”标记和右侧 AI 对话；AI 讨论、Qoder 受管执行、Candidate 等待决定与审阅均从这里进入。
 
 核心合同如下：
 
-> 编辑只负责编辑和评论；AI 对话只发生在预览或审阅。普通对话只能读取精确页面上下文，不能修改 HTML。只有用户明确“交给 AI 修改”后，PageRoot 才建立新的冻结 Request，并只授权 Qoder 写入独立 Candidate。当前 HTML 只有在用户明确采用且 Promotion 原子完成后才会切换。
+> 编辑只负责编辑和评论；AI 对话只发生在预览或审阅。普通对话只能读取精确页面上下文，不能修改 HTML。只有用户明确“交给 AI 修改”后，Stemmio 才建立新的冻结 Request，并只授权 Qoder 写入独立 Candidate。当前 HTML 只有在用户明确采用且 Promotion 原子完成后才会切换。
 
-右侧 AI 区采用 Agent 产品的对话结构，但 PageRoot、Qoder CLI 和用户拥有不同的权威：
+右侧 AI 区采用 Agent 产品的对话结构，但 Stemmio、Qoder CLI 和用户拥有不同的权威：
 
 - 用户表达问题、修改要求和最终决定。
 - Qoder CLI 提供可见回复与受管执行进展，但不能声明 Candidate 已验证、已保存或已采用。
-- PageRoot 展示冻结、权限、校验、Candidate、冲突、采用和恢复等系统事实，并且是唯一可以宣告“结果已验证”“当前页面已切换”的界面主体。
+- Stemmio 展示冻结、权限、校验、Candidate、冲突、采用和恢复等系统事实，并且是唯一可以宣告“结果已验证”“当前页面已切换”的界面主体。
 
 ## 2. 产品设计原则
 
@@ -77,7 +77,7 @@ PageRoot 只保留两个顶层页面模式：
 
 ### 2.9 权威分层在文案上可辨
 
-Qoder 只能说它正在做什么；只有 PageRoot 能说结果已验证、页面已切换。Qoder 消息禁止使用“已保存”“已创建版本”“已采用”。用户必须能分清是谁在说话。
+Qoder 只能说它正在做什么；只有 Stemmio 能说结果已验证、页面已切换。Qoder 消息禁止使用“已保存”“已创建版本”“已采用”。用户必须能分清是谁在说话。
 
 ### 2.10 材质与动效统一
 
@@ -92,16 +92,16 @@ AI 侧栏走[设计语言](DESIGN_LANGUAGE.md)已定的材质体系，不发明�
 
 ## 3. 背景与问题
 
-当前发送流程把同一件事拆成“怎样交给 AI”弹窗、等待处理工作台、已发送 HTML 预览和独立审阅页。状态完整，但用户在最需要观察页面时被带离页面，且交付方式、Agent 进度、PageRoot 校验与版本决定被表现为多套界面。
+当前发送流程把同一件事拆成“怎样交给 AI”弹窗、等待处理工作台、已发送 HTML 预览和独立审阅页。状态完整，但用户在最需要观察页面时被带离页面，且交付方式、Agent 进度、Stemmio 校验与版本决定被表现为多套界面。
 
 下一阶段还需要解决以下问题：
 
 1. 编辑态的右侧评论具有空间定位，AI 对话具有时间顺序；二者不能塞进同一个滚动流，也不能切换后让用户误以为评论消失。
 2. Qoder CLI 既可以参与只读讨论，也可以执行受管修改；两类会话的文件和工具权限必须明确分离。
 3. AI 对话必须回答“这句话针对哪一个项目、哪一份 HTML、哪次 Request、哪份 Candidate”，不能只依赖文件名、路径或当前画布。
-4. Qoder 的流式回复、PageRoot 的阶段事实和最终 Candidate 权威必须分层；Agent 说“完成”不等于 PageRoot 已接受结果。
+4. Qoder 的流式回复、Stemmio 的阶段事实和最终 Candidate 权威必须分层；Agent 说“完成”不等于 Stemmio 已接受结果。
 5. 审阅中继续讨论不应自动采用 Candidate；用户要求继续修改时，必须先完成一次明确的采用。
-6. 模型通常不止一个。PageRoot 需要提前加载真实可用模型、让用户显式选择，并记录每个 Turn 与 Request 实际使用的模型。
+6. 模型通常不止一个。Stemmio 需要提前加载真实可用模型、让用户显式选择，并记录每个 Turn 与 Request 实际使用的模型。
 7. 一个项目可以有多个 HTML Document。对话必须跟随 Document，切换 Document 时不能串线，也不能中断另一个 Document 的后台生成。
 8. 应用重启、项目切换、HTML 继续编辑、Agent 流式中断和对话过长时，消息与页面身份不能串线或静默丢失。
 
@@ -114,9 +114,9 @@ AI 侧栏走[设计语言](DESIGN_LANGUAGE.md)已定的材质体系，不发明�
 - AI 预览在评论原 TargetRef 上显示只读“评”标记，复用编辑模式同一个标记组件；Hover 或键盘聚焦后展开只读评论正文。
 - 用户可在 AI 预览中与 Qoder 讨论当前页面；讨论对话只能读取精确、只读的页面上下文快照。
 - 用户可明确把本轮评论和修改要求交给 Qoder CLI 或复制给外部 Agent。
-- Qoder CLI 自动执行时，用户持续看见 Qoder 与 PageRoot 各自负责的流式进展，不离开冻结页面。
+- Qoder CLI 自动执行时，用户持续看见 Qoder 与 Stemmio 各自负责的流式进展，不离开冻结页面。
 - 执行中 Composer 始终可见，允许用户提前写下一条草稿，但不能发送或改变已冻结 Request。
-- Candidate 通过校验后仍显示修改前的冻结页面，由 PageRoot 在常驻行动条中询问用户“审阅对比”或“直接采用”。
+- Candidate 通过校验后仍显示修改前的冻结页面，由 Stemmio 在常驻行动条中询问用户“审阅对比”或“直接采用”。
 - 审阅中允许继续和 Qoder 讨论结果；普通讨论不采用、不修改 Candidate。
 - 对话、Turn、消息、阶段、模型和页面上下文均具有稳定身份与时间记录，可在项目重开后恢复。
 - Conversation 跟随 Document；切换 Document 即切换对话，且互相看不到对方的记录。
@@ -147,10 +147,10 @@ AI 侧栏走[设计语言](DESIGN_LANGUAGE.md)已定的材质体系，不发明�
 | 审阅 | 是 | 修改前与 Candidate 的隔离对比；运行时仍属于待决定 Candidate |
 | Conversation | 是 | 围绕同一 Document 长期存在的一条 AI 对话线程，可跨多个 HTML Context 与 AI 轮次 |
 | Context | 否 | 一组精确页面身份，至少绑定 Working Copy、source SHA 和谱系基础 |
-| Turn | 否 | 用户发出一条消息后，Qoder 与 PageRoot 对应产生的一次对话或执行往返 |
+| Turn | 否 | 用户发出一条消息后，Qoder 与 Stemmio 对应产生的一次对话或执行往返 |
 | Discussion Turn | 否 | 只读讨论；不创建 Request，不授权修改 |
 | Execution Turn | 否 | 用户明确授权后创建冻结 Request，由 Qoder 只写独立 Candidate |
-| PageRoot Message | 是 | PageRoot 对冻结、校验、版本、错误和决策等系统事实的可见说明 |
+| Stemmio Message | 是 | Stemmio 对冻结、校验、版本、错误和决策等系统事实的可见说明 |
 | Qoder Message | 是 | Qoder CLI 的可见文本回复或结构化执行阶段；不拥有结果权威 |
 | Request | 可在详情中看见 | 一次已冻结的修改意图、HTML、评论、附件、项目规则、模型与交付配置 |
 | Candidate | 是 | Qoder 输出并通过协议校验、尚未采用的完整 HTML |
@@ -172,7 +172,7 @@ AI 侧栏走[设计语言](DESIGN_LANGUAGE.md)已定的材质体系，不发明�
 - AI 对话不常驻、不覆盖评论栏，也不通过页签替换评论栏。
 - Qoder 讨论或修改会话即使在后台存在，也不能在编辑画布中获得新页面权限。
 
-用户点击 AI 入口时，PageRoot 必须：
+用户点击 AI 入口时，Stemmio 必须：
 
 1. 完成当前原生输入 checkpoint；IME、SourcePatch 或映射失败时留在编辑模式并显示就地错误。
 2. 进入当前 HTML 的桌面预览。
@@ -190,7 +190,7 @@ AI 侧栏走[设计语言](DESIGN_LANGUAGE.md)已定的材质体系，不发明�
 
 ### 6.3 AI 侧栏三层结构
 
-AI 侧栏自上而下是三个固定区域。**消息流承载事实、当前过程和 PageRoot 决定；可变发送交互只放底部 Composer。**
+AI 侧栏自上而下是三个固定区域。**消息流承载事实、当前过程和 Stemmio 决定；可变发送交互只放底部 Composer。**
 
 ```text
 ┌ 顶部 ────────────────────────────────┐
@@ -198,12 +198,12 @@ AI 侧栏自上而下是三个固定区域。**消息流承载事实、当前过
 │ 当前文件 · 历史入口                   │
 ├ 消息流 ──────────────────────────────┤
 │  你       把这块结构再简化一些         │
-│  PageRoot 已将 index.html 交给 Qoder   │
+│  Stemmio 已将 index.html 交给 Qoder   │
 │           发送了评论、HTML 与项目规则   │
 │  Qoder    已读取本轮任务                │
 │           正在修改目标区域              │
 │           Thinking…                    │
-│  PageRoot 版本 5 等待你的决定           │
+│  Stemmio 版本 5 等待你的决定           │
 │           你可以先看变化，也可以直接采用  │
 │  [审阅对比]  [直接采用]                │
 ├ Composer ────────────────────────────┤
@@ -230,9 +230,9 @@ AI 侧栏自上而下是三个固定区域。**消息流承载事实、当前过
 
 - **用户**：使用用户头像或稳定的本地默认头像；消息记录用户原文。
 - **Qoder CLI**：使用 Qoder 图标；可显示文本回复、Agent 名称/版本和结构化进展。
-- **PageRoot**：使用 PageRoot 品牌图标；只显示产品事实、权限、校验、错误和决策。
+- **Stemmio**：使用 Stemmio 品牌图标；只显示产品事实、权限、校验、错误和决策。
 
-Qoder 消息不能使用“已保存”“已创建版本”“已采用”等只有 PageRoot 才能确认的文案。Qoder 的“已完成”后必须继续出现 PageRoot 的独立校验阶段。
+Qoder 消息不能使用“已保存”“已创建版本”“已采用”等只有 Stemmio 才能确认的文案。Qoder 的“已完成”后必须继续出现 Stemmio 的独立校验阶段。
 
 ## 7. 评论在编辑、AI 预览与审阅中的表现
 
@@ -280,7 +280,7 @@ Conversation 属于 Document，不属于项目、不属于文件路径。
 
 - 每个 Document 可以拥有多个 Conversation，但任一时刻只有一个当前 Conversation。
 - 第一阶段默认自动为 Document 建立一条 Conversation；用户可从历史中新建或切换已归档对话。
-- Conversation 不依赖文件路径。文件改名、PageRoot 自己的原子替换或 Working Copy 切换不改变 Conversation 身份。
+- Conversation 不依赖文件路径。文件改名、Stemmio 自己的原子替换或 Working Copy 切换不改变 Conversation 身份。
 - 新 Conversation 的标题默认取第一条用户消息的安全、限长摘要；用户可后续重命名。
 
 ### 8.2 切换 Document
@@ -334,7 +334,7 @@ Qoder 可以阅读当前预览并回答问题，但不能修改 HTML。
 
 Composer 的意图开关默认停在“讨论”。
 
-用户发送讨论消息前，PageRoot 必须：
+用户发送讨论消息前，Stemmio 必须：
 
 1. 安全持久化用户原文、消息身份、当前 Context 和模型配置。
 2. 建立只读 Discussion Turn。
@@ -343,13 +343,13 @@ Composer 的意图开关默认停在“讨论”。
 5. 不提供写文件、终端、finalizer、Candidate、Request mutation、MCP 或宿主 IPC 权限。
 6. 流式展示 Qoder 的可见回复。
 
-若持久化用户消息失败，不得向 Qoder 发送。若 Qoder 在讨论回复中声称已经改过文件，PageRoot 仍只把它当作文本；没有 Request、Candidate 和 completion 就不产生任何产品状态变化。
+若持久化用户消息失败，不得向 Qoder 发送。若 Qoder 在讨论回复中声称已经改过文件，Stemmio 仍只把它当作文本；没有 Request、Candidate 和 completion 就不产生任何产品状态变化。
 
 ### 9.2 讨论上下文来源
 
 讨论的页面上下文是**用户当前在左侧看到的那份 HTML**，即 Working Copy 的当前字节。Preview DOM 永不作为来源。
 
-Discussion Host 不得直接读取 Working Copy 路径。Turn 开始时，PageRoot 把这份字节写成一份短命只读快照，放在受管控制目录下，Turn 结束即删除。Discussion Host 的读取范围就是这一个文件。
+Discussion Host 不得直接读取 Working Copy 路径。Turn 开始时，Stemmio 把这份字节写成一份短命只读快照，放在受管控制目录下，Turn 结束即删除。Discussion Host 的读取范围就是这一个文件。
 
 该设计的产品含义：
 
@@ -384,7 +384,7 @@ Discussion Turn 使用比 Execution Turn 更短的超时预算（建议 2 分钟
 > 实测依据（`@qoder-ai/qodercli@1.1.27`，已登录账号）：
 >
 > - `qodercli --help` 含 `-m, --model <model>`（“Model for the current session”）——**spawn 时可指定模型**。
-> - `qodercli --list-models` 正常返回当前账号可用模型（实测 15 项：Auto / Ultimate / Performance / Efficient / Lite / Qwen3.8-Max / …）。PageRoot 的使用前检查已在调它并解析出有界、经消毒的模型标识。
+> - `qodercli --list-models` 正常返回当前账号可用模型（实测 15 项：Auto / Ultimate / Performance / Efficient / Lite / Qwen3.8-Max / …）。Stemmio 的使用前检查已在调它并解析出有界、经消毒的模型标识。
 > - ACP 协议本身确实无模型字段（`session/new` 参数与 schema 均无），也不回报实际使用的模型。**这只否定“通过协议选模型”，不否定“选模型”。**
 >
 > 因此本节不存在协议级阻塞，只是**尚未实现**。待做项：
@@ -413,7 +413,7 @@ Discussion Turn 使用比 Execution Turn 更短的超时预算（建议 2 分钟
 
 ### 10.3 提前加载
 
-PageRoot 维护进程内模型目录，并把“用户是否已同意本机 Qoder 集成”这一件事持久化。
+Stemmio 维护进程内模型目录，并把“用户是否已同意本机 Qoder 集成”这一件事持久化。
 
 | 是否落盘 | 内容 | 理由 |
 |---|---|---|
@@ -444,7 +444,7 @@ preflight 并把选择冻结到 Request。
 2. Qoder 明确报告的默认模型。
 3. 当前目录第一项。
 
-如果上次模型不再可用，PageRoot 选择新的默认项并在模型名旁显示一次内联说明：
+如果上次模型不再可用，Stemmio 选择新的默认项并在模型名旁显示一次内联说明：
 
 > 上次使用的模型已不可用，请确认当前模型后继续。
 
@@ -452,9 +452,9 @@ preflight 并把选择冻结到 Request。
 
 ### 10.5 思考深度不出现在界面上
 
-PageRoot 不传显式 reasoning-effort 覆盖，由 Qoder 对所选模型使用自己的默认策略。
+Stemmio 不传显式 reasoning-effort 覆盖，由 Qoder 对所选模型使用自己的默认策略。
 
-每个 Turn/Request 记录 `reasoningEffort = qoder-default`，用于解释没有发生 PageRoot 侧覆盖。**该记录不对应任何界面元素。** 界面上不存在“思考深度”标签、说明或控件。不记录也不展示模型隐藏推理内容。
+每个 Turn/Request 记录 `reasoningEffort = qoder-default`，用于解释没有发生 Stemmio 侧覆盖。**该记录不对应任何界面元素。** 界面上不存在“思考深度”标签、说明或控件。不记录也不展示模型隐藏推理内容。
 
 ### 10.6 模型记录与执行一致性
 
@@ -477,7 +477,7 @@ Composer 左侧是一个意图开关。它在三种状态下第二项不同，�
 | 正式审阅 | `[讨论结果] [继续修改]` |
 
 - 普通讨论的发送按钮只产生 Discussion Turn，不能隐式升级为修改权限。
-- PageRoot 不分析自然语言猜测意图；只有用户主动切换开关才改变本次发送的性质。
+- Stemmio 不分析自然语言猜测意图；只有用户主动切换开关才改变本次发送的性质。
 
 ### 11.2 修改意图的上下文摘要在 Composer 内
 
@@ -514,17 +514,17 @@ Composer 左侧是一个意图开关。它在三种状态下第二项不同，�
 复制模式继续使用现有 Request/Attempt、Prompt、文件与 finalizer 合同：
 
 - 用户选择复制并发送后才冻结和创建 Request。
-- PageRoot 写入剪贴板并逐字 readback；成功只表示剪贴板一致，不代表外部 Agent 已收到或运行。
+- Stemmio 写入剪贴板并逐字 readback；成功只表示剪贴板一致，不代表外部 Agent 已收到或运行。
 - 产品不自动打开、控制、粘贴或读取外部 Agent 对话。
-- AI 侧栏只记录 PageRoot 的“任务已复制”事实，不生成虚假的 Qoder 回复。
-- 外部 Agent 的后续补充仍按受控 supplement helper 记录；PageRoot 不自动同步外部聊天全文。
+- AI 侧栏只记录 Stemmio 的“任务已复制”事实，不生成虚假的 Qoder 回复。
+- 外部 Agent 的后续补充仍按受控 supplement helper 记录；Stemmio 不自动同步外部聊天全文。
 
 ### 11.5 冻结后的权限分界
 
-Request 成功创建后，PageRoot 在消息流中插入一条不可变权限分界：
+Request 成功创建后，Stemmio 在消息流中插入一条不可变权限分界：
 
 ```text
-PageRoot · 已将“index.html”交给 Qoder
+Stemmio · 已将“index.html”交给 Qoder
 发送了 3 条评论、当前 HTML 和项目规则。
 ```
 
@@ -542,15 +542,15 @@ PageRoot · 已将“index.html”交给 Qoder
 
 ### 12.2 消息流
 
-Qoder 与 PageRoot 使用各自头像展示。PageRoot 只显示当前可靠阶段，Agent 的公开回复在同一头像和名字下按消息事件逐行排列：
+Qoder 与 Stemmio 使用各自头像展示。Stemmio 只显示当前可靠阶段，Agent 的公开回复在同一头像和名字下按消息事件逐行排列：
 
 ```text
-PageRoot   已将“index.html”交给 Qoder
+Stemmio   已将“index.html”交给 Qoder
            发送了 3 条评论、当前 HTML 和项目规则
 Qoder      已读取本轮任务
            正在修改目标区域
            Thinking…
-PageRoot   版本 5 等待你的决定
+Stemmio   版本 5 等待你的决定
            你可以先看变化，也可以直接采用
 ```
 
@@ -592,9 +592,9 @@ HTTP 与 ACP 正式执行均无固定总时长上限；连续 45 分钟无有效
 可重试失败只有“重新发送”与“结束本轮”；重新发送复用该 Request
 冻结的页面、评论、provider、模型和配置，不读取之后改动的 Catalog。
 
-额度不足、容量不可用一类失败必须在侧栏出现一条清楚的 PageRoot 消息并给出下一步，不允许静默失败或只留一个无解释的灰按钮。PageRoot 不提供额度余量或成本估算界面。
+额度不足、容量不可用一类失败必须在侧栏出现一条清楚的 Stemmio 消息并给出下一步，不允许静默失败或只留一个无解释的灰按钮。Stemmio 不提供额度余量或成本估算界面。
 
-## 13. Candidate 就绪与 PageRoot 决策
+## 13. Candidate 就绪与 Stemmio 决策
 
 ### 13.1 画布保持修改前
 
@@ -610,7 +610,7 @@ Candidate 通过校验后：
 消息流中只追加一条不可变事实：
 
 ```text
-PageRoot   候选版本 5 已准备好
+Stemmio   候选版本 5 已准备好
 ```
 
 用户可执行的决定出现在常驻行动条中：
@@ -686,7 +686,7 @@ Candidate 待决定时 Composer 恢复发送能力，意图开关默认停在“
 
 点击“采用并继续”后：
 
-- PageRoot 执行 Promotion。
+- Stemmio 执行 Promotion。
 - 成功后回到新 Working Copy 的 AI 预览，**侧栏保持打开，草稿原文保留**。
 - 意图开关自动停在“交给 AI 修改”，用户按一次发送即开始下一轮。
 
@@ -706,7 +706,7 @@ Candidate 待决定时 Composer 恢复发送能力，意图开关默认停在“
 
 ### 15.3 原位状态变化
 
-同一条 PageRoot 消息原位更新，直到成为终态事实：
+同一条 Stemmio 消息原位更新，直到成为终态事实：
 
 ```text
 正在采用候选版本 5
@@ -804,7 +804,7 @@ Context 只描述消息所针对的页面事实，不授权文件读写。
 
 - `user`
 - `qoder`
-- `pageroot`
+- `stemmio`
 
 `kind` 至少支持：
 
@@ -856,7 +856,7 @@ Transport session ID 可以作为 Bridge 内部诊断关联，但不能替代 Co
 Conversation Repository 使用项目受管目录，并沿用仓库既有的持久化模式：单个 JSON 记录、有界数组、`revision` 递增、原子替换。
 
 ```text
-.pageroot/
+.stemmio/
   conversations/
     index.json                  原子替换（Document → 对话映射与当前对话指针）
     <conversationId>/
@@ -917,7 +917,7 @@ Conversation Repository 使用项目受管目录，并沿用仓库既有的持�
 
 两者也复用同一个 ACP 驱动，但驱动**按带品牌策略的 `mode` 分派**：Host、向 Agent 声明的客户端能力（讨论模式为 `writeTextFile:false`、`terminal:false`）、以及是否要求 Turn 完成证据，全部由策略决定，调用方不能注入 Host。因此“执行策略配讨论 Host”或反向组合在结构上不可能出现。执行模式的 `assertTurnCompleted()` 是**强制调用**，不是可选调用：一旦该方法缺失或改名，Turn 直接失败，而不是静默跳过 finalizer 证据。讨论模式显式声明“不要求完成证据”，其 Turn 结果里没有 completion。
 
-Discussion Snapshot 由 PageRoot 在 Turn 开始时建立、Turn 结束时删除。Agent 不知道也不能推导 Working Copy 的真实路径。
+Discussion Snapshot 由 Stemmio 在 Turn 开始时建立、Turn 结束时删除。Agent 不知道也不能推导 Working Copy 的真实路径。
 
 ### 17.3 Execution Host
 
@@ -956,7 +956,7 @@ Execution Turn 另受“一个 Document 一个活跃 Request”约束。执行�
 平台已提供写入方盖章的记录归属：`provenance = { actor: { kind: "human" | "agent", id }, device }`，由写入方盖章，不接受调用方传入，且已落在 Draft 的 comments/changeEvents 上。
 
 - Execution Turn 冻结时写入的评论与编辑事件属于 Draft 记录，因此自动带上 provenance；`agent` 类型可用来区分是哪一回合、哪个 Agent 产生的补充。Conversation 不重复盖章，读取即可。
-- Conversation 消息自身的 `actor`（`user` / `qoder` / `pageroot`）是产品层“谁在说话”的概念，与 provenance 的归属概念相关但不等同：`user` 对应 `human`，`qoder` 对应 `agent`，而 `pageroot` 是产品自身的系统事实，没有 provenance 对应项。因此不把 provenance 结构强塞进每条消息，只在冻结进 Draft 的记录上沿用平台已有的盖章。
+- Conversation 消息自身的 `actor`（`user` / `qoder` / `stemmio`）是产品层“谁在说话”的概念，与 provenance 的归属概念相关但不等同：`user` 对应 `human`，`qoder` 对应 `agent`，而 `stemmio` 是产品自身的系统事实，没有 provenance 对应项。因此不把 provenance 结构强塞进每条消息，只在冻结进 Draft 的记录上沿用平台已有的盖章。
 
 ## 18. 状态机与锁定矩阵
 
@@ -1019,13 +1019,13 @@ ready-to-open / review-view
 - 模型与 `qoder-default` 思考深度记录
 - 用户原始修改要求
 - Qoder 可见完成摘要
-- PageRoot 校验与采用结果
+- Stemmio 校验与采用结果
 
 Version manifest 保持不可变；历史通过稳定身份读取 Conversation 投影。Conversation 标题、后续讨论或归档状态变化不能改写 Version manifest。
 
 ### 19.3 拒绝与 no-change
 
-- 拒绝 Candidate：Conversation 保留该轮 Qoder 回复、PageRoot 校验、拒绝决定和 Candidate 关联。
+- 拒绝 Candidate：Conversation 保留该轮 Qoder 回复、Stemmio 校验、拒绝决定和 Candidate 关联。
 - no-change：不创建新 Version；Conversation 记录“未识别到明确的页面变化”。
 - error：Conversation 记录安全错误摘要和恢复结果，不持久化原始 stderr 或敏感诊断。
 - cancelled：记录是谁、何时、在哪个 Context 结束；不暗示外部 Agent 已停止。
@@ -1055,7 +1055,7 @@ Version manifest 保持不可变；历史通过稳定身份读取 Conversation �
 - 用户从 AI 预览返回编辑并修改 HTML：建立新 Context；旧消息不改写。
 - Qoder 对旧 Context 的回复迟到：显示“基于上一份页面预览”。
 - 当前文件被外部程序修改：进行中的讨论继续读取本轮 Discussion Snapshot，不受影响；发送修改或 Promotion 前必须进入现有外部冲突流程。
-- 文件改名或 PageRoot 原子替换：通过 ID-first Working Copy 身份恢复；不得新建 Conversation。
+- 文件改名或 Stemmio 原子替换：通过 ID-first Working Copy 身份恢复；不得新建 Conversation。
 - Document 身份无法安全确认：Conversation 只读，禁止新 Turn 和 Request，直到项目恢复。
 
 ### 20.4 Document 与项目切换
@@ -1076,9 +1076,9 @@ Version manifest 保持不可变；历史通过稳定身份读取 Conversation �
 ### 20.6 复制模式
 
 - 剪贴板失败：Request 保留，提供重新复制或结束本轮。
-- 已复制后用户结束：继续使用外部 Agent 风险确认；PageRoot 不声称停止外部进程。
+- 已复制后用户结束：继续使用外部 Agent 风险确认；Stemmio 不声称停止外部进程。
 - 外部 Agent 写回 Candidate：仍需 completion 与 Repository 校验。
-- 外部聊天回复不在 PageRoot：历史只显示已复制、supplement 记录和最终 Candidate，不伪造对话。
+- 外部聊天回复不在 Stemmio：历史只显示已复制、supplement 记录和最终 Candidate，不伪造对话。
 
 ## 21. 隐私、安全与遥测
 
@@ -1101,7 +1101,7 @@ Discussion Snapshot 是短命只读文件，Turn 结束即删除，不进入版�
 
 ### 21.3 Agent 输出
 
-PageRoot 只展示 Qoder 明确作为用户可见消息发送的文本。内部 reasoning、思维链、工具原始结果和系统 Prompt 不进入 Conversation，也不进入内存投影。结构化工具进展必须经过 allowlist、限长和安全文案映射。
+Stemmio 只展示 Qoder 明确作为用户可见消息发送的文本。内部 reasoning、思维链、工具原始结果和系统 Prompt 不进入 Conversation，也不进入内存投影。结构化工具进展必须经过 allowlist、限长和安全文案映射。
 
 ## 22. 可访问性与键盘行为
 
@@ -1125,7 +1125,7 @@ PageRoot 只展示 Qoder 明确作为用户可见消息发送的文本。内部 
 |---|---|---|
 | AI 讨论 | `讨论 · 只读` | `Qoder 可以阅读当前预览，但不能修改 HTML。` |
 | Request 执行 | `处理中` | 当前文件、发送给 Agent 的内容与当前可靠阶段。 |
-| Candidate 就绪 | `待决定` | `版本 N 等待你的决定`，由带头像和名字的 PageRoot 消息呈现。 |
+| Candidate 就绪 | `待决定` | `版本 N 等待你的决定`，由带头像和名字的 Stemmio 消息呈现。 |
 | 正式审阅 | `审阅 · 只读` | `讨论不会改变候选。` |
 | 继续修改 | `采用并继续` | 不追加解释性阻断文案，由当前可用动作表达状态。 |
 
@@ -1147,7 +1147,7 @@ PageRoot 只展示 Qoder 明确作为用户可见消息发送的文本。内部 
 | 场景 | 文案 |
 |---|---|
 | Qoder 完成 | `Qoder CLI 已完成本轮执行` |
-| PageRoot 校验 | `PageRoot 正在核对完成记录与候选` |
+| Stemmio 校验 | `Stemmio 正在核对完成记录与候选` |
 | 候选通过 | `候选版本 N 已准备好` |
 | 待决定提示 | `候选版本 N 等待你的决定` |
 | 讨论草稿 | `仅保存草稿，不会发送给当前任务` |
@@ -1181,7 +1181,7 @@ P1-C 不是“给现有标记加一个只读态”：预览模式不挂载编辑
 ### 24.2 合并点 M1：必须串行
 
 1. 侧栏改读真实 Conversation Repository。
-2. 把现有交付、进度、决策与审阅入口迁入侧栏；进度使用既有阶段与事件计数渲染 PageRoot 自己的阶段文案。
+2. 把现有交付、进度、决策与审阅入口迁入侧栏；进度使用既有阶段与事件计数渲染 Stemmio 自己的阶段文案。
 3. 删除 Agent 交付弹窗与全屏等待工作台及其调用点。
 4. 下调架构预算，使天花板跟随实际行数下降。
 
@@ -1286,7 +1286,7 @@ Qoder ACP Agent Bridge 分支尚未合并，且与本 PRD 的多个包共享文�
 
 ### 25.7 执行与结果
 
-- [ ] Qoder 与 PageRoot 使用不同头像和文案权威。
+- [ ] Qoder 与 Stemmio 使用不同头像和文案权威。
 - [ ] 执行始终显示冻结页面，不进入全屏等待工作台。
 - [ ] 同一公开 Agent 消息的 token 原位更新；新的公开消息事件在同一头像下逐行展示。
 - [ ] Agent 处理中显示动态 `Thinking`，结束、失败或中断后移除。
@@ -1296,7 +1296,7 @@ Qoder ACP Agent Bridge 分支尚未合并，且与本 PRD 的多个包共享文�
 - [ ] 执行中可写草稿但不能发送，草稿不进入当前 Request。
 - [ ] Candidate 就绪后仍显示修改前页面。
 - [ ] `ready` 行动条显示审阅与直接采用；`attention` 只显示审阅。
-- [ ] 额度类失败产生一条清楚的 PageRoot 消息；界面不出现额度余量或成本估算。
+- [ ] 额度类失败产生一条清楚的 Stemmio 消息；界面不出现额度余量或成本估算。
 
 ### 25.8 审阅与采用
 
@@ -1311,7 +1311,7 @@ Qoder ACP Agent Bridge 分支尚未合并，且与本 PRD 的多个包共享文�
 ### 25.9 复制与恢复
 
 - [ ] 复制成功只表示剪贴板 readback 一致。
-- [ ] PageRoot 不伪造外部 Agent 回复。
+- [ ] Stemmio 不伪造外部 Agent 回复。
 - [ ] Document 与项目切换后每个 Conversation/Run 恢复到正确归属。
 - [ ] Bridge 重启、进程清理未知和残留继续遵守现有 fail-closed fence。
 - [ ] 外部源冲突阻止 Request 冻结或 Promotion，不丢对话。
@@ -1346,14 +1346,14 @@ Qoder ACP Agent Bridge 分支尚未合并，且与本 PRD 的多个包共享文�
 
 ## 27. 最终产品口径
 
-PageRoot 不是把聊天框贴到 HTML 编辑器旁边，而是把同一份真实页面上的讨论、修改与审阅连成一个可追溯的 Agent 工作流：
+Stemmio 不是把聊天框贴到 HTML 编辑器旁边，而是把同一份真实页面上的讨论、修改与审阅连成一个可追溯的 Agent 工作流：
 
 - 编辑时，用户专注编辑和评论。
 - 进入 AI 后，页面自然切到预览，评论变成同一个“评”标记的只读态，对话出现在右侧。
 - 对话跟着 Document 走，切换文档就切换对话，后台仍在生成的那一轮不会被打断。
 - Qoder 在讨论时只能阅读一份短命只读快照；用户明确交给 AI 后才可以写独立 Candidate。
 - 模型在用户进入前尽可能加载，在设置中选择；用户改不了的参数不出现在界面上。
-- Qoder 展示它正在做什么，PageRoot 展示哪些结果已经被验证。
+- Qoder 展示它正在做什么，Stemmio 展示哪些结果已经被验证。
 - 消息流只留不可变事实，当前该做的决定永远在视野里。
 - Candidate 返回后，原页面保持不变，直到用户审阅、采用或拒绝。
 - 继续修改就是先采用、再发送两个清楚的动作，不被弹窗打断，也不藏在一个跨事务的原子序列里。

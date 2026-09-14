@@ -3,7 +3,7 @@ function writeShutdownAborted(writeDiagnostic) {
     type: "shutdown-aborted",
     error: {
       code: "AGENT_SHUTDOWN_UNCONFIRMED",
-      message: "PageRoot 无法确认本机 Agent 已停止；Bridge 将保持运行。",
+      message: "Stemmio 无法确认本机 Agent 已停止；Bridge 将保持运行。",
     },
   })}\n`);
 }

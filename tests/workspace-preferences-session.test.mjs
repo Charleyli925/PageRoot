@@ -40,9 +40,9 @@ test("workspace preference session loads v2 values and writes narrow patches", a
   assert.equal(session.snapshot.workspace.reviewChangeContextVisibility, 25);
   assert.equal(session.snapshot.workspace.reviewCommentContextVisibility, 15);
   assert.deepEqual(session.snapshot.workspace.disabledAgentProviderIds, []);
-  assert.equal(await session.update({ defaultAgentProviderId: "pageroot" }), true);
-  assert.deepEqual(calls, [{ workspace: { defaultAgentProviderId: "pageroot" } }]);
-  assert.equal(session.snapshot.workspace.defaultAgentProviderId, "pageroot");
+  assert.equal(await session.update({ defaultAgentProviderId: "stemmio" }), true);
+  assert.deepEqual(calls, [{ workspace: { defaultAgentProviderId: "stemmio" } }]);
+  assert.equal(session.snapshot.workspace.defaultAgentProviderId, "stemmio");
   session.dispose();
 });
 
@@ -121,7 +121,7 @@ test("invalid workspace patches are rejected before they reach the port", async 
   assert.throws(() => session.update({ defaultAgentProviderId: "gemini" }), /默认 Agent/u);
   assert.throws(() => session.update({ disabledAgentProviderIds: ["gemini"] }), /停用的 AI 服务/u);
   assert.equal(writes, 0);
-  assert.equal(await session.update({ defaultAgentProviderId: "pageroot" }), true);
+  assert.equal(await session.update({ defaultAgentProviderId: "stemmio" }), true);
   assert.equal(await session.update({ disabledAgentProviderIds: ["qoder"] }), true);
   assert.equal(writes, 2);
   assert.deepEqual(session.snapshot.workspace.disabledAgentProviderIds, ["qoder"]);
@@ -135,22 +135,22 @@ test("a disabled default Agent stays preferred and is not persisted as another p
     agentServiceLabel,
   } = await import("../app/application/workspace-agent-preference.js");
   const providers = [
-    { providerId: "pageroot", selection: { providerId: "pageroot" } },
+    { providerId: "stemmio", selection: { providerId: "stemmio" } },
     { providerId: "qoder", selection: { providerId: "qoder" } },
     { providerId: "codex", selection: { providerId: "codex" } },
   ];
   const preferred = resolvePreferredAgentProvider({
-    defaultAgentProviderId: "pageroot",
-    disabledAgentProviderIds: ["pageroot"],
+    defaultAgentProviderId: "stemmio",
+    disabledAgentProviderIds: ["stemmio"],
     providers,
   });
-  assert.equal(preferred.providerId, "pageroot");
+  assert.equal(preferred.providerId, "stemmio");
   assert.equal(shouldPersistDefaultAgentProvider({
-    storedDefaultId: "pageroot",
+    storedDefaultId: "stemmio",
     preferredId: "qoder",
-    disabledAgentProviderIds: ["pageroot"],
+    disabledAgentProviderIds: ["stemmio"],
   }), false);
-  assert.equal(agentServiceLabel("pageroot"), "内置 AI");
+  assert.equal(agentServiceLabel("stemmio"), "内置 AI");
 });
 
 
@@ -176,9 +176,9 @@ test("a transient preference failure retries once without losing the current cho
     },
   } });
   await session.load();
-  assert.equal(await session.update({ defaultAgentProviderId: "pageroot" }), true);
+  assert.equal(await session.update({ defaultAgentProviderId: "stemmio" }), true);
   assert.equal(attempts, 2);
   assert.equal(session.snapshot.error, null);
-  assert.equal(session.snapshot.workspace.defaultAgentProviderId, "pageroot");
+  assert.equal(session.snapshot.workspace.defaultAgentProviderId, "stemmio");
   session.dispose();
 });

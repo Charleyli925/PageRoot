@@ -14,12 +14,12 @@ import { createTargetRef } from "../app/lib/target-resolver.js";
 import { enableEditPipelineCounters, disableEditPipelineCounters, readEditPipelineCounters } from "../app/lib/edit-pipeline-counters.js";
 
 const ids = Object.fromEntries(["html", "head", "body", "section", "a", "b", "c"].map(
-  (name, index) => [name, `pr1_00000000000040008000${String(index + 1).padStart(12, "0")}`],
+  (name, index) => [name, `sm1_00000000000040008000${String(index + 1).padStart(12, "0")}`],
 ));
-const a = `<p data-pageroot-id="${ids.a}" data-x=1 style='color : red !important;  padding:4px ; --Token: 10'>A &amp; B</p>`;
-const b = `<p data-pageroot-id="${ids.b}">Second</p>`;
-const c = `<p data-pageroot-id="${ids.c}">Third</p>`;
-const prefix = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"></head><body data-pageroot-id="${ids.body}"><section data-pageroot-id="${ids.section}">`;
+const a = `<p data-stemmio-id="${ids.a}" data-x=1 style='color : red !important;  padding:4px ; --Token: 10'>A &amp; B</p>`;
+const b = `<p data-stemmio-id="${ids.b}">Second</p>`;
+const c = `<p data-stemmio-id="${ids.c}">Third</p>`;
+const prefix = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"></head><body data-stemmio-id="${ids.body}"><section data-stemmio-id="${ids.section}">`;
 const suffix = "</section></body></html>";
 const html = `${prefix}${a}${b}${c}${suffix}`;
 
@@ -35,7 +35,7 @@ function uuidFactory(...values) {
 
 function rangeSetup(source) {
   const index = buildSourceIndex(source);
-  const paragraph = index.byPagerootId.get(ids.a);
+  const paragraph = index.byStemmioId.get(ids.a);
   const textMap = buildSourceTextMap(index, paragraph.nodeId);
   return {
     index,
@@ -47,7 +47,7 @@ function rangeSetup(source) {
 
 test("element style preserves exact surrounding bytes, priority and tracked targets through one materialization", () => {
   const { index, state } = setup();
-  const tracked = createTargetRef(index, index.byPagerootId.get(ids.a), { targetId: "comment_style" });
+  const tracked = createTargetRef(index, index.byStemmioId.get(ids.a), { targetId: "comment_style" });
   enableEditPipelineCounters();
   try {
     const operation = inlineStyleOperation(index, {
@@ -86,7 +86,7 @@ test("direct style and reorder retain a module-level caller target through the s
     }),
   ]) {
     const { index, state } = setup();
-    const tracked = createTargetRef(index, index.byPagerootId.get(ids.a), {
+    const tracked = createTargetRef(index, index.byStemmioId.get(ids.a), {
       targetId: "target_canvas_module_caller",
       level: "module",
     });
@@ -110,7 +110,7 @@ test("direct style and reorder retain a module-level caller target through the s
 });
 
 test("direct range style carries the exact logical quote and uses one Kernel materialization with returned IDs", () => {
-  const source = `${prefix}<p data-pageroot-id="${ids.a}">Alpha &amp; <strong data-pageroot-id="${ids.b}">Beta</strong> tail</p><aside data-pageroot-id="${ids.c}">outside</aside>${suffix}`;
+  const source = `${prefix}<p data-stemmio-id="${ids.a}">Alpha &amp; <strong data-stemmio-id="${ids.b}">Beta</strong> tail</p><aside data-stemmio-id="${ids.c}">outside</aside>${suffix}`;
   const { index, state, textMap } = rangeSetup(source);
   const segments = textRangeToSourceSegments(textMap, 3, 10);
   const operation = textRangeStyleOperation(index, {
@@ -127,14 +127,14 @@ test("direct range style carries the exact logical quote and uses one Kernel mat
     endOffset: 10,
     quote: "ha & Be",
   });
-  assert.equal(operation.createdPagerootIds, undefined);
+  assert.equal(operation.createdStemmioIds, undefined);
 
-  const tracked = createTargetRef(index, index.byPagerootId.get(ids.a), {
+  const tracked = createTargetRef(index, index.byStemmioId.get(ids.a), {
     targetId: "target_canvas_range_module",
     level: "module",
   });
-  const firstId = "pr1_000000000000400080000000000000a1";
-  const secondId = "pr1_000000000000400080000000000000a2";
+  const firstId = "sm1_000000000000400080000000000000a1";
+  const secondId = "sm1_000000000000400080000000000000a2";
   enableEditPipelineCounters();
   try {
     const result = applySemanticOperation(state, operation, {
@@ -146,7 +146,7 @@ test("direct range style carries the exact logical quote and uses one Kernel mat
     });
     assert.equal(
       result.html,
-      `${prefix}<p data-pageroot-id="${ids.a}">Alp<span style="all: unset; display: inline !important; font-weight: 700" data-pageroot-id="${firstId}">ha &amp; </span><strong data-pageroot-id="${ids.b}"><span style="all: unset; display: inline !important; font-weight: 700" data-pageroot-id="${secondId}">Be</span>ta</strong> tail</p><aside data-pageroot-id="${ids.c}">outside</aside>${suffix}`,
+      `${prefix}<p data-stemmio-id="${ids.a}">Alp<span style="all: unset; display: inline !important; font-weight: 700" data-stemmio-id="${firstId}">ha &amp; </span><strong data-stemmio-id="${ids.b}"><span style="all: unset; display: inline !important; font-weight: 700" data-stemmio-id="${secondId}">Be</span>ta</strong> tail</p><aside data-stemmio-id="${ids.c}">outside</aside>${suffix}`,
     );
     assert.deepEqual(result.allocatedElementIds, [firstId, secondId]);
     assert.deepEqual(result.identityDelta.addedElementIds, [firstId, secondId]);
@@ -171,14 +171,14 @@ test("direct range style carries the exact logical quote and uses one Kernel mat
 });
 
 test("editable island text factory emits a complete envelope without preallocating line-break IDs", () => {
-  const source = `${prefix}<p data-pageroot-id="${ids.a}">Alpha <strong data-pageroot-id="${ids.b}">Beta</strong> tail</p><aside data-pageroot-id="${ids.c}">outside</aside>${suffix}`;
+  const source = `${prefix}<p data-stemmio-id="${ids.a}">Alpha <strong data-stemmio-id="${ids.b}">Beta</strong> tail</p><aside data-stemmio-id="${ids.c}">outside</aside>${suffix}`;
   const { index, state } = setup(source);
   const operation = editableIslandTextOperation(index, {
     elementId: ids.a,
     baseRevision: state.revision,
     operationId: "op_canvas_island_text_01",
     text: "Alpha Beta\ntail",
-    contentHtml: `Alpha <strong data-pageroot-id="${ids.b}">Beta</strong><br>tail`,
+    contentHtml: `Alpha <strong data-stemmio-id="${ids.b}">Beta</strong><br>tail`,
   });
   assert.deepEqual(Object.keys(operation).sort(), [
     "baseRevision",
@@ -204,24 +204,24 @@ test("editable island text factory emits a complete envelope without preallocati
   assert.equal(operation.text, "Alpha Beta\ntail");
   assert.equal(
     operation.contentHtml,
-    `Alpha <strong data-pageroot-id="${ids.b}">Beta</strong><br>tail`,
+    `Alpha <strong data-stemmio-id="${ids.b}">Beta</strong><br>tail`,
   );
-  assert.equal(Object.hasOwn(operation, "createdPagerootIds"), false);
+  assert.equal(Object.hasOwn(operation, "createdStemmioIds"), false);
 
-  const breakId = "pr1_000000000000400080000000000000b1";
+  const breakId = "sm1_000000000000400080000000000000b1";
   const result = applySemanticOperation(state, operation, {
     randomUUID: () => "00000000-0000-4000-8000-0000000000b1",
   });
   assert.deepEqual(result.allocatedElementIds, [breakId]);
   assert.deepEqual(result.identityDelta.addedElementIds, [breakId]);
-  assert.match(result.html, new RegExp(`<br data-pageroot-id="${breakId}">`, "u"));
+  assert.match(result.html, new RegExp(`<br data-stemmio-id="${breakId}">`, "u"));
   const undo = applySemanticOperation(result.nextState, result.inverseOperation);
   assert.equal(undo.html, source);
   assert.equal(applySemanticOperation(undo.nextState, undo.inverseOperation).html, result.html);
 });
 
 test("direct range style avoids wrapper allocation for no-change and existing-wrapper projections", () => {
-  const wholeSource = `${prefix}<p data-pageroot-id="${ids.a}" style="font-weight: 700">Alpha</p>${suffix}`;
+  const wholeSource = `${prefix}<p data-stemmio-id="${ids.a}" style="font-weight: 700">Alpha</p>${suffix}`;
   const whole = rangeSetup(wholeSource);
   const unchanged = applySemanticOperation(whole.state, textRangeStyleOperation(whole.index, {
     elementId: ids.a,
@@ -236,7 +236,7 @@ test("direct range style avoids wrapper allocation for no-change and existing-wr
   assert.deepEqual(unchanged.allocatedElementIds, []);
   assert.equal(textRangeStyleCreatesWrapper(unchanged.materialization.sourcePatchResult), false);
 
-  const wrappedSource = `${prefix}<p data-pageroot-id="${ids.a}"><span data-pageroot-id="${ids.b}" style="font-weight: 700">Alpha</span> tail</p>${suffix}`;
+  const wrappedSource = `${prefix}<p data-stemmio-id="${ids.a}"><span data-stemmio-id="${ids.b}" style="font-weight: 700">Alpha</span> tail</p>${suffix}`;
   const wrapped = rangeSetup(wrappedSource);
   const coalesced = applySemanticOperation(wrapped.state, textRangeStyleOperation(wrapped.index, {
     elementId: ids.a,
@@ -254,7 +254,7 @@ test("direct range style avoids wrapper allocation for no-change and existing-wr
 });
 
 test("direct range style rejects stale revision, hash, target and quote evidence", () => {
-  const source = `${prefix}<p data-pageroot-id="${ids.a}">Alpha Beta</p><p data-pageroot-id="${ids.b}">Other</p>${suffix}`;
+  const source = `${prefix}<p data-stemmio-id="${ids.a}">Alpha Beta</p><p data-stemmio-id="${ids.b}">Other</p>${suffix}`;
   const { index, state, textMap } = rangeSetup(source);
   const operation = textRangeStyleOperation(index, {
     elementId: ids.a,
@@ -273,7 +273,7 @@ test("direct range style rejects stale revision, hash, target and quote evidence
     { ...operation, range: { ...operation.range, quote: "Omega" } },
   ]) assert.throws(() => applySemanticOperation(state, changed));
 
-  const other = index.byPagerootId.get(ids.b);
+  const other = index.byStemmioId.get(ids.b);
   assert.throws(() => textRangeStyleOperation(index, {
     ...operation,
     elementId: ids.a,
@@ -342,7 +342,7 @@ test("direct commands retain stale source, target identity and sibling bounds re
     { ...operation, target: { ...operation.target, expectedOuterHtmlSha256: `sha256:${"0".repeat(64)}` } },
     { ...operation, important: undefined },
   ]) assert.throws(() => applySemanticOperation(state, changed));
-  for (const elementId of ["", "invalid", "pr1_ffffffffffff4fff8fffffffffffffff"]) {
+  for (const elementId of ["", "invalid", "sm1_ffffffffffff4fff8fffffffffffffff"]) {
     assert.throws(() => inlineStyleOperation(index, { ...operation, elementId }));
     assert.throws(() => siblingReorderOperation(index, { elementId, toIndex: 0, baseRevision: 0 }));
   }
@@ -350,5 +350,5 @@ test("direct commands retain stale source, target identity and sibling bounds re
     assert.throws(() => siblingReorderOperation(index, { elementId: ids.a, toIndex, baseRevision: 0 }));
   }
   assert.throws(() => siblingReorderOperation(index, { elementId: ids.body, toIndex: 0, baseRevision: 0 }));
-  assert.throws(() => createSemanticDocumentState(html.replace(`data-pageroot-id="${ids.b}"`, `data-pageroot-id="${ids.a}"`)));
+  assert.throws(() => createSemanticDocumentState(html.replace(`data-stemmio-id="${ids.b}"`, `data-stemmio-id="${ids.a}"`)));
 });

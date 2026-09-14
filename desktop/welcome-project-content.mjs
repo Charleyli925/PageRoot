@@ -6,7 +6,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>源页 · PageRoot</title>
+  <title>源页 · Stemmio</title>
   <style>
     :root {
       --paper: #fffdf8;
@@ -358,7 +358,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
         <div class="brand-row">
           <div class="brand-lockup">
             <img src="./${WELCOME_LOGO_RELATIVE_PATH}" alt="源页 Logo" />
-            <div><strong>源页</strong><small>PAGEROOT</small></div>
+            <div><strong>源页</strong><small>STEMMIO</small></div>
           </div>
         </div>
         <p class="eyebrow">Visual HTML × AI Agents</p>
@@ -449,7 +449,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
       </aside>
     </div>
 
-    <footer><span>源页 · PageRoot</span><span>Visual intent in context. AI changes under review.</span></footer>
+    <footer><span>源页 · Stemmio</span><span>Visual intent in context. AI changes under review.</span></footer>
   </article>
 </body>
 </html>`;

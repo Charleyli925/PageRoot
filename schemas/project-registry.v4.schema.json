@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pageroot.local/schemas/project-registry.v4.schema.json",
-  "$comment": "Forward compatible. A Registry whose required members are missing or invalid is still an unrecognized shape and still fails closed. A Registry that carries every required member plus a member added by a newer PageRoot is read normally, and that member is preserved unchanged through the next Registry write.",
+  "$id": "https://stemmio.local/schemas/project-registry.v4.schema.json",
+  "$comment": "Forward compatible. A Registry whose required members are missing or invalid is still an unrecognized shape and still fails closed. A Registry that carries every required member plus a member added by a newer Stemmio is read normally, and that member is preserved unchanged through the next Registry write.",
   "type": "object",
   "required": ["schemaVersion", "updatedAt", "projects", "pendingImports"],
   "properties": {

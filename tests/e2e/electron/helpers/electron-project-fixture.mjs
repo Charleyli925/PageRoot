@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { fixtureBuffer } from "../../browser/pageroot-driver.mjs";
+import { fixtureBuffer } from "../../browser/stemmio-driver.mjs";
 import { removeValidatedTemporaryDirectory } from "./electron-safe-cleanup.mjs";
 
-const DEFAULT_SOURCE_PREFIX = "pageroot-native-e2e-source-";
+const DEFAULT_SOURCE_PREFIX = "stemmio-native-e2e-source-";
 
 export function seedActiveDiskProject(
   isolatedUserData,

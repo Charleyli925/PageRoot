@@ -1,6 +1,6 @@
 # Security model
 
-PageRoot edits local files and renders user-controlled HTML, so its default policy is least privilege and fail-closed validation.
+Stemmio edits local files and renders user-controlled HTML, so its default policy is least privilege and fail-closed validation.
 
 ## Main controls
 
@@ -59,9 +59,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   user can retry without guessing. Official logout runs the verified installation's
   `logout` command for `cli-login` / ChatGPT accounts. Environment PAT/API keys are reported as `environment` auth scope
   and are not claimed to be revoked by in-app logout. The 源页 HTTP Agent may redirect preflight and
-  chat to a loopback `127.0.0.1` base URL only when both `PAGEROOT_E2E=1` and
-  `PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL=1` are set; production never honors
-  `PAGEROOT_HTTP_AGENT_BASE_URL`.
+  chat to a loopback `127.0.0.1` base URL only when both `STEMMIO_E2E=1` and
+  `STEMMIO_HTTP_AGENT_ALLOW_TEST_BASE_URL=1` are set; production never honors
+  `STEMMIO_HTTP_AGENT_BASE_URL`.
 - Fixed app-resource lookup for the packaged user statement and disclaimer;
   the renderer can request it but cannot choose a local path
 - Default-browser opening accepts only an already known HTML source path,
@@ -86,9 +86,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   non-symlink file, and lies outside the projects root. It never grants a
   renderer path or a late
   active-project mutation.
-- Desktop interactive preview runs under a dedicated `pageroot-preview:`
+- Desktop interactive preview runs under a dedicated `stemmio-preview:`
   origin. Its main-process session is size/count/time bounded, exposes no
-  PageRoot preload bridge, and serves only a session-specific allowlist of
+  Stemmio preload bridge, and serves only a session-specific allowlist of
   declared relative script, style, image, font and media assets after source
   path authority, realpath and containment checks. Dotfiles, undeclared
   siblings and files reachable only through an escaping symlink are never
@@ -97,7 +97,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   scheme does not receive `bypassCSP`.
 - Ordinary static Edit may use the same contained resource root for images,
   fonts, styles and media, but not for renderer or authored scripts:
-  `pageroot-preview:` is absent from `script-src` and every source transition
+  `stemmio-preview:` is absent from `script-src` and every source transition
   revokes the previous session. After an external HTML import, Main substitutes
   the original sibling directory as that preview/edit resource root without
   exposing the original path to the renderer. The separate disposable Script
@@ -105,7 +105,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Desktop Edit author runtime is a trusted-local authoring capability, not a
   hostile-page sandbox. Main re-reads the active source and requires exact
   HTML/SHA, Canvas generation, bounded supported scripts and contained resource
-  paths before creating a scoped `pageroot-edit-runtime:` session. Renderer
+  paths before creating a scoped `stemmio-edit-runtime:` session. Renderer
   Canvas observations additionally require the source-owner receipt
   incarnation/sequence, origin, generation, exact HTML/SHA and complete
   project/session context; the DocumentWorkflow is the only confirmer, and an
@@ -119,7 +119,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   escaping authored base URLs are blocked. A first contained relative base is
   resolved inside the same resource closure. The protocol has no `bypassCSP`, directory listing or project-path
   response. Popup, form submission and top-level navigation remain blocked.
-  `PAGEROOT_E2E=1` may hold Main `prepare` behind a process-local latch so tests
+  `STEMMIO_E2E=1` may hold Main `prepare` behind a process-local latch so tests
   can prove static Active acknowledgement without a grant; production never
   installs that latch.
   A fixed bootstrap privately proves the complete source-node set after parsing
@@ -171,7 +171,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   unique-origin sandboxed frames; authored scripts, refresh directives and
   inline handlers are removed, nested frames are re-sandboxed, and links/forms
   cannot navigate or submit. On desktop, each sanitized copy uses a bounded
-  `pageroot-preview:` session so the exact review bootstrap loads as an external
+  `stemmio-preview:` session so the exact review bootstrap loads as an external
   script without weakening the application renderer CSP; the root sandbox still
   grants only scripts. Only that review scroll/focus bridge may execute, and its
   messages are bound to the exact frame and review session.
@@ -194,7 +194,7 @@ shape with `schemaVersion: "4.0.0"`, no `pendingImports`, and no project-record
 fields beyond `projectRootPath` and `updatedAt`. The migration reader validates
 a current Registry read-only. Before completing that legacy shape, every record must
 prove its valid key, direct-child real non-symlink root and matching
-`.pageroot/project.json`; the new root identity comes only from the live
+`.stemmio/project.json`; the new root identity comes only from the live
 directory stat. A short-lived exclusive migration lock serializes the one
 replacement across Bridge processes; dead-owner reclamation atomically claims
 the exact sealed token marker, and every waiter re-reads under that lock
@@ -212,11 +212,11 @@ name still exists. Registry updates compare the recorded business mapping;
 or copy-delete moving a complete project within this root may rebuild local
 bindings after content verification. Moving outside this root still grants no
 write authority. Import recovery remains limited to Registry-owned pending
-intents; an arbitrary `.pageroot/import.json` is not an import grant.
+intents; an arbitrary `.stemmio/import.json` is not an import grant.
 The same canonical external path binds to at most one `projectId`. Content Hash
 never matches a file at another path into that project. Duplicate source-key
 claims fail closed without deleting or merging projects. Ordinary Registry
-mutations take a current write lock under `.pageroot-registry-write-lock/`,
+mutations take a current write lock under `.stemmio-registry-write-lock/`,
 which is the only Registry lock. A Registry that is not a valid current Registry
 fails closed and keeps its exact bytes; there is no migration and no fallback to
 an empty Registry, because an empty Registry would let the next import
@@ -238,7 +238,7 @@ and never becomes the outcome of an operation that already committed nor replace
 the original error whose code drives recovery.
 
 Working-copy filename changes retain their immutable IDs. The Repository owns
-`.pageroot/source-bindings/<workingCopyId>.ref` hard links as recoverable locator
+`.stemmio/source-bindings/<workingCopyId>.ref` hard links as recoverable locator
 evidence. A registered relative path selects a member; its state Hash validates
 bytes. If that path is absent, only a unique currently matching anchor/file pair
 can recover its name. Equal bytes at an unlisted path never grant membership.
@@ -319,11 +319,11 @@ closes the mutation surface before Qoder cancellation/process-group cleanup;
 the Bridge cancels the durable Request only after that bounded stop completes.
 Before spawn, an exclusive project-local lease and a final executable
 dev/inode/size/mtime/content identity comparison fence duplicate launch. The
-standalone npm JavaScript bundle is then loaded by PageRoot's trusted runtime
+standalone npm JavaScript bundle is then loaded by Stemmio's trusted runtime
 from the already-opened verified file descriptor, so a pathname replacement
 cannot substitute different script bytes after that comparison. A normally
 settled process releases that lease only after bounded process-group cleanup.
-If the Bridge crashes, the lease remains: PageRoot never invents a
+If the Bridge crashes, the lease remains: Stemmio never invents a
 surviving session, and the processing Request becomes interrupted and
 non-retryable. Durable cancellation then fences the old Request, but does not
 claim an unknown old process has stopped; the user must submit a new Request.
@@ -334,9 +334,9 @@ An unconfirmed probe descendant creates no Request but remains a non-prunable
 Bridge-level fence, so later preflight and application shutdown both fail
 closed rather than forgetting an unowned local process.
 
-PageRoot may also keep a product-managed ACP install under Application Support
+Stemmio may also keep a product-managed ACP install under Application Support
 `agents/<providerId>/<version>/` (Electron `userData`, overridable with
-`HTML_AI_AGENTS_ROOT`). That tree is written only by the Bridge installer after
+`STEMMIO_AGENTS_ROOT`). That tree is written only by the Bridge installer after
 npm integrity and package-identity checks. It is not a user document root, not
 a Request workspace, and not visible to the renderer as a path. A user-installed
 CLI still wins when it passes the current identity checks; an invalid user
@@ -349,8 +349,8 @@ Every provider, ticket and launch descriptor freezes one `securityProfile`.
 The installed Qoder and Codex ACP mappings are `client-mediated`: the Host
 modules can allow or deny only file and terminal requests sent through the ACP
 Client Host. They do not constrain native file or command operations performed
-inside the Agent process. The PageRoot native HTTP Agent is also
-`client-mediated`: PageRoot mediates every file read and the unique Candidate
+inside the Agent process. The Stemmio native HTTP Agent is also
+`client-mediated`: Stemmio mediates every file read and the unique Candidate
 write, and the vendor model never receives filesystem or terminal access. There
 is no registered `agent-native` mapping and no Codex executable or private
 runtime in the packaged application. Both installed ACP providers use one fresh
@@ -384,7 +384,7 @@ records remain data only and cannot reopen an Agent process.
 
 The driver may retain at most 16 KiB of raw Qoder stderr only inside the live
 Bridge promise to classify authentication/capacity/process failures. It is
-discarded after classification and never enters public Agent status, PageRoot
+discarded after classification and never enters public Agent status, Stemmio
 telemetry, reports or user-facing errors. Agent visible text that matches a
 capacity failure is classified the same way and must not be projected as chat.
 Absolute Request paths necessarily
@@ -395,7 +395,7 @@ The 源页 Agent may be connected with a vendor API Token (DeepSeek, 智谱,
 阿里通义, OpenAI, or another OpenAI-compatible HTTPS endpoint). Renderer posts
 `POST /agent/session-credential` with `vendorId` and optional `baseUrl`; Bridge
 keeps the secret in coordinator process memory and injects only
-`PAGEROOT_API_KEY` / `PAGEROOT_API_VENDOR` / `PAGEROOT_API_BASE_URL` into this
+`STEMMIO_API_KEY` / `STEMMIO_API_VENDOR` / `STEMMIO_API_BASE_URL` into this
 provider's preflight and HTTP launch. Empty `apiKey` clears it. The secret is
 never written to `ui-preferences.json`, logs, GET responses or renderer
 snapshots. If the user explicitly checks “在此 Mac 上记住 API Key”, Main encrypts
@@ -433,13 +433,13 @@ local diagnostics.
 ## V2 editable-island trust boundary
 
 The rendered preview DOM is disposable and never becomes a whole-document
-persistence source. PageRoot 0.9.0 has one controlled `contenteditable="true"`
+persistence source. Stemmio 0.9.0 has one controlled `contenteditable="true"`
 route:
 
 The pure semantic-operation kernel is also source-only. It requires complete
 persistent identity plus exact source, revision, tag and subtree-Hash evidence;
 SourcePatch re-plans its lowered ranges before apply. New structural fragments
-cannot provide PageRoot IDs, moves preserve exact identified bytes, replacement
+cannot provide Stemmio IDs, moves preserve exact identified bytes, replacement
 retains the target root ID/tag, and generated exact-source inverse objects lose
 authority when cloned. The kernel has no save, IPC, filesystem or Runtime DOM
 capability in PR4.
@@ -472,7 +472,7 @@ capability in PR4.
   all validate against those Bridge-returned bytes; otherwise the Canvas loads
   a fresh verified frame.
 
-Pure-browser preview is a different, strictly weaker capability: authored scripts and interactions may run inside the sandbox, but PageRoot editing, comments, attachments, local persistence and AI submission are unavailable. Its transient page state is never treated as unsaved PageRoot content.
+Pure-browser preview is a different, strictly weaker capability: authored scripts and interactions may run inside the sandbox, but Stemmio editing, comments, attachments, local persistence and AI submission are unavailable. Its transient page state is never treated as unsaved Stemmio content.
 
 Desktop preview is likewise untrusted authored content. The iframe has no
 top-navigation authority, new windows are denied, and preview IPC is available
@@ -480,7 +480,7 @@ only to the trusted application main frame. A direct preview frame that tries
 to self-navigate is fenced by the main process; before its first load completes,
 its volatile session becomes a one-way scriptless fallback retaining only the
 owned external bootstrap, while later attempts leave the loaded page intact.
-When the user returns to ordinary editing, PageRoot accepts only an allowlisted
+When the user returns to ordinary editing, Stemmio accepts only an allowlisted
 source-backed presentation diff. It rejects unknown or duplicated source nodes,
 stale Hashes, arbitrary one-sided runtime classes, text/HTML, inline style,
 form state and runtime children. The desktop disposable Script page may keep
@@ -504,7 +504,7 @@ observation cannot invent source facts or grant adoption authority. A validated
 Candidate may have zero locatable facts and still enter the same Review.
 
 Comment location remains separately private. Each source-resolved local target
-may use an opaque initial-bootstrap binding: the element's `data-pageroot-id`,
+may use an opaque initial-bootstrap binding: the element's `data-stemmio-id`,
 an element path plus a narrow static fingerprint. Review never writes a parseKey
 or second identity attribute into authored or prepared HTML. The managed
 preview serves that binding only to the first parser-blocking bootstrap request,
@@ -520,7 +520,7 @@ and its confirmation; empty Review facts never bypass that boundary.
 
 Current Edit comments use a separate ADR 0061 identity boundary. On a complete
 managed Working Copy, a TargetRef resolves officially only through SourceIndex's
-valid unique `data-pageroot-id` map; missing, invalid or deleted identity
+valid unique `data-stemmio-id` map; missing, invalid or deleted identity
 becomes orphaned. Selector, fingerprint, source-offset and text-affix
 heuristics are not an official result and are not retained as a shadow path.
 Incomplete identity HTML cannot rebound across a hash change and cannot enable

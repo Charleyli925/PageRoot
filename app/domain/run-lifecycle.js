@@ -1,6 +1,6 @@
 import {
-  isValidPagerootElementId,
-} from "../../shared/pageroot-element-identity.mjs";
+  isValidStemmioElementId,
+} from "../../shared/stemmio-element-identity.mjs";
 
 export const CANONICAL_LIFECYCLE_STATES = Object.freeze([
   "editing",
@@ -211,7 +211,7 @@ function deriveRunProgressCopy({
   if (status === "processing" && agentMode && agentCompleted) {
     return progressPresentationCopy(
       "正在确认结果",
-      `${agentName} 已返回，PageRoot 正在检查修改结果`,
+      `${agentName} 已返回，Stemmio 正在检查修改结果`,
       "正在确认结果",
       "当前 HTML 仍未被替换",
       "检查通过后才会进入审阅。",
@@ -223,11 +223,11 @@ function deriveRunProgressCopy({
       "starting-session": [`正在连接 ${agentName}…`, "正在建立本轮受管会话"],
       "reading-task": [`${agentName} 正在读取本轮任务…`, "只读冻结 HTML、评论、附件与项目规则"],
       "writing-candidate": [`${agentName} 正在修改页面…`, "当前 HTML 不会被直接覆盖"],
-      finalizing: [`${agentName} 正在整理修改结果…`, "PageRoot 将独立检查返回的页面"],
+      finalizing: [`${agentName} 正在整理修改结果…`, "Stemmio 将独立检查返回的页面"],
       "awaiting-validation": ["Agent 已返回，正在校验并保存…", "当前 HTML 不会被直接覆盖"],
-      "preparing-review": ["PageRoot 正在准备审阅…", "检查通过后才会进入审阅"],
+      "preparing-review": ["Stemmio 正在准备审阅…", "检查通过后才会进入审阅"],
       cancelling: [`正在停止 ${agentName}…`, "停止完成前本轮仍保持锁定"],
-    }[handoff.phase] || [`${agentName} 正在处理…`, "PageRoot 正在接收受管 Agent 进度"];
+    }[handoff.phase] || [`${agentName} 正在处理…`, "Stemmio 正在接收受管 Agent 进度"];
     return progressPresentationCopy(
       agentName,
       phaseCopy[0],
@@ -509,7 +509,7 @@ const LEGACY_IMPACT_ARRAY_FIELDS = [
 function validImpactIdList(ids, { bounded } = {}) {
   return Array.isArray(ids)
     && (!bounded || ids.length <= IMPACT_SAMPLE_LIMIT)
-    && ids.every((id) => isValidPagerootElementId(id))
+    && ids.every((id) => isValidStemmioElementId(id))
     && new Set(ids).size === ids.length;
 }
 

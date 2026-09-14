@@ -15,7 +15,7 @@ import {
 } from "../bridge/lifecycle-core.mjs";
 
 test("atomic writes support a 255-byte output filename", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "pageroot-atomic-write-"));
+  const directory = await mkdtemp(join(tmpdir(), "stemmio-atomic-write-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const fileName = `${"x".repeat(250)}.html`;
   assert.equal(Buffer.byteLength(fileName), 255);

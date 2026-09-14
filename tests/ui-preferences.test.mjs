@@ -34,7 +34,7 @@ const DEFAULT_WORKSPACE = {
 };
 
 async function temporaryUserData(t) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pageroot-ui-pref-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "stemmio-ui-pref-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -156,7 +156,7 @@ test("workspace preference decoding clamps damaged values and strict writes reje
   assert.throws(() => normalizeWorkspacePatch({ unknown: true }), /未知字段/u);
   assert.throws(() => normalizeWorkspacePatch({ defaultAgentProviderId: "gemini" }), /默认 Agent/u);
   assert.throws(() => normalizeWorkspacePatch({ disabledAgentProviderIds: ["gemini"] }), /停用的 AI 服务/u);
-  assert.equal(normalizeWorkspacePatch({ defaultAgentProviderId: "pageroot" }).defaultAgentProviderId, "pageroot");
+  assert.equal(normalizeWorkspacePatch({ defaultAgentProviderId: "stemmio" }).defaultAgentProviderId, "stemmio");
   assert.deepEqual(
     normalizeWorkspacePatch({ disabledAgentProviderIds: ["codex", "codex"] }).disabledAgentProviderIds,
     ["codex"],
@@ -165,17 +165,17 @@ test("workspace preference decoding clamps damaged values and strict writes reje
 
 test("provider configurations accept only bounded public choices and preserve the default", async (t) => {
   const userDataPath = await temporaryUserData(t);
-  const configurations = { pageroot: { modelId: "pageroot:deepseek-v4-pro", reasoning: "high" } };
+  const configurations = { stemmio: { modelId: "stemmio:deepseek-v4-pro", reasoning: "high" } };
   await recordUiWorkspacePreferences({ userDataPath, workspace: { defaultAgentProviderId: "codex" } });
   await recordUiWorkspacePreferences({ userDataPath, workspace: { agentConfigurations: configurations } });
   const persisted = await readUiPreferences({ userDataPath });
   assert.deepEqual(persisted.workspace.agentConfigurations, configurations);
   assert.equal(persisted.workspace.defaultAgentProviderId, "codex");
   for (const unsafe of [
-    { pageroot: { ...configurations.pageroot, apiKey: "secret" } },
-    { pageroot: { ...configurations.pageroot, modelId: "codex:other-provider" } },
-    { pageroot: { ...configurations.pageroot, reasoning: "../../secret" } },
-    { other: configurations.pageroot },
+    { stemmio: { ...configurations.stemmio, apiKey: "secret" } },
+    { stemmio: { ...configurations.stemmio, modelId: "codex:other-provider" } },
+    { stemmio: { ...configurations.stemmio, reasoning: "../../secret" } },
+    { other: configurations.stemmio },
   ]) assert.throws(() => normalizeWorkspacePatch({ agentConfigurations: unsafe }), /服务配置无效/u);
 });
 
@@ -201,11 +201,11 @@ test("document service choice survives reload separately from the default and di
   const userDataPath = await temporaryUserData(t);
   const documentAgentSelections = { doc_aaaaaaaaaaaaaaaa: "qoder", doc_bbbbbbbbbbbbbbbb: "codex" };
   await recordUiWorkspacePreferences({ userDataPath, workspace: {
-    defaultAgentProviderId: "pageroot", disabledAgentProviderIds: ["qoder"], documentAgentSelections,
+    defaultAgentProviderId: "stemmio", disabledAgentProviderIds: ["qoder"], documentAgentSelections,
   } });
   const restored = await readUiPreferences({ userDataPath });
   assert.deepEqual(restored.workspace.documentAgentSelections, documentAgentSelections);
-  assert.equal(restored.workspace.defaultAgentProviderId, "pageroot");
+  assert.equal(restored.workspace.defaultAgentProviderId, "stemmio");
   assert.deepEqual(restored.workspace.disabledAgentProviderIds, ["qoder"]);
   assert.throws(() => normalizeWorkspacePatch({ documentAgentSelections: { "/tmp/private": "codex" } }));
 });

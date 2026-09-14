@@ -13,7 +13,7 @@ import {
   setTextSelection,
   sha256,
   withBomAndCrLf,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 const originalToken = "SOURCE_FIDELITY_TOKEN_001";
 const replacement = "逐字节替换_OK";

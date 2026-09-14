@@ -27,7 +27,7 @@ const bridgeScript = path.join(productRoot, "bridge", "workspace-bridge.mjs");
 const fixtureSizesMiB = [0.5, 1.25, 2.5];
 const tokenPrefix = "PERSISTENCE_TOKEN_";
 const editableCase = "persistence-benchmark";
-const tempPrefix = "pageroot-persistence-benchmark-";
+const tempPrefix = "stemmio-persistence-benchmark-";
 const defaultSamples = 7;
 const defaultWarmups = 1;
 const benchmarkCommand = "npm run desktop:renderer && node scripts/benchmark-persistence.mjs";
@@ -92,7 +92,7 @@ async function assertSourceBytes(sourcePath, expectedHtml, operation) {
 
 function fixtureHtml(sizeMiB, initialToken = token(0)) {
   const targetBytes = Math.round(sizeMiB * 1024 * 1024);
-  const header = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>PageRoot persistence benchmark</title><style>body{font:14px system-ui}.card{border:1px solid #ddd;margin:8px;padding:8px}</style></head><body><main><p data-native-case="${editableCase}" data-native-mode="native-editable">${initialToken}</p>`;
+  const header = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Stemmio persistence benchmark</title><style>body{font:14px system-ui}.card{border:1px solid #ddd;margin:8px;padding:8px}</style></head><body><main><p data-native-case="${editableCase}" data-native-mode="native-editable">${initialToken}</p>`;
   const footer = "</main></body></html>";
   const paragraph = "structured-persistence-content-".repeat(56);
   const card = `<section class="card"><h2>Structured section</h2><p>${paragraph}</p><ul><li>source bytes stay authoritative</li><li>atomic recovery stays enabled</li></ul></section>`;
@@ -285,9 +285,9 @@ async function startBridge(workspace, extraEnvironment = {}) {
     cwd: productRoot,
     env: {
       ...process.env,
-      HTML_AI_WORKSPACE: workspace,
-      HTML_AI_PROJECT_FILES_ROOT: path.join(workspace, "project-files"),
-      HTML_AI_BRIDGE_PORT: String(port),
+      STEMMIO_WORKSPACE: workspace,
+      STEMMIO_PROJECT_FILES_ROOT: path.join(workspace, "project-files"),
+      STEMMIO_BRIDGE_PORT: String(port),
       ...extraEnvironment,
     },
     stdio: ["ignore", "ignore", "pipe"],
@@ -546,7 +546,7 @@ async function runSafetyChecks(runRoot, sizeMiB) {
 
     const recovery = await createBridgeFixture(path.join(safetyRoot, "recovery"), sizeMiB);
     failedBridge = await startBridge(recovery.workspace, {
-      HTML_AI_FAILPOINT: "save-source-written",
+      STEMMIO_FAILPOINT: "save-source-written",
     });
     const recoveringProject = await openWorkspace(failedBridge.baseUrl, recovery.sourcePath);
     const recoveryPath = recoveringProject.sourcePath
@@ -610,10 +610,10 @@ async function launchElectron(userData, activePath, recentPaths) {
     cwd: productRoot,
     env: {
       ...process.env,
-      PAGEROOT_E2E: "1",
-      PAGEROOT_E2E_USER_DATA_DIR: userData,
-      HTML_AI_WORKSPACE: path.join(userData, "workspace"),
-      HTML_AI_PROJECT_FILES_ROOT: path.join(userData, "project-files"),
+      STEMMIO_E2E: "1",
+      STEMMIO_E2E_USER_DATA_DIR: userData,
+      STEMMIO_WORKSPACE: path.join(userData, "workspace"),
+      STEMMIO_PROJECT_FILES_ROOT: path.join(userData, "project-files"),
     },
   });
   const page = await electronApp.firstWindow();
@@ -621,7 +621,7 @@ async function launchElectron(userData, activePath, recentPaths) {
   const rendererUrl = page.url();
   await electronApp.evaluate(({ BrowserWindow }, url) => {
     const window = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === url);
-    if (!window) throw new Error("PageRoot main BrowserWindow is unavailable.");
+    if (!window) throw new Error("Stemmio main BrowserWindow is unavailable.");
     window.webContents.setBackgroundThrottling(false);
   }, rendererUrl);
   await page.waitForFunction(() => document.visibilityState === "visible");
@@ -632,7 +632,7 @@ async function launchElectron(userData, activePath, recentPaths) {
 async function rendererPid(electronApp, rendererUrl) {
   return electronApp.evaluate(({ BrowserWindow }, url) => {
     const window = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.getURL() === url);
-    if (!window) throw new Error("PageRoot renderer is unavailable for RSS sampling.");
+    if (!window) throw new Error("Stemmio renderer is unavailable for RSS sampling.");
     return window.webContents.getOSProcessId();
   }, rendererUrl);
 }
@@ -642,9 +642,9 @@ async function waitForLiveSourcePath(page) {
     document.querySelector("main.workbench")?.getAttribute("data-project-state") === "ready"
   ), null, { timeout: 30_000 });
   return page.evaluate(async () => {
-    const project = await window.htmlAIProjects?.getActiveProject?.();
+    const project = await window.stemmioProjects?.getActiveProject?.();
     if (!project?.sourcePath) {
-      throw new Error("PageRoot did not expose an imported Working Copy path.");
+      throw new Error("Stemmio did not expose an imported Working Copy path.");
     }
     return project.sourcePath;
   });
@@ -652,7 +652,7 @@ async function waitForLiveSourcePath(page) {
 
 async function currentFrame(page, expectedPath, expectedToken = null) {
   await page.waitForFunction(async (sourcePath) => {
-    const project = await window.htmlAIProjects?.getActiveProject?.();
+    const project = await window.stemmioProjects?.getActiveProject?.();
     return project?.sourcePath === sourcePath
       && document.querySelector("main.workbench")?.getAttribute("data-project-state") === "ready";
   }, expectedPath, { timeout: 30_000 });
@@ -682,7 +682,7 @@ async function currentFrame(page, expectedPath, expectedToken = null) {
     }
     await page.waitForTimeout(50);
   }
-  throw new Error("PageRoot benchmark canvas did not expose its fresh edit frame.");
+  throw new Error("Stemmio benchmark canvas did not expose its fresh edit frame.");
 }
 
 async function activateAndReplace(page, frame, nextToken) {
@@ -747,7 +747,7 @@ async function persistedRevision(page, minimumRevision) {
 async function startRendererGapMonitor(page) {
   await page.evaluate(() => {
     const state = { active: true, last: performance.now(), maxGapMs: 0, samples: 0 };
-    globalThis.__PAGEROOT_PERSISTENCE_GAP_MONITOR__ = state;
+    globalThis.__STEMMIO_PERSISTENCE_GAP_MONITOR__ = state;
     const frame = () => {
       if (!state.active) return;
       const now = performance.now();
@@ -761,10 +761,10 @@ async function startRendererGapMonitor(page) {
   return {
     async stop() {
       return page.evaluate(() => {
-        const state = globalThis.__PAGEROOT_PERSISTENCE_GAP_MONITOR__;
+        const state = globalThis.__STEMMIO_PERSISTENCE_GAP_MONITOR__;
         if (!state) return { maxGapMs: 0, samples: 0 };
         state.active = false;
-        delete globalThis.__PAGEROOT_PERSISTENCE_GAP_MONITOR__;
+        delete globalThis.__STEMMIO_PERSISTENCE_GAP_MONITOR__;
         return { maxGapMs: state.maxGapMs, samples: state.samples };
       });
     },
@@ -779,7 +779,7 @@ async function closeElectronGracefully(electronApp, rendererUrl) {
     window.close();
     return true;
   }, rendererUrl);
-  assert(requested, "PageRoot main BrowserWindow disappeared before close measurement.");
+  assert(requested, "Stemmio main BrowserWindow disappeared before close measurement.");
   await closed;
 }
 
@@ -791,7 +791,7 @@ async function forceCloseElectron(electronApp) {
 async function removeElectronUserData(userData, temporaryParent) {
   assert(
     path.dirname(path.resolve(userData)) === temporaryParent
-      && path.basename(userData).startsWith("pageroot-native-e2e-"),
+      && path.basename(userData).startsWith("stemmio-native-e2e-"),
     "Refusing to remove an unexpected Electron benchmark user-data directory.",
   );
   // Chromium can finish one final storage write shortly after Electron's close
@@ -811,7 +811,7 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
   // Electron validates this value with path.resolve(tmpdir()), so preserve the
   // system spelling (for example /var rather than its /private realpath).
   const temporaryParent = path.resolve(os.tmpdir());
-  const userData = await mkdtemp(path.join(temporaryParent, "pageroot-native-e2e-"));
+  const userData = await mkdtemp(path.join(temporaryParent, "stemmio-native-e2e-"));
   const sourceA = path.join(sources, `persistence-${sizeMiB}-A.html`);
   const sourceB = path.join(sources, `persistence-${sizeMiB}-B.html`);
   const initialSourceA = fixtureHtml(sizeMiB);

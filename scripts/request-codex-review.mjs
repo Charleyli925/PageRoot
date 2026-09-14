@@ -36,7 +36,7 @@ export function reviewCommentBody(headSha) {
   return [
     "@codex review",
     "",
-    `PageRoot requests a Codex review of exact head \`${headSha}\`.`,
+    `Stemmio requests a Codex review of exact head \`${headSha}\`.`,
     "",
     "This review is informational and does not block merge. `release-gate` remains the merge requirement.",
     "",

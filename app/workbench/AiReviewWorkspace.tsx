@@ -226,7 +226,7 @@ function postToFrame(
   message: Record<string, unknown>,
 ) {
   frame?.contentWindow?.postMessage({
-    source: "pageroot-ai-review-parent",
+    source: "stemmio-ai-review-parent",
     sessionId,
     ...message,
   }, "*");
@@ -518,7 +518,7 @@ export default function AiReviewWorkspace({
 }) {
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
-  const independentTransport = hydrated && Boolean(window.htmlAIPreview);
+  const independentTransport = hydrated && Boolean(window.stemmioPreview);
   const [initialReview] = useState(() => restoreReviewPresentation({
     documents,
     reviewIdentity: sessionId,
@@ -1213,7 +1213,7 @@ export default function AiReviewWorkspace({
       return requested[side].filter((step) => {
         const valid = step.kind === "panel"
           ? /^panel-\d+$/u.test(step.key)
-          : /^pr1_[0-9a-f]{32}$/iu.test(step.stableId);
+          : /^sm1_[0-9a-f]{32}$/iu.test(step.stableId);
         if (!valid) return false;
         const key = step.kind === "panel" ? `panel:${step.key}` : `details:${step.stableId}`;
         if (seen.has(key)) return false;
@@ -1271,7 +1271,7 @@ export default function AiReviewWorkspace({
 
   useEffect(() => {
     if (!independentTransport) return undefined;
-    const previewApi = window.htmlAIPreview;
+    const previewApi = window.stemmioPreview;
     if (!previewApi) return undefined;
     let cancelled = false;
     const liveSessions: ReviewDesktopSession[] = [];
@@ -1658,7 +1658,7 @@ export default function AiReviewWorkspace({
       const message = event.data;
       if (
         !message
-        || message.source !== "pageroot-ai-review"
+        || message.source !== "stemmio-ai-review"
         || message.sessionId !== sessionId
         || (message.side !== "before" && message.side !== "after")
         || event.source !== framesRef.current[message.side]?.contentWindow
@@ -1682,7 +1682,7 @@ export default function AiReviewWorkspace({
         reviewCommentChannelChallengeRef.current = null;
         reviewCommentPortRef.current = port;
         port.postMessage({
-          source: "pageroot-ai-review-comment-targets",
+          source: "stemmio-ai-review-comment-targets",
           sessionId,
           side: "before",
           type: "comment-targets",

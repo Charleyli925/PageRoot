@@ -126,7 +126,7 @@ stateDiagram-v2
 
 ### 3.1 首次启动欢迎项目
 
-桌面应用没有可恢复的当前项目时，不显示一个只有内存内容的假预览。系统会在所选工作区的上级目录建立 `欢迎来到源页.html`；默认位置是 `~/Documents/PageRoot/欢迎来到源页.html`，并立即：
+桌面应用没有可恢复的当前项目时，不显示一个只有内存内容的假预览。系统会在所选工作区的上级目录建立 `欢迎来到源页.html`；默认位置是 `~/Documents/Stemmio/欢迎来到源页.html`，并立即：
 
 1. 把它作为普通当前 HTML 加入最近项目。
 2. 通过 Bridge 登记独立的 `projectId`、`documentId` 和初始 V1。
@@ -166,9 +166,9 @@ Tab 已经能操作，不为此增加眼睛徽章或工具栏「去预览」按�
 纯浏览器预览是正式产品能力，但边界固定为只读：
 
 - 默认进入“预览”，不能切换到“编辑”。
-- PageRoot 的直接编辑、评论、附件、项目持久化和“发给 AI”均不可用。
+- Stemmio 的直接编辑、评论、附件、项目持久化和“发给 AI”均不可用。
 - 页面自身的脚本、表单与交互可以在 sandbox 内运行；顶部持续显示“浏览器预览 · 只读”“操作不会保存”。
-- 离开预览不弹“是否保存”，因为 PageRoot 从未接受可写修改。
+- 离开预览不弹“是否保存”，因为 Stemmio 从未接受可写修改。
 
 ### 3.3 桌面交互预览与“编辑当前页面”
 
@@ -178,7 +178,7 @@ Tab 已经能操作，不为此增加眼睛徽章或工具栏「去预览」按�
    `script` 程序的页面时，主进程先核对路径、Hash、generation 和资源预算，
    再准备作用域受限的资源闭包。可见 Edit iframe 执行受支持的 parser-blocking、
    inline、`defer`、无 import module、`DOMContentLoaded` listener 与受控相对
-   `<base>` 页面；PageRoot 不等待“静默帧”，不冻结 timer/listener/
+   `<base>` 页面；Stemmio 不等待“静默帧”，不冻结 timer/listener/
    Observer/动画，也不把 Runtime DOM 与源码逐节点对账。不支持的 module import
    graph 等不能等价执行的程序会关闭到禁用脚本的静态画布，不能把
    iframe load 当成脚本已运行。Edit 始终不使用截图、位图投影
@@ -187,9 +187,9 @@ Tab 已经能操作，不为此增加眼睛徽章或工具栏「去预览」按�
 2. 点击“预览”后，当前 HTML 在独立隔离文档中像普通页面一样运行。
    页面脚本、相对资源、Tab、表单、SVG、Canvas 和动态表格可以工作；
    相对资源继续从首次导入时的原稿目录读取。编辑画布为这些静态资源
-   复用同一个 `pageroot-preview` 会话，自动保存只刷新声明资源、不新开
+   复用同一个 `stemmio-preview` 会话，自动保存只刷新声明资源、不新开
    会话；会话表满时按最近访问淘汰空闲会话。
-   页面不能导航宿主窗口或获得 PageRoot 的文件、编辑、评论和 AI 权限。
+   页面不能导航宿主窗口或获得 Stemmio 的文件、编辑、评论和 AI 权限。
 3. 用户在预览中切换 Tab、展开详情或改变同类显示状态。
 4. 点击“编辑”时，系统不捕获运行时图像或页面状态；它只把仍能唯一映射到
    源码节点的 Tab/显示状态临时应用到画面，因此用户看到并编辑刚才选择
@@ -260,7 +260,7 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 耐久提交并发布后即可显示新 HTML；同次导航仍等待画布核对、可选移入废纸篓和外部请求回执收口，
 不凭首份应用回执提前释放队列。失败保留同一请求的重试或取消出口，不静默接受不一致身份。
 
-在 macOS 或 QoderWork 的“打开方式”中选择 PageRoot 时，系统只接受绝对
+在 macOS 或 QoderWork 的“打开方式”中选择 Stemmio 时，系统只接受绝对
 路径的 `.html` / `.htm` 文件，并在应用未启动或已运行时打开同一份当前源文件。
 它与“打开本地 HTML”共用安全项目切换边界和主进程完整打开队列：当前编辑、
 评论、附件和项目规则会先安全收口，无法收口时保留当前项目；本地选择、最近
@@ -279,7 +279,7 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 新外部打开会取消本次关闭并继续按上述切换流程处理；确认已经提交后，当前进程不再
 接收该请求，而是把最新已验证路径交给下一次启动，避免退出中的项目记录与画面脱节。
 
-全局左侧栏与开始页只提供“新建项目”，不再把“打开 HTML”表达为另一种并列文件管理模型。该动作的第一步仍是在系统文件选择器中选择一份本地 HTML，然后由现有导入流程建立 Registry 项目并进入编辑。用户在文件选择器取消时，当前项目与画布完全不变。浏览器预览路径的隐藏文件选择器必须在“新建项目”的同一次点击里打开（该点击本身即用户手势），包括编码错误后画布“重新选择”直接打开选择器的情形；不得先 drain 当前项目再请求选择器，工作台导航在空闲或仍在收口当前 HTML 时，都必须在同一次点击里先请求隐藏选择器，不得把这次点击排进微任务后再请求，否则 Chromium 会丢掉用户手势。编码错误后的“重新选择”直接点击隐藏选择器；没有 picker operationId 的受信任提交仍进入 accepted FIFO，不得因为上一次未完成的选择器命令而判为过期。内存中打开的 HTML 会记下内容 Hash，以便下一次选择能通过画布切换围栏。没有磁盘路径的内存 HTML 在 ProjectSession 里没有 projectId；导航收口仍须按这次应用回执的 epoch 完成，不得因此一直占着准入锁导致编码错误后的下一次打开排不进去。若当前编辑、评论、附件或项目规则还没有安全收口，系统只在用户确认会切换项目的动作之后，才沿用项目切换边界完成保存或阻止切换。系统文件选择器始终从受管项目根（“文稿 › PageRoot › 项目”）起步；该目录不可用时回退到“文稿”，不记忆上一次选择过的目录。
+全局左侧栏与开始页只提供“新建项目”，不再把“打开 HTML”表达为另一种并列文件管理模型。该动作的第一步仍是在系统文件选择器中选择一份本地 HTML，然后由现有导入流程建立 Registry 项目并进入编辑。用户在文件选择器取消时，当前项目与画布完全不变。浏览器预览路径的隐藏文件选择器必须在“新建项目”的同一次点击里打开（该点击本身即用户手势），包括编码错误后画布“重新选择”直接打开选择器的情形；不得先 drain 当前项目再请求选择器，工作台导航在空闲或仍在收口当前 HTML 时，都必须在同一次点击里先请求隐藏选择器，不得把这次点击排进微任务后再请求，否则 Chromium 会丢掉用户手势。编码错误后的“重新选择”直接点击隐藏选择器；没有 picker operationId 的受信任提交仍进入 accepted FIFO，不得因为上一次未完成的选择器命令而判为过期。内存中打开的 HTML 会记下内容 Hash，以便下一次选择能通过画布切换围栏。没有磁盘路径的内存 HTML 在 ProjectSession 里没有 projectId；导航收口仍须按这次应用回执的 epoch 完成，不得因此一直占着准入锁导致编码错误后的下一次打开排不进去。若当前编辑、评论、附件或项目规则还没有安全收口，系统只在用户确认会切换项目的动作之后，才沿用项目切换边界完成保存或阻止切换。系统文件选择器始终从受管项目根（“文稿 › Stemmio › 项目”）起步；该目录不可用时回退到“文稿”，不记忆上一次选择过的目录。
 
 1. 用户选择本地 HTML，或系统通过 Finder / Open With / Dock / 冷启动交付一份 HTML。
 2. 主进程只读检查该路径：有效 v4 项目文件、已绑定的外部原稿，或真正全新的外部 HTML。确认前不写入 active/recent，也不把外部 HTML 挂到画布。
@@ -429,7 +429,7 @@ Candidate 在已验证源码登记后、作者脚本执行前恢复 PageViewCont
   已有 Candidate 占用 inactive slot 时只保留最新待处理修订；当前 Candidate
   结算并退休后再启动它，不能让两个修订并发复用同一 browsing context。
 - 必须重建时，尽量恢复共享 scroll、当前界面实际提供的 zoom，以及仍能按
-  `data-pageroot-id` 精确解析的 selection；目标已删除或证明失败时允许安全
+  `data-stemmio-id` 精确解析的 selection；目标已删除或证明失败时允许安全
   清除选择，不能猜测重绑或转存 Runtime DOM。恢复锚点取自晋升前最后可见的
   Active Frame，不得覆盖 Candidate 准备期间的用户滚动。
 - 必要刷新可以出现短暂加载，但不打断尚未完成的活跃输入。位置与选择恢复尽力而为，
@@ -489,12 +489,12 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 - 旧 revision 的写入可以完成，但不得把新内存内容回滚。
 - 队列继续处理最新 revision，直至 `lastPersistedRevision=editRevision`。
 - 持久化完成后保持正常编辑状态；用户无需阅读内部写入阶段。
-- `contenteditable`、IME 快照和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。元素身份只保存 `data-pageroot-id`。
+- `contenteditable`、IME 快照和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。元素身份只保存 `data-stemmio-id`。
 - flex/grid 文字只有在源码、运行时布局和 CSS selector 均安全时，才随首个真实 Patch 创建唯一 canonical 直接文字项；双击本身不修改源码。
 - 直接源码编辑的 `operationTarget` 任何目标为 `ambiguous`、`orphaned`，或 patch 越出已解析源码范围时都必须 fail-closed，保留当前源码并要求用户重新定位；运行时目标的 `ambiguous` 只表示 comment-only 视觉操作，不阻断其已验证 `commentAnchor` 的评论。
 - 行内透明节点向上寻找宿主时，只有新候选仍是安全可编辑岛才继续提升。复杂父容器本身也可以是岛：非行内后代保持冻结原子，直属文字和行内标签在同一宿主里编辑。
 
-PageRoot 0.9.0 只使用一种文字编辑路线：
+Stemmio 0.9.0 只使用一种文字编辑路线：
 
 - 可编辑岛统一使用受控 `contenteditable="true"`。浏览器只负责焦点、光标、Selection 与 composition；普通输入、删除、换行、剪切和粘贴由 Controller 阻止默认行为后按逻辑位置执行。粘贴只读取 `text/plain`，换行固定写成 `<br>`。
 - 可视段首、段尾、行中和非空行内样式交界都必须支持输入与删除。可视段首继承右侧首字符，其余边界统一继承左侧字符；空排版标签附近同样自动放置光标，不再拒绝进入。工具栏显示下一次输入将采用的样式。
@@ -555,7 +555,7 @@ canonical 子节点而不更换 iframe；任何证明失败都回退到 fresh-fr
 已导入项目的每一次写操作在用户意图开始时一次性冻结
 `projectId + documentId + sourcePath`；附件上传及其失败清理也使用同一份
 上下文。Bridge 先按两个 ID 找到原项目，再把路径当作归属校验；
-已登记写操作不能因路径或 inode 变化而新建项目。PageRoot 原子替换完源文件、
+已登记写操作不能因路径或 inode 变化而新建项目。Stemmio 原子替换完源文件、
 但 registry 尚未刷新的窄窗口，只由原项目 `pendingWrite` 的目标 Hash
 证明并原位恢复；其他物理替换仍按外部变更停止写入。
 
@@ -565,7 +565,7 @@ Edit 菜单与快捷键只调用该控件的原生局部撤销，不进入源码
 
 源码结构工具栏只提供复制、显式确认删除和同级上/下移；取消确认不会修改
 源码，只有接受本次确认才提交删除。复制先从选中源码子树
-移除全部 `data-pageroot-id`，再由语义内核为整棵新子树分配新 ID；移动
+移除全部 `data-stemmio-id`，再由语义内核为整棵新子树分配新 ID；移动
 保留原 ID，删除后的 ID 不主动复用。内部编辑器端口可按父 ID 和 before ID
 插入一个原始 HTML 元素或跨父移动，但本阶段不增加元素面板、组件系统、
 布局引擎或任意 CSS 规则编辑器。任何 Script 生成节点都不具备此权限。
@@ -615,9 +615,9 @@ Edit 菜单与快捷键只调用该控件的原生局部撤销，不进入源码
 ```
 
 - **预览外部版本** 只读展示磁盘当前 HTML，不写入任何持久化状态。用户可“返回我的编辑”或“接受此版本（丢弃我的编辑）”。
-- **采用磁盘版本** 会二次确认后清空 Working Copy 锁状态、采用磁盘 Hash 并把画布换成磁盘内容，不把内存编辑写回 HTML。这是冲突死锁的确定恢复路径，避免手动删除 `.pageroot/`。预览中的“接受此版本”走同一通道。
+- **采用磁盘版本** 会二次确认后清空 Working Copy 锁状态、采用磁盘 Hash 并把画布换成磁盘内容，不把内存编辑写回 HTML。这是冲突死锁的确定恢复路径，避免手动删除 `.stemmio/`。预览中的“接受此版本”走同一通道。
 - 在用户选择前，暂停自动写回并禁用提交。监视器只做提前预警，写前 Hash 检查仍是最终防线。
-- 监视器在每次成功读出当前活动项目后启动，包括重开已记住的项目；PageRoot 自己的保存不误报冲突。
+- 监视器在每次成功读出当前活动项目后启动，包括重开已记住的项目；Stemmio 自己的保存不误报冲突。
 
 ## 6. 评论
 
@@ -764,7 +764,7 @@ commit pending native edit checkpoint
 
 Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<日期>-候选版本N/` 派生目录；处理中只显示 `PROMPT.md`，通过 finalizer 的 Candidate 才加入 `*-Vn-待审阅.html`。写入前先持久投影收据，目录和文件均 no-replace。用户删除、修改或占用该目录只会让下一次 Finder 操作安全重建或分配另一个展示目录，绝不影响隐藏 Request/Attempt、Candidate、审阅或 Promotion。
 
-“查看 AI任务”只把当前 `sourcePath` 交给 Desktop；Bridge 重验 Registry、当前项目根及 `AI任务/<单一子目录>` 后才允许 Finder 打开。Renderer 不传 Request 路径，产品 UI 也不打开 `.pageroot/requests/...`。本次不生成 `附件快照说明.md`、`附件与图片/`、`AI_RULES.md` 或 `PROJECT.md` 副本；可见附件管理延期。
+“查看 AI任务”只把当前 `sourcePath` 交给 Desktop；Bridge 重验 Registry、当前项目根及 `AI任务/<单一子目录>` 后才允许 Finder 打开。Renderer 不传 Request 路径，产品 UI 也不打开 `.stemmio/requests/...`。本次不生成 `附件快照说明.md`、`附件与图片/`、`AI_RULES.md` 或 `PROJECT.md` 副本；可见附件管理延期。
 
 ### 7.3 Agent Bridge 交接
 
@@ -788,7 +788,7 @@ smoke session，仅验证 `initialize → session.new → identity/protocol` 并
 对话侧栏只消费最近一次可信状态，未知、检测中、
 未安装、需要登录、额度用尽或连接失败时都提供进入设置的下一步，不把英文原文写进聊天。
 检测、官方登录、填写源页 Agent Token 和打开 About 不运行 Request、不冻结 HTML、不
-改变评论或草稿。打开 About 不触发 Agent 检查；未安装时的一键安装只写入 PageRoot 管理目录，同样不创建 Request。诊断分别投影安装、认证、协议和服务四项事实；Custom 兼容接口的诊断只证明“已配置”，不要求实现 `/models`，连接或发送时的正式 preflight 才能证明模型服务。弱诊断不能覆盖正式发送或运行得到的强失败。会话中的额度失败会收回绿灯，分类为
+改变评论或草稿。打开 About 不触发 Agent 检查；未安装时的一键安装只写入 Stemmio 管理目录，同样不创建 Request。诊断分别投影安装、认证、协议和服务四项事实；Custom 兼容接口的诊断只证明“已配置”，不要求实现 `/models`，连接或发送时的正式 preflight 才能证明模型服务。弱诊断不能覆盖正式发送或运行得到的强失败。会话中的额度失败会收回绿灯，分类为
 `account-capacity`，禁止把 Agent 可见英文错误当作聊天。
 
 设置页保留三个服务行，每行只有一次名称和主状态；默认标记与就绪状态独立，
@@ -892,7 +892,7 @@ Agent 的同一公开消息只原位合并 token，新的公开消息增加一�
 并继续编辑”后，Bridge 必须先关闭 runtime mutation surface、发送取消并有界终止受管进程组；
 确认 Agent 已停止后，才写 durable Request cancellation 并恢复编辑。停止期间本轮保持锁定。
 应用/Bridge 正常关闭走同一边界。Bridge 崩溃后，处理中 Agent Request 投影为不可重试的
-“会话已中断”；PageRoot 无法证明旧进程已退出，因此结束时使用同一外部 Agent 风险确认，
+“会话已中断”；Stemmio 无法证明旧进程已退出，因此结束时使用同一外部 Agent 风险确认，
 durable cancel 只作为旧 Request 的 authority fence，不声称已经停止旧 Agent。
 
 ## 8. 内部 AI 处理与完成
@@ -903,8 +903,8 @@ durable cancel 只作为旧 Request 的 authority fence，不声称已经停止�
 
 1. 读取 Prompt、v3 Request、input manifest、项目规则和冻结输入。
 2. 把评论 TargetRef 和文字范围作为理解上下文，不把它们当作可写子树边界；一条评论可以要求同时修改多个远距离区域。
-3. 将完整 HTML 写入 Prompt 冻结的唯一 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。PageRoot 已给出精确绝对路径；AI 不得从 `input/base/index.html` 推导名称、递增版本号、创建 `AI任务/` 或写入其他 output 路径。
-4. 保留所有仍存在源码元素的 `data-pageroot-id`，移动或改 tag 时 ID 仍跟随该元素；不复制或伪造 ID。真正新增的元素不填 ID，由 PageRoot 校验后分配。Stable ID 是唯一身份，parent、order 和 tag 只作为 Review 变化事实。
+3. 将完整 HTML 写入 Prompt 冻结的唯一 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Stemmio 已给出精确绝对路径；AI 不得从 `input/base/index.html` 推导名称、递增版本号、创建 `AI任务/` 或写入其他 output 路径。
+4. 保留所有仍存在源码元素的 `data-stemmio-id`，移动或改 tag 时 ID 仍跟随该元素；不复制或伪造 ID。真正新增的元素不填 ID，由 Stemmio 校验后分配。Stable ID 是唯一身份，parent、order 和 tag 只作为 Review 变化事实。
 5. 完成全部写入后执行 Prompt 给出的完整 finalizer 命令。
 
 finalizer 通过后，Repository 封存 AI 原始输出 Hash，再以冻结 HTML 为基线校验重复、伪造和具有确定性证据的可疑丢失；同一有效 ID 即使 tag、parent 或 order 变化仍按同一元素处理。只有校验通过后，才为新元素分配 ID，生成完整规范化 Candidate、独立 Hash 和 identity report；不启发式重绑。
@@ -990,9 +990,9 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 3. 新增：每个新增字正下方一个绿色实点，贴紧字形并与该字水平居中。标点与独立符号不带绿点——它们只打断点阵节奏而不增加证据；红色删除线不受此限，删除线是一条连续横线并照常穿过标点。同一渲染文字行、同一字号的绿点统一取该行最低基线与同一半径，使一行读作一条均匀点线；不同字号不并成一行，小号说明文字保留自己的自然深度。绿点必须画在不参与排版的叠层上；禁止 `text-emphasis`，禁止用改字色、加底色或做成下划线来冒充。
 4. 一个字符只画一个标记。嵌套 marker 由最内层 marker 拥有其文字，禁止同一字符被外层与内层各画一次。
 
-权威实现是 `app/lib/review-text-evidence-marks.js`。审阅页对 `[data-pageroot-review-text]` 只能 `inherit` 作者文字样式，真正的红虚线与绿点由投影叠层绘制。
+权威实现是 `app/lib/review-text-evidence-marks.js`。审阅页对 `[data-stemmio-review-text]` 只能 `inherit` 作者文字样式，真正的红虚线与绿点由投影叠层绘制。
 
-审阅分析只读取冻结的修改前/修改后 HTML，不执行候选来生成源码差异，也没有 Review 专用截图、像素比较、主进程 owner 或 IPC。源码文字、新增/删除、移动和明确属性变化仍是用户可见的正式事实；完整、有效且全文唯一的 `data-pageroot-id` 只决定能否使用精确连续性与当前帧视觉增强。旧版本缺失、partial、invalid 或 duplicate Stable ID 时，视觉增强显示 `不支持`，既有源码语义配对仍保留，不把差异隐藏成空审阅。
+审阅分析只读取冻结的修改前/修改后 HTML，不执行候选来生成源码差异，也没有 Review 专用截图、像素比较、主进程 owner 或 IPC。源码文字、新增/删除、移动和明确属性变化仍是用户可见的正式事实；完整、有效且全文唯一的 `data-stemmio-id` 只决定能否使用精确连续性与当前帧视觉增强。旧版本缺失、partial、invalid 或 duplicate Stable ID 时，视觉增强显示 `不支持`，既有源码语义配对仍保留，不把差异隐藏成空审阅。
 
 1. 源码事实仍复用 `text` 与 `structure` 两类投影。文字使用 `insert/delete/replace` 和两侧独立的 `evidenceRanges`、`phraseGroups`、`anchorOffset`；`evidenceRanges` 是唯一字符级证据。视觉观察不得生成替代性的通用 change，也不得覆盖这些 wrapper、changeId 或精确范围。
    每个原子事实另带可选 `displayGroupId / displayOwnerId / displayScope / geometryMode`，只决定阅读展示且不进入精确事实身份。`displayScope` 表示段落、列表项、单元格、组件或容器，`geometryMode` 独立表示文字内容、完整元素、完整容器或编号行 Range。文字段落按阅读内容框选；样式及新增/删除/移动始终按完整元素；简单 `li`、`td/th` 与按钮等控件按完整组件，复杂列表项/单元格继续落到内部最小阅读块；编号 `<br>` 行逐条独立。自动换行和同段多处字符变化仍是一组，公开紫框不输出 phrase/line scope。
@@ -1025,7 +1025,7 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 
 进入审阅时同步冻结本轮已保存评论。评论只投影到“修改前”左页的原 TargetRef 位置，常驻一个 30px 的紫底白字“评”标记；鼠标 hover 时展开简洁的只读评论详情气泡，移出后气泡自动消失而“评”保留。标记继续按原评论 TargetRef 锚定，不固定在画布边缘。标记和气泡不提供编辑、回复、删除或其他点击交互，右页不重复显示。评论正文始终保留在可信 React 宿主层。评论定位不读取或授权任何脚本关系，也不改变文字/元素差异集合。
 
-实现补充：冻结源可解析的非全局 TargetRef 使用内容无关的 Stable ID 私有绑定。准备 before 文档时，精确目标元素绝不带 parseKey 或第二套身份属性；分析器只把 `data-pageroot-id`、child-index 路径与窄静态指纹放入会话私有的首个 bootstrap 响应。桌面受管预览只将该响应交给解析器阻塞式的第一次请求，随后改为无绑定回退源码，私有端口才交付评论 key→Stable ID 映射。class-only 的普通目标即使邻近同标签元素被作者重排，只要路径失效后仍唯一匹配私有指纹，仍会显示在原元素上；私有绑定不可用时才回退到唯一 `id`、`data-*`、`name` 或 `aria-label`，绝不走位置路径。绑定缺失、歧义、替换、脱离文档或私有端口失效时不显示标记。作者加载后不能从 HTML 或后续 bootstrap 抓取获得评论正文、评论 key、Stable ID 或完整定位映射；评论端口的 challenge 由首个受管 capture listener 校验并停止传播，因此作者 capture listener 既看不到 challenge，也不能伪造先到端口。
+实现补充：冻结源可解析的非全局 TargetRef 使用内容无关的 Stable ID 私有绑定。准备 before 文档时，精确目标元素绝不带 parseKey 或第二套身份属性；分析器只把 `data-stemmio-id`、child-index 路径与窄静态指纹放入会话私有的首个 bootstrap 响应。桌面受管预览只将该响应交给解析器阻塞式的第一次请求，随后改为无绑定回退源码，私有端口才交付评论 key→Stable ID 映射。class-only 的普通目标即使邻近同标签元素被作者重排，只要路径失效后仍唯一匹配私有指纹，仍会显示在原元素上；私有绑定不可用时才回退到唯一 `id`、`data-*`、`name` 或 `aria-label`，绝不走位置路径。绑定缺失、歧义、替换、脱离文档或私有端口失效时不显示标记。作者加载后不能从 HTML 或后续 bootstrap 抓取获得评论正文、评论 key、Stable ID 或完整定位映射；评论端口的 challenge 由首个受管 capture listener 校验并停止传播，因此作者 capture listener 既看不到 challenge，也不能伪造先到端口。
 
 两侧审阅画布在无同源、无表单提交、无导航、无弹窗、无下载、无宿主 IPC 的隔离沙箱中运行原页面交互；运行态变化不会写回 HTML、候选 Version 或当前项目。“返回 AI 修改前”先逐行说明不会采用本次 AI 返回、继续以修改前版本为基线，以及 AI HTML 已自动保留；如需 Finder，入口只打开经验证的可见 AI任务，不暴露隐藏 Candidate 或 Request。确认后结束当前待打开选择，直接回到原 HTML 的可编辑状态，原评论和编辑记录继续保留，未采纳Candidate及本轮证据继续保留，但不进入正式版本历史。“打开 AI 修改后”确认前已跨过当前画布的 source-authority fence；确认后原编辑画布在固定审阅层下完成激活与候选渲染。候选画布和收起的 AI 对话侧栏至少完成一次渲染后，审阅层才一次性移除，因此不会闪现等待 AI 页面。两条确认中，“继续审阅”是建议保留的紫色操作，“返回修改前版本”为灰色操作；打开候选的最终按钮文案为“确认并打开”。
 

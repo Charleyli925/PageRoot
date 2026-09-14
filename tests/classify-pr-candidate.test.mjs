@@ -67,7 +67,7 @@ test("candidate classification preserves every former release-dry-run packaging 
     "NOTICE",
     "PRIVACY.md",
     "THIRD_PARTY_NOTICES.md",
-    "PageRoot 用户声明与免责声明.txt",
+    "源页 用户声明与免责声明.txt",
   ];
   for (const file of formerPackagingPaths) {
     assert.equal(

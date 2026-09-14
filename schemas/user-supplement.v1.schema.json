@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/user-supplement.v1.schema.json",
-  "title": "PageRoot controlled external-chat supplement v1",
+  "$id": "https://stemmio.local/schemas/user-supplement.v1.schema.json",
+  "title": "Stemmio controlled external-chat supplement v1",
   "type": "object",
   "additionalProperties": false,
   "required": [

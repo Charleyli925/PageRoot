@@ -117,7 +117,7 @@ export default function HtmlDisplaySurface({
                 firstScrollReportedRef.current = true;
                 lastPublishedAt = performance.now();
                 onScrollTopChangeRef.current?.(scrollTop);
-                performance.mark("pageroot:document:first-scroll-response");
+                performance.mark("stemmio:document:first-scroll-response");
                 onFirstScrollRef.current?.(scrollTop);
               }
               if (scheduled) return;
@@ -129,7 +129,7 @@ export default function HtmlDisplaySurface({
               frameWindow.clearTimeout(trailingTimer);
               frameWindow.removeEventListener("scroll", handleScroll);
             };
-            performance.mark("pageroot:document:scrollable-ready");
+            performance.mark("stemmio:document:scrollable-ready");
             setScrollableFrameHtml(frameHtml);
             if (restorationPending) frameWindow.requestAnimationFrame(() => {
               if (!restorationPending) return;
@@ -145,7 +145,7 @@ export default function HtmlDisplaySurface({
             });
           }
           setLoadedFrameHtml(frameHtml);
-          performance.mark("pageroot:document:static-frame-loaded");
+          performance.mark("stemmio:document:static-frame-loaded");
         }}
       />
     </div>

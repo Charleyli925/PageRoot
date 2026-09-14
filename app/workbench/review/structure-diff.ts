@@ -20,12 +20,12 @@ export function markStructureElement(
   geometryOwnerId: string,
   displayScope: ReviewDisplayScope,
 ) {
-  element.setAttribute("data-pageroot-review-structure", tone);
-  element.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
-  element.setAttribute("data-pageroot-review-geometry-owner", geometryOwnerId);
-  element.setAttribute("data-pageroot-review-display-group", `display-${semanticOwnerId}`);
-  element.setAttribute("data-pageroot-review-display-owner", `display-owner-${semanticOwnerId}`);
-  element.setAttribute("data-pageroot-review-display-scope", displayScope);
+  element.setAttribute("data-stemmio-review-structure", tone);
+  element.setAttribute("data-stemmio-review-semantic-owner", semanticOwnerId);
+  element.setAttribute("data-stemmio-review-geometry-owner", geometryOwnerId);
+  element.setAttribute("data-stemmio-review-display-group", `display-${semanticOwnerId}`);
+  element.setAttribute("data-stemmio-review-display-owner", `display-owner-${semanticOwnerId}`);
+  element.setAttribute("data-stemmio-review-display-scope", displayScope);
 }
 
 export function* markStructureDifferenceSteps(
@@ -41,12 +41,12 @@ export function* markStructureDifferenceSteps(
     const afterElement = pair.after?.element || null;
     const unitKind = pair.before?.kind || pair.after?.kind || "";
     const ownsElement = unitKind !== "direct-flow" && unitKind !== "br-line";
-    if (beforeElement?.hasAttribute("data-pageroot-review-structure")
-      || afterElement?.hasAttribute("data-pageroot-review-structure")) {
+    if (beforeElement?.hasAttribute("data-stemmio-review-structure")
+      || afterElement?.hasAttribute("data-stemmio-review-structure")) {
       stats.changed = true;
     }
-    const stableCommon = beforeElement?.getAttribute("data-pageroot-review-stable-common") === "true"
-      || afterElement?.getAttribute("data-pageroot-review-stable-common") === "true";
+    const stableCommon = beforeElement?.getAttribute("data-stemmio-review-stable-common") === "true"
+      || afterElement?.getAttribute("data-stemmio-review-stable-common") === "true";
     if (!beforeElement && afterElement && ownsElement && !stableCommon) {
       markStructureElement(
         afterElement,

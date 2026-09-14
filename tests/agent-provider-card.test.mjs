@@ -71,7 +71,7 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
 
 test("About is product information while Settings owns Agent checks and update controls", async () => {
   const [about, settings] = await Promise.all([
-    source("../app/components/AboutPageRootDialog.tsx"),
+    source("../app/components/AboutStemmioDialog.tsx"),
     source("../app/components/SettingsPage.tsx"),
   ]);
   assert.match(about, /源码级本地 HTML 编辑器/u);
@@ -125,7 +125,7 @@ test("Settings reuses AgentSetupPanel and lists every service row", async () => 
   assert.doesNotMatch(panel, /resolvedModelId \|\| "none"/u);
 });
 
-test("the conversation sidebar names pageroot from the connection summary", async () => {
+test("the conversation sidebar names stemmio from the connection summary", async () => {
   const sidebar = await source("../app/workbench/AiConversationSidebar.tsx");
   assert.match(sidebar, /vendorDisplayName/u);
   assert.doesNotMatch(sidebar, /DeepSeek ·/u);

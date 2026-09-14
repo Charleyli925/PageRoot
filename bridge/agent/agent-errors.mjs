@@ -34,10 +34,10 @@ export function sessionCredentialEnvironment(credential) {
   const baseUrl = String(credential.baseUrl || "").trim();
   if (!key || !vendorId || !baseUrl) return Object.freeze({});
   return Object.freeze({
-    PAGEROOT_API_KEY: key,
-    PAGEROOT_API_VENDOR: vendorId,
-    PAGEROOT_API_BASE_URL: baseUrl,
-    PAGEROOT_API_CREDENTIAL_GENERATION: String(
+    STEMMIO_API_KEY: key,
+    STEMMIO_API_VENDOR: vendorId,
+    STEMMIO_API_BASE_URL: baseUrl,
+    STEMMIO_API_CREDENTIAL_GENERATION: String(
       Number.isSafeInteger(credential.credentialGeneration) ? credential.credentialGeneration : 0,
     ),
   });

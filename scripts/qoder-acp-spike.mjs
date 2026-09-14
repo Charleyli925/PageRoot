@@ -31,14 +31,14 @@ import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
 const finalizerPath = fileURLToPath(new URL("../bridge/finalize-attempt.mjs", import.meta.url));
 const reportPath = path.join(productRoot, "output", "qoder-acp-spike", "report.json");
-const candidateMarker = "data-pageroot-qoder-acp=\"verified\"";
+const candidateMarker = "data-stemmio-qoder-acp=\"verified\"";
 const MAX_RETAINED_EVENTS = 2_048;
 const partialEvidence = { qoder: null, events: [], droppedEvents: 0 };
 const sourceHtml = `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>PageRoot ACP Before</title>
+  <title>Stemmio ACP Before</title>
 </head>
 <body>
   <main><h1>Before Qoder ACP</h1></main>
@@ -63,12 +63,12 @@ async function executable(candidate) {
 }
 
 async function resolveQoderCommand() {
-  const configured = process.env.PAGEROOT_QODER_ACP_COMMAND;
+  const configured = process.env.STEMMIO_QODER_ACP_COMMAND;
   if (configured) {
     if (!path.isAbsolute(configured)) {
       throw fail(
         "QODER_COMMAND_NOT_ABSOLUTE",
-        "PAGEROOT_QODER_ACP_COMMAND must be an absolute executable path.",
+        "STEMMIO_QODER_ACP_COMMAND must be an absolute executable path.",
       );
     }
     const resolved = await executable(configured);
@@ -86,7 +86,7 @@ async function resolveQoderCommand() {
   }
   throw fail(
     "QODER_COMMAND_NOT_FOUND",
-    "No Qoder CLI was found. Set PAGEROOT_QODER_ACP_COMMAND to its absolute path.",
+    "No Qoder CLI was found. Set STEMMIO_QODER_ACP_COMMAND to its absolute path.",
   );
 }
 
@@ -115,7 +115,7 @@ async function writeSafeReport(report) {
     canonicalDirectory !== canonicalOutput
     && !canonicalDirectory.startsWith(`${canonicalOutput}${path.sep}`)
   ) {
-    throw fail("REPORT_PATH_UNSAFE", "The ACP report directory escapes PageRoot output.");
+    throw fail("REPORT_PATH_UNSAFE", "The ACP report directory escapes Stemmio output.");
   }
   const target = path.join(canonicalDirectory, path.basename(reportPath));
   const temporary = `${target}.${randomUUID()}.tmp`;
@@ -162,7 +162,7 @@ function textContent(node) {
 async function run() {
   const qoderCommand = await resolveQoderCommand();
   const temporaryRoot = await realpath(
-    await mkdtemp(path.join(tmpdir(), "pageroot-qoder-acp-live-")),
+    await mkdtemp(path.join(tmpdir(), "stemmio-qoder-acp-live-")),
   );
   try {
     const sourcesRoot = path.join(temporaryRoot, "sources");
@@ -190,7 +190,7 @@ async function run() {
     });
     const requestId = `req_qoder_acp_${randomUUID().replaceAll("-", "")}`;
     const attemptId = "attempt_001";
-    const requestPath = path.join(projectRoot, ".pageroot", "requests", requestId);
+    const requestPath = path.join(projectRoot, ".stemmio", "requests", requestId);
     const outputPath = path.join(
       requestPath,
       "attempts",
@@ -218,7 +218,7 @@ async function run() {
       cwd: requestPath,
       env: {},
     };
-    const prompt = `# PageRoot Qoder ACP synthetic task
+    const prompt = `# Stemmio Qoder ACP synthetic task
 
 This is synthetic validation data. Read input-manifest.json in its exact readOrder.
 Modify the complete frozen HTML so that the body has the exact attribute
@@ -234,7 +234,7 @@ After the write succeeds, invoke terminal/create once with this exact structured
 - env: []
 
 Do not use a shell wrapper and do not write any other path. The result remains a
-Candidate pending PageRoot review; it must not replace or adopt the Working Copy.
+Candidate pending Stemmio review; it must not replace or adopt the Working Copy.
 `;
     const request = await repository.prepareRequest({
       target,
@@ -275,7 +275,7 @@ Candidate pending PageRoot review; it must not replace or adopt the Working Copy
       command: qoderCommand,
       args: ["--acp"],
       policy,
-      prompt: `Complete the frozen synthetic PageRoot task at ${policy.promptPath}.`,
+      prompt: `Complete the frozen synthetic Stemmio task at ${policy.promptPath}.`,
       onEvent: (event) => {
         if (event.kind === "initialized" && event.agentName !== "qoder-cli") {
           throw fail(
@@ -297,7 +297,7 @@ Candidate pending PageRoot review; it must not replace or adopt the Working Copy
 
     assert(result.stopReason === "end_turn", "QODER_TURN_NOT_COMPLETE", "Qoder did not end the ACP turn cleanly.");
     const status = await repository.requestStatus({ target, requestId, attemptId });
-    assert(status.status === "candidate-ready", "CANDIDATE_NOT_READY", "PageRoot did not seal a reviewable Candidate.");
+    assert(status.status === "candidate-ready", "CANDIDATE_NOT_READY", "Stemmio did not seal a reviewable Candidate.");
     assert(
       status.candidate?.status === "pending-review",
       "CANDIDATE_NOT_PENDING_REVIEW",
@@ -313,7 +313,7 @@ Candidate pending PageRoot review; it must not replace or adopt the Working Copy
     assert(
       bodies.length === 1
       && bodies[0].attrs?.some((attribute) => (
-        attribute.name === "data-pageroot-qoder-acp"
+        attribute.name === "data-stemmio-qoder-acp"
         && attribute.value === "verified"
       )),
       "CANDIDATE_MARKER_MISSING",

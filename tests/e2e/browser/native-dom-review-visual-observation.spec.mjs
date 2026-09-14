@@ -4,13 +4,13 @@ import { createServer } from "node:http";
 
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
 
-const HOST_ID = "pr1_11111111111141118111111111111111";
-const DETAILS_ID = "pr1_22222222222242229222222222222222";
+const HOST_ID = "sm1_11111111111141118111111111111111";
+const DETAILS_ID = "sm1_22222222222242229222222222222222";
 const PROJECTION_LAYER_TEST_STYLE = `<style>
-  [data-pageroot-review-projection-layer],
-  [data-pageroot-review-mask-layer],
-  [data-pageroot-review-text-marks],
-  [data-pageroot-review-overlay-box] {
+  [data-stemmio-review-projection-layer],
+  [data-stemmio-review-mask-layer],
+  [data-stemmio-review-text-marks],
+  [data-stemmio-review-overlay-box] {
     position: absolute !important;
     top: 0 !important;
     left: 0 !important;
@@ -19,7 +19,7 @@ const PROJECTION_LAYER_TEST_STYLE = `<style>
 </style>`;
 
 async function observe(page, {
-  body = `<main data-pageroot-id="${HOST_ID}">same</main>`,
+  body = `<main data-stemmio-id="${HOST_ID}">same</main>`,
   authoredScript = "",
   readySelector = "",
   present = true,
@@ -38,7 +38,7 @@ async function observe(page, {
     addEventListener("message", receive);
     try {
       postMessage({
-        source: "pageroot-ai-review-parent",
+        source: "stemmio-ai-review-parent",
         sessionId: "review-session",
         type: "request-review-visual-channel",
         challenge: "c".repeat(32),
@@ -71,14 +71,14 @@ test("structured Review presentation reveals a panel and details before focus", 
   const bootstrap = generatedReviewBootstrap([], "after", []);
   await page.setContent(`<!doctype html><html><head><script>${bootstrap}</script></head><body>
     <button aria-controls="hidden-panel" aria-selected="false"
-      data-pageroot-review-panel-control="true"
-      data-pageroot-review-panel-group="panel-group-1"
-      data-pageroot-review-panel-key="panel-1">隐藏面板</button>
+      data-stemmio-review-panel-control="true"
+      data-stemmio-review-panel-group="panel-group-1"
+      data-stemmio-review-panel-key="panel-1">隐藏面板</button>
     <section id="hidden-panel" hidden aria-hidden="true"
-      data-pageroot-review-panel-container="true"
-      data-pageroot-review-panel-group="panel-group-1"
-      data-pageroot-review-panel-key="panel-1">
-      <details data-pageroot-id="${DETAILS_ID}"><summary>说明</summary><p>目标内容</p></details>
+      data-stemmio-review-panel-container="true"
+      data-stemmio-review-panel-group="panel-group-1"
+      data-stemmio-review-panel-key="panel-1">
+      <details data-stemmio-id="${DETAILS_ID}"><summary>说明</summary><p>目标内容</p></details>
     </section>
   </body></html>`);
 
@@ -86,7 +86,7 @@ test("structured Review presentation reveals a panel and details before focus", 
     const epoch = 7;
     const ready = new Promise((resolve) => {
       const receive = (event) => {
-        if (event.data?.source !== "pageroot-ai-review"
+        if (event.data?.source !== "stemmio-ai-review"
           || event.data?.type !== "presentation-ready"
           || event.data?.presentationEpoch !== epoch) return;
         removeEventListener("message", receive);
@@ -95,13 +95,13 @@ test("structured Review presentation reveals a panel and details before focus", 
       addEventListener("message", receive);
     });
     postMessage({
-      source: "pageroot-ai-review-parent",
+      source: "stemmio-ai-review-parent",
       sessionId: "review-session",
       type: "begin-presentation",
       presentationEpoch: epoch,
     }, "*");
     postMessage({
-      source: "pageroot-ai-review-parent",
+      source: "stemmio-ai-review-parent",
       sessionId: "review-session",
       type: "activate-presentation",
       presentationEpoch: epoch,
@@ -112,7 +112,7 @@ test("structured Review presentation reveals a panel and details before focus", 
     }, "*");
     await ready;
     const panel = document.querySelector("#hidden-panel");
-    const details = document.querySelector(`details[data-pageroot-id="${stableId}"]`);
+    const details = document.querySelector(`details[data-stemmio-id="${stableId}"]`);
     return {
       panelHidden: panel.hidden,
       panelAriaHidden: panel.getAttribute("aria-hidden"),
@@ -131,38 +131,38 @@ test("visual summaries ignore page position and class source noise but detect pr
   tag: ["@gate-smoke", "@smoke-review"],
 }, async ({ page }) => {
   const baseline = await observe(page, {
-    body: `<main style="margin-left:0"><p data-pageroot-id="${HOST_ID}" class="old">same</p></main>`,
+    body: `<main style="margin-left:0"><p data-stemmio-id="${HOST_ID}" class="old">same</p></main>`,
   });
   const shifted = await observe(page, {
-    body: `<main style="transform:translate(.5px,120px)"><p data-pageroot-id="${HOST_ID}" class="new">same</p></main>`,
+    body: `<main style="transform:translate(.5px,120px)"><p data-stemmio-id="${HOST_ID}" class="new">same</p></main>`,
   });
   expect(baseline.unverified).not.toBe(true);
   expect(shifted.unverified).not.toBe(true);
   expect(shifted.fingerprint).toBe(baseline.fingerprint);
 
   const recolored = await observe(page, {
-    body: `<p data-pageroot-id="${HOST_ID}" style="color:rgb(200,0,0)">same</p>`,
+    body: `<p data-stemmio-id="${HOST_ID}" style="color:rgb(200,0,0)">same</p>`,
   });
   expect(recolored.fingerprint).not.toBe(baseline.fingerprint);
 });
 
 test("visual summaries cover text, runtime DOM, SVG and Canvas drawing surfaces", async ({ page }) => {
-  const text = await observe(page, { body: `<p data-pageroot-id="${HOST_ID}">changed</p>` });
+  const text = await observe(page, { body: `<p data-stemmio-id="${HOST_ID}">changed</p>` });
   const contentsBefore = await observe(page, {
-    body: `<p data-pageroot-id="${HOST_ID}">stable <span style="display:contents">old</span></p>`,
+    body: `<p data-stemmio-id="${HOST_ID}">stable <span style="display:contents">old</span></p>`,
   });
   const contentsAfter = await observe(page, {
-    body: `<p data-pageroot-id="${HOST_ID}">stable <span style="display:contents">new</span></p>`,
+    body: `<p data-stemmio-id="${HOST_ID}">stable <span style="display:contents">new</span></p>`,
   });
   const runtime = await observe(page, {
-    body: `<main data-pageroot-id="${HOST_ID}"></main>`,
+    body: `<main data-stemmio-id="${HOST_ID}"></main>`,
     authoredScript: "document.querySelector('main').append(Object.assign(document.createElement('strong'), { textContent: 'runtime' }))",
   });
   const svg = await observe(page, {
-    body: `<svg data-pageroot-id="${HOST_ID}" width="80" height="40"><path d="M0 0 L70 30" stroke="red"/></svg>`,
+    body: `<svg data-stemmio-id="${HOST_ID}" width="80" height="40"><path d="M0 0 L70 30" stroke="red"/></svg>`,
   });
   const canvas = await observe(page, {
-    body: `<canvas data-pageroot-id="${HOST_ID}" width="80" height="40"></canvas>`,
+    body: `<canvas data-stemmio-id="${HOST_ID}" width="80" height="40"></canvas>`,
     authoredScript: "const c=document.querySelector('canvas').getContext('2d');c.fillStyle='blue';c.fillRect(4,4,30,20);c.fillText('42',40,20)",
   });
   for (const result of [text, runtime, svg, canvas]) {
@@ -177,13 +177,13 @@ test("visual summaries cover text, runtime DOM, SVG and Canvas drawing surfaces"
 
 test("a forged replacement carrying the same Stable ID fails closed", async ({ page }) => {
   const replaced = await observe(page, {
-    body: `<main data-pageroot-id="${HOST_ID}">source host</main>`,
+    body: `<main data-stemmio-id="${HOST_ID}">source host</main>`,
     authoredScript: `
-      const sourceHost = document.querySelector('[data-pageroot-id="${HOST_ID}"]');
+      const sourceHost = document.querySelector('[data-stemmio-id="${HOST_ID}"]');
       const replacement = document.createElement('main');
-      replacement.setAttribute('data-pageroot-id', '${HOST_ID}');
+      replacement.setAttribute('data-stemmio-id', '${HOST_ID}');
       replacement.textContent = 'forged host';
-      sourceHost.removeAttribute('data-pageroot-id');
+      sourceHost.removeAttribute('data-stemmio-id');
       sourceHost.replaceWith(replacement);
     `,
   });
@@ -196,16 +196,16 @@ test("a forged replacement carrying the same Stable ID fails closed", async ({ p
 test("image content and visibility use rendered evidence rather than source URL alone", async ({ page }) => {
   const svgImage = (color, padding = "") => `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">${padding}<rect width="8" height="8" fill="${color}"/></svg>`)}`;
   const red = await observe(page, {
-    body: `<img data-pageroot-id="${HOST_ID}" src="${svgImage("red")}">`,
+    body: `<img data-stemmio-id="${HOST_ID}" src="${svgImage("red")}">`,
   });
   const sameRedDifferentBytes = await observe(page, {
-    body: `<img data-pageroot-id="${HOST_ID}" src="${svgImage("red", " ")}">`,
+    body: `<img data-stemmio-id="${HOST_ID}" src="${svgImage("red", " ")}">`,
   });
   const blue = await observe(page, {
-    body: `<img data-pageroot-id="${HOST_ID}" src="${svgImage("blue")}">`,
+    body: `<img data-stemmio-id="${HOST_ID}" src="${svgImage("blue")}">`,
   });
   const hidden = await observe(page, {
-    body: `<p data-pageroot-id="${HOST_ID}" style="display:none">hidden</p>`,
+    body: `<p data-stemmio-id="${HOST_ID}" style="display:none">hidden</p>`,
   });
   expect(red.fingerprint).toBe(sameRedDifferentBytes.fingerprint);
   expect(blue.fingerprint).not.toBe(red.fingerprint);
@@ -215,17 +215,17 @@ test("image content and visibility use rendered evidence rather than source URL 
 
 test("unsupported animated, media, WebGL and over-budget surfaces fail closed", async ({ page }) => {
   const animated = await observe(page, {
-    body: `<style>@keyframes pulse{to{opacity:.4}}</style><main data-pageroot-id="${HOST_ID}" style="animation:pulse 1s infinite">moving</main>`,
+    body: `<style>@keyframes pulse{to{opacity:.4}}</style><main data-stemmio-id="${HOST_ID}" style="animation:pulse 1s infinite">moving</main>`,
   });
   const media = await observe(page, {
-    body: `<main data-pageroot-id="${HOST_ID}"><video></video></main>`,
+    body: `<main data-stemmio-id="${HOST_ID}"><video></video></main>`,
   });
   const webgl = await observe(page, {
-    body: `<canvas data-pageroot-id="${HOST_ID}" width="20" height="20"></canvas>`,
+    body: `<canvas data-stemmio-id="${HOST_ID}" width="20" height="20"></canvas>`,
     authoredScript: "document.querySelector('canvas').getContext('webgl')",
   });
   const overBudget = await observe(page, {
-    body: `<canvas data-pageroot-id="${HOST_ID}" width="2100" height="2100"></canvas>`,
+    body: `<canvas data-stemmio-id="${HOST_ID}" width="2100" height="2100"></canvas>`,
   });
   expect(animated).toMatchObject({ unverified: true, failureReason: "animation" });
   expect(media).toMatchObject({ unverified: true, failureReason: "live-media" });
@@ -235,7 +235,7 @@ test("unsupported animated, media, WebGL and over-budget surfaces fail closed", 
 
 test("a delayed runtime mutation is never frozen into an unchanged verdict", async ({ page }) => {
   const delayed = await observe(page, {
-    body: `<main data-pageroot-id="${HOST_ID}">initial</main>`,
+    body: `<main data-stemmio-id="${HOST_ID}">initial</main>`,
     authoredScript: `setTimeout(() => {
       document.querySelector('main').textContent = 'final content';
     }, 500)`,
@@ -245,11 +245,11 @@ test("a delayed runtime mutation is never frozen into an unchanged verdict", asy
 
 test("the observation plan reports every candidate beyond 1000 without silent truncation", async ({ page }) => {
   test.setTimeout(30_000);
-  const stableId = (index) => `pr1_${index.toString(16).padStart(12, "0")}40008${"0".repeat(15)}`;
+  const stableId = (index) => `sm1_${index.toString(16).padStart(12, "0")}40008${"0".repeat(15)}`;
   const stableIds = Array.from({ length: 1_001 }, (_, index) => stableId(index + 1));
   const bootstrap = generatedReviewBootstrap([], "after", stableIds);
   await page.setContent(`<!doctype html><script>${bootstrap}</script>${stableIds.map((id, index) => (
-    `<span data-pageroot-id="${id}">${index}</span>`
+    `<span data-stemmio-id="${id}">${index}</span>`
   )).join("")}`);
   const observations = await page.evaluate(async ({ ids }) => {
     let port = null;
@@ -257,7 +257,7 @@ test("the observation plan reports every candidate beyond 1000 without silent tr
       if (event.data?.type === "review-visual-channel") port = event.ports?.[0] || null;
     }, { once: true });
     postMessage({
-      source: "pageroot-ai-review-parent",
+      source: "stemmio-ai-review-parent",
       sessionId: "review-session",
       type: "request-review-visual-channel",
       challenge: "e".repeat(32),
@@ -290,7 +290,7 @@ test("a genuinely tainted Canvas proves the unreadable branch", async ({ page })
   try {
     const address = server.address();
     const result = await observe(page, {
-      body: `<canvas data-pageroot-id="${HOST_ID}" width="64" height="64"></canvas>`,
+      body: `<canvas data-stemmio-id="${HOST_ID}" width="64" height="64"></canvas>`,
       authoredScript: `
         const image = new Image();
         image.src = 'http://127.0.0.1:${address.port}/favicon.png';
@@ -369,16 +369,16 @@ test("source projection activates existing text UI without creating replacement 
     [{ atomKey, count: 1 }],
   );
   const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
-  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-id="${HOST_ID}" data-pageroot-review-geometry-owner="geometry-owner-1" data-pageroot-review-display-owner="display-owner-1"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-marker-types="text" data-pageroot-review-summary="新增内容" data-pageroot-review-projection-facts="${fact}">new</span></p>`);
-  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(0);
-  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-stemmio-id="${HOST_ID}" data-stemmio-review-geometry-owner="geometry-owner-1" data-stemmio-review-display-owner="display-owner-1"><span data-stemmio-review-text="added" data-stemmio-review-marker="change-1" data-stemmio-review-marker-types="text" data-stemmio-review-summary="新增内容" data-stemmio-review-projection-facts="${fact}">new</span></p>`);
+  await expect(page.locator('[data-stemmio-review-overlay-box="change-1"]')).toHaveCount(0);
+  await expect(page.locator('[data-stemmio-review-text-mark="added"]')).not.toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
   const activated = await page.evaluate(async ({ stableId }) => {
     let port = null;
     addEventListener("message", (event) => {
       if (event.data?.type === "review-visual-channel") port = event.ports?.[0] || null;
     }, { once: true });
-    postMessage({ source: "pageroot-ai-review-parent", sessionId: "review-session", type: "request-review-visual-channel", challenge: "d".repeat(32) }, "*");
+    postMessage({ source: "stemmio-ai-review-parent", sessionId: "review-session", type: "request-review-visual-channel", challenge: "d".repeat(32) }, "*");
     const deadline = Date.now() + 3_000;
     while (!port && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
     port.postMessage({
@@ -398,11 +398,11 @@ test("source projection activates existing text UI without creating replacement 
     return Boolean(port);
   }, { stableId: HOST_ID });
   expect(activated).toBe(true);
-  const focusGroupId = await page.locator("[data-pageroot-review-region-bar]")
-    .first().getAttribute("data-pageroot-review-focus-group");
+  const focusGroupId = await page.locator("[data-stemmio-review-region-bar]")
+    .first().getAttribute("data-stemmio-review-focus-group");
   expect(focusGroupId).toBeTruthy();
   await page.evaluate((activeFocusGroupId) => postMessage({
-    source: "pageroot-ai-review-parent",
+    source: "stemmio-ai-review-parent",
     sessionId: "review-session",
     type: "state",
     state: {
@@ -414,13 +414,13 @@ test("source projection activates existing text UI without creating replacement 
     },
   }, "*"), focusGroupId);
   await expect(page.locator("html"))
-    .toHaveAttribute("data-pageroot-review-focus-group", "");
-  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(0);
-  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-comment-mask-dim]"))
+    .toHaveAttribute("data-stemmio-review-focus-group", "");
+  await expect(page.locator('[data-stemmio-review-overlay-box="change-1"]')).toHaveCount(0);
+  await expect(page.locator('[data-stemmio-review-text-mark="added"]')).not.toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-comment-mask-dim]"))
     .toHaveAttribute("fill-opacity", "0.85");
-  await expect(page.locator("[data-pageroot-review-comment-highlight]")).toHaveCount(1);
+  await expect(page.locator("[data-stemmio-review-comment-highlight]")).toHaveCount(1);
   await page.evaluate(() => window.__reviewTestVisualPort.postMessage({
     type: "comment-highlight",
     sessionId: "review-session",
@@ -428,12 +428,12 @@ test("source projection activates existing text UI without creating replacement 
     active: false,
     stableIds: [],
   }));
-  await expect(page.locator("[data-pageroot-review-comment-highlight]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-comment-highlight]")).toHaveCount(0);
   await expect(page.locator("html"))
-    .toHaveAttribute("data-pageroot-review-focus-group", focusGroupId);
-  await expect(page.locator("[data-pageroot-review-mask-dim]"))
+    .toHaveAttribute("data-stemmio-review-focus-group", focusGroupId);
+  await expect(page.locator("[data-stemmio-review-mask-dim]"))
     .toHaveAttribute("fill-opacity", "0.75");
-  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(0);
+  await expect(page.locator('[data-stemmio-review-overlay-box="change-1"]')).toHaveCount(0);
 });
 
 function exactTextFocusFixture() {
@@ -509,11 +509,11 @@ test("an invalid semantic plan preserves exact source evidence without a box or 
     [{ atomKey, count: 1 }],
   );
   const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
-  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-review-display-owner="display-owner-1"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts="${fact}">new</span></p>`);
-  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-region-bar]")).toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-stemmio-review-display-owner="display-owner-1"><span data-stemmio-review-text="added" data-stemmio-review-marker="change-1" data-stemmio-review-projection-facts="${fact}">new</span></p>`);
+  await expect(page.locator('[data-stemmio-review-text-mark="added"]')).not.toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-region-bar]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
 });
 
 test("one exact text atom may span several markers but remains one borderless focus mask", async ({ page }) => {
@@ -527,8 +527,8 @@ test("one exact text atom may span several markers but remains one borderless fo
     [{ atomKey, count: 2 }],
   );
   const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
-  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-review-display-owner="display-owner-1"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts="${fact}">new</span> context <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts="${fact}">words</span></p>`);
-  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).toHaveCount(8);
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-stemmio-review-display-owner="display-owner-1"><span data-stemmio-review-text="added" data-stemmio-review-marker="change-1" data-stemmio-review-projection-facts="${fact}">new</span> context <span data-stemmio-review-text="added" data-stemmio-review-marker="change-1" data-stemmio-review-projection-facts="${fact}">words</span></p>`);
+  await expect(page.locator('[data-stemmio-review-text-mark="added"]')).toHaveCount(8);
   await page.evaluate(() => {
     Array.prototype.flatMap = () => [];
     Array.prototype.find = () => undefined;
@@ -539,13 +539,13 @@ test("one exact text atom may span several markers but remains one borderless fo
     Element.prototype.contains = () => false;
   });
   await page.evaluate((activeFocusGroupId) => postMessage({
-    source: "pageroot-ai-review-parent",
+    source: "stemmio-ai-review-parent",
     sessionId: "review-session",
     type: "state",
     state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 25, scale: 1 },
   }, "*"), plan.id);
-  const box = page.locator('[data-pageroot-review-overlay-box="change-1"]');
-  const hole = page.locator("[data-pageroot-review-mask-hole]");
+  const box = page.locator('[data-stemmio-review-overlay-box="change-1"]');
+  const hole = page.locator("[data-stemmio-review-mask-hole]");
   await expect(box).toHaveCount(0);
   await expect(hole).toHaveCount(1);
   expect(await hole.getAttribute("d")).toBeTruthy();
@@ -559,21 +559,21 @@ test("review navigation acknowledges only locatable geometry and honors cancella
   );
   const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
   await page.setContent(`<!doctype html><script>${bootstrap}</script>
-    <p id="owner" style="display:none" data-pageroot-review-display-owner="display-owner-1">
-      <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1"
-        data-pageroot-review-projection-facts="${fact}">new</span>
+    <p id="owner" style="display:none" data-stemmio-review-display-owner="display-owner-1">
+      <span data-stemmio-review-text="added" data-stemmio-review-marker="change-1"
+        data-stemmio-review-projection-facts="${fact}">new</span>
     </p>`);
   await page.evaluate(() => {
     window.__reviewNavigationResults = [];
     addEventListener("message", (event) => {
-      if (event.data?.source === "pageroot-ai-review"
+      if (event.data?.source === "stemmio-ai-review"
         && event.data?.type === "navigation-result") {
         window.__reviewNavigationResults.push(event.data);
       }
     });
   });
   const navigate = (commandId) => page.evaluate(({ commandId, plan }) => postMessage({
-    source: "pageroot-ai-review-parent",
+    source: "stemmio-ai-review-parent",
     sessionId: "review-session",
     type: "navigate-change",
     commandId,
@@ -595,7 +595,7 @@ test("review navigation acknowledges only locatable geometry and honors cancella
 
   await page.evaluate((planValue) => {
     postMessage({
-      source: "pageroot-ai-review-parent",
+      source: "stemmio-ai-review-parent",
       sessionId: "review-session",
       type: "navigate-change",
       commandId: "initial-nav-cancelled",
@@ -606,7 +606,7 @@ test("review navigation acknowledges only locatable geometry and honors cancella
       behavior: "auto",
     }, "*");
     postMessage({
-      source: "pageroot-ai-review-parent",
+      source: "stemmio-ai-review-parent",
       sessionId: "review-session",
       type: "cancel-navigation",
       commandId: "initial-nav-cancelled",
@@ -632,21 +632,21 @@ test("Escape inside every valid contenteditable form stays with the editor", asy
   );
   const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
   await page.setContent(`<!doctype html><script>${bootstrap}</script>
-    <p data-pageroot-review-display-owner="display-owner-1">
-      <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1"
-        data-pageroot-review-projection-facts="${fact}">new</span>
+    <p data-stemmio-review-display-owner="display-owner-1">
+      <span data-stemmio-review-text="added" data-stemmio-review-marker="change-1"
+        data-stemmio-review-projection-facts="${fact}">new</span>
     </p>
     <p id="bare-editable" contenteditable>bare editable</p>
     <p id="plaintext-editable" contenteditable="plaintext-only">plaintext editable</p>`);
   await page.evaluate((activeFocusGroupId) => {
     window.__reviewLeaveFocusMessages = 0;
     addEventListener("message", (event) => {
-      if (event.data?.source === "pageroot-ai-review" && event.data?.type === "leave-focus") {
+      if (event.data?.source === "stemmio-ai-review" && event.data?.type === "leave-focus") {
         window.__reviewLeaveFocusMessages += 1;
       }
     });
     postMessage({
-      source: "pageroot-ai-review-parent",
+      source: "stemmio-ai-review-parent",
       sessionId: "review-session",
       type: "state",
       state: {
@@ -658,11 +658,11 @@ test("Escape inside every valid contenteditable form stays with the editor", asy
       },
     }, "*");
   }, plan.id);
-  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(1);
+  await expect(page.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-mask-dim]")).toHaveCount(1);
   for (const selector of ["#bare-editable", "#plaintext-editable"]) {
     await page.locator(selector).press("Escape");
-    await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(1);
+    await expect(page.locator("[data-stemmio-review-mask-dim]")).toHaveCount(1);
   }
   await expect.poll(() => page.evaluate(() => window.__reviewLeaveFocusMessages)).toBe(0);
 });
@@ -675,25 +675,25 @@ test("text-content geometry stays inside one loose reading flow of a complex ite
   );
   const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
   await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<style>li{width:320px}#nested-block{margin:90px 0}</style>
-    <script>${bootstrap}</script><ul><li data-pageroot-review-geometry-owner="geometry-owner-1"
-      data-pageroot-review-display-owner="display-owner-1">
-      prefix <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1"
-        data-pageroot-review-projection-facts="${fact}">new</span> context
+    <script>${bootstrap}</script><ul><li data-stemmio-review-geometry-owner="geometry-owner-1"
+      data-stemmio-review-display-owner="display-owner-1">
+      prefix <span data-stemmio-review-text="added" data-stemmio-review-marker="change-1"
+        data-stemmio-review-projection-facts="${fact}">new</span> context
       <p id="nested-block">unchanged nested paragraph</p>
       unchanged suffix
     </li></ul>`);
   await page.evaluate((activeFocusGroupId) => postMessage({
-    source: "pageroot-ai-review-parent",
+    source: "stemmio-ai-review-parent",
     sessionId: "review-session",
     type: "state",
     state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 25, scale: 1 },
   }, "*"), plan.id);
-  const hole = page.locator("[data-pageroot-review-mask-hole]");
-  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  const hole = page.locator("[data-stemmio-review-mask-hole]");
+  await expect(page.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
   await expect(hole).toHaveCount(1);
   const geometry = await page.evaluate(() => ({
-    holeBottom: Number(document.querySelector("[data-pageroot-review-mask-hole]").dataset.top)
-      + Number(document.querySelector("[data-pageroot-review-mask-hole]").dataset.height),
+    holeBottom: Number(document.querySelector("[data-stemmio-review-mask-hole]").dataset.top)
+      + Number(document.querySelector("[data-stemmio-review-mask-hole]").dataset.height),
     nested: document.querySelector("#nested-block").getBoundingClientRect().toJSON(),
   }));
   expect(geometry.holeBottom).toBeLessThan(geometry.nested.top);
@@ -712,25 +712,25 @@ test("numbered-line geometry ignores br elements inside nested blocks", async ({
   );
   const fact = JSON.stringify([fixture.factValue]).replaceAll('"', "&quot;");
   await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<script>${bootstrap}</script><ul><li
-    data-pageroot-review-geometry-owner="geometry-owner-1"
-    data-pageroot-review-display-owner="display-owner-1">
+    data-stemmio-review-geometry-owner="geometry-owner-1"
+    data-stemmio-review-display-owner="display-owner-1">
     <p id="nested-lines">nested one<br>nested two</p>
     <span id="numbered-first">1. first line</span><br>
-    <span>2. </span><span data-pageroot-review-text="added"
-      data-pageroot-review-marker="change-1"
-      data-pageroot-review-projection-facts="${fact}">new line</span>
+    <span>2. </span><span data-stemmio-review-text="added"
+      data-stemmio-review-marker="change-1"
+      data-stemmio-review-projection-facts="${fact}">new line</span>
   </li></ul>`);
   await page.evaluate((activeFocusGroupId) => postMessage({
-    source: "pageroot-ai-review-parent",
+    source: "stemmio-ai-review-parent",
     sessionId: "review-session",
     type: "state",
     state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 25, scale: 1 },
   }, "*"), fixture.plan.id);
-  const hole = page.locator("[data-pageroot-review-mask-hole]");
-  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  const hole = page.locator("[data-stemmio-review-mask-hole]");
+  await expect(page.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
   await expect(hole).toHaveCount(1);
   const geometry = await page.evaluate(() => ({
-    holeTop: Number(document.querySelector("[data-pageroot-review-mask-hole]").dataset.top),
+    holeTop: Number(document.querySelector("[data-stemmio-review-mask-hole]").dataset.top),
     nested: document.querySelector("#nested-lines").getBoundingClientRect().toJSON(),
     first: document.querySelector("#numbered-first").getBoundingClientRect().toJSON(),
   }));
@@ -792,9 +792,9 @@ test("a style locality stays on one visible owner and never promotes to its pare
   const targets = facts.map((fact, index) => {
     const serialized = JSON.stringify([fact]).replaceAll('"', "&quot;");
     const hidden = index < 3 ? ' style="display:none"' : "";
-    return `<div data-pageroot-review-display-owner="${fact.displayOwnerId}"${hidden}
-      data-pageroot-review-marker="${changeId}"
-      data-pageroot-review-projection-facts="${serialized}">changed ${index + 1}</div>`;
+    return `<div data-stemmio-review-display-owner="${fact.displayOwnerId}"${hidden}
+      data-stemmio-review-marker="${changeId}"
+      data-stemmio-review-projection-facts="${serialized}">changed ${index + 1}</div>`;
   }).join("");
   await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<style>
     #grid{display:grid;grid-template-columns:repeat(5,120px);gap:8px}
@@ -802,16 +802,16 @@ test("a style locality stays on one visible owner and never promotes to its pare
     <div>unchanged 1</div><div>unchanged 2</div><div>unchanged 3</div><div>unchanged 4</div>
   </div>`);
   await page.evaluate((activeFocusGroupId) => postMessage({
-    source: "pageroot-ai-review-parent",
+    source: "stemmio-ai-review-parent",
     sessionId: "review-session",
     type: "state",
     state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 25, scale: 1 },
   }, "*"), plan.id);
-  const hole = page.locator("[data-pageroot-review-mask-hole]");
-  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  const hole = page.locator("[data-stemmio-review-mask-hole]");
+  await expect(page.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
   await expect(hole).toHaveCount(1);
   const geometry = await page.evaluate(() => ({
-    holeWidth: Number(document.querySelector("[data-pageroot-review-mask-hole]").dataset.width),
+    holeWidth: Number(document.querySelector("[data-stemmio-review-mask-hole]").dataset.width),
     gridWidth: document.querySelector("#grid").getBoundingClientRect().width,
   }));
   expect(geometry.holeWidth).toBeLessThan(geometry.gridWidth / 2);
@@ -883,10 +883,10 @@ test("multi-screen table, list, and section owners keep navigation masks without
     cases.map((entry) => entry.plan),
     cases.map((entry) => ({ atomKey: entry.atomKey, count: 1 })),
   );
-  const attributes = (entry) => `data-pageroot-review-display-owner="${entry.ownerId}"
-    data-pageroot-review-geometry-owner="geometry-${entry.name}"
-    data-pageroot-review-marker="${entry.changeId}"
-    data-pageroot-review-projection-facts="${JSON.stringify([entry.fact]).replaceAll('"', "&quot;")}"`;
+  const attributes = (entry) => `data-stemmio-review-display-owner="${entry.ownerId}"
+    data-stemmio-review-geometry-owner="geometry-${entry.name}"
+    data-stemmio-review-marker="${entry.changeId}"
+    data-stemmio-review-projection-facts="${JSON.stringify([entry.fact]).replaceAll('"', "&quot;")}"`;
   await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<style>
     .multi-screen-owner { box-sizing:border-box; min-height:1300px; width:760px; }
   </style><script>${bootstrap}</script>
@@ -897,7 +897,7 @@ test("multi-screen table, list, and section owners keep navigation masks without
   <section class="multi-screen-owner" ${attributes(cases[2])}>long section</section>`);
   for (const entry of cases) {
     await page.evaluate(({ changeId, focusGroupId, regionId }) => postMessage({
-      source: "pageroot-ai-review-parent",
+      source: "stemmio-ai-review-parent",
       sessionId: "review-session",
       type: "state",
       state: {
@@ -918,10 +918,10 @@ test("multi-screen table, list, and section owners keep navigation masks without
       regionId: entry.regionId,
     });
     const hole = page.locator(
-      `[data-pageroot-review-mask-hole][data-pageroot-review-focus-group="${entry.plan.id}"]`,
+      `[data-stemmio-review-mask-hole][data-stemmio-review-focus-group="${entry.plan.id}"]`,
     );
     await expect(hole).toHaveCount(1);
-    await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+    await expect(page.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
     expect(Number(await hole.getAttribute("data-height"))).toBeGreaterThan(
       await page.evaluate(() => innerHeight),
     );
@@ -939,10 +939,10 @@ test("moving exact atom attributes to a parser-time decoy fails closed", async (
     [{ atomKey, count: 1 }],
   );
   const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
-  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-review-display-owner="display-owner-1"><span id="source" data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts="${fact}">new</span><span id="decoy">forged</span><script>for (const name of ["data-pageroot-review-text", "data-pageroot-review-marker", "data-pageroot-review-projection-facts"]) { const value = source.getAttribute(name); source.removeAttribute(name); decoy.setAttribute(name, value); } source.remove();</script></p>`);
-  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-region-bar]")).toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-stemmio-review-display-owner="display-owner-1"><span id="source" data-stemmio-review-text="added" data-stemmio-review-marker="change-1" data-stemmio-review-projection-facts="${fact}">new</span><span id="decoy">forged</span><script>for (const name of ["data-stemmio-review-text", "data-stemmio-review-marker", "data-stemmio-review-projection-facts"]) { const value = source.getAttribute(name); source.removeAttribute(name); decoy.setAttribute(name, value); } source.remove();</script></p>`);
+  await expect(page.locator('[data-stemmio-review-text-mark="added"]')).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-region-bar]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
 });
 
 test("reparenting an exact atom outside its captured display owner fails closed", async ({ page }) => {
@@ -957,16 +957,16 @@ test("reparenting an exact atom outside its captured display owner fails closed"
   );
   const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
   await page.setContent(`<!doctype html><script>${bootstrap}</script>
-    <p data-pageroot-review-display-owner="display-owner-1">
-      <span id="exact-marker" data-pageroot-review-text="added"
-        data-pageroot-review-marker="change-1"
-        data-pageroot-review-projection-facts="${fact}">new</span>
+    <p data-stemmio-review-display-owner="display-owner-1">
+      <span id="exact-marker" data-stemmio-review-text="added"
+        data-stemmio-review-marker="change-1"
+        data-stemmio-review-projection-facts="${fact}">new</span>
     </p>
     <div id="authored-destination" style="margin-top:200px"></div>
     <script>document.querySelector("#authored-destination").append(document.querySelector("#exact-marker"));</script>`);
-  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).toHaveCount(0);
+  await expect(page.locator('[data-stemmio-review-text-mark="added"]')).toHaveCount(0);
   await page.evaluate((activeFocusGroupId) => postMessage({
-    source: "pageroot-ai-review-parent",
+    source: "stemmio-ai-review-parent",
     sessionId: "review-session",
     type: "state",
     state: {
@@ -977,7 +977,7 @@ test("reparenting an exact atom outside its captured display owner fails closed"
       scale: 1,
     },
   }, "*"), plan.id);
-  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-mask-hole]")).toHaveCount(0);
-  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-mask-hole]")).toHaveCount(0);
+  await expect(page.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
 });

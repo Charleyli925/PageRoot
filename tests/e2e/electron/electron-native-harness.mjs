@@ -37,19 +37,19 @@ import {
   replaceUniqueBytes,
   setTextSelection,
   withBomAndCrLf,
-} from "../browser/pageroot-driver.mjs";
+} from "../browser/stemmio-driver.mjs";
 import {
-  closePageRootGracefully,
+  closeStemmioGracefully,
   createSourceFixture as createSharedSourceFixture,
-  launchPageRoot,
+  launchStemmio,
   loadedDiskFrame as loadDiskFrame,
   openRailGlobalCommentComposer,
   removeValidatedTemporaryDirectory,
   removeSourceFixture as removeSharedSourceFixture,
   sendToMainRenderer,
-  stopPageRoot,
+  stopStemmio,
   waitForProjectReady as waitForSharedProjectReady,
-} from "./helpers/pageroot-app-fixture.mjs";
+} from "./helpers/stemmio-app-fixture.mjs";
 
 export {
   cpSync,
@@ -83,18 +83,18 @@ export {
   withBomAndCrLf,
 };
 export {
-  closePageRootGracefully,
-  launchPageRoot,
+  closeStemmioGracefully,
+  launchStemmio,
   openRailGlobalCommentComposer,
   removeValidatedTemporaryDirectory,
   sendToMainRenderer,
-  stopPageRoot,
+  stopStemmio,
 };
 
 export const ORIGINAL_LIST_TEXT = "列表项中的文字保持项目符号和缩进。";
 
 export function removeIsolatedUserData(isolatedUserData) {
-  removeValidatedTemporaryDirectory(isolatedUserData, "pageroot-native-e2e-");
+  removeValidatedTemporaryDirectory(isolatedUserData, "stemmio-native-e2e-");
 }
 
 export function createSourceFixture(
@@ -161,7 +161,7 @@ export async function loadedDiskFrame(page, sourcePath, caseId, {
       ).elementHandle();
       const activeFrame = await activeHandle?.contentFrame();
       activeBootstrapCount = await activeFrame?.locator(
-        "[data-pageroot-edit-runtime-bootstrap]",
+        "[data-stemmio-edit-runtime-bootstrap]",
       ).count() || 0;
     } catch {
       activeBootstrapCount = 0;
@@ -224,7 +224,7 @@ export async function openRecentProject(
   let projectRow = sidebar.getByRole("button", { name: projectName, exact: true });
   if (await projectRow.count() === 0) {
     const activeSourcePath = await page.evaluate(
-      async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+      async () => (await window.stemmioProjects?.getActiveProject())?.sourcePath || "",
     );
     const repository = new ProjectFileRepository({
       projectsRoot: path.dirname(path.dirname(activeSourcePath)),
@@ -267,7 +267,7 @@ export async function managedWorkingCopyPath(page, externalSourcePath) {
   const expectedWorkingCopyName = path.basename(externalPath);
   let active = null;
   await expect.poll(async () => {
-    active = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+    active = await page.evaluate(() => window.stemmioProjects?.getActiveProject());
     const sourcePath = active?.sourcePath || "";
     if (!sourcePath) return "";
     try {
@@ -285,15 +285,15 @@ export async function managedWorkingCopyPath(page, externalSourcePath) {
 
 export async function bridgeJson(page, pathname, { method = "GET", body = null } = {}) {
   await page.waitForFunction(
-    () => Boolean(window.htmlAIRuntime?.getBridgeConnection?.()),
+    () => Boolean(window.stemmioRuntime?.getBridgeConnection?.()),
     undefined,
     { timeout: 30_000 },
   );
   const runtime = await page.evaluate(() => ({
-    port: window.htmlAIRuntime?.getBridgeConnection?.()?.bridgePort
-      || window.htmlAIRuntime?.bridgePort || "",
-    token: window.htmlAIRuntime?.getBridgeConnection?.()?.bridgeAuthToken
-      || window.htmlAIRuntime?.bridgeAuthToken || "",
+    port: window.stemmioRuntime?.getBridgeConnection?.()?.bridgePort
+      || window.stemmioRuntime?.bridgePort || "",
+    token: window.stemmioRuntime?.getBridgeConnection?.()?.bridgeAuthToken
+      || window.stemmioRuntime?.bridgeAuthToken || "",
   }));
   if (!runtime.port || !runtime.token) {
     throw new Error("Electron did not expose a usable Bridge connection.");
@@ -301,7 +301,7 @@ export async function bridgeJson(page, pathname, { method = "GET", body = null }
   const response = await fetch(`http://127.0.0.1:${runtime.port}${pathname}`, {
     method,
     headers: {
-      "X-HTML-AI-Bridge-Token": runtime.token,
+      "X-Stemmio-Bridge-Token": runtime.token,
       ...(body ? { "content-type": "application/json" } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -319,14 +319,14 @@ export async function rememberCurrentNativeHost(page, caseId) {
     .first()
     .locator('iframe[title*="HTML"]');
   await iframe.evaluate((frameElement, selector) => {
-    window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__ =
+    window.__STEMMIO_ELECTRON_RETIRED_NATIVE_HOST__ =
       frameElement.contentDocument?.querySelector(selector) || null;
   }, caseSelector(caseId));
 }
 
 export async function retiredNativeHostState(page) {
   return page.evaluate(() => {
-    const host = window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__;
+    const host = window.__STEMMIO_ELECTRON_RETIRED_NATIVE_HOST__;
     if (!host || host.nodeType !== 1) {
       throw new Error("Electron source-authority fence lost the retired native host reference.");
     }
@@ -334,7 +334,7 @@ export async function retiredNativeHostState(page) {
       contenteditable: host.getAttribute("contenteditable"),
       editingMarker: host.getAttribute("data-html-canvas-editing"),
     };
-    delete window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__;
+    delete window.__STEMMIO_ELECTRON_RETIRED_NATIVE_HOST__;
     return state;
   });
 }
@@ -483,7 +483,7 @@ function sanitizedRuntimeHandoffSnapshot(snapshot) {
 export async function readRuntimeHandoffSnapshot(page) {
   try {
     return await page.evaluate(async ({ stabilityFrames }) => {
-      const tokenKey = "__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__";
+      const tokenKey = "__STEMMIO_NATIVE_QA_DOCUMENT_TOKEN__";
       const findVisibleEditor = () => Array.from(
         document.querySelectorAll('[data-testid="html-canvas-editor"]'),
       ).find((candidate) => {
@@ -669,7 +669,7 @@ export async function clickEditHistoryMenu(electronApp, page, direction) {
         candidate.webContents.getURL() === rendererUrl
       ));
       if (!mainWindow) {
-        throw new Error("PageRoot main BrowserWindow is unavailable for Edit history.");
+        throw new Error("Stemmio main BrowserWindow is unavailable for Edit history.");
       }
       item.click(item, mainWindow, {});
     },
@@ -711,7 +711,7 @@ export const ECHARTS_STUB = `window.echarts = {
     context.fillStyle = "rgb(1, 2, 3)";
     context.fillRect(0, 0, 640, 360);
     host.append(canvas);
-    return { setOption() { window.__PAGEROOT_ECHARTS_AUTHOR_SETTLED__ = true; } };
+    return { setOption() { window.__STEMMIO_ECHARTS_AUTHOR_SETTLED__ = true; } };
   }
 };`;
 
@@ -737,7 +737,7 @@ export function requestDirectoryCount(workspace) {
       const requestsRoot = path.join(
         managedProjectsRoot,
         entry.name,
-        ".pageroot",
+        ".stemmio",
         "requests",
       );
       return total + (
@@ -771,7 +771,7 @@ export function workspaceContainsDraftComment(workspace, text) {
       const draftsRoot = path.join(
         managedProjectsRoot,
         entry.name,
-        ".pageroot",
+        ".stemmio",
         "drafts",
       );
       return existsSync(draftsRoot) && readdirSync(draftsRoot)
@@ -858,7 +858,7 @@ export async function waitForActiveSourcePath(page, expectedPath) {
   await expect.poll(async () => {
     try {
       const active = await page.evaluate(() => (
-        window.htmlAIProjects?.getActiveProject()
+        window.stemmioProjects?.getActiveProject()
       ));
       return sameDesktopSourcePath(active?.sourcePath, expectedPath);
     } catch {
@@ -887,7 +887,7 @@ export async function waitForDesktopActivePath(isolatedUserData, expectedPath) {
 
 export async function readManagedManifest(sourcePath) {
   return JSON.parse(readFileSync(
-    path.join(path.dirname(sourcePath), ".pageroot", "manifest.json"),
+    path.join(path.dirname(sourcePath), ".stemmio", "manifest.json"),
     "utf8",
   ));
 }

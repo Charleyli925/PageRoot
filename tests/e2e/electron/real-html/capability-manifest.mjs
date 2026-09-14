@@ -2,7 +2,7 @@
 // Callers must normalize SourceIndex and live DOM evidence before calling.
 
 export const CAPABILITY_COVERAGE_FRACTION = 0.6;
-export const CAPABILITY_STABLE_ID_PATTERN = /^pr1_[0-9a-f]{32}$/u;
+export const CAPABILITY_STABLE_ID_PATTERN = /^sm1_[0-9a-f]{32}$/u;
 
 export const CAPABILITY_MANIFEST_REASONS = Object.freeze({
   SOURCE_ID_MISSING: "SOURCE_ID_MISSING",
@@ -60,8 +60,8 @@ export function createCapabilityManifest({ sourceIndex, liveDom }) {
   const sourceCounts = new Map();
   const liveMap = new Map();
   for (const source of sourceElements) {
-    if (typeof source?.pagerootId === "string") {
-      sourceCounts.set(source.pagerootId, (sourceCounts.get(source.pagerootId) || 0) + 1);
+    if (typeof source?.stemmioId === "string") {
+      sourceCounts.set(source.stemmioId, (sourceCounts.get(source.stemmioId) || 0) + 1);
     }
   }
   for (const live of liveElements) {
@@ -71,12 +71,12 @@ export function createCapabilityManifest({ sourceIndex, liveDom }) {
   const entries = [];
   const rejected = [];
   for (const source of sourceElements) {
-    const id = source?.pagerootId;
+    const id = source?.stemmioId;
     if (!id) {
       rejected.push(excluded(null, CAPABILITY_MANIFEST_REASONS.SOURCE_ID_MISSING));
       continue;
     }
-    if (!CAPABILITY_STABLE_ID_PATTERN.test(id) || source.pagerootIdentityStatus !== "valid") {
+    if (!CAPABILITY_STABLE_ID_PATTERN.test(id) || source.stemmioIdentityStatus !== "valid") {
       rejected.push(excluded(id, CAPABILITY_MANIFEST_REASONS.INVALID_STABLE_ID));
       continue;
     }
@@ -121,7 +121,7 @@ export function createCapabilityManifest({ sourceIndex, liveDom }) {
       behaviorFamilies: unique(live.behaviorFamilies || source.behaviorFamilies || []),
     });
   }
-  const sourceIds = new Set(sourceElements.map((source) => source?.pagerootId).filter(Boolean));
+  const sourceIds = new Set(sourceElements.map((source) => source?.stemmioId).filter(Boolean));
   for (const [id] of liveMap) {
     if (CAPABILITY_STABLE_ID_PATTERN.test(id || "") && !sourceIds.has(id)) {
       rejected.push(excluded(id, CAPABILITY_MANIFEST_REASONS.SOURCE_ID_NOT_FOUND));

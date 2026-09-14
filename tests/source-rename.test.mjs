@@ -59,7 +59,7 @@ function renamePayload(
 }
 
 async function createFixture(t) {
-  const directory = await mkdtemp(path.join(tmpdir(), "pageroot-rename-test-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "stemmio-rename-test-"));
   const sourcePath = path.join(directory, "原文件.html");
   await writeFile(sourcePath, HTML, "utf8");
   t.after(async () => {

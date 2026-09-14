@@ -29,7 +29,7 @@ import type {
 } from "./components/HtmlCanvasEditor";
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
-import AboutPageRootDialog from "./components/AboutPageRootDialog";
+import AboutStemmioDialog from "./components/AboutStemmioDialog";
 import SettingsPage from "./components/SettingsPage";
 import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
 import HistoryCreationDialog from "./components/HistoryCreationDialog";
@@ -442,7 +442,7 @@ const subscribeEmptyShell = () => () => {};
 export default function Workbench() {
   const [globalSidebarOpen, setGlobalSidebarOpen] = useState(false);
   const desktopUiPreferencesApi: DesktopUiPreferencesApi | undefined = (
-    typeof window !== "undefined" ? window.htmlAIUiPreferences : undefined
+    typeof window !== "undefined" ? window.stemmioUiPreferences : undefined
   );
   const editorRef = useRef<HtmlCanvasEditorHandle>(null);
   const interactionPreviewRef = useRef<HtmlInteractionPreviewHandle>(null);
@@ -897,8 +897,8 @@ export default function Workbench() {
     if (!bridgeConnectionReady || !desktopHostReady || desktopHostIssue) {
       return undefined;
     }
-    const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
-    const uiPreferencesApi: DesktopUiPreferencesApi | undefined = window.htmlAIUiPreferences;
+    const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.stemmioEditRuntime;
+    const uiPreferencesApi: DesktopUiPreferencesApi | undefined = window.stemmioUiPreferences;
     const controller = createRuntimeWorkspaceController({
       initial: {
         documentHtml: DEFAULT_PROJECT_HTML,
@@ -922,25 +922,25 @@ export default function Workbench() {
         rebindTargetsPreservingGlobal,
       }),
       ports: {
-        agentCredentialStatus: () => window.htmlAIIntegrations?.sessionCredentialStatus?.() ?? Promise.resolve({}),
+        agentCredentialStatus: () => window.stemmioIntegrations?.sessionCredentialStatus?.() ?? Promise.resolve({}),
         hash: { sha256: browserSha256 },
         canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
-        ...(window.htmlAIWorkbenchTabs ? {
+        ...(window.stemmioWorkbenchTabs ? {
           workbenchTabs: {
-            get: () => window.htmlAIWorkbenchTabs!.get(),
+            get: () => window.stemmioWorkbenchTabs!.get(),
             set: (value: Readonly<Record<string, unknown>>) => (
-              window.htmlAIWorkbenchTabs!.set(value)
+              window.stemmioWorkbenchTabs!.set(value)
             ),
           },
         } : {}),
-        ...(window.htmlAIAppLifecycle?.onExternalOpenRequested ? {
+        ...(window.stemmioAppLifecycle?.onExternalOpenRequested ? {
           navigation: {
             subscribeExternalOpen: (listener: (request: {
               requestId: string;
               sourcePath?: string;
-            }) => void) => window.htmlAIAppLifecycle!.onExternalOpenRequested(listener),
+            }) => void) => window.stemmioAppLifecycle!.onExternalOpenRequested(listener),
             readInitialExternalOpen: () => (
-              window.htmlAIAppLifecycle!.getInitialExternalOpen?.()
+              window.stemmioAppLifecycle!.getInitialExternalOpen?.()
               ?? Promise.resolve(null)
             ),
           },
@@ -957,7 +957,7 @@ export default function Workbench() {
             projectRootPath: string;
             operationId?: string;
           }) => {
-            const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
+            const activate = window.stemmioProjects?.activateManagedWorkingCopy;
             if (!activate) {
               throw new Error("当前运行环境不能安全切换到托管工作文件。");
             }
@@ -978,7 +978,7 @@ export default function Workbench() {
         } : {}),
       },
       documentWorkflow: {
-        recoveryJournal: createDesktopRecoveryJournalPort(window.htmlAIProjects),
+        recoveryJournal: createDesktopRecoveryJournalPort(window.stemmioProjects),
         codecs: createDocumentWorkflowCodecs({
           isRecord,
           sameSourcePath: sameLocalSourcePath,
@@ -1123,42 +1123,42 @@ export default function Workbench() {
             ),
           },
           projectOpen: {
-            openLocal: async () => window.htmlAIProjects?.openHtml() ?? null,
+            openLocal: async () => window.stemmioProjects?.openHtml() ?? null,
             openRecent: async (sourcePath: string) => {
-              const api = window.htmlAIProjects;
+              const api = window.stemmioProjects;
               if (!api) throw new Error("当前运行环境不能打开本地 HTML。");
               return api.openRecent(sourcePath);
             },
-            getActive: async () => window.htmlAIProjects?.getActiveProject() ?? null,
-            listRecent: async () => window.htmlAIProjects?.listRecentProjects() ?? [],
-            listRegistered: async () => window.htmlAIProjects?.listRegisteredProjects?.() ?? [],
+            getActive: async () => window.stemmioProjects?.getActiveProject() ?? null,
+            listRecent: async () => window.stemmioProjects?.listRecentProjects() ?? [],
+            listRegistered: async () => window.stemmioProjects?.listRegisteredProjects?.() ?? [],
             restoreRegisteredWorkingCopy: async (projectId: string) => {
-              const restore = window.htmlAIProjects?.restoreRegisteredWorkingCopy;
+              const restore = window.stemmioProjects?.restoreRegisteredWorkingCopy;
               if (!restore) throw new Error("当前应用缺少工作文件恢复通道。");
               return restore(projectId);
             },
             listRegisteredVersionSummaries: async (registeredProjectId: string) => {
-              const list = window.htmlAIProjects?.listRegisteredProjectVersionSummaries;
-              if (!list) throw new Error("当前 PageRoot 版本缺少项目版本摘要通道。");
+              const list = window.stemmioProjects?.listRegisteredProjectVersionSummaries;
+              if (!list) throw new Error("当前 Stemmio 版本缺少项目版本摘要通道。");
               return list(registeredProjectId);
             },
             readRegisteredProjection: async (registeredProjectId: string) => {
-              const read = window.htmlAIProjects?.readRegisteredProjectProjection;
-              if (!read) throw new Error("当前 PageRoot 版本缺少项目展示预热通道。");
+              const read = window.stemmioProjects?.readRegisteredProjectProjection;
+              if (!read) throw new Error("当前 Stemmio 版本缺少项目展示预热通道。");
               return read(registeredProjectId);
             },
             openRegistered: async (registeredProjectId: string) => {
-              const open = window.htmlAIProjects?.openRegisteredProject;
-              if (!open) throw new Error("当前 PageRoot 版本缺少项目目录打开通道。");
+              const open = window.stemmioProjects?.openRegisteredProject;
+              if (!open) throw new Error("当前 Stemmio 版本缺少项目目录打开通道。");
               return open(registeredProjectId);
             },
             acceptExternal: async (requestId: string) => {
-              const accept = window.htmlAIProjects?.acceptExternalOpen;
-              if (!accept) throw new Error("当前 PageRoot 版本缺少外部文件打开通道。");
+              const accept = window.stemmioProjects?.acceptExternalOpen;
+              if (!accept) throw new Error("当前 Stemmio 版本缺少外部文件打开通道。");
               return accept(requestId);
             },
             ackExternal: async (requestId: string) => {
-              const acknowledge = window.htmlAIProjects?.acknowledgeExternalOpen;
+              const acknowledge = window.stemmioProjects?.acknowledgeExternalOpen;
               if (!acknowledge) return { acknowledged: true, requestId };
               return acknowledge(requestId);
             },
@@ -1167,22 +1167,22 @@ export default function Workbench() {
               action: "import-new" | "continue-current" | "open-managed";
               deleteOriginal?: boolean;
             }) => {
-              const commit = window.htmlAIProjects?.commitPreparedHtmlOpen;
-              if (!commit) throw new Error("当前 PageRoot 版本缺少导入确认通道。");
+              const commit = window.stemmioProjects?.commitPreparedHtmlOpen;
+              if (!commit) throw new Error("当前 Stemmio 版本缺少导入确认通道。");
               return commit(payload);
             },
             cancelPrepared: async (requestId: string) => {
-              const cancel = window.htmlAIProjects?.cancelPreparedHtmlOpen;
+              const cancel = window.stemmioProjects?.cancelPreparedHtmlOpen;
               if (!cancel) return { canceled: false };
               return cancel(requestId);
             },
             finalizePrepared: async (requestId: string) => {
-              const finalize = window.htmlAIProjects?.finalizePreparedHtmlOpen;
+              const finalize = window.stemmioProjects?.finalizePreparedHtmlOpen;
               if (!finalize) return { disposition: "kept" as const };
               return finalize(requestId);
             },
             rollbackPrepared: async (requestId: string) => {
-              const rollback = window.htmlAIProjects?.rollbackPreparedHtmlOpen;
+              const rollback = window.stemmioProjects?.rollbackPreparedHtmlOpen;
               if (!rollback) return { rolledBack: false, project: null };
               return rollback(requestId);
             },
@@ -1194,7 +1194,7 @@ export default function Workbench() {
               projectId: string;
               versionId: string;
             }) => {
-              const activate = window.htmlAIProjects?.activateGeneratedVersion;
+              const activate = window.stemmioProjects?.activateGeneratedVersion;
               if (!activate) throw new Error("当前运行环境不能安全切换生成版本。");
               return activate(input);
             },
@@ -1209,7 +1209,7 @@ export default function Workbench() {
               projectRootPath: string;
               operationId?: string;
             }) => {
-              const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
+              const activate = window.stemmioProjects?.activateManagedWorkingCopy;
               if (!activate) {
                 throw new Error("当前运行环境不能安全切换到托管工作文件。");
               }
@@ -1221,7 +1221,7 @@ export default function Workbench() {
               stem: string;
               expectedSha256: string;
             }) => {
-              const rename = window.htmlAIProjects?.renameHtml;
+              const rename = window.stemmioProjects?.renameHtml;
               if (!rename) throw new Error("当前运行环境不能安全修改 HTML 文件名。");
               return rename(input);
             },
@@ -1236,7 +1236,7 @@ export default function Workbench() {
               reason: "watch" | "rename" | "startup" | "safe-action";
               watcherGeneration?: number;
             }) => {
-              const reconcile = window.htmlAIProjects?.reconcileActiveManagedSource;
+              const reconcile = window.stemmioProjects?.reconcileActiveManagedSource;
               if (!reconcile) {
                 throw new Error("当前运行环境不能安全核对工作文件位置。");
               }
@@ -1279,7 +1279,7 @@ export default function Workbench() {
         },
         handoff: {
           copy: async ({ message }: { message: string }) => {
-            const integrations = window.htmlAIIntegrations;
+            const integrations = window.stemmioIntegrations;
             if (integrations?.handoffToQoderWork) {
               const result = await integrations.handoffToQoderWork({ message });
               if (result.status !== "copied" || result.copied !== true) {
@@ -1297,7 +1297,7 @@ export default function Workbench() {
             return { status: "copied", copied: true };
           },
           openLogin: async ({ providerId }: { providerId: string }) => {
-            const integrations = window.htmlAIIntegrations;
+            const integrations = window.stemmioIntegrations;
             if (typeof integrations?.openAgentLogin !== "function") {
               return { opened: false };
             }
@@ -1314,8 +1314,8 @@ export default function Workbench() {
       versionWorkflow: {
         files: {
           exportHtmlCopy: async (input) => {
-            if (typeof window.htmlAIProjects?.exportHtmlCopy === "function") {
-              return window.htmlAIProjects.exportHtmlCopy(input);
+            if (typeof window.stemmioProjects?.exportHtmlCopy === "function") {
+              return window.stemmioProjects.exportHtmlCopy(input);
             }
             downloadHtml(input.html, input.suggestedName || "项目.html");
             return { kind: "download-started" as const };
@@ -1570,7 +1570,7 @@ export default function Workbench() {
           reviewAnalysisSession.clear();
           if (review) reviewSessionsRef.current.delete(review.tabId);
           setReadyReviewSession(null);
-          performance.mark("pageroot:accept:overlay-closed");
+          performance.mark("stemmio:accept:overlay-closed");
         }
         commentCanvasPort.setSelection(null);
         commentEditResumePendingRef.current = null;
@@ -1578,7 +1578,7 @@ export default function Workbench() {
         setPreviewAttachment(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("edit");
-        performance.mark("pageroot:accept:ui-published");
+        performance.mark("stemmio:accept:ui-published");
         return;
       }
       if (event.type === "attachment-cleanup-failed") {
@@ -1828,7 +1828,7 @@ export default function Workbench() {
       if (projectEvent.type === "external-project-open-unavailable") {
         setInterruption({
           kind: "external-open-unavailable",
-          detail: String(projectEvent.reason || "当前 PageRoot 版本缺少外部文件打开通道。"),
+          detail: String(projectEvent.reason || "当前 Stemmio 版本缺少外部文件打开通道。"),
         });
         return;
       }
@@ -2053,7 +2053,7 @@ export default function Workbench() {
   ]);
 
   useEffect(() => {
-    const updates = window.htmlAIUpdates;
+    const updates = window.stemmioUpdates;
     if (!updates) return undefined;
     let active = true;
     const receiveStatus = (result: ApplicationUpdateResult | null) => {
@@ -2073,7 +2073,7 @@ export default function Workbench() {
   useEffect(() => {
     let active = true;
     queueMicrotask(() => {
-      if (active) setApplicationVersion(window.htmlAIRuntime?.appVersion || "");
+      if (active) setApplicationVersion(window.stemmioRuntime?.appVersion || "");
     });
     return () => {
       active = false;
@@ -2082,7 +2082,7 @@ export default function Workbench() {
 
   const relaunchApp = useCallback(async () => {
     try {
-      await window.htmlAIAppLifecycle?.relaunch();
+      await window.stemmioAppLifecycle?.relaunch();
     } catch (cause) {
       setWorkspaceIssue({
         title: "本地项目资料暂时不可用",
@@ -2095,7 +2095,7 @@ export default function Workbench() {
     }
   }, []);
 
-  const openAboutPageRoot = useCallback(() => {
+  const openAboutStemmio = useCallback(() => {
     const active = document.activeElement;
     if (active instanceof HTMLElement) overlayReturnFocusRef.current = active;
     setManualUpdateCheckFailed(false);
@@ -2121,7 +2121,7 @@ export default function Workbench() {
   }, [openSettingsPage]);
 
   useEffect(() => {
-    const lifecycle = window.htmlAIAppLifecycle;
+    const lifecycle = window.stemmioAppLifecycle;
     if (!lifecycle?.onWorkspaceUnavailable) return undefined;
     return lifecycle.onWorkspaceUnavailable((issue) => {
       setWorkspaceIssue({
@@ -2134,7 +2134,7 @@ export default function Workbench() {
   }, []);
 
   useEffect(() => {
-    const lifecycle = window.htmlAIAppLifecycle;
+    const lifecycle = window.stemmioAppLifecycle;
     if (!lifecycle?.onExternalOpenFailed) return undefined;
     return lifecycle.onExternalOpenFailed((issue) => {
       setOpenHtmlError(issue.message || "无法读取这个 HTML 文件。");
@@ -2143,13 +2143,13 @@ export default function Workbench() {
   }, []);
 
   useEffect(() => {
-    const lifecycle = window.htmlAIAppLifecycle;
+    const lifecycle = window.stemmioAppLifecycle;
     if (!lifecycle?.onAboutRequested) return undefined;
-    return lifecycle.onAboutRequested(openAboutPageRoot);
-  }, [openAboutPageRoot]);
+    return lifecycle.onAboutRequested(openAboutStemmio);
+  }, [openAboutStemmio]);
 
   const checkForApplicationUpdates = useCallback(async () => {
-    const updates = window.htmlAIUpdates;
+    const updates = window.stemmioUpdates;
     setManualUpdateCheckFailed(false);
     if (!updates) {
       setManualUpdateCheckFailed(true);
@@ -2169,7 +2169,7 @@ export default function Workbench() {
   const openProjectRepository = useCallback(async () => {
     setRepositoryOpenFailed(false);
     try {
-      const updates = window.htmlAIUpdates;
+      const updates = window.stemmioUpdates;
       if (updates) {
         const result = await updates.openRepository();
         if (!result?.opened) throw new Error("GitHub repository did not open.");
@@ -2184,7 +2184,7 @@ export default function Workbench() {
   const openReleaseNotes = useCallback(async () => {
     setReleaseNotesOpenFailed(false);
     try {
-      const updates = window.htmlAIUpdates;
+      const updates = window.stemmioUpdates;
       if (updates) {
         const result = await updates.openLatestRelease();
         if (!result?.opened) throw new Error("Release notes did not open.");
@@ -2199,14 +2199,14 @@ export default function Workbench() {
   const openUserNotice = useCallback(async () => {
     setUserNoticeOpenFailed(false);
     try {
-      const result = await window.htmlAIAppLifecycle?.openUserNotice();
+      const result = await window.stemmioAppLifecycle?.openUserNotice();
       if (!result?.opened) throw new Error("User notice did not open.");
     } catch {
       setUserNoticeOpenFailed(true);
     }
   }, []);
 
-  const closeAboutPageRoot = useCallback(() => {
+  const closeAboutStemmio = useCallback(() => {
     setAboutOpen(false);
     window.requestAnimationFrame(() => {
       const returnFocus = overlayReturnFocusRef.current;
@@ -2220,7 +2220,7 @@ export default function Workbench() {
 
   const downloadAvailableUpdate = useCallback(async () => {
     try {
-      const result = await window.htmlAIUpdates?.downloadAvailable();
+      const result = await window.stemmioUpdates?.downloadAvailable();
       if (result) setUpdateResult(result);
     } catch {
       // The main-process controller publishes a bounded unavailable state.
@@ -2229,7 +2229,7 @@ export default function Workbench() {
 
   const installDownloadedUpdate = useCallback(async (): Promise<boolean> => {
     try {
-      const result = await window.htmlAIUpdates?.installDownloaded();
+      const result = await window.stemmioUpdates?.installDownloaded();
       if (!result?.installing) {
         throw new Error(result?.reason || "下载的更新尚未准备完成。");
       }
@@ -2604,7 +2604,7 @@ export default function Workbench() {
     previousFrameGeneration?: number | null,
     previousFrameDocument?: Document | null,
   ): Promise<DocumentCanvasRenderObservation> => {
-    performance.mark("pageroot:canvas:verify-start");
+    performance.mark("stemmio:canvas:verify-start");
     let expectedGeneration = currentDocumentSessionSnapshot().canvasGeneration;
     let expectedReceipt = receipt || currentDocumentSessionSnapshot().sourceReceipt;
     const initialFrameDocument = previousFrameDocument
@@ -2667,7 +2667,7 @@ export default function Workbench() {
           throw new Error("画布已载入内容的 Hash 与源 HTML 不一致。");
         }
         if (!currentReceipt || frameGeneration == null) continue;
-        performance.mark("pageroot:canvas:verify-ack");
+        performance.mark("stemmio:canvas:verify-ack");
         return Object.freeze({
           receipt: currentReceipt,
           renderedHtml: renderedSource,
@@ -2682,7 +2682,7 @@ export default function Workbench() {
 
     // A missing acknowledgement is a disposable-Canvas failure, not a user
     // conflict. Rebuild exactly once from the authoritative Document snapshot.
-    performance.mark("pageroot:canvas:verify-rebuild");
+    performance.mark("stemmio:canvas:verify-rebuild");
     expectedGeneration = requiredWorkspaceController(
       workspaceControllerRef.current,
     ).reloadDocumentCanvas().canvasGeneration;
@@ -3138,7 +3138,7 @@ export default function Workbench() {
 
   useEffect(() => {
     if (!workspaceController) return undefined;
-    const subscribe = window.htmlAIProjects?.onSourceFileChanged;
+    const subscribe = window.stemmioProjects?.onSourceFileChanged;
     if (typeof subscribe !== "function") return undefined;
     return subscribe((payload) => {
       void workspaceController.observeExternalSourceChange({
@@ -3162,9 +3162,9 @@ export default function Workbench() {
       }) as Promise<CloseReadiness>);
       setPendingExit(true);
     };
-    window.addEventListener("html-ai:prepare-close", handlePrepareClose);
+    window.addEventListener("stemmio:prepare-close", handlePrepareClose);
     return () => window.removeEventListener(
-      "html-ai:prepare-close",
+      "stemmio:prepare-close",
       handlePrepareClose,
     );
   }, [workspaceController, workspacePreferencesController]);
@@ -3177,9 +3177,9 @@ export default function Workbench() {
       workspaceController.abortClose({ requestId: detail.requestId });
       setPendingExit(false);
     };
-    window.addEventListener("html-ai:close-aborted", handleCloseAborted);
+    window.addEventListener("stemmio:close-aborted", handleCloseAborted);
     return () => window.removeEventListener(
-      "html-ai:close-aborted",
+      "stemmio:close-aborted",
       handleCloseAborted,
     );
   }, [workspaceController]);
@@ -3307,7 +3307,7 @@ export default function Workbench() {
   const showProjectInFolder = useCallback(async (requestedSourcePath?: string) => {
     const activeSourcePath = requestedSourcePath
       || currentProjectSessionSnapshot().sourcePath;
-    const showInFolder = window.htmlAIProjects?.showInFolder;
+    const showInFolder = window.stemmioProjects?.showInFolder;
     if (!activeSourcePath || !showInFolder) return;
     await runLocalUserAction({
       kind: "show-source-in-folder",
@@ -3326,7 +3326,7 @@ export default function Workbench() {
     const activeProject = currentProjectSessionSnapshot();
     const activeSourcePath = activeProject.sourcePath;
     const activeEpoch = activeProject.epoch;
-    const openInDefaultBrowser = window.htmlAIProjects?.openInDefaultBrowser;
+    const openInDefaultBrowser = window.stemmioProjects?.openInDefaultBrowser;
     if (!activeSourcePath || !openInDefaultBrowser) return;
     await runLocalUserAction({
       kind: "open-source-in-browser",
@@ -3958,7 +3958,7 @@ export default function Workbench() {
   }, [requestSourceHistoryAction]);
 
   useEffect(() => {
-    const editApi = window.htmlAIEdit;
+    const editApi = window.stemmioEdit;
     if (!editApi) return undefined;
     return editApi.onHistoryRequested((direction) => {
       if (ownsNativeTextHistory(document.activeElement)) {
@@ -4758,7 +4758,7 @@ export default function Workbench() {
 
   const revealAiTaskInFinder = useCallback(async () => {
     const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
-    const revealAiTask = window.htmlAIProjects?.revealAiTask;
+    const revealAiTask = window.stemmioProjects?.revealAiTask;
     if (!activeSourcePath || !revealAiTask) return;
     await runLocalUserAction({
       kind: "reveal-ai-task",
@@ -4847,7 +4847,7 @@ export default function Workbench() {
     if (currentRun.submissionPending) return;
     const submissionSourcePath = currentProject.sourcePath;
     if (!submissionSourcePath) {
-      if (typeof window !== "undefined" && !window.htmlAIProjects) return;
+      if (typeof window !== "undefined" && !window.stemmioProjects) return;
       void openProject();
       return;
     }
@@ -4962,7 +4962,7 @@ export default function Workbench() {
   ) => {
     const outcome = await workspaceController?.connectAgentApiKey(selection, apiKey, extras) ?? null;
     if (!outcome || outcome.status !== "succeeded") return outcome;
-    const integrations = window.htmlAIIntegrations;
+    const integrations = window.stemmioIntegrations;
     try {
       if (extras?.remember === true && apiKey) {
         workspaceController?.holdAgentCredential?.(selection, {
@@ -5012,7 +5012,7 @@ export default function Workbench() {
   }, [commitPendingDefaultIfReady, workspaceController]);
   const openVendorApiKeyPage = useCallback(async (vendorId: string) => {
     try {
-      const result = await window.htmlAIIntegrations?.openVendorApiKeyPage?.(vendorId);
+      const result = await window.stemmioIntegrations?.openVendorApiKeyPage?.(vendorId);
       return result?.opened === false
         ? { status: "rejected", reason: "无法打开获取 API Key 页面。" }
         : { status: "succeeded" };
@@ -5062,7 +5062,7 @@ export default function Workbench() {
       )
     ) return;
     const operationKey = activeRunOperationKey(run);
-    performance.mark("pageroot:accept:start");
+    performance.mark("stemmio:accept:start");
     setOpeningReadyVersion(true);
     try {
       const outcome = await runCapability.commands.activateReadyVersion({
@@ -5074,7 +5074,7 @@ export default function Workbench() {
               }
             : null,
         });
-      performance.mark("pageroot:accept:activated");
+      performance.mark("stemmio:accept:activated");
       if (outcome.status !== "succeeded") {
         if (outcome.status !== "stale" && outcome.status !== "unknown") {
           const published = readyVersionPublicationMatches(workspaceController, run);
@@ -5108,7 +5108,7 @@ export default function Workbench() {
         // cut instead of a multi-frame cascade.
         reviewSessionsRef.current.delete(readyReviewSession.tabId);
         setReadyReviewSession(null);
-        performance.mark("pageroot:accept:overlay-closed");
+        performance.mark("stemmio:accept:overlay-closed");
       }
       if (!result.current) {
         reportInternalFailure({
@@ -5129,7 +5129,7 @@ export default function Workbench() {
       setPreviewAttachment(null);
       setHandoffPreviewOpen(false);
       setCanvasMode("edit");
-      performance.mark("pageroot:accept:ui-committed");
+      performance.mark("stemmio:accept:ui-committed");
       if (result.protocolViolation) {
         reportInternalFailure({
           area: "version",
@@ -5225,7 +5225,7 @@ export default function Workbench() {
       ) {
         throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
       }
-      const externalBootstrap = Boolean(window.htmlAIPreview);
+      const externalBootstrap = Boolean(window.stemmioPreview);
       const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
       const beforeLabel = run.basedOnVersionId
         ? safeVersionLabel(run.basedOnVersionId)
@@ -5350,12 +5350,12 @@ export default function Workbench() {
       stopRelatedRuns: kind !== "reconnect",
       credentials: {
         clear: async () => {
-          if (typeof window.htmlAIIntegrations?.clearSessionCredential !== "function") {
+          if (typeof window.stemmioIntegrations?.clearSessionCredential !== "function") {
             return { ok: false };
           }
-          return window.htmlAIIntegrations.clearSessionCredential();
+          return window.stemmioIntegrations.clearSessionCredential();
         },
-        restore: () => window.htmlAIIntegrations?.restoreSessionCredential?.()
+        restore: () => window.stemmioIntegrations?.restoreSessionCredential?.()
           ?? Promise.resolve({ ok: true }),
       },
     }) ?? { status: "rejected" as const, reason: "工作台尚未就绪。" };
@@ -5658,12 +5658,12 @@ export default function Workbench() {
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
-    && window.htmlAIProjects?.showInFolder,
+    && window.stemmioProjects?.showInFolder,
   );
   const canOpenCurrentHtmlInDefaultBrowser = Boolean(
     sourcePath
     && typeof window !== "undefined"
-    && window.htmlAIProjects?.openInDefaultBrowser,
+    && window.stemmioProjects?.openInDefaultBrowser,
   );
   const hasDocumentHistoryAction = Boolean(shellSnapshot?.hasDocumentHistoryAction);
   const presentation = useMemo(() => deriveWorkbenchPresentation({
@@ -5958,7 +5958,7 @@ export default function Workbench() {
       onConnectApiKey: connectAgentApiKey,
       onRetryPersistCredential: (selection: AgentSelection) => (
         workspaceController?.retryAgentCredentialPersist?.(selection, (held) => (
-          window.htmlAIIntegrations?.persistSessionCredential?.({
+          window.stemmioIntegrations?.persistSessionCredential?.({
             apiKey: held.apiKey,
             vendorId: held.vendorId ?? undefined,
             baseUrl: held.baseUrl ?? undefined,
@@ -6010,7 +6010,7 @@ export default function Workbench() {
       }}
       accepting={openingReadyVersion || Boolean(activeRun?.adoptionPhase)}
       activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
-      onAbout={openAboutPageRoot}
+      onAbout={openAboutStemmio}
       onCancelBefore={cancelActiveRun}
       onAccept={() => void activateReadyResult({ reviewed: true })}
       onRevealAiTask={() => void revealAiTaskInFinder()}
@@ -6220,7 +6220,7 @@ export default function Workbench() {
                 ? "ready"
                 : "unbound"
         }
-        aria-label="HTML AI 可视化编辑工作台"
+        aria-label="Stemmio 可视化编辑工作台"
       >
       {navigationCapability ? <WorkbenchTabBarContainer
         capability={navigationCapability}
@@ -6498,7 +6498,7 @@ export default function Workbench() {
         updateDownloading={updateDownloading}
         updateResult={updateResult}
         updateBadgeLabel={updateBadgeLabel}
-        onOpenAbout={openAboutPageRoot}
+        onOpenAbout={openAboutStemmio}
         onOpenSettings={() => openSettingsPage("general")}
         onOpenProjectRules={openProjectRulesPage}
         onResizeCommit={(width) => workspacePreferencesController.commitPanelWidth("sidebar", width)}
@@ -6563,7 +6563,7 @@ export default function Workbench() {
           onConnectApiKey={connectAgentApiKey}
           onRetryPersistCredential={(selection) => (
             workspaceController?.retryAgentCredentialPersist?.(selection, (held) => (
-              window.htmlAIIntegrations?.persistSessionCredential?.({
+              window.stemmioIntegrations?.persistSessionCredential?.({
                 apiKey: held.apiKey,
                 vendorId: held.vendorId ?? undefined,
                 baseUrl: held.baseUrl ?? undefined,
@@ -6846,13 +6846,13 @@ export default function Workbench() {
         }}
       />
 
-      <AboutPageRootDialog
+      <AboutStemmioDialog
         open={aboutOpen}
         appVersion={applicationVersion}
         architecture={updateResult?.architecture}
         repositoryOpenFailed={repositoryOpenFailed}
         userNoticeOpenFailed={userNoticeOpenFailed}
-        onClose={closeAboutPageRoot}
+        onClose={closeAboutStemmio}
         onOpenRepository={() => void openProjectRepository()}
         onOpenUserNotice={() => void openUserNotice()}
       />

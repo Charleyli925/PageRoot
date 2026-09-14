@@ -1,7 +1,7 @@
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  generatePagerootElementId,
-} from "./pageroot-element-identity.js";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  generateStemmioElementId,
+} from "./stemmio-element-identity.js";
 import {
   applyPatchPlan,
   planEditableIslandPatch,
@@ -92,11 +92,11 @@ function cloneLineage(lineage) {
 }
 
 function assertManagedIdentity(index, context) {
-  if (!index.pagerootIdentity?.complete || !index.pagerootIdentity.valid) {
+  if (!index.stemmioIdentity?.complete || !index.stemmioIdentity.valid) {
     fail(
       "SEMANTIC_IDENTITY_INCOMPLETE",
       `${context} requires a managed source with complete valid element identity.`,
-      { pagerootIdentity: index.pagerootIdentity },
+      { stemmioIdentity: index.stemmioIdentity },
     );
   }
 }
@@ -200,7 +200,7 @@ function elementPrecondition(index, target, fieldName) {
     });
   }
   const elementId = String(target.elementId ?? "");
-  const element = index.byPagerootId.get(elementId) ?? null;
+  const element = index.byStemmioId.get(elementId) ?? null;
   if (!element) {
     fail("SEMANTIC_TARGET_NOT_FOUND", `${fieldName} is not present in the exact source.`, {
       fieldName,
@@ -236,14 +236,14 @@ export function createSemanticElementPrecondition(indexOrHtml, elementId) {
     })
     : resolveKernelIndex(indexOrHtml?.source, indexOrHtml);
   assertManagedIdentity(index, "Semantic target precondition");
-  const element = index.byPagerootId.get(String(elementId)) ?? null;
+  const element = index.byStemmioId.get(String(elementId)) ?? null;
   if (!element) {
     fail("SEMANTIC_TARGET_NOT_FOUND", "The stable element ID is not present in the exact source.", {
       elementId,
     });
   }
   return {
-    elementId: element.pagerootId,
+    elementId: element.stemmioId,
     tagName: element.tagName,
     expectedOuterHtmlSha256: sourceSha256(element.raw),
   };
@@ -275,7 +275,7 @@ function fragmentRoot(index, html) {
 
 function allocateId(randomUUID, reservedIds) {
   for (let attempt = 0; attempt < 32; attempt += 1) {
-    const elementId = generatePagerootElementId(randomUUID);
+    const elementId = generateStemmioElementId(randomUUID);
     if (!reservedIds.has(elementId)) {
       reservedIds.add(elementId);
       return elementId;
@@ -291,22 +291,22 @@ function materializeNewFragment(rawHtml, documentIndex, options = {}) {
     caller: "materializeNewFragment",
   });
   const root = fragmentRoot(index, html);
-  const existingIdentity = index.elements.find((element) => element.pagerootIdAttribute);
+  const existingIdentity = index.elements.find((element) => element.stemmioIdAttribute);
   if (existingIdentity) {
     fail(
       "SEMANTIC_NEW_FRAGMENT_ID_FORBIDDEN",
-      "New structural HTML cannot supply or clone persistent PageRoot IDs.",
+      "New structural HTML cannot supply or clone persistent Stemmio IDs.",
       { nodeId: existingIdentity.nodeId },
     );
   }
-  const reservedIds = new Set(documentIndex.byPagerootId.keys());
+  const reservedIds = new Set(documentIndex.byStemmioId.keys());
   const identities = index.elements.map((element) => ({
     offset: element.closingDelimiterOffset,
     elementId: allocateId(options.randomUUID, reservedIds),
   }));
   let identified = html;
   for (const identity of [...identities].sort((left, right) => right.offset - left.offset)) {
-    identified = `${identified.slice(0, identity.offset)} ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${identity.elementId}"${identified.slice(identity.offset)}`;
+    identified = `${identified.slice(0, identity.offset)} ${STEMMIO_ELEMENT_ID_ATTRIBUTE}="${identity.elementId}"${identified.slice(identity.offset)}`;
   }
   const nextIndex = buildSourceIndex(identified, {
     scope: "fragment",
@@ -327,28 +327,28 @@ function materializeReplacementFragment(rawHtml, documentIndex, target, options 
     caller: "materializeReplacementFragment",
   });
   const root = fragmentRoot(index, html);
-  if (index.elements.some((element) => element.pagerootIdAttribute)) {
+  if (index.elements.some((element) => element.stemmioIdAttribute)) {
     fail(
       "SEMANTIC_REPLACEMENT_ID_FORBIDDEN",
-      "Replacement HTML cannot author persistent PageRoot IDs; the kernel owns identity continuity.",
+      "Replacement HTML cannot author persistent Stemmio IDs; the kernel owns identity continuity.",
     );
   }
-  const reservedIds = new Set(documentIndex.byPagerootId.keys());
+  const reservedIds = new Set(documentIndex.byStemmioId.keys());
   const identities = index.elements.map((element) => ({
     offset: element.closingDelimiterOffset,
     elementId: element.nodeId === root.nodeId
-      ? target.pagerootId
+      ? target.stemmioId
       : allocateId(options.randomUUID, reservedIds),
   }));
   let identified = html;
   for (const identity of [...identities].sort((left, right) => right.offset - left.offset)) {
-    identified = `${identified.slice(0, identity.offset)} ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${identity.elementId}"${identified.slice(identity.offset)}`;
+    identified = `${identified.slice(0, identity.offset)} ${STEMMIO_ELEMENT_ID_ATTRIBUTE}="${identity.elementId}"${identified.slice(identity.offset)}`;
   }
   return {
     html: identified,
     allocatedElementIds: identities
       .map((identity) => identity.elementId)
-      .filter((elementId) => elementId !== target.pagerootId),
+      .filter((elementId) => elementId !== target.stemmioId),
   };
 }
 
@@ -365,16 +365,16 @@ function semanticSourceCommand(state, index, operation, options) {
 
   if (["setText", "replaceTextRange", "setAttribute", "setStyle", "deleteElement", "moveElement", "replaceSubtree"].includes(operation.type)) {
     const target = elementPrecondition(index, operation.target, "target");
-    command.targetElementId = target.pagerootId;
+    command.targetElementId = target.stemmioId;
     command.targetTagName = target.tagName;
   }
   if (["insertElement", "moveElement"].includes(operation.type)) {
     const parent = elementPrecondition(index, operation.parent, "parent");
-    command.parentElementId = parent.pagerootId;
+    command.parentElementId = parent.stemmioId;
     command.parentTagName = parent.tagName;
     if (operation.before !== null && operation.before !== undefined) {
       const before = elementPrecondition(index, operation.before, "before");
-      command.beforeElementId = before.pagerootId;
+      command.beforeElementId = before.stemmioId;
       command.beforeTagName = before.tagName;
     }
   }
@@ -394,7 +394,7 @@ function semanticSourceCommand(state, index, operation, options) {
       command.contentHtml = operation.contentHtml;
     }
   } else if (operation.type === "replaceTextRange") {
-    const target = index.byPagerootId.get(command.targetElementId);
+    const target = index.byStemmioId.get(command.targetElementId);
     const textMap = buildSourceTextMap(index, target.nodeId);
     const startOffset = operation.range?.startOffset;
     const endOffset = operation.range?.endOffset;
@@ -446,7 +446,7 @@ function semanticSourceCommand(state, index, operation, options) {
       ) {
         fail("SEMANTIC_TEXT_RANGE_INVALID", "Range style requires an exact text range and quote.");
       }
-      const target = index.byPagerootId.get(command.targetElementId);
+      const target = index.byStemmioId.get(command.targetElementId);
       const textMap = buildSourceTextMap(index, target.nodeId);
       if (
         textMap.text.slice(operation.range.startOffset, operation.range.endOffset)
@@ -472,7 +472,7 @@ function semanticSourceCommand(state, index, operation, options) {
     if (typeof operation.html !== "string" || operation.html.length === 0) {
       fail("SEMANTIC_FRAGMENT_INVALID", "replaceSubtree requires non-empty structural HTML.");
     }
-    const target = index.byPagerootId.get(command.targetElementId);
+    const target = index.byStemmioId.get(command.targetElementId);
     const fragment = materializeReplacementFragment(operation.html, index, target, options);
     command.elementHtml = fragment.html;
     allocation.allocatedElementIds = fragment.allocatedElementIds;
@@ -550,7 +550,7 @@ function nearestIdentifiedParentId(index, element) {
   while (parentId) {
     const parent = index.byNodeId.get(parentId);
     if (!parent || parent.type !== "element") return null;
-    if (parent.pagerootId) return parent.pagerootId;
+    if (parent.stemmioId) return parent.stemmioId;
     parentId = parent.parentId;
   }
   return null;
@@ -561,7 +561,7 @@ function semanticIdentitySnapshot(index) {
   return createSemanticIdentitySnapshot({
     sourceSha256: index.sourceSha256,
     elements: index.elements.map((element) => ({
-      elementId: element.pagerootId,
+      elementId: element.stemmioId,
       tagName: element.tagName,
       parentElementId: nearestIdentifiedParentId(index, element),
       outerHtmlSha256: sourceSha256(element.raw),
@@ -634,10 +634,10 @@ export function applySemanticOperation(inputState, operation, options = {}) {
   }
   const { command, allocation } = semanticSourceCommand(state, index, operation, options);
   const targetElement = command.targetElementId
-    ? index.byPagerootId.get(command.targetElementId)
+    ? index.byStemmioId.get(command.targetElementId)
     : null;
   const semanticParent = operation.type === "moveElement"
-    ? index.byPagerootId.get(operation.parent.elementId)
+    ? index.byStemmioId.get(operation.parent.elementId)
     : null;
   const plan = operation.type === "moveElement"
     && targetElement?.parentId === semanticParent?.nodeId
@@ -648,7 +648,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
         ? {
             beforeTargetRef: createTargetRef(
               index,
-              index.byPagerootId.get(operation.before.elementId),
+              index.byStemmioId.get(operation.before.elementId),
               { level: "subregion" },
             ),
           }
@@ -656,7 +656,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       expectedSourceSha256: state.sourceSha256,
     })
     : operation.type === "setText" && operation.contentHtml !== undefined
-    ? (operation.createdPagerootIds !== undefined
+    ? (operation.createdStemmioIds !== undefined
       ? planSemanticEditableIslandPatch(index, {
         type: "replace-editable-island",
         targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
@@ -666,7 +666,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
         ),
         nextInnerHtml: command.contentHtml,
         expectedSourceSha256: state.sourceSha256,
-      }, operation.createdPagerootIds)
+      }, operation.createdStemmioIds)
       : planEditableIslandPatch(index, {
         type: "replace-editable-island",
         targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
@@ -678,7 +678,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
         expectedSourceSha256: state.sourceSha256,
       }, { randomUUID: options.randomUUID }))
     : operation.type === "setStyle" && operation.range
-    ? (operation.createdPagerootIds
+    ? (operation.createdStemmioIds
       ? planSemanticTextRangeStylePatch(index, {
         type: "set-text-range-style",
         targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
@@ -687,7 +687,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
         value: operation.value,
         important: operation.important,
         expectedSourceSha256: state.sourceSha256,
-      }, operation.createdPagerootIds)
+      }, operation.createdStemmioIds)
       : planTextRangeStylePatch(index, {
         type: "set-text-range-style",
         targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
@@ -712,9 +712,9 @@ export function applySemanticOperation(inputState, operation, options = {}) {
   if (
     operation.type === "setText"
     && operation.contentHtml !== undefined
-    && Array.isArray(plan.metadata?.createdPagerootIds)
+    && Array.isArray(plan.metadata?.createdStemmioIds)
   ) {
-    allocation.allocatedElementIds = [...plan.metadata.createdPagerootIds];
+    allocation.allocatedElementIds = [...plan.metadata.createdStemmioIds];
   }
   const materialization = applyPatchPlan(plan, state.html, {
     baseIndex: index,
@@ -724,14 +724,14 @@ export function applySemanticOperation(inputState, operation, options = {}) {
   });
   assertManagedIdentity(materialization.sourceIndex, "Semantic operation output");
   if (operation.type === "insertElement" || operation.type === "moveElement") {
-    const expectedParent = materialization.sourceIndex.byPagerootId.get(
+    const expectedParent = materialization.sourceIndex.byStemmioId.get(
       operation.parent.elementId,
     );
     const placedElementId = operation.type === "moveElement"
       ? operation.target.elementId
       : allocation.insertedRootElementId;
     const placedElement = placedElementId
-      ? materialization.sourceIndex.byPagerootId.get(placedElementId)
+      ? materialization.sourceIndex.byStemmioId.get(placedElementId)
       : null;
     if (
       expectedParent?.type !== "element"
@@ -750,7 +750,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
     }
   }
   if (operation.type === "setText" && operation.contentHtml !== undefined) {
-    const target = materialization.sourceIndex.byPagerootId.get(
+    const target = materialization.sourceIndex.byStemmioId.get(
       operation.target.elementId,
     );
     const text = target?.type === "element"
@@ -773,10 +773,10 @@ export function applySemanticOperation(inputState, operation, options = {}) {
   const generatedRangeStyleIds = (
     operation.type === "setStyle"
     && operation.range
-    && !operation.createdPagerootIds
-    && Array.isArray(plan.metadata?.createdPagerootIds)
+    && !operation.createdStemmioIds
+    && Array.isArray(plan.metadata?.createdStemmioIds)
   )
-    ? [...plan.metadata.createdPagerootIds]
+    ? [...plan.metadata.createdStemmioIds]
     : [];
   if (generatedRangeStyleIds.length > 0) {
     allocation.allocatedElementIds = generatedRangeStyleIds;
@@ -784,18 +784,18 @@ export function applySemanticOperation(inputState, operation, options = {}) {
   const generatedEditableIslandIds = (
     operation.type === "setText"
     && operation.contentHtml !== undefined
-    && operation.createdPagerootIds === undefined
+    && operation.createdStemmioIds === undefined
     && allocation.allocatedElementIds?.length
   )
     ? [...allocation.allocatedElementIds]
     : [];
   const identityOperation = generatedRangeStyleIds.length > 0
-    ? { ...operation, createdPagerootIds: generatedRangeStyleIds }
+    ? { ...operation, createdStemmioIds: generatedRangeStyleIds }
     : generatedEditableIslandIds.length > 0
       ? {
           ...operation,
           contentHtml: plan.metadata.nextInnerHtml,
-          createdPagerootIds: generatedEditableIslandIds,
+          createdStemmioIds: generatedEditableIslandIds,
         }
       : operation.type === "setText" && operation.contentHtml !== undefined
         ? { ...operation, contentHtml: plan.metadata.nextInnerHtml }

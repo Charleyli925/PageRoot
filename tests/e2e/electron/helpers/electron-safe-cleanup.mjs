@@ -2,13 +2,13 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const DEFAULT_USER_DATA_PREFIX = "pageroot-native-e2e-";
+const DEFAULT_USER_DATA_PREFIX = "stemmio-native-e2e-";
 const DEFAULT_CLOSE_TIMEOUT = 5_000;
 const DEFAULT_EXIT_REQUEST_TIMEOUT = 1_000;
 const DEFAULT_EXIT_TIMEOUT = 3_000;
 const DEFAULT_TERMINATE_TIMEOUT = 1_000;
 const DEFAULT_CLOSE_OBSERVATION_GRACE = 1_000;
-const stopPromiseKey = Symbol("pagerootAppFixtureStopPromise");
+const stopPromiseKey = Symbol("stemmioAppFixtureStopPromise");
 
 export function closeObservationTimeout(timeout = DEFAULT_CLOSE_TIMEOUT) {
   const shutdownBudget = DEFAULT_EXIT_REQUEST_TIMEOUT
@@ -66,7 +66,7 @@ export function createCloseFirstCleanup({
       }
       const closeObserved = await waitForClose();
       if (!closeObserved && !processExited) {
-        throw new Error("PageRoot exit could not be confirmed; temporary data was preserved.");
+        throw new Error("Stemmio exit could not be confirmed; temporary data was preserved.");
       }
       await cleanup();
     })();
@@ -90,7 +90,7 @@ export function removeValidatedTemporaryDirectory(directoryPath, namePrefix) {
   });
 }
 
-export async function stopPageRoot(
+export async function stopStemmio(
   electronApp,
   isolatedUserData,
   {
@@ -128,17 +128,17 @@ export async function stopPageRoot(
   return stopPromise;
 }
 
-export async function closePageRootGracefully(electronApp, page, {
+export async function closeStemmioGracefully(electronApp, page, {
   timeout = 35_000,
 } = {}) {
   const mainRendererUrl = page?.url();
   if (!mainRendererUrl) {
-    throw new Error("PageRoot main renderer URL is unavailable for graceful close.");
+    throw new Error("Stemmio main renderer URL is unavailable for graceful close.");
   }
   await page.evaluate(() => {
-    window.__PAGEROOT_CLOSE_ABORT_REASON__ = null;
-    window.addEventListener("html-ai:close-aborted", (event) => {
-      window.__PAGEROOT_CLOSE_ABORT_REASON__ = event.detail?.reason || "unknown";
+    window.__STEMMIO_CLOSE_ABORT_REASON__ = null;
+    window.addEventListener("stemmio:close-aborted", (event) => {
+      window.__STEMMIO_CLOSE_ABORT_REASON__ = event.detail?.reason || "unknown";
     }, { once: true });
   });
   const closed = electronApp.waitForEvent("close", { timeout });
@@ -151,16 +151,16 @@ export async function closePageRootGracefully(electronApp, page, {
     return true;
   }, mainRendererUrl);
   if (!requested) {
-    throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
+    throw new Error("Stemmio main BrowserWindow was unavailable for graceful close.");
   }
   try {
     await closed;
   } catch (error) {
     const reason = await page.evaluate(
-      () => window.__PAGEROOT_CLOSE_ABORT_REASON__,
+      () => window.__STEMMIO_CLOSE_ABORT_REASON__,
     ).catch(() => null);
     throw new Error(
-      `PageRoot graceful close did not complete${reason ? `: ${reason}` : "."}`,
+      `Stemmio graceful close did not complete${reason ? `: ${reason}` : "."}`,
       { cause: error },
     );
   }

@@ -7,8 +7,8 @@ import {
 
 const HTTPS_ORIGIN = /^https:\/\//u;
 
-export const PAGEROOT_PROVIDER_ID = "pageroot";
-export const PAGEROOT_RUNTIME_ID = "http";
+export const STEMMIO_PROVIDER_ID = "stemmio";
+export const STEMMIO_RUNTIME_ID = "http";
 
 const VENDORS = [
   { id: "deepseek", displayName: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", needsBaseUrl: false },
@@ -25,7 +25,7 @@ export function openaiCompatibleVendor(vendorId) {
 }
 
 export function openAiCompatibleVendorDisplayNameForPublicModel(modelId) {
-  const providerModelId = String(modelId || "").replace(/^pageroot:/u, "");
+  const providerModelId = String(modelId || "").replace(/^stemmio:/u, "");
   if (!providerModelId) return "";
   const vendor = OPENAI_COMPATIBLE_VENDORS.find((entry) => (
     entry.id !== "custom"
@@ -55,13 +55,13 @@ export function resolveOpenAiCompatibleVendor(vendorId, baseUrl) {
 const LOOPBACK_HTTP = /^https?:\/\/127\.0\.0\.1(?::\d+)?(?:\/[A-Za-z0-9._~!$&'()*+,;=:@%-]*)?$/u;
 
 export function httpAgentTestOverrideEnabled(environment = {}) {
-  return environment.PAGEROOT_E2E === "1"
-    && environment.PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL === "1";
+  return environment.STEMMIO_E2E === "1"
+    && environment.STEMMIO_HTTP_AGENT_ALLOW_TEST_BASE_URL === "1";
 }
 
 export function testOpenAiCompatibleBaseUrl(environment = {}) {
   if (!httpAgentTestOverrideEnabled(environment)) return "";
-  const text = String(environment.PAGEROOT_HTTP_AGENT_BASE_URL || "").trim();
+  const text = String(environment.STEMMIO_HTTP_AGENT_BASE_URL || "").trim();
   if (!text || text.length > 200 || !LOOPBACK_HTTP.test(text)) return "";
   let url;
   try { url = new URL(text); } catch { return ""; }
@@ -127,7 +127,7 @@ export function publicModelsForVendor(vendorId, environment = {}) {
   if (vendorId === "custom") return Object.freeze([]);
   const includeBeta = betaAgentModelsEnabled(environment);
   return Object.freeze(supportedAgentModelsForVendor(vendorId, { includeBeta }).map((entry) => Object.freeze({
-    id: `${PAGEROOT_PROVIDER_ID}:${entry.modelId}`,
+    id: `${STEMMIO_PROVIDER_ID}:${entry.modelId}`,
     providerModelId: entry.modelId,
     displayName: entry.displayName,
     isDefault: entry.recommended === true,
@@ -141,7 +141,7 @@ export function publicModelsForVendor(vendorId, environment = {}) {
 }
 
 export function publicOpenAiCompatibleVendors({
-  includeBeta = globalThis.htmlAIRuntime?.betaAgentModelsEnabled === true,
+  includeBeta = globalThis.stemmioRuntime?.betaAgentModelsEnabled === true,
 } = {}) {
   return Object.freeze(OPENAI_COMPATIBLE_VENDORS.filter((vendor) => (
     vendor.id === "custom"

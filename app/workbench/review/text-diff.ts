@@ -19,13 +19,13 @@ import type {
 } from "./types";
 
 const WHOLE_ELEMENT_CHANGE_SELECTOR = [
-  '[data-pageroot-review-structure="added"]',
-  '[data-pageroot-review-structure="removed"]',
+  '[data-stemmio-review-structure="added"]',
+  '[data-stemmio-review-structure="removed"]',
   `[${REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE}="true"]`,
 ].join(",");
 
 export function markTextAnchor(anchor: Element, groupId: string, offset: number) {
-  const attribute = "data-pageroot-review-text-anchors";
+  const attribute = "data-stemmio-review-text-anchors";
   const anchors = new Set(
     (anchor.getAttribute(attribute) || "").split(/\s+/).filter(Boolean),
   );
@@ -39,7 +39,7 @@ export function reviewTextAnchorOffset(
 ): number {
   const firstEntry = inventory.nodes[0];
   if (!firstEntry) return 0;
-  const ownerId = anchor.getAttribute("data-pageroot-review-geometry-owner") || "";
+  const ownerId = anchor.getAttribute("data-stemmio-review-geometry-owner") || "";
   let offset = 0;
   const walker = anchor.ownerDocument.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
   let node = walker.nextNode();
@@ -48,7 +48,7 @@ export function reviewTextAnchorOffset(
     let nestedOwner = parent;
     let crossesOwner = false;
     while (nestedOwner && nestedOwner !== anchor) {
-      const nestedOwnerId = nestedOwner.getAttribute("data-pageroot-review-geometry-owner") || "";
+      const nestedOwnerId = nestedOwner.getAttribute("data-stemmio-review-geometry-owner") || "";
       if (nestedOwnerId && nestedOwnerId !== ownerId) {
         crossesOwner = true;
         break;
@@ -59,7 +59,7 @@ export function reviewTextAnchorOffset(
       parent
       && !crossesOwner
       && parent.namespaceURI === "http://www.w3.org/1999/xhtml"
-      && !parent.closest("script, style, noscript, template, [data-pageroot-review-projection-layer]"),
+      && !parent.closest("script, style, noscript, template, [data-stemmio-review-projection-layer]"),
     );
     if (visibleTextNode) {
       if (node === firstEntry.node) return offset + firstEntry.nodeOffset;
@@ -74,14 +74,14 @@ export function applyTextFootprintMetadata(
   marker: HTMLElement,
   group: ReviewTextEvidenceGroup,
 ) {
-  marker.dataset.pagerootReviewTextGroup = group.id;
-  marker.dataset.pagerootReviewTextOperation = group.operation;
-  marker.dataset.pagerootReviewSemanticOwner = group.semanticOwnerId;
-  marker.dataset.pagerootReviewGeometryOwner = group.geometryOwnerId;
-  marker.dataset.pagerootReviewDisplayGroup = group.displayGroupId;
-  marker.dataset.pagerootReviewDisplayOwnerRef = group.displayOwnerId;
-  marker.dataset.pagerootReviewDisplayScope = group.displayScope;
-  marker.dataset.pagerootReviewGeometryMode = group.geometryMode;
+  marker.dataset.stemmioReviewTextGroup = group.id;
+  marker.dataset.stemmioReviewTextOperation = group.operation;
+  marker.dataset.stemmioReviewSemanticOwner = group.semanticOwnerId;
+  marker.dataset.stemmioReviewGeometryOwner = group.geometryOwnerId;
+  marker.dataset.stemmioReviewDisplayGroup = group.displayGroupId;
+  marker.dataset.stemmioReviewDisplayOwnerRef = group.displayOwnerId;
+  marker.dataset.stemmioReviewDisplayScope = group.displayScope;
+  marker.dataset.stemmioReviewGeometryMode = group.geometryMode;
 }
 
 export function wrapTextRanges(
@@ -107,7 +107,7 @@ export function wrapTextRanges(
     const appendDifference = (value: string, group: ReviewTextEvidenceGroup) => {
       if (!value) return;
       const marker = node.ownerDocument.createElement("span");
-      marker.dataset.pagerootReviewText = tone;
+      marker.dataset.stemmioReviewText = tone;
       applyTextFootprintMetadata(marker, group);
       marker.textContent = value;
       fragment.append(marker);
@@ -134,16 +134,16 @@ export function markSemanticTextFootprintOwner(
   groups: ReviewTextEvidenceGroup[],
 ) {
   unit.element.setAttribute(
-    "data-pageroot-review-geometry-owner",
+    "data-stemmio-review-geometry-owner",
     groups[0]?.geometryOwnerId || "",
   );
   const displayOwners = new Set(
-    (unit.element.getAttribute("data-pageroot-review-display-owner") || "")
+    (unit.element.getAttribute("data-stemmio-review-display-owner") || "")
       .split(/\s+/u)
       .filter(Boolean),
   );
   groups.forEach((group) => displayOwners.add(group.displayOwnerId));
-  unit.element.setAttribute("data-pageroot-review-display-owner", [...displayOwners].join(" "));
+  unit.element.setAttribute("data-stemmio-review-display-owner", [...displayOwners].join(" "));
 }
 
 export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
@@ -152,8 +152,8 @@ export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
   const alreadyMarked = (element: Element | null | undefined) => Boolean(
     element
     && (
-      element.matches("[data-pageroot-review-text]")
-      || element.querySelector("[data-pageroot-review-text]")
+      element.matches("[data-stemmio-review-text]")
+      || element.querySelector("[data-stemmio-review-text]")
     )
   );
   let changed = alreadyMarked(graph.root.before?.element)

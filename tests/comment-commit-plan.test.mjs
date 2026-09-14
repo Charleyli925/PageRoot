@@ -6,7 +6,7 @@ import {
   planCommentCommit,
 } from "../app/application/comment/commit-plan.js";
 
-const ELEMENT_ID = "pr1_11111111111141118111111111111111";
+const ELEMENT_ID = "sm1_11111111111141118111111111111111";
 
 test("comment commit plan fail-closes disposed, missing, unsafe, uploading and empty composers", () => {
   assert.equal(planCommentCommit({ disposed: true }).code, "COMMENT_WORKFLOW_DISPOSED");
@@ -52,7 +52,7 @@ test("comment commit plan fail-closes disposed, missing, unsafe, uploading and e
   }), true);
   assert.equal(isSavableCommentTarget({
     resolution: "exact",
-    elementId: "pr1_invalid",
+    elementId: "sm1_invalid",
   }), false);
 });
 

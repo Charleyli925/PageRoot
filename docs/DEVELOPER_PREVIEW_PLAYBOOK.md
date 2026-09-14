@@ -7,15 +7,15 @@
 Preview 的运行目录固定为：
 
 ```text
-~/Library/Application Support/PageRoot Developer Preview/
+~/Library/Application Support/Stemmio Developer Preview/
   应用设置、标签页状态、最近项目、加密凭证文件
   agents/
   recovery-journals-v1/
   chromium/
-~/Documents/PageRoot Developer Preview/
+~/Documents/Stemmio Developer Preview/
   项目/
   项目记录/
-~/Library/Logs/PageRoot Developer Preview/
+~/Library/Logs/Stemmio Developer Preview/
 ```
 
 源码开发和 E2E 使用各自的临时隔离目录；它们不会把正式版或 Preview 的数据当作测试夹具。Preview 的 `sessionData` 明确位于 `chromium/`，其中 Cookies 等会话数据随 Preview 保留，不能当作普通缓存清空。
@@ -70,7 +70,7 @@ electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID 
 2. 选择需要验证的提交所在分支。
 3. 架构固定为 `arm64`。
 4. 手动点击运行。
-5. 下载名为 `PageRoot-developer-preview-…` 的 Actions artifact。
+5. 下载名为 `Stemmio-developer-preview-…` 的 Actions artifact。
 
 工作流摘要会同时给出“安装包内容报告”，artifact 内也包含
 `package-delivery-report.json` 和可直接用于交付回复的
@@ -82,8 +82,8 @@ electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID 
 
 开发者测试包同时通过应用名、安装包名和版本号表明身份：
 
-- 安装后的应用名固定为 `PageRoot Developer Preview`，Bundle ID 固定在正式版 ID 的 `.developer-preview` 子标识下，因此可以和正式版 `PageRoot` 并存。
-- DMG 固定命名为 `PageRoot-Developer-Preview-<测试版本>-<架构>.dmg`。
+- 安装后的应用名固定为 `Stemmio Developer Preview`，Bundle ID 固定在正式版 ID 的 `.developer-preview` 子标识下，因此可以和正式版 `Stemmio` 并存。
+- DMG 固定命名为 `Stemmio-Developer-Preview-<测试版本>-<架构>.dmg`。
 - `developer-preview.json` 同时记录源码版本、最近正式 tag、测试序号、测试版本、应用名和 Bundle ID。
 
 测试版本先由最近一个正式 `vA.B.C` tag 和该 tag 之后的 first-parent 提交序号 `N` 生成易读序号：补丁位使用“下一正式补丁号 + `999` + 序号”。例如正式版本为 `0.9.5` 时：
@@ -93,11 +93,11 @@ electron-builder 会从当前 macOS 钥匙串自动选择稳定的 Developer ID 
 
 完整测试版本始终在这个前缀后附加精确 commit 标识，例如
 `0.9.69991-dev.g<40 位 Commit SHA>`；对应产物为
-`PageRoot-Developer-Preview-0.9.69991-dev.g<40 位 Commit SHA>-arm64.dmg`。
+`Stemmio-Developer-Preview-0.9.69991-dev.g<40 位 Commit SHA>-arm64.dmg`。
 这保留了容易识别、按提交顺延的 `0.9.69991`/`0.9.69992` 规则，同时让不同
 分支上序号碰巧相同的两个 Tree 也不会共享应用或 DMG 版本。
 
-同一个提交重复构建始终得到同一个完整测试版本；新提交才会顺延。新的正式 tag 会重置基线。基线只能是 `origin` 上存在、指向 commit、消息符合发布流程的注释 `vA.B.C` tag；本地轻量 tag 或未推送的自定义 tag 不会被当作正式版本。工作流会拒绝没有该正式 tag、直接位于正式 tag 上或含未提交修改的测试构建，避免版本身份不确定。`package.json` 和正式发布产物仍保留正式版本与 `PageRoot` 名称，不会被测试包配置改写。
+同一个提交重复构建始终得到同一个完整测试版本；新提交才会顺延。新的正式 tag 会重置基线。基线只能是 `origin` 上存在、指向 commit、消息符合发布流程的注释 `vA.B.C` tag；本地轻量 tag 或未推送的自定义 tag 不会被当作正式版本。工作流会拒绝没有该正式 tag、直接位于正式 tag 上或含未提交修改的测试构建，避免版本身份不确定。`package.json` 和正式发布产物仍保留正式版本与 `Stemmio` 名称，不会被测试包配置改写。
 
 ## 自动校验范围
 

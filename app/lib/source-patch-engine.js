@@ -23,10 +23,10 @@ import {
 } from "./editable-island.js";
 import { isNativeDirectEditRoot } from "./native-edit-capability.js";
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  generatePagerootElementId,
-  isValidPagerootElementId,
-} from "./pageroot-element-identity.js";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  generateStemmioElementId,
+  isValidStemmioElementId,
+} from "./stemmio-element-identity.js";
 import {
   cleanTargetRef,
   createInsertionPointTargetRef,
@@ -124,7 +124,7 @@ function liveElementIdFromCommand(command, key) {
 function officialCommandTarget(index, command, key = "targetRef") {
   const elementId = liveElementIdFromCommand(command, key);
   if (!elementId) return null;
-  const element = index.byPagerootId.get(elementId);
+  const element = index.byStemmioId.get(elementId);
   if (!element || element.type !== "element") {
     fail(
       "TARGET_ORPHANED",
@@ -226,13 +226,13 @@ function isDescendantNode(index, node, ancestor) {
 }
 
 function semanticElement(index, elementId, expectedTagName, fieldName) {
-  if (!isValidPagerootElementId(elementId)) {
+  if (!isValidStemmioElementId(elementId)) {
     fail("SEMANTIC_ELEMENT_ID_INVALID", `${fieldName} must carry a valid stable element ID.`, {
       fieldName,
       elementId,
     });
   }
-  const element = index.byPagerootId.get(elementId) ?? null;
+  const element = index.byStemmioId.get(elementId) ?? null;
   if (!element) {
     fail("SEMANTIC_ELEMENT_NOT_FOUND", `${fieldName} is not present in the exact source.`, {
       fieldName,
@@ -252,11 +252,11 @@ function semanticElement(index, elementId, expectedTagName, fieldName) {
 }
 
 function assertCompleteSemanticIdentity(index) {
-  if (!index.pagerootIdentity?.complete || !index.pagerootIdentity.valid) {
+  if (!index.stemmioIdentity?.complete || !index.stemmioIdentity.valid) {
     fail(
       "SEMANTIC_IDENTITY_INCOMPLETE",
       "Semantic operations require a managed source with complete valid element identity.",
-      { pagerootIdentity: index.pagerootIdentity },
+      { stemmioIdentity: index.stemmioIdentity },
     );
   }
 }
@@ -278,7 +278,7 @@ function directChildElement(index, parent, elementId, expectedTagName, fieldName
     fail("SEMANTIC_INSERTION_PARENT_MISMATCH", `${fieldName} is not a direct child of the declared parent.`, {
       fieldName,
       elementId,
-      parentElementId: parent.pagerootId,
+      parentElementId: parent.stemmioId,
     });
   }
   return element;
@@ -293,7 +293,7 @@ function semanticInsertion(index, command) {
   );
   if (parent.isVoid) {
     fail("SEMANTIC_VOID_PARENT", "A void element cannot own an insertion point.", {
-      parentElementId: parent.pagerootId,
+      parentElementId: parent.stemmioId,
       tagName: parent.tagName,
     });
   }
@@ -321,10 +321,10 @@ function semanticInsertion(index, command) {
 
 function semanticStructurePlanElements(index) {
   return index.elements.map((element) => ({
-    elementId: element.pagerootId,
+    elementId: element.stemmioId,
     tagName: element.tagName,
     parentElementId: element.parentId
-      ? index.byNodeId.get(element.parentId)?.pagerootId ?? null
+      ? index.byNodeId.get(element.parentId)?.stemmioId ?? null
       : null,
     startOffset: element.range.startOffset,
     endOffset: element.range.endOffset,
@@ -361,11 +361,11 @@ function semanticFragmentIndex(fragmentHtml, existingIndex, allowedExistingIds =
     scope: "fragment",
     caller: "planSemanticOperationPatch:fragment",
   });
-  if (!fragmentIndex.integrity.ok || !fragmentIndex.pagerootIdentity.complete) {
+  if (!fragmentIndex.integrity.ok || !fragmentIndex.stemmioIdentity.complete) {
     fail(
       "SEMANTIC_FRAGMENT_IDENTITY_INVALID",
       "Inserted or replacement HTML must contain complete valid stable identity.",
-      { pagerootIdentity: fragmentIndex.pagerootIdentity, rangeErrors: fragmentIndex.rangeErrors },
+      { stemmioIdentity: fragmentIndex.stemmioIdentity, rangeErrors: fragmentIndex.rangeErrors },
     );
   }
   const rootElements = fragmentIndex.elements.filter((element) => element.parentId === null);
@@ -382,9 +382,9 @@ function semanticFragmentIndex(fragmentHtml, existingIndex, allowedExistingIds =
     fail("SEMANTIC_FRAGMENT_ROOT_INVALID", "Structural HTML cannot contain authored content outside its root element.");
   }
   for (const element of fragmentIndex.elements) {
-    if (existingIndex.byPagerootId.has(element.pagerootId) && !allowedExistingIds.has(element.pagerootId)) {
+    if (existingIndex.byStemmioId.has(element.stemmioId) && !allowedExistingIds.has(element.stemmioId)) {
       fail("SEMANTIC_FRAGMENT_ID_COLLISION", "Structural HTML reuses an identity owned outside its target.", {
-        elementId: element.pagerootId,
+        elementId: element.stemmioId,
       });
     }
   }
@@ -435,7 +435,7 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
     if (!HTML_ATTRIBUTE_NAME_PATTERN.test(attributeName)) {
       fail("SEMANTIC_ATTRIBUTE_NAME_INVALID", "The attribute name is not valid HTML source.", { attributeName });
     }
-    if (attributeName === PAGEROOT_ELEMENT_ID_ATTRIBUTE) {
+    if (attributeName === STEMMIO_ELEMENT_ID_ATTRIBUTE) {
       fail("SEMANTIC_IDENTITY_ATTRIBUTE_PROTECTED", "Stable identity cannot be edited as an ordinary attribute.");
     }
     const attributes = target.attributesByName.get(attributeName) ?? [];
@@ -487,16 +487,16 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
     const subtreeIds = new Set(
       index.elements
         .filter((element) => element.nodeId === target.nodeId || isDescendantNode(index, element, target))
-        .map((element) => element.pagerootId),
+        .map((element) => element.stemmioId),
     );
     const fragment = semanticFragmentIndex(command.elementHtml, index, subtreeIds);
-    if (fragment.root.pagerootId !== target.pagerootId) {
+    if (fragment.root.stemmioId !== target.stemmioId) {
       fail(
         "SEMANTIC_REPLACEMENT_ROOT_MISMATCH",
         "A replacement subtree must retain the target root ID.",
         {
-          expectedElementId: target.pagerootId,
-          actualElementId: fragment.root.pagerootId,
+          expectedElementId: target.stemmioId,
+          actualElementId: fragment.root.stemmioId,
         },
       );
     }
@@ -735,13 +735,13 @@ export function planEditableIslandPatch(indexOrHtml, command, options = null) {
     );
   }
 
-  const replayPagerootIds = options?.token === EDITABLE_ISLAND_ID_REPLAY_TOKEN
-    ? options.pagerootIds
+  const replayStemmioIds = options?.token === EDITABLE_ISLAND_ID_REPLAY_TOKEN
+    ? options.stemmioIds
     : null;
-  const materialized = index.pagerootIdentity.complete
+  const materialized = index.stemmioIdentity.complete
     ? materializeEditableIslandHtml(String(command.nextInnerHtml), {
         baselineInnerHtml: island.innerHtml,
-        replayPagerootIds,
+        replayStemmioIds,
         randomUUID: options?.randomUUID,
       })
     : {
@@ -749,7 +749,7 @@ export function planEditableIslandPatch(indexOrHtml, command, options = null) {
           String(command.nextInnerHtml),
           { baselineInnerHtml: island.innerHtml },
         ),
-        createdPagerootIds: [],
+        createdStemmioIds: [],
       };
   const nextInnerHtml = materialized.html;
   const patch = sourcePatch(
@@ -772,7 +772,7 @@ export function planEditableIslandPatch(indexOrHtml, command, options = null) {
       rootTagName: island.element.tagName,
       beforeInnerHtml: island.innerHtml,
       nextInnerHtml,
-      createdPagerootIds: materialized.createdPagerootIds,
+      createdStemmioIds: materialized.createdStemmioIds,
       writeScope: "editable-island-inner-html",
     },
   );
@@ -781,11 +781,11 @@ export function planEditableIslandPatch(indexOrHtml, command, options = null) {
 export function planSemanticEditableIslandPatch(
   indexOrHtml,
   command,
-  createdPagerootIds,
+  createdStemmioIds,
 ) {
   return planEditableIslandPatch(indexOrHtml, command, {
     token: EDITABLE_ISLAND_ID_REPLAY_TOKEN,
-    pagerootIds: createdPagerootIds,
+    stemmioIds: createdStemmioIds,
   });
 }
 
@@ -1340,7 +1340,7 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
           endOffset: segment.endOffset,
         })),
         writeScope: "existing-text-range-wrapper-inline-style",
-        coalescedTextRangeElementId: segmentParent.pagerootId ?? segmentParent.nodeId,
+        coalescedTextRangeElementId: segmentParent.stemmioId ?? segmentParent.nodeId,
       },
     );
   }
@@ -1348,36 +1348,36 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
   // this materialization before source publication. In supported inline flow,
   // this wrapper preserves Chromium's real caret/beforeinput/input behavior.
   const replayIds = replay?.token === TEXT_RANGE_ID_REPLAY_TOKEN
-    ? replay.pagerootIds
+    ? replay.stemmioIds
     : null;
-  const createdPagerootIds = index.pagerootIdentity.complete
+  const createdStemmioIds = index.stemmioIdentity.complete
     ? segments.map((_, segmentIndex) => {
-      const pagerootId = replayIds?.[segmentIndex]
-        ?? generatePagerootElementId(replay?.randomUUID);
-      if (!isValidPagerootElementId(pagerootId) || index.byPagerootId.has(pagerootId)) {
+      const stemmioId = replayIds?.[segmentIndex]
+        ?? generateStemmioElementId(replay?.randomUUID);
+      if (!isValidStemmioElementId(stemmioId) || index.byStemmioId.has(stemmioId)) {
         fail(
           "TEXT_RANGE_IDENTITY_INVALID",
           "A new text-range wrapper requires a fresh valid persistent identity.",
         );
       }
-      return pagerootId;
+      return stemmioId;
     })
     : [];
-  if (replayIds && replayIds.length !== createdPagerootIds.length) {
+  if (replayIds && replayIds.length !== createdStemmioIds.length) {
     fail(
       "TEXT_RANGE_IDENTITY_INVALID",
       "Text-range wrapper identity evidence does not match the selected segments.",
     );
   }
-  if (new Set(createdPagerootIds).size !== createdPagerootIds.length) {
+  if (new Set(createdStemmioIds).size !== createdStemmioIds.length) {
     fail(
       "TEXT_RANGE_IDENTITY_INVALID",
       "Text-range wrapper identities must be unique within the operation.",
     );
   }
   const patches = segments.flatMap((segment, segmentIndex) => {
-    const persistentIdentity = index.pagerootIdentity.complete
-      ? ` ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${createdPagerootIds[segmentIndex]}"`
+    const persistentIdentity = index.stemmioIdentity.complete
+      ? ` ${STEMMIO_ELEMENT_ID_ATTRIBUTE}="${createdStemmioIds[segmentIndex]}"`
       : "";
     const openingTag = `<span style="${TEXT_RANGE_LAYOUT_GUARD}; ${declaration}"${persistentIdentity}>`;
     return [
@@ -1422,7 +1422,7 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
         endOffset: segment.endOffset,
       })),
       writeScope: "selected-text-ranges",
-      createdPagerootIds,
+      createdStemmioIds,
     },
   );
 }
@@ -1430,11 +1430,11 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
 export function planSemanticTextRangeStylePatch(
   indexOrHtml,
   command,
-  createdPagerootIds,
+  createdStemmioIds,
 ) {
   return planTextRangeStylePatch(indexOrHtml, command, {
     token: TEXT_RANGE_ID_REPLAY_TOKEN,
-    pagerootIds: createdPagerootIds,
+    stemmioIds: createdStemmioIds,
   });
 }
 
@@ -1619,7 +1619,7 @@ export function planSiblingReorderPatch(indexOrHtml, command) {
   }
 
   let patches;
-  if (index.pagerootIdentity?.complete) {
+  if (index.stemmioIdentity?.complete) {
     const movedPosition = nextOrder.indexOf(moving.nodeId);
     const nextSiblingNodeId = nextOrder[movedPosition + 1] ?? null;
     const nextSibling = nextSiblingNodeId
@@ -1627,9 +1627,9 @@ export function planSiblingReorderPatch(indexOrHtml, command) {
       : null;
     patches = sharedSemanticStructurePatches(index, {
       type: "moveElement",
-      targetElementId: moving.pagerootId,
-      parentElementId: parent.pagerootId,
-      beforeElementId: nextSibling?.pagerootId ?? null,
+      targetElementId: moving.stemmioId,
+      parentElementId: parent.stemmioId,
+      beforeElementId: nextSibling?.stemmioId ?? null,
     });
   } else {
     let firstChanged = -1;
@@ -2019,7 +2019,7 @@ function authorizePatchPlan(plan, index, patches) {
         beforeInnerHtml: plan.metadata?.beforeInnerHtml,
         nextInnerHtml: plan.metadata?.nextInnerHtml,
         expectedSourceSha256: index.sourceSha256,
-      }, plan.metadata?.createdPagerootIds ?? []);
+      }, plan.metadata?.createdStemmioIds ?? []);
       if (!patchesEqual(patches, expected.patches)) {
         fail(
           "PATCH_PLAN_TAMPERED",
@@ -2119,7 +2119,7 @@ function authorizePatchPlan(plan, index, patches) {
         expectedSourceSha256: index.sourceSha256,
       }, {
         token: TEXT_RANGE_ID_REPLAY_TOKEN,
-        pagerootIds: plan.metadata?.createdPagerootIds,
+        stemmioIds: plan.metadata?.createdStemmioIds,
       });
       if (!patchesEqual(patches, expected.patches)) {
         fail(
@@ -2277,8 +2277,8 @@ function directChildUnder(index, node, parentId) {
 }
 
 function deterministicMappedNode(plan, baseIndex, nextIndex, patches, baseNode) {
-  if (baseNode.type === "element" && baseNode.pagerootId) {
-    const stableElement = nextIndex.byPagerootId.get(baseNode.pagerootId) ?? null;
+  if (baseNode.type === "element" && baseNode.stemmioId) {
+    const stableElement = nextIndex.byStemmioId.get(baseNode.stemmioId) ?? null;
     return stableElement?.tagName === baseNode.tagName ? stableElement : null;
   }
   const reorderMap = reorderIdentityMap(plan, baseIndex, nextIndex);

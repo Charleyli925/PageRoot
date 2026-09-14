@@ -56,13 +56,13 @@ function runGit(repository, arguments_) {
 }
 
 async function createPreviewRepository() {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-preview-identity-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-preview-identity-"));
   const repository = path.join(root, "repository");
   const origin = path.join(root, "origin.git");
   await mkdir(repository);
   runGit(repository, ["init"]);
-  runGit(repository, ["config", "user.name", "PageRoot Test"]);
-  runGit(repository, ["config", "user.email", "pageroot-test@example.invalid"]);
+  runGit(repository, ["config", "user.name", "Stemmio Test"]);
+  runGit(repository, ["config", "user.email", "stemmio-test@example.invalid"]);
   runGit(repository, ["init", "--bare", origin]);
   runGit(repository, ["remote", "add", "origin", origin]);
   return { root, repository };
@@ -70,7 +70,7 @@ async function createPreviewRepository() {
 
 function createOfficialStableTag(repository, version) {
   const tag = `v${version}`;
-  runGit(repository, ["tag", "-a", tag, "-m", `PageRoot ${version}`]);
+  runGit(repository, ["tag", "-a", tag, "-m", `Stemmio ${version}`]);
   runGit(repository, ["push", "origin", `refs/tags/${tag}`]);
 }
 
@@ -177,7 +177,7 @@ test("developer preview ignores non-official semver-shaped tags", async () => {
     runGit(repository, ["-c", "commit.gpgsign=false", "commit", "-m", "preview"]);
     runGit(repository, ["tag", "v99.0.0"]);
     runGit(repository, ["push", "origin", "refs/tags/v99.0.0"]);
-    runGit(repository, ["tag", "-a", "v98.0.0", "-m", "PageRoot 98.0.0"]);
+    runGit(repository, ["tag", "-a", "v98.0.0", "-m", "Stemmio 98.0.0"]);
 
     const identity = resolveDeveloperPreviewIdentity({
       productRoot: repository,
@@ -205,7 +205,7 @@ test("developer preview is an explicit Developer ID DMG profile while release pa
     ["--mac", "dmg", "zip", "--arm64", "--publish", "never"],
   );
 
-  const releaseDirectory = "/tmp/pageroot-developer-preview/release";
+  const releaseDirectory = "/tmp/stemmio-developer-preview/release";
   const identity = createDeveloperPreviewIdentity({
     packageJson: sourcePackageJson,
     stableVersion: "0.9.5",
@@ -215,11 +215,11 @@ test("developer preview is an explicit Developer ID DMG profile while release pa
   assert.deepEqual(developerPreviewPackageJson(sourcePackageJson, identity), {
     ...sourcePackageJson,
     version: `0.9.69991-dev.g${"a".repeat(40)}`,
-    productName: "PageRoot Developer Preview",
+    productName: "Stemmio Developer Preview",
     build: {
       ...sourcePackageJson.build,
-      appId: "com.htmlai.workbench.developer-preview",
-      productName: "PageRoot Developer Preview",
+      appId: "com.stemmio.app.developer-preview",
+      productName: "Stemmio Developer Preview",
       artifactName: DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
       mac: {
         ...sourcePackageJson.build.mac,
@@ -243,9 +243,9 @@ test("developer preview is an explicit Developer ID DMG profile while release pa
       "--config.forceCodeSigning=true",
       "--config.mac.notarize=false",
       "--config.mac.hardenedRuntime=true",
-      "--config.appId=com.htmlai.workbench.developer-preview",
-      "--config.productName=PageRoot Developer Preview",
-      "--config.extraMetadata.productName=PageRoot Developer Preview",
+      "--config.appId=com.stemmio.app.developer-preview",
+      "--config.productName=Stemmio Developer Preview",
+      "--config.extraMetadata.productName=Stemmio Developer Preview",
       `--config.extraMetadata.version=0.9.69991-dev.g${"a".repeat(40)}`,
       `--config.buildVersion=0.9.69991-dev.g${"a".repeat(40)}`,
       `--config.mac.bundleVersion=0.9.69991-dev.g${"a".repeat(40)}`,
@@ -259,7 +259,7 @@ test("developer preview is an explicit Developer ID DMG profile while release pa
       version: `0.9.69991-dev.g${"a".repeat(40)}`,
       architecture: "arm64",
     }),
-    `PageRoot-Developer-Preview-0.9.69991-dev.g${"a".repeat(40)}-arm64.dmg`,
+    `Stemmio-Developer-Preview-0.9.69991-dev.g${"a".repeat(40)}-arm64.dmg`,
   );
 });
 
@@ -272,7 +272,7 @@ test("developer preview DMG uses its own first-open instructions", () => {
     commitSha: "a".repeat(40),
   });
   const sourceDmg = {
-    title: "PageRoot ${version}",
+    title: "Stemmio ${version}",
     contents: [
       { x: 170, y: 210, type: "file" },
       { x: 330, y: 350, type: "file", path: "desktop/resources/首次打开说明.txt" },
@@ -287,7 +287,7 @@ test("developer preview DMG uses its own first-open instructions", () => {
   );
   assert.deepEqual(previewPackageJson.build.dmg, {
     ...sourceDmg,
-    title: `PageRoot Developer Preview ${identity.version}`,
+    title: `Stemmio Developer Preview ${identity.version}`,
     contents: [
       sourceDmg.contents[0],
       { ...sourceDmg.contents[1], path: "desktop/resources/开发者测试版说明.txt" },
@@ -296,7 +296,7 @@ test("developer preview DMG uses its own first-open instructions", () => {
 });
 
 test("developer preview writes a self-contained builder config for its DMG overrides", async () => {
-  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-preview-builder-config-"));
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-preview-builder-config-"));
   try {
     const sourcePackageJson = developerPreviewSourcePackageJson();
     const identity = createDeveloperPreviewIdentity({
@@ -311,7 +311,7 @@ test("developer preview writes a self-contained builder config for its DMG overr
         build: {
           ...sourcePackageJson.build,
           dmg: {
-            title: "PageRoot ${version}",
+            title: "Stemmio ${version}",
             contents: [{ path: "desktop/resources/首次打开说明.txt" }],
           },
         },
@@ -346,7 +346,7 @@ test("developer preview keeps local signing identity inputs and strips release c
     APPLE_APP_SPECIFIC_PASSWORD: "private-app-password",
     APPLE_TEAM_ID: "TEAM",
     GITHUB_TOKEN: "private-token",
-    PAGEROOT_POSTHOG_TOKEN: "phc_private",
+    STEMMIO_POSTHOG_TOKEN: "phc_private",
   });
   assert.equal(environment.PATH, "/usr/bin");
   for (const key of [
@@ -354,19 +354,19 @@ test("developer preview keeps local signing identity inputs and strips release c
     "APPLE_APP_SPECIFIC_PASSWORD",
     "APPLE_TEAM_ID",
     "GITHUB_TOKEN",
-    "PAGEROOT_POSTHOG_TOKEN",
+    "STEMMIO_POSTHOG_TOKEN",
   ]) {
     assert.equal(environment[key], undefined, `${key} must not reach preview packaging`);
   }
   assert.equal(environment.CSC_LINK, "private-signing-material");
   assert.equal(environment.CSC_KEY_PASSWORD, "private-password");
   assert.equal(environment.CSC_IDENTITY_AUTO_DISCOVERY, "true");
-  assert.equal(environment.PAGEROOT_REQUIRE_NOTARIZATION, "0");
-  assert.equal(environment.PAGEROOT_REQUIRE_TELEMETRY_CONFIG, "0");
+  assert.equal(environment.STEMMIO_REQUIRE_NOTARIZATION, "0");
+  assert.equal(environment.STEMMIO_REQUIRE_TELEMETRY_CONFIG, "0");
 });
 
 test("developer preview attestation is explicitly non-release and binds exact bytes", async () => {
-  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-preview-contract-"));
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-preview-contract-"));
   try {
     const identity = createDeveloperPreviewIdentity({
       packageJson: developerPreviewSourcePackageJson(),
@@ -411,14 +411,14 @@ test("developer preview attestation is explicitly non-release and binds exact by
     assert.equal(record.attestation.buildSequence, 2);
     assert.equal(record.attestation.sequenceVersion, "0.9.69992");
     assert.equal(record.attestation.version, `0.9.69992-dev.g${"a".repeat(40)}`);
-    assert.equal(record.attestation.productName, "PageRoot Developer Preview");
+    assert.equal(record.attestation.productName, "Stemmio Developer Preview");
     assert.equal(
       record.attestation.bundleIdentifier,
-      "com.htmlai.workbench.developer-preview",
+      "com.stemmio.app.developer-preview",
     );
     assert.equal(
       record.attestation.artifact.file,
-      `PageRoot-Developer-Preview-0.9.69992-dev.g${"a".repeat(40)}-arm64.dmg`,
+      `Stemmio-Developer-Preview-0.9.69992-dev.g${"a".repeat(40)}-arm64.dmg`,
     );
     assert.equal(
       record.attestation.artifact.sha256,
@@ -481,14 +481,14 @@ test("developer preview stays optional, manual-only and independent from release
   );
   assert.doesNotMatch(
     workflow,
-    /(?:APPLE_ID|APPLE_APP_SPECIFIC_PASSWORD|PAGEROOT_POSTHOG_TOKEN|PAGEROOT_SMOKE_)/u,
+    /(?:APPLE_ID|APPLE_APP_SPECIFIC_PASSWORD|STEMMIO_POSTHOG_TOKEN|STEMMIO_SMOKE_)/u,
   );
   assert.match(workflow, /developer-package/u);
   assert.match(workflow, /retention-days:\s*7/u);
   assert.match(workflow, /not eligible for a tag, GitHub Release, or updater publication/u);
   assert.match(
     gateRunner,
-    /PAGEROOT_EXPECTED_BUNDLE_ID:\s*packagedPackageJson\.build\.appId/u,
+    /STEMMIO_EXPECTED_BUNDLE_ID:\s*packagedPackageJson\.build\.appId/u,
     "packaged startup must receive the Developer Preview Bundle ID, not the stable package identity",
   );
 });

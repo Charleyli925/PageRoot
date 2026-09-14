@@ -5,7 +5,7 @@ import path from "node:path";
 // Seed old terminal records directly: calling today's completeRequest would
 // exercise the new Candidate path and would not prove historical compatibility.
 export async function writeLegacyNoChangeOutcome({ projectRoot, requestId }) {
-  const controlRoot = path.join(projectRoot, ".pageroot");
+  const controlRoot = path.join(projectRoot, ".stemmio");
   const requestRoot = path.join(controlRoot, "requests", requestId);
   const requestPath = path.join(requestRoot, "request.json");
   const request = JSON.parse(await readFile(requestPath, "utf8"));

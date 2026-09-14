@@ -306,7 +306,7 @@ test("Bridge keeps preflight internals private while public execution sessions i
       run: {
         ...IDENTITY,
         status: "processing",
-        requestPath: "/synthetic/project/.pageroot/requests/req_provider_contract_001",
+        requestPath: "/synthetic/project/.stemmio/requests/req_provider_contract_001",
         promptPath: "/synthetic/request/PROMPT.md",
         outputPath: "/synthetic/request/output/candidate.html",
         completionPath: "/synthetic/request/completion.json",

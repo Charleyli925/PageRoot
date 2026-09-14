@@ -3,7 +3,7 @@ import { resolveReviewCommentSourceElement } from "./review-comment-source-map.j
 // Grouping rules for the read-only comment markers drawn over a preview.
 //
 // Pure and DOM-free: it maps saved comments onto the Stable IDs the preview
-// already stamps as data-pageroot-id, so the marker layer never needs a
+// already stamps as data-stemmio-id, so the marker layer never needs a
 // second annotation pass over authored HTML. The measure protocol still calls
 // that identity `nodeId` so the preview iframe contract stays one field.
 //
@@ -46,8 +46,8 @@ export function previewCommentMarkerGroups(sourceIndex, comments) {
     if (!target || isGlobalTarget(target)) continue;
     const sourceElement = resolveReviewCommentSourceElement(sourceIndex, target);
     // Preview DOM is addressed by Stable ID. An ephemeral parse nodeId cannot
-    // appear as data-pageroot-id, so it must not be sent to the page.
-    const elementId = sourceElement?.pagerootId;
+    // appear as data-stemmio-id, so it must not be sent to the page.
+    const elementId = sourceElement?.stemmioId;
     if (!elementId) continue;
     const existing = byNodeId.get(elementId);
     const item = {

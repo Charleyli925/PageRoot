@@ -30,7 +30,7 @@ const visibleTextGateMs = Math.max(
 );
 const sessionMarkerArgument = process.argv.find((argument) => argument.startsWith("--session-marker="));
 
-const sessionId = "session_pageroot_e2e_codex";
+const sessionId = "session_stemmio_e2e_codex";
 let requestRoot = "";
 
 function promptText(params) {
@@ -44,11 +44,11 @@ function finalizerRequest(params) {
   const line = promptText(params)
     .split(/\r?\n/u)
     .find((value) => value.trim().startsWith("{\"command\""));
-  if (!line) throw new Error("PageRoot finalizer request is missing");
+  if (!line) throw new Error("Stemmio finalizer request is missing");
   return JSON.parse(line);
 }
 
-const app = acp.agent({ name: "pageroot-e2e-codex" })
+const app = acp.agent({ name: "stemmio-e2e-codex" })
   .onRequest(acp.methods.agent.initialize, () => ({
     protocolVersion: acp.PROTOCOL_VERSION,
     agentCapabilities: { loadSession: false },
@@ -57,8 +57,8 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
       { id: "codex-api-key", name: "Codex API key" },
     ],
     agentInfo: {
-      name: "pageroot-e2e-codex",
-      title: "PageRoot E2E Codex",
+      name: "stemmio-e2e-codex",
+      title: "Stemmio E2E Codex",
       version: "1.7.0",
     },
   }))
@@ -112,7 +112,7 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
       models: {
         currentModelId: "gpt-synthetic",
         availableModels: [
-          { modelId: "gpt-synthetic", name: "GPT Synthetic", description: "PageRoot synthetic Codex model" },
+          { modelId: "gpt-synthetic", name: "GPT Synthetic", description: "Stemmio synthetic Codex model" },
         ],
       },
     };
@@ -147,7 +147,7 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
     const candidate = input.content
       .replace(
         /<body([^>]*)>/iu,
-        '<body$1 data-pageroot-codex-acp="e2e">',
+        '<body$1 data-stemmio-codex-acp="e2e">',
       )
       .replace(
         /(<h1\b[^>]*>)\u771f\u5b9e /iu,
@@ -157,8 +157,8 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
       sessionId,
       update: {
         sessionUpdate: "tool_call",
-        toolCallId: "tool_pageroot_e2e_codex",
-        title: "Build PageRoot Candidate",
+        toolCallId: "tool_stemmio_e2e_codex",
+        title: "Build Stemmio Candidate",
         kind: "edit",
         status: "in_progress",
         locations: [{ path: outputPath }],
@@ -180,7 +180,7 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
       terminalId: terminal.terminalId,
     });
     if (status.exitCode !== 0 || status.signal) {
-      throw new Error("PageRoot finalizer failed");
+      throw new Error("Stemmio finalizer failed");
     }
     await client.request(acp.methods.client.terminal.release, {
       sessionId,

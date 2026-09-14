@@ -130,7 +130,7 @@ export function chooseNativeEditHostMode({
 
 /**
  * display:contents is not unconditional proof of event loss. When mutation
- * observation is available, PageRoot may enter optimistically: a missing
+ * observation is available, Stemmio may enter optimistically: a missing
  * beforeinput/input pair is detected and rolled back before SourcePatch.
  */
 export function classifyNativeEventDelivery({

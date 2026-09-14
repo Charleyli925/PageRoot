@@ -1,10 +1,10 @@
 import { parseFragment, serialize, serializeOuter } from "parse5";
 
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  generatePagerootElementId,
-  isValidPagerootElementId,
-} from "./pageroot-element-identity.mjs";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  generateStemmioElementId,
+  isValidStemmioElementId,
+} from "./stemmio-element-identity.mjs";
 export const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 
 export const HTML_VOID_TAGS = new Set([
@@ -113,12 +113,12 @@ const RUNTIME_ATTRIBUTE_NAMES = new Set([
   "data-html-canvas-editing",
   "data-html-canvas-selected",
   "data-html-canvas-global-selected",
-  "data-pageroot-v2-editing",
+  "data-stemmio-editing",
   "role",
   "spellcheck",
 ]);
 const RUNTIME_ATTRIBUTE_PREFIXES = [
-  "data-pageroot-",
+  "data-stemmio-",
   "data-html-canvas-",
 ];
 const PROTECTED_ATTRIBUTE_NAMES = new Set([
@@ -204,7 +204,7 @@ function childNodesFor(node) {
 
 function isRuntimeAttribute(name) {
   const normalized = String(name ?? "").toLowerCase();
-  if (normalized === PAGEROOT_ELEMENT_ID_ATTRIBUTE) return false;
+  if (normalized === STEMMIO_ELEMENT_ID_ATTRIBUTE) return false;
   return RUNTIME_ATTRIBUTE_NAMES.has(normalized)
     || RUNTIME_ATTRIBUTE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
@@ -221,7 +221,7 @@ function isImmutableAtomNode(node, tagName, attributes) {
   if (IMMUTABLE_ATOM_TAGS.has(tagName)) return true;
   if (tagName === "br") return false;
   const authoredAttributes = attributes.filter(
-    (attribute) => attribute.name !== PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+    (attribute) => attribute.name !== STEMMIO_ELEMENT_ID_ATTRIBUTE,
   );
   return childNodesFor(node).length === 0 && authoredAttributes.length > 0;
 }
@@ -271,7 +271,7 @@ function protectedAttributeInventory(
         return;
       }
       for (const attribute of attributes) {
-        if (attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE) {
+        if (attribute.name === STEMMIO_ELEMENT_ID_ATTRIBUTE) {
           // Hard-break anchors may be inserted and deleted as text. Their IDs
           // are allocated at materialization time and must not freeze the
           // island against removing a line break the user just created.
@@ -403,7 +403,7 @@ function editableIslandElements(root) {
 
 function persistentElementId(node) {
   return (node.attrs ?? []).find(
-    (attribute) => attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+    (attribute) => attribute.name === STEMMIO_ELEMENT_ID_ATTRIBUTE,
   )?.value ?? null;
 }
 
@@ -411,7 +411,7 @@ export function materializeEditableIslandHtml(
   value,
   {
     baselineInnerHtml = "",
-    replayPagerootIds = null,
+    replayStemmioIds = null,
     randomUUID,
   } = {},
 ) {
@@ -446,9 +446,9 @@ export function materializeEditableIslandHtml(
       "Direct text editing can allocate identity only for a new line-break element.",
     );
   }
-  const replayIds = replayPagerootIds === null
+  const replayIds = replayStemmioIds === null
     ? null
-    : Array.isArray(replayPagerootIds) ? replayPagerootIds.map(String) : [];
+    : Array.isArray(replayStemmioIds) ? replayStemmioIds.map(String) : [];
   if (replayIds && replayIds.length !== newElements.length) {
     fail(
       "EDITABLE_ISLAND_IDENTITY_EVIDENCE_MISMATCH",
@@ -460,7 +460,7 @@ export function materializeEditableIslandHtml(
     ...nextElements.map(persistentElementId).filter(Boolean),
   ]);
   const allocatedIds = new Set();
-  const createdPagerootIds = newElements.map((node, index) => {
+  const createdStemmioIds = newElements.map((node, index) => {
     const authoredId = persistentElementId(node);
     if (authoredId && !replayIds) {
       fail(
@@ -469,9 +469,9 @@ export function materializeEditableIslandHtml(
       );
     }
     const elementId = replayIds?.[index]
-      ?? generatePagerootElementId(randomUUID);
+      ?? generateStemmioElementId(randomUUID);
     if (
-      !isValidPagerootElementId(elementId)
+      !isValidStemmioElementId(elementId)
       || baselineIds.has(elementId)
       || allocatedIds.has(elementId)
       || (!authoredId && reservedIds.has(elementId))
@@ -485,14 +485,14 @@ export function materializeEditableIslandHtml(
     if (!authoredId) {
       node.attrs = [
         ...(node.attrs ?? []),
-        { name: PAGEROOT_ELEMENT_ID_ATTRIBUTE, value: elementId },
+        { name: STEMMIO_ELEMENT_ID_ATTRIBUTE, value: elementId },
       ];
     }
     allocatedIds.add(elementId);
     reservedIds.add(elementId);
     return elementId;
   });
-  if (new Set(createdPagerootIds).size !== createdPagerootIds.length) {
+  if (new Set(createdStemmioIds).size !== createdStemmioIds.length) {
     fail(
       "EDITABLE_ISLAND_IDENTITY_EVIDENCE_MISMATCH",
       "Line-break identities must be unique within the edit.",
@@ -500,7 +500,7 @@ export function materializeEditableIslandHtml(
   }
   return {
     html: serialize(next),
-    createdPagerootIds,
+    createdStemmioIds,
   };
 }
 
@@ -526,7 +526,7 @@ export function editableIslandDraftHtml(
       );
     }
     node.attrs = (node.attrs ?? []).filter(
-      (attribute) => attribute.name !== PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+      (attribute) => attribute.name !== STEMMIO_ELEMENT_ID_ATTRIBUTE,
     );
   }
   return normalizeEditableIslandHtml(serialize(next), { baselineInnerHtml });

@@ -113,7 +113,7 @@ test("v3 TargetRef requires explicit resolution and accepts source anchors plus 
   const [target] = request.requirements.targets;
   assert.equal(validate(request), true, ajv.errorsText(validate.errors));
   assert.equal(target.resolution, "exact");
-  assert.equal(target.elementId, "pr1_11111111111141118111111111111111");
+  assert.equal(target.elementId, "sm1_11111111111141118111111111111111");
   assert.equal(target.expectedSourceSha256, request.baseSnapshot.sha256);
   assert.equal(target.sourceAnchor.sourceSha256, request.baseSnapshot.sha256);
   assert.equal(target.fingerprint.stableAttributes.id, "metrics-grid");
@@ -146,7 +146,7 @@ test("v3 TargetRef accepts stable element identity and a bounded selected-text l
     new URL("../fixtures/v3/change-request.frozen.json", import.meta.url),
   );
   const target = request.requirements.targets[0];
-  target.elementId = "pr1_11111111111141118111111111111111";
+  target.elementId = "sm1_11111111111141118111111111111111";
   target.expectedSourceSha256 = request.baseSnapshot.sha256;
   target.textLocator = {
     quote: "指标",
@@ -223,7 +223,7 @@ test("v3 comments can bind project attachments to the same target and AI instruc
     ...attachment,
     commentId: "comment_emphasize_value",
     targetRef: "target_metrics_grid",
-    localPath: "/Users/test/Documents/PageRoot/项目记录/projects/指标系统__20260728-124315__01234567/requests/req_metrics_cards/input/attachments/comment_emphasize_value/attachment_reference_image-参考图.png",
+    localPath: "/Users/test/Documents/Stemmio/项目记录/projects/指标系统__20260728-124315__01234567/requests/req_metrics_cards/input/attachments/comment_emphasize_value/attachment_reference_image-参考图.png",
   }];
   request.annotations.attachmentCount = 1;
   assert.equal(

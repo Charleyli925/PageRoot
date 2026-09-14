@@ -17,7 +17,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 async function isolatedRoot(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-installer-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-installer-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }

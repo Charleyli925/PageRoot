@@ -197,7 +197,7 @@ function cancellationGate(signal) {
     rejectCancelled = reject;
   });
   const cancel = () => {
-    const reason = acpPolicyError("ACP_CANCELLED", "The PageRoot ACP task was cancelled.");
+    const reason = acpPolicyError("ACP_CANCELLED", "The Stemmio ACP task was cancelled.");
     if (signal.reason instanceof Error) reason.cause = signal.reason;
     rejectCancelled(reason);
   };
@@ -301,7 +301,7 @@ export const ACP_HOST_METHODS = Object.freeze([
 
 function buildClient(host) {
   return acp
-    .client({ name: "pageroot-agent-bridge" })
+    .client({ name: "stemmio-agent-bridge" })
     .onRequest(acp.methods.client.session.requestPermission, ({ params, signal }) => (
       host.requestPermission(params, signal)
     ))
@@ -347,7 +347,7 @@ export async function probeAcpSession({
   if (expectedAgentName !== undefined && !(expectedAgentName instanceof RegExp)) {
     throw new TypeError("expectedAgentName must be a RegExp.");
   }
-  const client = acp.client({ name: "pageroot-agent-bridge-diagnose" });
+  const client = acp.client({ name: "stemmio-agent-bridge-diagnose" });
   const startupTimeout = timeoutController(startupTimeoutMs, { clock, scheduler });
   const cancellation = cancellationGate(cancellationSignal);
   try {
@@ -366,8 +366,8 @@ export async function probeAcpSession({
               terminal: false,
             },
             clientInfo: {
-              name: "pageroot-agent-bridge-diagnose",
-              title: "PageRoot Agent Bridge Diagnose",
+              name: "stemmio-agent-bridge-diagnose",
+              title: "Stemmio Agent Bridge Diagnose",
               version: "1.0.0",
             },
           },
@@ -452,7 +452,7 @@ function defaultCreateHost(policy, onEvent) {
 export function acpDriverProfile(policy, { createHost = defaultCreateHost } = {}) {
   assertObject(policy, "policy");
   if (policy[AGENT_POLICY_BRAND] !== true) {
-    throw new TypeError("The ACP driver requires a verified PageRoot policy.");
+    throw new TypeError("The ACP driver requires a verified Stemmio policy.");
   }
   if (policy.mode !== "execution") {
     throw acpPolicyError(
@@ -533,8 +533,8 @@ export async function runAcpTask({
             protocolVersion: acp.PROTOCOL_VERSION,
             clientCapabilities: profile.clientCapabilities,
             clientInfo: {
-              name: "pageroot-agent-bridge",
-              title: "PageRoot Agent Bridge",
+              name: "stemmio-agent-bridge",
+              title: "Stemmio Agent Bridge",
               version: "1.0.0",
             },
           },

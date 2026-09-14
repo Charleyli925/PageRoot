@@ -2,9 +2,9 @@ import {
   analyzeReviewStableIdTopology,
 } from "../../lib/review-stable-id-diff.js";
 import {
-  isValidPagerootElementId,
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-} from "../../lib/pageroot-element-identity.js";
+  isValidStemmioElementId,
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+} from "../../lib/stemmio-element-identity.js";
 import {
   appendProjectionFactToElement,
 } from "./parse";
@@ -34,7 +34,7 @@ export type StableSourceDifferenceAnalysis = {
   }>;
 };
 
-const COMMON_STABLE_SOURCE_ATTRIBUTE = "data-pageroot-review-stable-common";
+const COMMON_STABLE_SOURCE_ATTRIBUTE = "data-stemmio-review-stable-common";
 
 const CHANGE_SUMMARIES: Record<StableSourceChangeKind, string> = {
   moved: "移动元素",
@@ -44,13 +44,13 @@ const CHANGE_SUMMARIES: Record<StableSourceChangeKind, string> = {
 };
 
 function sourceId(element: Element | null): string | null {
-  const id = element?.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
-  return isValidPagerootElementId(id) ? id : null;
+  const id = element?.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
+  return isValidStemmioElementId(id) ? id : null;
 }
 
 function uniqueSourceElements(document: Document): Map<string, Element> {
   const elements = new Map<string, Element | null>();
-  document.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`).forEach((element) => {
+  document.querySelectorAll(`[${STEMMIO_ELEMENT_ID_ATTRIBUTE}]`).forEach((element) => {
     const id = sourceId(element);
     if (!id) return;
     elements.set(id, elements.has(id) ? null : element);
@@ -59,7 +59,7 @@ function uniqueSourceElements(document: Document): Map<string, Element> {
 }
 
 function topologyDescriptors(document: Document) {
-  const elements = [...document.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`)]
+  const elements = [...document.querySelectorAll(`[${STEMMIO_ELEMENT_ID_ATTRIBUTE}]`)]
     .flatMap((element) => {
       const id = sourceId(element);
       return id ? [{ id, element }] : [];
@@ -91,7 +91,7 @@ function comparableAttributes(element: Element, excluded: Set<string>) {
     .filter((attribute) => {
       const name = attribute.name.toLowerCase();
       return !excluded.has(name)
-        && !name.startsWith("data-pageroot-");
+        && !name.startsWith("data-stemmio-");
     })
     .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`)
     .sort()
@@ -293,16 +293,16 @@ function annotateStructureFact(
 ) {
   const semanticOwnerId = `stable-${id}`;
   const geometryOwnerId = `stable-geometry-${id}`;
-  element.setAttribute("data-pageroot-review-structure", kind);
-  element.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
-  element.setAttribute("data-pageroot-review-geometry-owner", geometryOwnerId);
+  element.setAttribute("data-stemmio-review-structure", kind);
+  element.setAttribute("data-stemmio-review-semantic-owner", semanticOwnerId);
+  element.setAttribute("data-stemmio-review-geometry-owner", geometryOwnerId);
   const displayOwnerId = `display-owner-stable-${id}`;
   const displayOwners = new Set(
-    (element.getAttribute("data-pageroot-review-display-owner") || "").split(/\s+/u).filter(Boolean),
+    (element.getAttribute("data-stemmio-review-display-owner") || "").split(/\s+/u).filter(Boolean),
   );
   displayOwners.add(displayOwnerId);
-  element.setAttribute("data-pageroot-review-display-owner", [...displayOwners].join(" "));
-  element.setAttribute("data-pageroot-review-geometry-mode", geometryModeForElement(element));
+  element.setAttribute("data-stemmio-review-display-owner", [...displayOwners].join(" "));
+  element.setAttribute("data-stemmio-review-geometry-mode", geometryModeForElement(element));
   appendProjectionFactToElement(element, {
     id: factId,
     type: "structure",

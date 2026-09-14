@@ -8,8 +8,8 @@ import {
   inspectSourceElementIdentity,
 } from "./project-file-repository/working-copy.mjs";
 import {
-  isValidPagerootElementId,
-} from "../shared/pageroot-element-identity.mjs";
+  isValidStemmioElementId,
+} from "../shared/stemmio-element-identity.mjs";
 
 export const CANDIDATE_ASSESSMENT_SCHEMA_VERSION = "1.0.0";
 
@@ -140,8 +140,8 @@ function normalizedAssetReference(value) {
     || /^(?:data|javascript|blob):/iu.test(raw)
   ) return "";
   try {
-    const parsed = new URL(raw, "https://pageroot.invalid/");
-    return `${parsed.origin === "https://pageroot.invalid" ? "" : parsed.origin}${parsed.pathname}`
+    const parsed = new URL(raw, "https://stemmio.invalid/");
+    return `${parsed.origin === "https://stemmio.invalid" ? "" : parsed.origin}${parsed.pathname}`
       .toLocaleLowerCase("und");
   } catch {
     return raw.split(/[?#]/u, 1)[0].toLocaleLowerCase("und");
@@ -168,7 +168,7 @@ function continuityFingerprint(html) {
         if (
           name.startsWith("data-")
           && !name.startsWith("data-html-canvas-")
-          && !name.startsWith("data-pageroot-")
+          && !name.startsWith("data-stemmio-")
         ) {
           anchors.add(`${name}:${value}`);
         }
@@ -343,15 +343,15 @@ function stableElementSnapshot(source) {
   const byId = new Map();
   const siblingGroups = new Map();
   const sourceElementIds = inspection.elements.map((element) => (
-    isValidPagerootElementId(element.pagerootId) ? element.pagerootId : null
+    isValidStemmioElementId(element.stemmioId) ? element.stemmioId : null
   ));
   const sourceParentElementIndices = inspection.elements.map(
     (element) => element.parentElementIndex,
   );
   for (const [elementIndex, element] of inspection.elements.entries()) {
     recordCandidateImpactWork("snapshotElementVisits");
-    const id = element.pagerootId;
-    if (!isValidPagerootElementId(id)) continue;
+    const id = element.stemmioId;
+    if (!isValidStemmioElementId(id)) continue;
     if (byId.has(id)) return null;
     const directText = authoredChildren(nodeByStartOffset.get(element.startOffset))
       .filter((child) => child?.nodeName === "#text")
@@ -364,8 +364,8 @@ function stableElementSnapshot(source) {
       id,
       sourceElementIndex: elementIndex,
       parentElementIndex: element.parentElementIndex,
-      parentId: isValidPagerootElementId(parent?.pagerootId)
-        ? parent.pagerootId
+      parentId: isValidStemmioElementId(parent?.stemmioId)
+        ? parent.stemmioId
         : null,
       namespaceURI: String(element.node?.namespaceURI || ""),
       tagName: String(element.tagName || "").toLowerCase(),
@@ -396,7 +396,7 @@ function stableElementSnapshot(source) {
 function normalizedRequestedTargetIds(values) {
   return [...new Set(
     (Array.isArray(values) ? values : [])
-      .filter((value) => isValidPagerootElementId(value)),
+      .filter((value) => isValidStemmioElementId(value)),
   )];
 }
 

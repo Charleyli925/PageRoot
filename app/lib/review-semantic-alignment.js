@@ -17,8 +17,8 @@ function identityKey(unit) {
   if (unit.identityAmbiguous) return null;
   const stableId = String(unit.stableId || "").trim();
   if (!stableId) return null;
-  if (unit.persistentIdentityClaimed && !stableId.startsWith("pageroot:")) return null;
-  return stableId.startsWith("pageroot:")
+  if (unit.persistentIdentityClaimed && !stableId.startsWith("stemmio:")) return null;
+  return stableId.startsWith("stemmio:")
     ? stableId
     : `${normalizedParent(unit)}\u0000${unit.kind}\u0000${stableId}`;
 }

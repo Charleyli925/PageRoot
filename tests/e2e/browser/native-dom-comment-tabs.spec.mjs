@@ -5,7 +5,7 @@ import {
   caseSelector,
   fixtureBuffer,
   loadFixture as loadRawFixture,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 const loadFixture = (page, name, options = {}) => loadRawFixture(page, name, {
   ...options,
@@ -529,21 +529,21 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   await previewFrame.locator('[data-p="panel-two"]').click();
   await expect(previewFrame.locator("#panel-two")).toBeVisible();
   await page.evaluate(() => {
-    window.__PAGEROOT_COMMENT_LAYOUT_STATES__ = [];
+    window.__STEMMIO_COMMENT_LAYOUT_STATES__ = [];
     const recordState = () => {
       const rail = document.querySelector('aside[aria-label="本轮评论"]');
       const state = rail?.getAttribute("data-layout-ready");
       if (
         state
-        && window.__PAGEROOT_COMMENT_LAYOUT_STATES__.at(-1) !== state
+        && window.__STEMMIO_COMMENT_LAYOUT_STATES__.at(-1) !== state
       ) {
-        window.__PAGEROOT_COMMENT_LAYOUT_STATES__.push(state);
+        window.__STEMMIO_COMMENT_LAYOUT_STATES__.push(state);
       }
     };
-    window.__PAGEROOT_COMMENT_LAYOUT_OBSERVER__ = new MutationObserver(
+    window.__STEMMIO_COMMENT_LAYOUT_OBSERVER__ = new MutationObserver(
       recordState,
     );
-    window.__PAGEROOT_COMMENT_LAYOUT_OBSERVER__.observe(document.body, {
+    window.__STEMMIO_COMMENT_LAYOUT_OBSERVER__.observe(document.body, {
       attributes: true,
       childList: true,
       subtree: true,
@@ -555,8 +555,8 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   const returningRail = page.locator('aside[aria-label="本轮评论"]');
   await expect(returningRail).toHaveAttribute("data-layout-ready", "true");
   const layoutTransition = await page.evaluate(() => {
-    window.__PAGEROOT_COMMENT_LAYOUT_OBSERVER__?.disconnect();
-    return window.__PAGEROOT_COMMENT_LAYOUT_STATES__ ?? [];
+    window.__STEMMIO_COMMENT_LAYOUT_OBSERVER__?.disconnect();
+    return window.__STEMMIO_COMMENT_LAYOUT_STATES__ ?? [];
   });
   expect(layoutTransition).toContain("false");
   expect(layoutTransition.at(-1)).toBe("true");

@@ -5,8 +5,8 @@ import path from 'node:path';
 import { ProjectFileRepository } from '../bridge/project-file-repository.mjs';
 import { sha256 } from '../bridge/lifecycle-core.mjs';
 import { fixture, html, importSource, json, promoteNextVersion } from './project-file-repository-harness.mjs';
-const manifestPath = (t) => path.join(t.projectRootPath, '.pageroot/manifest.json');
-const statePath = (t) => path.join(t.projectRootPath, '.pageroot/working-copies', t.workingCopyId + '.json');
+const manifestPath = (t) => path.join(t.projectRootPath, '.stemmio/manifest.json');
+const statePath = (t) => path.join(t.projectRootPath, '.stemmio/working-copies', t.workingCopyId + '.json');
 const current = async (v, t) => (await v.repository.resolveRegisteredProjectOpenTarget({ projectId: t.projectId })).target;
 
 async function replacementProofFixture(t, { attachment = false } = {}) {
@@ -25,9 +25,9 @@ async function replacementProofFixture(t, { attachment = false } = {}) {
   }
   const target = await promoteNextVersion(value.repository, before, 'replacement_proof_next');
   const version = (await json(manifestPath(target))).versions.at(-1);
-  const transactionPath = path.join(target.projectRootPath, '.pageroot/transactions', `current_${version.sourceOperationId}`, 'transaction.json');
+  const transactionPath = path.join(target.projectRootPath, '.stemmio/transactions', `current_${version.sourceOperationId}`, 'transaction.json');
   const preserved = (await value.repository.listPreservedDrafts({ projectId: target.projectId }))[0];
-  const preservedRoot = path.join(target.projectRootPath, '.pageroot/recovery/preserved-drafts', preserved.recoveryId);
+  const preservedRoot = path.join(target.projectRootPath, '.stemmio/recovery/preserved-drafts', preserved.recoveryId);
   const journal = { projectId: before.projectId, documentId: before.documentId, workingCopyId: before.workingCopyId,
     sourcePath: before.exactSourcePath, expectedSourceSha256: before.sourceSha256, recoveryHtmlSha256: sha256(Buffer.from(original)),
     journalSha256: sha256(Buffer.from('verified Main journal')), revision: 0, html: original, changeEvents: [] };
@@ -37,7 +37,7 @@ async function replacementProofFixture(t, { attachment = false } = {}) {
 test('replacement proof verifies completed preservation across later snapshots and rename without writes', async (t) => {
   const f = await replacementProofFixture(t, { attachment: true });
   const files = [manifestPath(f.target), f.target.exactSourcePath, f.transactionPath,
-    path.join(f.preservedRoot, 'record.json'), path.join(f.value.projects, '.pageroot-registry.json')];
+    path.join(f.preservedRoot, 'record.json'), path.join(f.value.projects, '.stemmio-registry.json')];
   const beforeBytes = await Promise.all(files.map((file) => readFile(file)));
   const result = await f.value.repository.verifyReplacedCurrentDraft({ target: f.target, journal: f.journal });
   assert.deepEqual(result, { verified: true, proof: { projectId: f.target.projectId, documentId: f.target.documentId,
@@ -116,16 +116,16 @@ test('replacement proof does not commit or trust an unfinished preserved transac
     journalSha256: sha256(Buffer.from('verified Main journal')), revision: 0, html: await readFile(target.exactSourcePath, 'utf8') };
   assert.deepEqual(await value.repository.verifyReplacedCurrentDraft({ target, journal }), { verified: false });
   assert.equal((await json(manifestPath(target))).versions.length, 1);
-  assert.equal((await json(path.join(target.projectRootPath, '.pageroot/transactions/current_proof_uncommitted_history_01/transaction.json'))).state, 'prepared');
+  assert.equal((await json(path.join(target.projectRootPath, '.stemmio/transactions/current_proof_uncommitted_history_01/transaction.json'))).state, 'prepared');
 });
 
 test('import has stable current filename; identity materialization alone creates no Version', async (t) => {
-  const v = await fixture(t); const {target, buffer} = await importSource(v, 'page.htm', html('V1').replace(/ data-pageroot-id="[^"]*"/g, ''));
+  const v = await fixture(t); const {target, buffer} = await importSource(v, 'page.htm', html('V1').replace(/ data-stemmio-id="[^"]*"/g, ''));
   assert.equal(path.basename(target.exactSourcePath), 'page.htm');
   const input = {target, operationId:'snapshot_no_user_edit', expectedSourceSha256:target.sourceSha256};
   const result = await v.repository.createVersionFromCurrent(input);
   assert.equal(result.status, 'unchanged'); assert.equal((await json(manifestPath(target))).versions.length, 1);
-  assert.deepEqual(await readFile(path.join(target.projectRootPath,'.pageroot/versions/ver_0001/index.html')),buffer);
+  assert.deepEqual(await readFile(path.join(target.projectRootPath,'.stemmio/versions/ver_0001/index.html')),buffer);
   assert.deepEqual(await v.repository.queryCurrentVersionCreation(input),result);
 });
 
@@ -139,7 +139,7 @@ test('manual snapshot retains current bytes, identity, comments and revisions; r
   const result=await v.repository.createVersionFromCurrent(input);
   assert.equal(result.status,'created');assert.equal(result.versionId,'ver_0002');assert.equal(result.workingCopyId,target.workingCopyId);assert.equal(result.sourcePath,target.exactSourcePath);
   const state=await json(statePath(target));assert.equal(state.lastPersistedRevision,before.lastPersistedRevision);assert.equal(state.currentSha256,edited.sourceSha256);
-  const draft=await json(path.join(target.projectRootPath,'.pageroot',state.draftRelativePath));assert.equal(draft.comments[0].body,'keep');assert.equal(draft.draftRevision,before.draftRevision);
+  const draft=await json(path.join(target.projectRootPath,'.stemmio',state.draftRelativePath));assert.equal(draft.comments[0].body,'keep');assert.equal(draft.draftRevision,before.draftRevision);
   assert.equal((await v.repository.createVersionFromCurrent(input)).versionId,result.versionId);
   const manifest=await json(manifestPath(target));assert.equal(manifest.workingCopies.length,1);assert.equal(manifest.versions.length,2);
 });
@@ -159,7 +159,7 @@ test('history replaces current; recovery restores HTML plus comments and attachm
   const revisionBeforeRestore=(await json(statePath(target))).draftRevision;
   const restored=await v.repository.restorePreservedDraft({target:now,operationId:'restore_current_01',recoveryId:records[0].recoveryId,expectedSourceSha256:now.sourceSha256});
   assert.equal(restored.versionId,'ver_0003');assert.equal(await readFile(target.exactSourcePath,'utf8'),html('local-only'));assert.deepEqual(await readFile(path.join(target.projectRootPath,relativePath)),bytes);
-  const state=await json(statePath(target));const draft=await json(path.join(target.projectRootPath,'.pageroot',state.draftRelativePath));assert.equal(draft.comments[0].body,'unsent');assert.ok(draft.draftRevision>revisionBeforeRestore);
+  const state=await json(statePath(target));const draft=await json(path.join(target.projectRootPath,'.stemmio',state.draftRelativePath));assert.equal(draft.comments[0].body,'unsent');assert.ok(draft.draftRevision>revisionBeforeRestore);
   assert.equal((await json(manifestPath(target))).workingCopies.length,1);
 });
 
@@ -180,7 +180,7 @@ for(const stage of ['current-version-prepared','current-version-snapshot-written
 }
 test('migration preserves actual older active draft and removes inactive write authority',async(t)=>{
  const v=await fixture(t);const {target}=await importSource(v);const first=await json(manifestPath(target));delete first.currentDraftSchemaVersion;await writeFile(manifestPath(target),JSON.stringify(first));
- const second=await promoteNextVersion(v.repository,target,'V2-legacy');const runtimePath=path.join(target.projectRootPath,'.pageroot/runtime-state.json');const runtime=await json(runtimePath);runtime.activeWorkingCopyId=target.workingCopyId;await writeFile(runtimePath,JSON.stringify(runtime));
+ const second=await promoteNextVersion(v.repository,target,'V2-legacy');const runtimePath=path.join(target.projectRootPath,'.stemmio/runtime-state.json');const runtime=await json(runtimePath);runtime.activeWorkingCopyId=target.workingCopyId;await writeFile(runtimePath,JSON.stringify(runtime));
  await v.repository.saveWorkingCopy({target,html:html('active-old-local'),expectedSourceSha256:target.sourceSha256,editRevision:1});
  const restarted=new ProjectFileRepository({projectsRoot:v.projects});await restarted.initialize();const opened=await restarted.resolveRegisteredProjectOpenTarget({projectId:target.projectId});
  assert.equal(opened.target.workingCopyId,target.workingCopyId);assert.equal(opened.html,html('active-old-local'));assert.equal((await json(manifestPath(target))).workingCopies.length,1);
@@ -196,7 +196,7 @@ test('only confirmed absent folder is hidden; returning folder preserves identit
 test('manual save rejects active Candidate and legacy migration waits without rebinding the frozen job', async (t) => {
  const v=await fixture(t);const {target}=await importSource(v);const file=manifestPath(target);const manifest=await json(file);delete manifest.currentDraftSchemaVersion;await writeFile(file,JSON.stringify(manifest));
  const candidateId='candidate_migration_pending_0001';await v.repository.createCandidate({target,requestId:'req_migration_pending_0001',candidateId,html:html('next'),expectedSourceSha256:target.sourceSha256});
- const runtimePath=path.join(target.projectRootPath,'.pageroot/runtime-state.json');const runtime=await json(runtimePath);
+ const runtimePath=path.join(target.projectRootPath,'.stemmio/runtime-state.json');const runtime=await json(runtimePath);
  const restarted=new ProjectFileRepository({projectsRoot:v.projects});await restarted.initialize();
  assert.equal((await json(file)).currentDraftSchemaVersion,undefined);assert.deepEqual((await json(runtimePath)).activeRequest,runtime.activeRequest);
  await assert.rejects(restarted.createVersionFromCurrent({target,operationId:'manual_pending_0001',expectedSourceSha256:target.sourceSha256}),{code:'HISTORY_CREATION_RUN_LOCKED'});
@@ -205,7 +205,7 @@ test('manual save rejects active Candidate and legacy migration waits without re
 });
 
 test('migration ignores initial Stable ID materialization when deciding whether a local Version is needed',async(t)=>{
- const v=await fixture(t);const {target}=await importSource(v,'legacy.html',html('V1').replace(/ data-pageroot-id="[^"]*"/g,''));
+ const v=await fixture(t);const {target}=await importSource(v,'legacy.html',html('V1').replace(/ data-stemmio-id="[^"]*"/g,''));
  const manifest=await json(manifestPath(target));delete manifest.currentDraftSchemaVersion;await writeFile(manifestPath(target),JSON.stringify(manifest));
  const state=await json(statePath(target));delete state.snapshotBaselineSha256;await writeFile(statePath(target),JSON.stringify(state));
  const restarted=new ProjectFileRepository({projectsRoot:v.projects});await restarted.initialize();
@@ -243,7 +243,7 @@ test('readonly classification discovers Finder rename without rewriting Registry
  const v=await fixture(t);const imported=await importSource(v);const target=imported.target;
  const renamedHtml=path.join(target.projectRootPath,'renamed.html');await rename(target.exactSourcePath,renamedHtml);
  const renamedRoot=path.join(v.projects,'renamed-project');await rename(target.projectRootPath,renamedRoot);
- const registryFile=path.join(v.projects,'.pageroot-registry.json');const manifestFile=path.join(renamedRoot,'.pageroot/manifest.json');const bindingFile=path.join(renamedRoot,'.pageroot/source-bindings',target.workingCopyId+'.ref');
+ const registryFile=path.join(v.projects,'.stemmio-registry.json');const manifestFile=path.join(renamedRoot,'.stemmio/manifest.json');const bindingFile=path.join(renamedRoot,'.stemmio/source-bindings',target.workingCopyId+'.ref');
  const before=await Promise.all([registryFile,manifestFile,bindingFile].map((file)=>readFile(file)));
  const known=await v.repository.classifyOpenPath({sourcePath:imported.sourcePath});assert.equal(known.kind,'known-external');assert.equal(known.projectFacts.openTarget.exactSourcePath,path.join(renamedRoot,'renamed.html'));
  const managed=await v.repository.classifyOpenPath({sourcePath:path.join(renamedRoot,'renamed.html')});assert.equal(managed.kind,'managed-project');
@@ -251,7 +251,7 @@ test('readonly classification discovers Finder rename without rewriting Registry
 });
 
 test('a renamed project with a corrupt manifest stays visible instead of becoming a deletion',async(t)=>{
- const v=await fixture(t);const {target}=await importSource(v);const moved=path.join(v.projects,'corrupt-renamed');await rename(target.projectRootPath,moved);await writeFile(path.join(moved,'.pageroot/manifest.json'),'{broken');
+ const v=await fixture(t);const {target}=await importSource(v);const moved=path.join(v.projects,'corrupt-renamed');await rename(target.projectRootPath,moved);await writeFile(path.join(moved,'.stemmio/manifest.json'),'{broken');
  const rows=await v.repository.listRegisteredProjects();assert.equal(rows.length,1);assert.equal(rows[0].projectId,target.projectId);assert.equal(rows[0].availability,'invalid');
 });
 
@@ -274,7 +274,7 @@ for(const [field,mutate] of [
 ])test('current adoption recovery revalidates sealed '+field,async(t)=>{
  const v=await fixture(t);const {target}=await importSource(v);const candidateId='candidate_current_authority_0001';await v.repository.createCandidate({target,requestId:'req_current_authority_01',candidateId,html:html('next'),expectedSourceSha256:target.sourceSha256});
  const writer=new ProjectFileRepository({projectsRoot:v.projects,failpoint:(name)=>name==='current-version-prepared'});await assert.rejects(writer.promoteCandidate({target,candidateId,decisionOperationId:`promote_${candidateId}`}));
- const transactionFile=path.join(target.projectRootPath,'.pageroot/transactions','current_promote_'+candidateId,'transaction.json');const transaction=await json(transactionFile);mutate(transaction);await writeFile(transactionFile,JSON.stringify(transaction));
+ const transactionFile=path.join(target.projectRootPath,'.stemmio/transactions','current_promote_'+candidateId,'transaction.json');const transaction=await json(transactionFile);mutate(transaction);await writeFile(transactionFile,JSON.stringify(transaction));
  const restarted=new ProjectFileRepository({projectsRoot:v.projects});await assert.rejects(restarted.recoverProject({projectRootPath:target.projectRootPath}));assert.equal(await readFile(target.exactSourcePath,'utf8'),html('V1'));assert.equal((await json(manifestPath(target))).versions.length,1);
 });
 
@@ -294,7 +294,7 @@ test('completed adoption replay preserves a newer real Request and Candidate thr
   const adopted = await value.repository.promoteCandidate(firstInput);
   assert.equal(adopted.version.versionId, 'ver_0002');
   await prepare(adopted.target, 'req_adoption_replay_b');
-  const runtimeFile = path.join(target.projectRootPath, '.pageroot/runtime-state.json');
+  const runtimeFile = path.join(target.projectRootPath, '.stemmio/runtime-state.json');
   const processing = await readFile(runtimeFile);
   assert.equal((await value.repository.promoteCandidate(firstInput)).version.versionId, 'ver_0002');
   assert.deepEqual(await readFile(runtimeFile), processing);
@@ -302,7 +302,7 @@ test('completed adoption replay preserves a newer real Request and Candidate thr
     attemptId: 'attempt_001', html: html('second candidate') });
   const pending = await readFile(runtimeFile);
   const sourceBefore = await readFile(adopted.target.exactSourcePath);
-  const requestFile = path.join(target.projectRootPath, '.pageroot/requests/req_adoption_replay_b/request.json');
+  const requestFile = path.join(target.projectRootPath, '.stemmio/requests/req_adoption_replay_b/request.json');
   const requestBefore = await readFile(requestFile);
   const replay = await value.repository.promoteCandidate(firstInput);
   assert.equal(replay.version.versionId, 'ver_0002');

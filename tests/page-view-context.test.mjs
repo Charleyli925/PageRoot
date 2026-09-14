@@ -118,7 +118,7 @@ function sourceNodeId(index, id) {
     (candidate) => candidate.stableAttributes.id === id,
   );
   assert.ok(element, `missing synthetic source element #${id}`);
-  return element.pagerootId || element.nodeId;
+  return element.stemmioId || element.nodeId;
 }
 
 function targetRef(index, id) {
@@ -253,7 +253,7 @@ test("page view context rebinds to edited source without copying runtime DOM", (
   const resolved = resolvePageViewContext(editedHtml, context);
   const resolvedIds = new Set(
     resolved.entries.map(({ sourceNodeId }) => (
-      resolved.sourceIndex.byPagerootId.get(sourceNodeId)
+      resolved.sourceIndex.byStemmioId.get(sourceNodeId)
         ?? resolved.sourceIndex.byNodeId.get(sourceNodeId)
     )?.stableAttributes.id),
   );
@@ -338,7 +338,7 @@ test("semantic Tab actions switch only disposable presentation context", () => {
   const resolved = resolvePageViewContext(html, action.nextContext);
   const stateById = new Map(resolved.entries.map((item) => [
     (
-      resolved.sourceIndex.byPagerootId.get(item.sourceNodeId)
+      resolved.sourceIndex.byStemmioId.get(item.sourceNodeId)
         ?? resolved.sourceIndex.byNodeId.get(item.sourceNodeId)
     )?.stableAttributes.id,
     item.entry,
@@ -432,7 +432,7 @@ test("details and strict local disclosure actions preserve existing context", ()
   const resolved = resolvePageViewContext(html, disclosureAction.nextContext);
   const stateById = new Map(resolved.entries.map((item) => [
     (
-      resolved.sourceIndex.byPagerootId.get(item.sourceNodeId)
+      resolved.sourceIndex.byStemmioId.get(item.sourceNodeId)
         ?? resolved.sourceIndex.byNodeId.get(item.sourceNodeId)
     )?.stableAttributes.id,
     item.entry,

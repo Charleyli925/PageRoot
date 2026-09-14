@@ -34,7 +34,7 @@ import {
 } from "../app/lib/source-text-map.js";
 
 function elementId(sequence) {
-  return `pr1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
+  return `sm1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
 }
 
 const IDS = {
@@ -51,7 +51,7 @@ const IDS = {
 };
 
 function attr(element) {
-  return `data-pageroot-id="${element}"`;
+  return `data-stemmio-id="${element}"`;
 }
 
 function managedHtml() {
@@ -125,7 +125,7 @@ test("applies text, range, attribute and style operations through exact SourcePa
   assert.match(textResult.html, />A &lt; B &amp; C<\/p>/u);
   assert.equal(textResult.materialization.kind, "source-patch");
   assert.equal(textResult.nextRevision, 1);
-  assert.equal(buildSourceIndex(textResult.html).pagerootIdentity.complete, true);
+  assert.equal(buildSourceIndex(textResult.html).stemmioIdentity.complete, true);
 
   const rangeResult = applySemanticOperation(baseline, operation(
     baseline,
@@ -174,14 +174,14 @@ test("materializes rich text and range style semantically with a generated inver
   const richText = operation(baseline, "sourceop_rich_text_0001", "setText", {
     target: target(baseline, IDS.paragraph),
     text: "Hello semantic",
-    contentHtml: `Hello <strong data-pageroot-id="${IDS.strong}">semantic</strong>`,
+    contentHtml: `Hello <strong data-stemmio-id="${IDS.strong}">semantic</strong>`,
   });
   const richResult = applySemanticOperation(baseline, richText);
   assert.match(
     richResult.html,
-    new RegExp(`Hello <strong data-pageroot-id="${IDS.strong}">semantic</strong>`),
+    new RegExp(`Hello <strong data-stemmio-id="${IDS.strong}">semantic</strong>`),
   );
-  assert.equal(buildSourceIndex(richResult.html).byPagerootId.has(IDS.strong), true);
+  assert.equal(buildSourceIndex(richResult.html).byStemmioId.has(IDS.strong), true);
 
   const rangeStyle = operation(baseline, "sourceop_legacy_style1", "setStyle", {
     target: target(baseline, IDS.paragraph),
@@ -189,7 +189,7 @@ test("materializes rich text and range style semantically with a generated inver
     value: "700",
     important: false,
     range: { startOffset: 0, endOffset: 5, quote: "Hello" },
-    createdPagerootIds: [elementId(30)],
+    createdStemmioIds: [elementId(30)],
   });
   const styled = applySemanticOperation(baseline, rangeStyle);
   assert.match(styled.html, /font-weight: 700/u);
@@ -199,7 +199,7 @@ test("materializes rich text and range style semantically with a generated inver
 test("replays the exact wrapper IDs allocated by an accepted Canvas range style plan", () => {
   const baseline = state();
   const index = buildSourceIndex(baseline.html);
-  const paragraph = index.byPagerootId.get(IDS.paragraph);
+  const paragraph = index.byStemmioId.get(IDS.paragraph);
   const textMap = buildSourceTextMap(index, paragraph.nodeId);
   const range = { startOffset: 0, endOffset: 5, quote: "Hello" };
   const forwardPlan = planTextRangeStylePatch(index, {
@@ -216,7 +216,7 @@ test("replays the exact wrapper IDs allocated by an accepted Canvas range style 
     expectedSourceSha256: baseline.sourceSha256,
   });
   const mapped = applyPatchPlan(forwardPlan, baseline.html);
-  const createdPagerootIds = forwardPlan.metadata.createdPagerootIds;
+  const createdStemmioIds = forwardPlan.metadata.createdStemmioIds;
   const semantic = applySemanticOperation(baseline, operation(
     baseline,
     "sourceop_canvas_style1",
@@ -227,12 +227,12 @@ test("replays the exact wrapper IDs allocated by an accepted Canvas range style 
       value: "700",
       important: false,
       range,
-      createdPagerootIds,
+      createdStemmioIds,
     },
   ));
 
-  assert.equal(createdPagerootIds.length, 1);
-  assert.match(semantic.html, new RegExp(createdPagerootIds[0], "u"));
+  assert.equal(createdStemmioIds.length, 1);
+  assert.match(semantic.html, new RegExp(createdStemmioIds[0], "u"));
   assert.equal(semantic.html, mapped.html);
   assert.equal(semantic.sourceSha256, mapped.sourceSha256);
 });
@@ -240,7 +240,7 @@ test("replays the exact wrapper IDs allocated by an accepted Canvas range style 
 test("replays ordered line-break IDs allocated by an accepted Canvas text plan", () => {
   const baseline = state();
   const index = buildSourceIndex(baseline.html);
-  const paragraph = index.byPagerootId.get(IDS.second);
+  const paragraph = index.byStemmioId.get(IDS.second);
   const beforeInnerHtml = baseline.html.slice(
     paragraph.contentRange.startOffset,
     paragraph.contentRange.endOffset,
@@ -253,7 +253,7 @@ test("replays ordered line-break IDs allocated by an accepted Canvas text plan",
     expectedSourceSha256: baseline.sourceSha256,
   });
   const mapped = applyPatchPlan(forwardPlan, baseline.html);
-  const createdPagerootIds = forwardPlan.metadata.createdPagerootIds;
+  const createdStemmioIds = forwardPlan.metadata.createdStemmioIds;
   const semantic = applySemanticOperation(baseline, operation(
     baseline,
     "sourceop_canvas_break1",
@@ -262,17 +262,17 @@ test("replays ordered line-break IDs allocated by an accepted Canvas text plan",
       target: target(baseline, IDS.second),
       text: "B\nsemantic\nordered",
       contentHtml: forwardPlan.metadata.nextInnerHtml,
-      createdPagerootIds,
+      createdStemmioIds,
     },
   ));
 
-  assert.equal(createdPagerootIds.length, 2);
+  assert.equal(createdStemmioIds.length, 2);
   const orderedIds = [...forwardPlan.metadata.nextInnerHtml.matchAll(
-    /<br data-pageroot-id="([^"]+)">/gu,
+    /<br data-stemmio-id="([^"]+)">/gu,
   )].map((match) => match[1]);
-  assert.deepEqual(orderedIds, createdPagerootIds);
-  assert.match(semantic.html, new RegExp(createdPagerootIds[0], "u"));
-  assert.match(semantic.html, new RegExp(createdPagerootIds[1], "u"));
+  assert.deepEqual(orderedIds, createdStemmioIds);
+  assert.match(semantic.html, new RegExp(createdStemmioIds[0], "u"));
+  assert.match(semantic.html, new RegExp(createdStemmioIds[1], "u"));
   assert.equal(semantic.html, mapped.html);
   assert.equal(semantic.sourceSha256, mapped.sourceSha256);
 });
@@ -282,10 +282,10 @@ test("fresh editable-island text allocation seals ordered line-break IDs in one 
   const operationValue = operation(baseline, "sourceop_native_breaks_01", "setText", {
     target: target(baseline, IDS.paragraph),
     text: "Hello world\nline\nend",
-    contentHtml: `Hello <strong data-pageroot-id="${IDS.strong}">world</strong><br>line<br>end`,
+    contentHtml: `Hello <strong data-stemmio-id="${IDS.strong}">world</strong><br>line<br>end`,
   });
-  const firstBreakId = "pr1_10000000000040008000000000000011";
-  const secondBreakId = "pr1_10000000000040008000000000000012";
+  const firstBreakId = "sm1_10000000000040008000000000000011";
+  const secondBreakId = "sm1_10000000000040008000000000000012";
   enableEditPipelineCounters();
   resetEditPipelineCounters();
   try {
@@ -295,11 +295,11 @@ test("fresh editable-island text allocation seals ordered line-break IDs in one 
         "10000000-0000-4000-8000-000000000012",
       ),
     });
-    assert.equal(operationValue.createdPagerootIds, undefined);
+    assert.equal(operationValue.createdStemmioIds, undefined);
     assert.deepEqual(result.allocatedElementIds, [firstBreakId, secondBreakId]);
     assert.deepEqual(result.identityDelta.addedElementIds, [firstBreakId, secondBreakId]);
     const orderedIds = [...result.html.matchAll(
-      /<br data-pageroot-id="([^"]+)">/gu,
+      /<br data-stemmio-id="([^"]+)">/gu,
     )].map((match) => match[1]);
     assert.deepEqual(orderedIds, [firstBreakId, secondBreakId]);
     assert.equal(readEditPipelineCounters().fullPatchApplies, 1);
@@ -325,9 +325,9 @@ test("allocates new identities for insert and replacement while preserving the r
   ), { randomUUID: uuidFactory(...INSERT_UUIDS) });
 
   assert.equal(insertResult.allocatedElementIds.length, 2);
-  assert.equal(insertResult.insertedRootElementId, "pr1_10000000000040008000000000000001");
-  assert.match(insertResult.html, /<span [^>]+>A<\/span><article data-pageroot-id="pr1_1000/u);
-  assert.equal(buildSourceIndex(insertResult.html).pagerootIdentity.complete, true);
+  assert.equal(insertResult.insertedRootElementId, "sm1_10000000000040008000000000000001");
+  assert.match(insertResult.html, /<span [^>]+>A<\/span><article data-stemmio-id="sm1_1000/u);
+  assert.equal(buildSourceIndex(insertResult.html).stemmioIdentity.complete, true);
 
   const replacementResult = applySemanticOperation(baseline, operation(
     baseline,
@@ -339,9 +339,9 @@ test("allocates new identities for insert and replacement while preserving the r
     },
   ), { randomUUID: uuidFactory(...INSERT_UUIDS) });
   const replacementIndex = buildSourceIndex(replacementResult.html);
-  assert.equal(replacementIndex.byPagerootId.get(IDS.section)?.tagName, "section");
+  assert.equal(replacementIndex.byStemmioId.get(IDS.section)?.tagName, "section");
   assert.equal(replacementResult.allocatedElementIds.length, 1);
-  assert.equal(replacementIndex.pagerootIdentity.complete, true);
+  assert.equal(replacementIndex.stemmioIdentity.complete, true);
 });
 
 test("deletes and moves only source elements addressed by stable identity", () => {
@@ -352,7 +352,7 @@ test("deletes and moves only source elements addressed by stable identity", () =
     "deleteElement",
     { target: target(baseline, IDS.first) },
   ));
-  assert.equal(buildSourceIndex(deleteResult.html).byPagerootId.has(IDS.first), false);
+  assert.equal(buildSourceIndex(deleteResult.html).byStemmioId.has(IDS.first), false);
 
   const moveResult = applySemanticOperation(baseline, operation(
     baseline,
@@ -366,7 +366,7 @@ test("deletes and moves only source elements addressed by stable identity", () =
   ));
   assert.equal(moveResult.materialization.planType, "reorder-sibling");
   assert.ok(moveResult.html.indexOf(`>${"B"}</span>`) < moveResult.html.indexOf(`>${"A"}</span>`));
-  assert.equal(buildSourceIndex(moveResult.html).byPagerootId.get(IDS.second)?.parentId !== null, true);
+  assert.equal(buildSourceIndex(moveResult.html).byStemmioId.get(IDS.second)?.parentId !== null, true);
 });
 
 test("generated inverse operations restore exact authoritative source bytes and support redo", () => {
@@ -429,7 +429,7 @@ test("fails closed for stale, duplicate and changed target preconditions", () =>
 test("replans semantic patches at apply time and rejects command, patch or insertion tag tampering", () => {
   const baseline = state();
   const section = target(baseline, IDS.section);
-  const identified = `<aside data-pageroot-id="${elementId(20)}">X</aside>`;
+  const identified = `<aside data-stemmio-id="${elementId(20)}">X</aside>`;
   const plan = planSemanticOperationPatch(baseline.html, {
     type: "semantic-operation",
     semanticType: "insertElement",
@@ -481,7 +481,7 @@ test("kernel apply remaps tracked comment targets without a second patch apply",
   const index = buildSourceIndex(documentState.html);
   const trackedComment = createTargetRef(
     index,
-    index.byPagerootId.get(IDS.paragraph),
+    index.byStemmioId.get(IDS.paragraph),
     { targetId: "comment_target_paragraph" },
   );
   const result = applySemanticOperation(

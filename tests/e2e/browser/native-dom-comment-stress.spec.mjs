@@ -4,7 +4,7 @@ import {
   caseSelector,
   fixtureBuffer,
   loadFixture as loadRawFixture,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 import { COMMENT_VIRTUALIZATION_THRESHOLD } from "../../../app/lib/comment-virtualization.js";
 
 const loadFixture = (page, name, options = {}) => loadRawFixture(page, name, {

@@ -20,7 +20,7 @@ function memorySafeStorage() {
 }
 
 test("remembered Key is stored as ciphertext and never written in plaintext", async () => {
-  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-credential-"));
   const crypto = memorySafeStorage();
   const store = createAgentSessionCredentialStore({
     userDataPath,
@@ -46,7 +46,7 @@ test("remembered Key is stored as ciphertext and never written in plaintext", as
 });
 
 test("remembered custom vendor also stores the non-secret Model ID", async () => {
-  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-credential-"));
   const crypto = memorySafeStorage();
   const store = createAgentSessionCredentialStore({
     userDataPath,
@@ -73,7 +73,7 @@ test("remembered custom vendor also stores the non-secret Model ID", async () =>
 });
 
 test("unavailable encryption refuses to persist and does not fall back to plaintext", async () => {
-  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-credential-"));
   const store = createAgentSessionCredentialStore({
     userDataPath,
     encryptString: () => Buffer.from("nope"),
@@ -90,7 +90,7 @@ test("unavailable encryption refuses to persist and does not fall back to plaint
 });
 
 test("missing credential status does not touch macOS safeStorage", async () => {
-  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-credential-"));
   let availabilityChecks = 0;
   const store = createAgentSessionCredentialStore({
     userDataPath,
@@ -104,7 +104,7 @@ test("missing credential status does not touch macOS safeStorage", async () => {
   assert.deepEqual(await store.publicStatus(), {
     available: true,
     remembered: false,
-    providerId: "pageroot",
+    providerId: "stemmio",
     vendorId: null,
   });
   assert.equal(availabilityChecks, 0);
@@ -113,7 +113,7 @@ test("missing credential status does not touch macOS safeStorage", async () => {
 });
 
 test("unreadable remembered credentials stay on disk and do not trigger retry loops", async () => {
-  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-credential-"));
+  const userDataPath = await mkdtemp(path.join(os.tmpdir(), "stemmio-credential-"));
   const credentialPath = path.join(userDataPath, "agent-session-credential.v1.json");
   const crypto = memorySafeStorage();
   const store = createAgentSessionCredentialStore({

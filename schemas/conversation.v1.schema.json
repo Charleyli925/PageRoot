@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/conversation.v1.schema.json",
-  "title": "PageRoot AI conversation record v1",
-  "$comment": "One record per Conversation. A Conversation belongs to exactly one Document and never contains another Document's messages. Forward compatible: every required member stays strictly validated, and a member added by a newer PageRoot is preserved unchanged through read, edit and write so an older build never silently deletes it. Preserved members take no part in validation and still count against the record byte budget. Messages are terminal facts only; a streaming fragment is never written, so every stored message is already in a final status. Messages carry no interface or interaction member: an executable action is derived from current product state by the action bar, never read from a stored message.",
+  "$id": "https://stemmio.local/schemas/conversation.v1.schema.json",
+  "title": "Stemmio AI conversation record v1",
+  "$comment": "One record per Conversation. A Conversation belongs to exactly one Document and never contains another Document's messages. Forward compatible: every required member stays strictly validated, and a member added by a newer Stemmio is preserved unchanged through read, edit and write so an older build never silently deletes it. Preserved members take no part in validation and still count against the record byte budget. Messages are terminal facts only; a streaming fragment is never written, so every stored message is already in a final status. Messages carry no interface or interaction member: an executable action is derived from current product state by the action bar, never read from a stored message.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -275,7 +275,7 @@
           "maxLength": 200
         },
         "reasoningEffort": {
-          "$comment": "Provenance only. It records that PageRoot applied no explicit override and has no interface element.",
+          "$comment": "Provenance only. It records that Stemmio applied no explicit override and has no interface element.",
           "const": "qoder-default"
         },
         "startedAt": {

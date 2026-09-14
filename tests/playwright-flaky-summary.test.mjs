@@ -175,7 +175,7 @@ test("an invalid result retry count fails closed instead of being dropped", () =
 });
 
 test("flaky evidence is written machine-readably inside the repository", async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-flaky-summary-"));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-flaky-summary-"));
   try {
     const destination = await writeFlakyEvidence(
       summarizeFlakyRuns(reporterSuite()),

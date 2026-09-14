@@ -14,7 +14,7 @@ test("runtime Bridge client resolves the preload-published shell connection", as
   try {
     globalThis.window = {
       location: { search: "" },
-      htmlAIRuntime: {
+      stemmioRuntime: {
         bridgePort: "",
         bridgeAuthToken: "",
         getBridgeConnection: () => ({
@@ -31,7 +31,7 @@ test("runtime Bridge client resolves the preload-published shell connection", as
     await client.workspace("/tmp/runtime.html");
     assert.match(requests[0].input, /^http:\/\/127\.0\.0\.1:43179\/workspace/u);
     assert.equal(
-      new Headers(requests[0].init.headers).get("x-html-ai-bridge-token"),
+      new Headers(requests[0].init.headers).get("x-stemmio-bridge-token"),
       "runtime-token",
     );
   } finally {
@@ -230,7 +230,7 @@ test("Bridge client retries a transient read and attaches authorization", async 
     /workspace\?sourcePath=%2Ftmp%2Fpage\.html&projectStorageVersion=4\.0\.0$/,
   );
   assert.equal(
-    new Headers(requests[0].init.headers).get("x-html-ai-bridge-token"),
+    new Headers(requests[0].init.headers).get("x-stemmio-bridge-token"),
     "test-token",
   );
 });
@@ -266,14 +266,14 @@ test("Bridge client exposes the Agent catalog, install and execution routes", as
   await client.cancelAgentLogin({ providerId: "qoder" });
   await client.logoutAgent({ providerId: "qoder" });
   await client.updateAgentConfiguration({
-    providerId: "pageroot",
+    providerId: "stemmio",
     apiKey: "sk-test",
     vendorId: "deepseek",
   });
-  await client.cancelAgentConfiguration({ providerId: "pageroot", generation: 1 });
+  await client.cancelAgentConfiguration({ providerId: "stemmio", generation: 1 });
   await client.preflightAgent({ selection: {} });
   await client.setAgentSessionCredential({
-    providerId: "pageroot",
+    providerId: "stemmio",
     apiKey: "sk-test",
     vendorId: "zhipu",
   });

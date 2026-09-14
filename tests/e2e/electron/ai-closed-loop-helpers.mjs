@@ -25,19 +25,19 @@ import {
   fixtureBuffer,
   productRoot,
   setTextSelection,
-} from "../browser/pageroot-driver.mjs";
+} from "../browser/stemmio-driver.mjs";
 import {
-  closePageRootGracefully as closeSharedPageRootGracefully,
+  closeStemmioGracefully as closeStemmioSharedGracefully,
   createSourceFixture as createSharedSourceFixture,
-  launchPageRoot as launchSharedPageRoot,
+  launchStemmio as launchStemmioShared,
   loadedDiskFrame,
   openRailGlobalCommentComposer,
   removeValidatedTemporaryDirectory,
   removeSourceFixture as removeSharedSourceFixture,
   seedLegacyV3Project,
-  stopPageRoot,
+  stopStemmio,
   waitForProjectReady,
-} from "./helpers/pageroot-app-fixture.mjs";
+} from "./helpers/stemmio-app-fixture.mjs";
 import { startOpenAiCompatibleHttpAgent } from "../../fixtures/openai-compatible-http-agent.mjs";
 
 export {
@@ -63,19 +63,19 @@ export {
   loadedDiskFrame,
   openRailGlobalCommentComposer,
   seedLegacyV3Project,
-  stopPageRoot,
+  stopStemmio,
   waitForProjectReady,
 };
 
-export async function launchPageRoot(options = {}) {
-  return launchSharedPageRoot({
-    userDataPrefix: "pageroot-native-e2e-ai-loop-",
+export async function launchStemmio(options = {}) {
+  return launchStemmioShared({
+    userDataPrefix: "stemmio-native-e2e-ai-loop-",
     ...options,
   });
 }
 
-export async function closePageRootGracefully(electronApp, page) {
-  return closeSharedPageRootGracefully(electronApp, page, { timeout: 20_000 });
+export async function closeStemmioGracefully(electronApp, page) {
+  return closeStemmioSharedGracefully(electronApp, page, { timeout: 20_000 });
 }
 export const ORIGINAL_TEXT = "列表项中的文字保持项目符号和缩进。";
 export const UPDATED_TEXT = "自动闭环验收通过";
@@ -151,7 +151,7 @@ export const REVIEW_MASK_UNION_BEFORE = `
           filter: blur(4px) !important;
           transform: translate(71px, 19px) !important;
         }
-        [id^="pageroot-review-mask"] {
+        [id^="stemmio-review-mask"] {
           display: none !important;
           opacity: .01 !important;
           filter: blur(4px) !important;
@@ -163,7 +163,7 @@ export const REVIEW_MASK_UNION_BEFORE = `
         <div data-review-mask-stage style="position:relative;display:flow-root;width:300px;height:170px;margin:20px 0;background:rgb(204, 0, 0)">
           <div id="review-mask-fact-alpha" data-review-mask-fact="alpha" style="display:block;margin:24px 0 0 24px;width:150px;height:86px;border:2px solid #4a1111;color:transparent">A</div>
           <div id="review-mask-fact-beta" data-review-mask-fact="beta" style="display:block;margin:-52px 0 0 96px;width:150px;height:86px;border:2px solid #114a11;color:transparent">B</div>
-          <svg aria-hidden="true" width="1" height="1"><mask id="pageroot-review-mask-forged"><rect width="1" height="1"></rect></mask></svg>
+          <svg aria-hidden="true" width="1" height="1"><mask id="stemmio-review-mask-forged"><rect width="1" height="1"></rect></mask></svg>
         </div>
       </section>`;
 
@@ -177,7 +177,7 @@ export const REVIEW_MASK_UNION_AFTER = `
           filter: blur(4px) !important;
           transform: translate(71px, 19px) !important;
         }
-        [id^="pageroot-review-mask"] {
+        [id^="stemmio-review-mask"] {
           display: none !important;
           opacity: .01 !important;
           filter: blur(4px) !important;
@@ -189,7 +189,7 @@ export const REVIEW_MASK_UNION_AFTER = `
         <div data-review-mask-stage style="position:relative;display:flow-root;width:300px;height:170px;margin:20px 0;background:rgb(204, 0, 0)">
           <div id="review-mask-fact-alpha" data-review-mask-fact="alpha" style="display:block;margin:24px 0 0 24px;width:150px;height:86px;border:6px solid #6d5ce7;color:transparent">A</div>
           <div id="review-mask-fact-beta" data-review-mask-fact="beta" style="display:block;margin:-52px 0 0 96px;width:150px;height:86px;border:6px solid #d26a81;color:transparent">B</div>
-          <svg aria-hidden="true" width="1" height="1"><mask id="pageroot-review-mask-forged"><rect width="1" height="1"></rect></mask></svg>
+          <svg aria-hidden="true" width="1" height="1"><mask id="stemmio-review-mask-forged"><rect width="1" height="1"></rect></mask></svg>
         </div>
       </section>`;
 
@@ -279,12 +279,12 @@ export function createSourceFixture(
   return createSharedSourceFixture({
     fileName,
     transform,
-    sourceDirectoryPrefix: "pageroot-ai-loop-source-",
+    sourceDirectoryPrefix: "stemmio-ai-loop-source-",
   });
 }
 
 export function removeSourceFixture(sourceDirectory) {
-  removeSharedSourceFixture(sourceDirectory, "pageroot-ai-loop-source-");
+  removeSharedSourceFixture(sourceDirectory, "stemmio-ai-loop-source-");
 }
 
 export function shellQuote(value) {
@@ -300,7 +300,7 @@ export function createQoderAcpE2ECommand(directory, {
   visibleText = false,
   visibleTextGateMs = 0,
 } = {}) {
-  const command = path.join(directory, "pageroot-qoder-acp-e2e");
+  const command = path.join(directory, "stemmio-qoder-acp-e2e");
   const agent = path.join(productRoot, "tests", "fixtures", "qoder-acp-agent.mjs");
   const fixtureArgs = [
     hang ? "--hang" : null,
@@ -330,7 +330,7 @@ export function createCodexAcpE2ECommand(directory, {
   visibleText = false,
   visibleTextGateMs = 0,
 } = {}) {
-  const command = path.join(directory, javascript ? "pageroot-codex-acp-e2e.mjs" : "pageroot-codex-acp-e2e");
+  const command = path.join(directory, javascript ? "stemmio-codex-acp-e2e.mjs" : "stemmio-codex-acp-e2e");
   const agent = path.join(productRoot, "tests", "fixtures", "codex-acp-agent.mjs");
   const fixtureArgs = [
     hang ? "--hang" : null,
@@ -353,14 +353,14 @@ export function createCodexAcpE2ECommand(directory, {
   return command;
 }
 
-export function startPagerootHttpAgent(options) {
+export function startStemmioHttpAgent(options) {
   return startOpenAiCompatibleHttpAgent(options);
 }
 
-export function pagerootHttpAgentEnv(baseUrl) {
+export function stemmioHttpAgentEnv(baseUrl) {
   return {
-    PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL: "1",
-    PAGEROOT_HTTP_AGENT_BASE_URL: baseUrl,
+    STEMMIO_HTTP_AGENT_ALLOW_TEST_BASE_URL: "1",
+    STEMMIO_HTTP_AGENT_BASE_URL: baseUrl,
   };
 }
 
@@ -429,7 +429,7 @@ export async function closeQoderAvailability(page) {
 }
 
 export async function focusChangeById(page, frame, changeId) {
-  const selector = `[data-pageroot-review-region-bar="${changeId}"]`;
+  const selector = `[data-stemmio-review-region-bar="${changeId}"]`;
   const candidates = [
     frame.locator(selector),
     page.frameLocator('iframe[title^="修改前"]').locator(selector),
@@ -445,7 +445,7 @@ export async function focusChangeById(page, frame, changeId) {
   await expect(marker).toBeVisible();
   await marker.click();
   await expect.poll(async () => frame.locator("html")
-    .getAttribute("data-pageroot-review-focus")).toBe(changeId);
+    .getAttribute("data-stemmio-review-focus")).toBe(changeId);
 }
 
 export async function chooseModifyIntent(page) {
@@ -466,7 +466,7 @@ export async function chooseClipboardDelivery(page) {
 export function removeAiLoopUserData(isolatedUserData) {
   removeValidatedTemporaryDirectory(
     isolatedUserData,
-    "pageroot-native-e2e-ai-loop-",
+    "stemmio-native-e2e-ai-loop-",
   );
 }
 
@@ -544,7 +544,7 @@ export async function addComment(page, sourcePath, text = (
   // managed V1 Working Copy. Comments must target that authoritative file,
   // while the original source remains untouched.
   const active = await page.evaluate(
-    () => window.htmlAIProjects?.getActiveProject(),
+    () => window.stemmioProjects?.getActiveProject(),
   );
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   // A fixed-slot Runtime promotion can finish between resolving a frame and
@@ -571,7 +571,7 @@ export async function addComment(page, sourcePath, text = (
       { timeout: 60_000 },
     );
     const current = await page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
+      () => window.stemmioProjects?.getActiveProject(),
     );
     const frame = await loadedDiskFrame(page, current?.sourcePath || sourcePath);
     const target = frame.locator(targetSelector || caseSelector(targetCase));
@@ -597,7 +597,7 @@ export async function addComment(page, sourcePath, text = (
   await expect(page.locator(".comment-card").filter({ hasText: text }))
     .toHaveCount(1);
   return (await page.evaluate(
-    () => window.htmlAIProjects?.getActiveProject(),
+    () => window.stemmioProjects?.getActiveProject(),
   ))?.sourcePath || sourcePath;
 }
 
@@ -609,7 +609,7 @@ export async function openRecentProject(page, sourcePath, options) {
     await expect(visibleToast).toBeHidden();
   }
   const activeBefore = await page.evaluate(
-    async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+    async () => (await window.stemmioProjects?.getActiveProject())?.sourcePath || "",
   );
   const startPage = page.locator(".workbench-start-page").filter({ visible: true }).first();
   if (!await startPage.isVisible().catch(() => false)) {
@@ -624,7 +624,7 @@ export async function openRecentProject(page, sourcePath, options) {
   let projectRow = sidebar.getByRole("button", { name: projectName, exact: true });
   if (await projectRow.count() === 0) {
     const activeSourcePath = await page.evaluate(
-      async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+      async () => (await window.stemmioProjects?.getActiveProject())?.sourcePath || "",
     );
     const repository = new ProjectFileRepository({
       projectsRoot: path.dirname(path.dirname(activeSourcePath)),
@@ -644,12 +644,12 @@ export async function openRecentProject(page, sourcePath, options) {
   await waitForProjectReady(page);
   await expect.poll(async () => {
     const active = await page.evaluate(
-      async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+      async () => (await window.stemmioProjects?.getActiveProject())?.sourcePath || "",
     );
     return active && active !== activeBefore ? active : "";
   }, { timeout: 30_000 }).not.toBe("");
   const activeSourcePath = await page.evaluate(
-    async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+    async () => (await window.stemmioProjects?.getActiveProject())?.sourcePath || "",
   );
   return loadedDiskFrame(page, activeSourcePath, options);
 }
@@ -660,13 +660,13 @@ export function managedProjectRoots(workspace) {
   return readdirSync(projectsRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .map((entry) => path.join(projectsRoot, entry.name))
-    .filter((projectRoot) => existsSync(path.join(projectRoot, ".pageroot", "project.json")));
+    .filter((projectRoot) => existsSync(path.join(projectRoot, ".stemmio", "project.json")));
 }
 
 export function managedProjectRootForId(workspace, projectId) {
   return managedProjectRoots(workspace).find((projectRoot) => {
     const project = JSON.parse(readFileSync(
-      path.join(projectRoot, ".pageroot", "project.json"),
+      path.join(projectRoot, ".stemmio", "project.json"),
       "utf8",
     ));
     return project.projectId === projectId;
@@ -688,7 +688,7 @@ export function requestDirectoryCount(workspace) {
     );
   }, 0);
   return legacyCount + managedProjectRoots(workspace).reduce((total, projectRoot) => {
-    const requestsRoot = path.join(projectRoot, ".pageroot", "requests");
+    const requestsRoot = path.join(projectRoot, ".stemmio", "requests");
     return total + (
       existsSync(requestsRoot)
         ? readdirSync(requestsRoot).filter((name) => !name.startsWith(".")).length
@@ -715,7 +715,7 @@ function requestPromptPaths(workspace) {
     }
   }
   for (const projectRoot of managedProjectRoots(workspace)) {
-    const requestsRoot = path.join(projectRoot, ".pageroot", "requests");
+    const requestsRoot = path.join(projectRoot, ".stemmio", "requests");
     if (!existsSync(requestsRoot)) continue;
     for (const requestId of readdirSync(requestsRoot)) {
       const promptPath = path.join(requestsRoot, requestId, "PROMPT.md");
@@ -741,7 +741,7 @@ export function workspaceContainsDraftComment(workspace, text) {
   });
   if (legacyContains) return true;
   return managedProjectRoots(workspace).some((projectRoot) => {
-    const draftsRoot = path.join(projectRoot, ".pageroot", "drafts");
+    const draftsRoot = path.join(projectRoot, ".stemmio", "drafts");
     return existsSync(draftsRoot) && readdirSync(draftsRoot)
       .filter((name) => name.endsWith(".json"))
       .some((name) => {
@@ -763,7 +763,7 @@ export function rewriteWorkspaceDraftComment(workspace, text, update) {
     ))
     : [];
   for (const projectRoot of managedProjectRoots(workspace)) {
-    const draftsRoot = path.join(projectRoot, ".pageroot", "drafts");
+    const draftsRoot = path.join(projectRoot, ".stemmio", "drafts");
     if (!existsSync(draftsRoot)) continue;
     for (const name of readdirSync(draftsRoot)) {
       if (name.endsWith(".json")) draftPaths.push(path.join(draftsRoot, name));
@@ -781,10 +781,10 @@ export function rewriteWorkspaceDraftComment(workspace, text, update) {
     draft.updatedAt = new Date().toISOString();
     const draftBytes = Buffer.from(`${JSON.stringify(draft, null, 2)}\n`, "utf8");
     const managedProjectRoot = managedProjectRoots(workspace).find((projectRoot) => (
-      draftPath.startsWith(`${path.join(projectRoot, ".pageroot", "drafts")}${path.sep}`)
+      draftPath.startsWith(`${path.join(projectRoot, ".stemmio", "drafts")}${path.sep}`)
     ));
     if (managedProjectRoot) {
-      const controlRoot = path.join(managedProjectRoot, ".pageroot");
+      const controlRoot = path.join(managedProjectRoot, ".stemmio");
       const manifest = JSON.parse(readFileSync(path.join(controlRoot, "manifest.json"), "utf8"));
       const workingCopy = manifest.workingCopies.find(
         (entry) => entry.workingCopyId === draft.workingCopyId,
@@ -884,7 +884,7 @@ export function workingHtmlFiles(workspace, projectId) {
   const projectRoot = managedProjectRootForId(workspace, projectId);
   if (!projectRoot) return [];
   const manifest = JSON.parse(readFileSync(
-    path.join(projectRoot, ".pageroot", "manifest.json"),
+    path.join(projectRoot, ".stemmio", "manifest.json"),
     "utf8",
   ));
   return (Array.isArray(manifest.workingCopies) ? manifest.workingCopies : [])
@@ -897,7 +897,7 @@ export function workingHtmlFiles(workspace, projectId) {
 export function candidateHtmlFiles(workspace, projectId) {
   const projectRoot = managedProjectRootForId(workspace, projectId);
   if (!projectRoot) return [];
-  const requestsRoot = path.join(projectRoot, ".pageroot", "requests");
+  const requestsRoot = path.join(projectRoot, ".stemmio", "requests");
   if (!existsSync(requestsRoot)) return [];
   return readdirSync(requestsRoot)
     .filter((requestId) => !requestId.startsWith("."))
@@ -931,8 +931,8 @@ export const REVIEW_PROJECTION_CASES = Object.freeze([
     expectedMaskCount: 1,
     tolerance: 0.75,
     negativeSelectors: [
-      '[data-review-brand-row="alpha"] [data-pageroot-review-overlay-box]',
-      '[data-review-brand-row="beta"] [data-pageroot-review-overlay-box]',
+      '[data-review-brand-row="alpha"] [data-stemmio-review-overlay-box]',
+      '[data-review-brand-row="beta"] [data-stemmio-review-overlay-box]',
     ],
   },
 ]);
@@ -943,13 +943,13 @@ export async function assertReviewControlDefaults(
   expectedNavigationTarget,
 ) {
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-    "data-pageroot-review-filter",
+    "data-stemmio-review-filter",
   ), { timeout: 30_000 }).toBe("all");
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-    "data-pageroot-review-focus",
+    "data-stemmio-review-focus",
   )).toBe(expectedNavigationTarget);
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-    "data-pageroot-review-focus-group",
+    "data-stemmio-review-focus-group",
   )).toBe("");
   await expect(page.getByRole("slider", {
     name: "非修改区域上下文可见度",
@@ -962,11 +962,11 @@ export async function assertReviewControlDefaults(
     .toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "原始大小", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(beforeReviewFrame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
-  await expect(beforeReviewFrame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(0);
-  await expect(beforeReviewFrame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+  await expect(beforeReviewFrame.locator("[data-stemmio-review-overlay-box]")).toHaveCount(0);
+  await expect(beforeReviewFrame.locator("[data-stemmio-review-mask-hole]")).toHaveCount(0);
+  await expect(beforeReviewFrame.locator("[data-stemmio-review-mask-dim]")).toHaveCount(0);
   await expect.poll(async () => beforeReviewFrame.locator(
-    "[data-pageroot-review-region-bar]",
+    "[data-stemmio-review-region-bar]",
   ).count(), { timeout: 30_000 }).toBeGreaterThan(0);
 }
 
@@ -975,26 +975,26 @@ export async function assertReviewFocusPaint(beforeReviewFrame, afterReviewFrame
   // a separate paint decision, so text focus legitimately has no box.
   for (const frame of [beforeReviewFrame, afterReviewFrame]) {
     await expect.poll(async () => frame.locator("html").evaluate((html) => (
-      !html.hasAttribute("data-pageroot-review-transitioning")
+      !html.hasAttribute("data-stemmio-review-transitioning")
     )), { timeout: 30_000 }).toBe(true);
   }
   for (const frame of [beforeReviewFrame, afterReviewFrame]) {
     await expect.poll(
-      async () => frame.locator("[data-pageroot-review-mask-hole]").count(),
+      async () => frame.locator("[data-stemmio-review-mask-hole]").count(),
       { timeout: 30_000 },
     ).toBe(1);
-    expect(await frame.locator("[data-pageroot-review-overlay-box]").count()).toBeLessThanOrEqual(1);
+    expect(await frame.locator("[data-stemmio-review-overlay-box]").count()).toBeLessThanOrEqual(1);
   }
 }
 
 export async function assertProjectionGeometryCase(frame, geometryCase) {
   const ownerElement = frame.locator(geometryCase.ownerSelector);
-  const owner = await ownerElement.getAttribute("data-pageroot-review-semantic-owner");
+  const owner = await ownerElement.getAttribute("data-stemmio-review-semantic-owner");
   expect(owner, `${geometryCase.id} must retain a semantic owner`).toBeTruthy();
   const focusGroupId = await ownerElement.evaluate((element) => {
-    const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+    const changeId = element.getAttribute("data-stemmio-review-marker") || "";
     const facts = JSON.parse(
-      element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+      element.getAttribute("data-stemmio-review-projection-facts") || "[]",
     );
     const fact = facts.find((candidate) => candidate.type === "structure") || facts[0];
     const displayGroupId = fact?.displayGroupId || `display-fact-${fact?.id || ""}`;
@@ -1003,23 +1003,23 @@ export async function assertProjectionGeometryCase(frame, geometryCase) {
       : `focus-${changeId}-${displayGroupId}`;
   });
   const regionBar = frame.locator(
-    `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${focusGroupId}"]`,
+    `[data-stemmio-review-region-bar][data-stemmio-review-focus-group="${focusGroupId}"]`,
   ).first();
   const frames = frame.locator(
-    `[data-pageroot-review-overlay-box][data-tone="${geometryCase.changeType}"][data-pageroot-review-semantic-owner="${owner}"]`,
+    `[data-stemmio-review-overlay-box][data-tone="${geometryCase.changeType}"][data-stemmio-review-semantic-owner="${owner}"]`,
   );
   const masks = frame.locator(
-    `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
+    `[data-stemmio-review-mask-hole][data-stemmio-review-semantic-owner="${owner}"]`,
   );
   // Region bars activate one explicit region. Retrying while its asynchronous
   // state arrives is unnecessary; wait for the requested transition.
   const root = frame.locator("html");
-  await expect(root).not.toHaveAttribute("data-pageroot-review-transitioning", /./);
-  if (await root.getAttribute("data-pageroot-review-focus-group") !== focusGroupId) {
+  await expect(root).not.toHaveAttribute("data-stemmio-review-transitioning", /./);
+  if (await root.getAttribute("data-stemmio-review-focus-group") !== focusGroupId) {
     await regionBar.click({ timeout: 8_000 });
   }
-  await expect(root).toHaveAttribute("data-pageroot-review-focus-group", focusGroupId);
-  await expect(root).not.toHaveAttribute("data-pageroot-review-transitioning", /./);
+  await expect(root).toHaveAttribute("data-stemmio-review-focus-group", focusGroupId);
+  await expect(root).not.toHaveAttribute("data-stemmio-review-transitioning", /./);
   await expect(frames).toHaveCount(geometryCase.expectedFrameCount);
   await expect(masks).toHaveCount(geometryCase.expectedMaskCount);
   await expect.poll(() => frames.evaluate((overlay, { ownerSelector, tolerance }) => {
@@ -1040,8 +1040,8 @@ export async function assertProjectionGeometryCase(frame, geometryCase) {
 
 export async function assertActiveFocusPaintBudget(frame) {
   return frame.locator("html").evaluate(() => {
-    const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
-    const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")];
+    const boxes = [...document.querySelectorAll("[data-stemmio-review-overlay-box]")];
+    const holes = [...document.querySelectorAll("[data-stemmio-review-mask-hole]")];
     const width = Math.max(innerWidth, document.documentElement.scrollWidth);
     const height = Math.max(innerHeight, document.documentElement.scrollHeight);
     const insideDocument = (element) => {
@@ -1057,12 +1057,12 @@ export async function assertActiveFocusPaintBudget(frame) {
       && boxes.length <= 1
       && holes.every(insideDocument)
       && boxes.every((box) => insideDocument(box) && holes.some((hole) => (
-        box.getAttribute("data-pageroot-review-overlay-box")
-        === hole.getAttribute("data-pageroot-review-mask-hole")
-      && box.getAttribute("data-pageroot-review-semantic-owner")
-        === hole.getAttribute("data-pageroot-review-semantic-owner")
-      && box.getAttribute("data-pageroot-review-fact")
-        === hole.getAttribute("data-pageroot-review-fact")
+        box.getAttribute("data-stemmio-review-overlay-box")
+        === hole.getAttribute("data-stemmio-review-mask-hole")
+      && box.getAttribute("data-stemmio-review-semantic-owner")
+        === hole.getAttribute("data-stemmio-review-semantic-owner")
+      && box.getAttribute("data-stemmio-review-fact")
+        === hole.getAttribute("data-stemmio-review-fact")
       && Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
       && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
       && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
@@ -1083,13 +1083,13 @@ export async function assertReviewHasNoRuntimeVisualSupplement(
   await expect(reviewWorkspace).not.toHaveAttribute("data-review-runtime-visual-delivery", /.+/u);
   for (const frame of [beforeReviewFrame, afterReviewFrame]) {
     await expect(frame.locator(
-      "[data-pageroot-review-runtime-marker], [data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
+      "[data-stemmio-review-runtime-marker], [data-stemmio-review-runtime-host], [data-stemmio-review-runtime-source-box]",
     )).toHaveCount(0);
   }
 }
 
 export async function captureReviewAcceptPersistence(page) {
-  const opened = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+  const opened = await page.evaluate(() => window.stemmioProjects?.getActiveProject());
   const repository = new ProjectFileRepository({
     projectsRoot: path.dirname(path.dirname(opened.sourcePath)),
   });
@@ -1105,14 +1105,14 @@ export async function captureReviewAcceptPersistence(page) {
 export async function assertReviewAcceptPersistence({ page, beforeAdoption, expectedText }) {
   const { repository, target: previousTarget, snapshot, snapshotBytes } = beforeAdoption;
   await expect.poll(async () => page.evaluate(async () => {
-    const project = await window.htmlAIProjects?.getActiveProject();
+    const project = await window.stemmioProjects?.getActiveProject();
     const reviewVisible = Boolean(document.querySelector('[data-testid="ai-review-workspace"]'));
     return { sourcePath: project?.sourcePath || "", reviewVisible };
   }), { timeout: 30_000 }).toMatchObject({
     sourcePath: beforeAdoption.sourcePath,
     reviewVisible: false,
   });
-  const opened = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+  const opened = await page.evaluate(() => window.stemmioProjects?.getActiveProject());
   const { target } = await repository.workspace({ sourcePath: opened.sourcePath });
   expect(target).toMatchObject({
     projectId: previousTarget.projectId,

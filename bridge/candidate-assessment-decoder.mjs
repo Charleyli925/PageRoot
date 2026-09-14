@@ -12,8 +12,8 @@ import {
   sha256,
 } from "./lifecycle-core.mjs";
 import {
-  isValidPagerootElementId,
-} from "../shared/pageroot-element-identity.mjs";
+  isValidStemmioElementId,
+} from "../shared/stemmio-element-identity.mjs";
 
 const ROOT_FIELDS = new Set([
   "schemaVersion",
@@ -161,7 +161,7 @@ function assertBoundedStableIdSample(value, label) {
   if (
     !Array.isArray(value)
     || value.length > IMPACT_SAMPLE_LIMIT
-    || value.some((id) => !isValidPagerootElementId(id))
+    || value.some((id) => !isValidStemmioElementId(id))
     || new Set(value).size !== value.length
   ) {
     throw decodeError(

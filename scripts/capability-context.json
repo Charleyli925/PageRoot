@@ -212,7 +212,7 @@
         "tests/source-structure-edit.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/source-text-map.test.mjs",
-        "tests/pageroot-element-identity.test.mjs",
+        "tests/stemmio-element-identity.test.mjs",
         "tests/edit-pipeline-baseline.test.mjs",
         "tests/edit-pipeline-counters.test.mjs",
         "tests/source-index-reuse.test.mjs"

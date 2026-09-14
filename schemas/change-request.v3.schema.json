@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/change-request.v3.schema.json",
-  "title": "HTML AI frozen change request v3",
+  "$id": "https://stemmio.local/schemas/change-request.v3.schema.json",
+  "title": "Stemmio frozen change request v3",
   "description": "A portable, immutable request that freezes the exact current source snapshot and system-reserved candidate Version identity for one internal-AI attempt.",
   "type": "object",
   "additionalProperties": false,
@@ -248,7 +248,7 @@
         },
         "elementId": {
           "type": "string",
-          "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"
         },
         "expectedSourceSha256": {
           "$ref": "#/$defs/sha256"
@@ -545,7 +545,7 @@
             {
               "type": "string",
               "pattern": "^output/(?:V1\\.[0-9]+|[^/\\\\]+-V1\\.[0-9]+)\\.html$",
-              "description": "PageRoot-generated original-name plus semantic Version output path."
+              "description": "Stemmio-generated original-name plus semantic Version output path."
             }
           ]
         },

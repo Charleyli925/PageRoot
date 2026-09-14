@@ -86,9 +86,9 @@ async function createStagedApp(t, profile, appRelativePath) {
 }
 
 test("formal candidate profiles assemble once and package only a verified prepackaged app", () => {
-  const staged = "/tmp/pageroot-release-candidate/staged";
-  const appPath = `${staged}/mac-arm64/PageRoot.app`;
-  const release = "/tmp/pageroot-release";
+  const staged = "/tmp/stemmio-release-candidate/staged";
+  const appPath = `${staged}/mac-arm64/Stemmio.app`;
+  const release = "/tmp/stemmio-release";
   assert.deepEqual(
     parseBuildOptions(["--arch", "arm64", "--profile", "candidate-app"]),
     {
@@ -151,7 +151,7 @@ test("formal candidate profiles assemble once and package only a verified prepac
 });
 
 test("release dry-run profile assembles an explicitly unsigned App without distributables", () => {
-  const releaseDirectory = "/tmp/pageroot-release-dry-run/staged";
+  const releaseDirectory = "/tmp/stemmio-release-dry-run/staged";
   assert.deepEqual(
     parseBuildOptions(["--arch", "arm64", "--profile", "release-dry-run"]),
     {
@@ -193,13 +193,13 @@ test("pre-sign assembly keeps public telemetry but cannot see signing or notariz
     APPLE_APP_SPECIFIC_PASSWORD: "apple-password",
     APPLE_TEAM_ID: "RNK9RB969G",
     GITHUB_TOKEN: "github-token",
-    PAGEROOT_POSTHOG_TOKEN: "phc_syntheticpageroot",
-    PAGEROOT_POSTHOG_HOST: "https://us.i.posthog.com",
+    STEMMIO_POSTHOG_TOKEN: "phc_syntheticstemmio",
+    STEMMIO_POSTHOG_HOST: "https://us.i.posthog.com",
   };
   const preflight = candidateAppEnvironment(source);
-  assert.equal(preflight.PAGEROOT_POSTHOG_TOKEN, source.PAGEROOT_POSTHOG_TOKEN);
-  assert.equal(preflight.PAGEROOT_REQUIRE_TELEMETRY_CONFIG, "1");
-  assert.equal(preflight.PAGEROOT_REQUIRE_NOTARIZATION, "0");
+  assert.equal(preflight.STEMMIO_POSTHOG_TOKEN, source.STEMMIO_POSTHOG_TOKEN);
+  assert.equal(preflight.STEMMIO_REQUIRE_TELEMETRY_CONFIG, "1");
+  assert.equal(preflight.STEMMIO_REQUIRE_NOTARIZATION, "0");
   for (const name of [
     "CSC_LINK",
     "CSC_KEY_PASSWORD",
@@ -211,16 +211,16 @@ test("pre-sign assembly keeps public telemetry but cannot see signing or notariz
     assert.equal(preflight[name], undefined);
   }
   const finalBuilder = candidateArtifactBuilderEnvironment(source);
-  assert.equal(finalBuilder.PAGEROOT_POSTHOG_TOKEN, undefined);
-  assert.equal(finalBuilder.PAGEROOT_POSTHOG_HOST, undefined);
+  assert.equal(finalBuilder.STEMMIO_POSTHOG_TOKEN, undefined);
+  assert.equal(finalBuilder.STEMMIO_POSTHOG_HOST, undefined);
   assert.equal(finalBuilder.CSC_LINK, undefined);
   assert.equal(finalBuilder.APPLE_ID, undefined);
 
   const dryRun = releaseDryRunAppEnvironment(source);
-  assert.equal(dryRun.PAGEROOT_POSTHOG_TOKEN, RELEASE_DRY_RUN_TELEMETRY_TOKEN);
-  assert.equal(dryRun.PAGEROOT_POSTHOG_HOST, RELEASE_DRY_RUN_TELEMETRY_HOST);
-  assert.equal(dryRun.PAGEROOT_REQUIRE_TELEMETRY_CONFIG, "1");
-  assert.equal(dryRun.PAGEROOT_REQUIRE_NOTARIZATION, "0");
+  assert.equal(dryRun.STEMMIO_POSTHOG_TOKEN, RELEASE_DRY_RUN_TELEMETRY_TOKEN);
+  assert.equal(dryRun.STEMMIO_POSTHOG_HOST, RELEASE_DRY_RUN_TELEMETRY_HOST);
+  assert.equal(dryRun.STEMMIO_REQUIRE_TELEMETRY_CONFIG, "1");
+  assert.equal(dryRun.STEMMIO_REQUIRE_NOTARIZATION, "0");
   for (const name of [
     "CSC_LINK",
     "CSC_KEY_PASSWORD",
@@ -237,7 +237,7 @@ test("final artifact packaging restores the exact embedded release metadata byte
   const fixture = await createStagedApp(
     t,
     "candidate",
-    "output/release-candidate/staged/mac-arm64/PageRoot.app",
+    "output/release-candidate/staged/mac-arm64/Stemmio.app",
   );
   const record = await restoreReleaseMetadataFromApp({
     productRoot: fixture.productRoot,
@@ -247,7 +247,7 @@ test("final artifact packaging restores the exact embedded release metadata byte
   });
   assert.equal(record.buildInfo.builtAt, builtAt);
   assert.equal(record.telemetry.enabled, true);
-  assert.equal(record.applicationUpdate.updaterCacheDirName, "pageroot-updater");
+  assert.equal(record.applicationUpdate.updaterCacheDirName, "stemmio-updater");
   assert.deepEqual(
     await readFile(path.join(
       fixture.productRoot,
@@ -275,7 +275,7 @@ test("Developer ID signing uses one temporary keychain and the configured entitl
   const fixture = await createStagedApp(
     t,
     "candidate",
-    "output/release-candidate/staged/mac-arm64/PageRoot.app",
+    "output/release-candidate/staged/mac-arm64/Stemmio.app",
   );
   const calls = [];
   let cleanupCount = 0;
@@ -296,12 +296,12 @@ test("Developer ID signing uses one temporary keychain and the configured entitl
       },
       async createSigningKeychain(options) {
         calls.push(["keychain", options.cscLink, options.cscKeyPassword]);
-        return { keychainFile: "/tmp/pageroot.keychain" };
+        return { keychainFile: "/tmp/stemmio.keychain" };
       },
       async resolveIdentity(type, qualifier, keychain) {
         calls.push(["identity", type, qualifier, keychain]);
         return {
-          name: "Developer ID Application: PageRoot (RNK9RB969G)",
+          name: "Developer ID Application: Stemmio (RNK9RB969G)",
           hash: "CERT_HASH",
         };
       },
@@ -315,19 +315,19 @@ test("Developer ID signing uses one temporary keychain and the configured entitl
   });
   assert.equal(
     result.identity,
-    "Developer ID Application: PageRoot (RNK9RB969G)",
+    "Developer ID Application: Stemmio (RNK9RB969G)",
   );
   const signOptions = calls.find(([name]) => name === "sign")[1];
   assert.equal(signOptions.app, fixture.appPath);
   assert.equal(
     signOptions.identity,
-    "Developer ID Application: PageRoot (RNK9RB969G)",
+    "Developer ID Application: Stemmio (RNK9RB969G)",
   );
   assert.equal(signOptions.platform, "darwin");
   assert.equal(signOptions.type, "distribution");
   assert.equal(signOptions.optionsForFile(fixture.appPath).hardenedRuntime, true);
   assert.match(signOptions.optionsForFile(fixture.appPath).entitlements, /entitlements\.mac\.plist$/u);
-  assert.deepEqual(calls.at(-1), ["delete", "/tmp/pageroot.keychain"]);
+  assert.deepEqual(calls.at(-1), ["delete", "/tmp/stemmio.keychain"]);
   assert.equal(cleanupCount, 1);
 });
 
@@ -335,7 +335,7 @@ test("app notarization has no blanket retry and staples only after Apple accepts
   const fixture = await createStagedApp(
     t,
     "candidate",
-    "output/release-candidate/staged/mac-arm64/PageRoot.app",
+    "output/release-candidate/staged/mac-arm64/Stemmio.app",
   );
   const calls = [];
   await notarizeCandidateApp({
@@ -367,7 +367,7 @@ test("signed-app checkpoint binds source and archive bytes and restores the same
   const fixture = await createStagedApp(
     t,
     "candidate",
-    "output/release-candidate/staged/mac-arm64/PageRoot.app",
+    "output/release-candidate/staged/mac-arm64/Stemmio.app",
   );
   const root = fixture.productRoot;
   const outputDirectory = "output/release-app-checkpoint/bundle";
@@ -432,14 +432,14 @@ test("signed-app checkpoint binds source and archive bytes and restores the same
     expectedBuildInfoResolver: fixtureExpectedBuildInfo,
     async commandRunner(_command, arguments_) {
       const destination = arguments_.at(-1);
-      await cp(fixture.appPath, path.join(destination, "PageRoot.app"), {
+      await cp(fixture.appPath, path.join(destination, "Stemmio.app"), {
         recursive: true,
       });
     },
   });
   assert.equal(restored.appPath, path.join(
     root,
-    "output/release-candidate/restored/PageRoot.app",
+    "output/release-candidate/restored/Stemmio.app",
   ));
   const restoredResources = path.join(restored.appPath, "Contents/Resources");
   assert.deepEqual(
@@ -474,7 +474,7 @@ test("release dry-run checkpoint is non-release, restores metadata and cannot en
   const fixture = await createStagedApp(
     t,
     "dry-run",
-    "output/release-dry-run/staged/mac-arm64/PageRoot.app",
+    "output/release-dry-run/staged/mac-arm64/Stemmio.app",
   );
   const root = fixture.productRoot;
   const outputDirectory = "output/release-dry-run-checkpoint/bundle";
@@ -526,19 +526,19 @@ test("release dry-run checkpoint is non-release, restores metadata and cannot en
     identity,
     expectedBuildInfoResolver: fixtureExpectedBuildInfo,
     async commandRunner(_command, arguments_) {
-      await cp(fixture.appPath, path.join(arguments_.at(-1), "PageRoot.app"), {
+      await cp(fixture.appPath, path.join(arguments_.at(-1), "Stemmio.app"), {
         recursive: true,
       });
     },
   });
   assert.equal(
     restored.appPath,
-    path.join(root, "output/release-dry-run/restored/PageRoot.app"),
+    path.join(root, "output/release-dry-run/restored/Stemmio.app"),
   );
   assert.equal(restored.metadata.telemetry.enabled, true);
   assert.equal(
     restored.metadata.applicationUpdate.updaterCacheDirName,
-    "pageroot-updater",
+    "stemmio-updater",
   );
 
   await assert.rejects(
@@ -552,7 +552,7 @@ test("release dry-run checkpoint is non-release, restores metadata and cannot en
       identity,
       expectedBuildInfoResolver: fixtureExpectedBuildInfo,
       async commandRunner(_command, arguments_) {
-        const destination = path.join(arguments_.at(-1), "PageRoot.app");
+        const destination = path.join(arguments_.at(-1), "Stemmio.app");
         await cp(fixture.appPath, destination, { recursive: true });
         await rm(path.join(
           destination,
@@ -574,7 +574,7 @@ test("release dry-run checkpoint is non-release, restores metadata and cannot en
       identity,
       expectedBuildInfoResolver: fixtureExpectedBuildInfo,
       async commandRunner(_command, arguments_) {
-        const destination = path.join(arguments_.at(-1), "PageRoot.app");
+        const destination = path.join(arguments_.at(-1), "Stemmio.app");
         await cp(fixture.appPath, destination, { recursive: true });
         await rm(path.join(
           destination,
@@ -596,7 +596,7 @@ test("release dry-run checkpoint is non-release, restores metadata and cannot en
       await readFile(record.attestationPath),
     ),
     writeFile(
-      path.join(renamedFormalDirectory, "PageRoot-signed-app.zip"),
+      path.join(renamedFormalDirectory, "Stemmio-signed-app.zip"),
       "synthetic release dry-run archive",
     ),
   ]);
@@ -623,13 +623,13 @@ test("packaged startup identity fails on the #102 runtime-name regression and Bu
     () => assertPackagedAppIdentity({
       name: "源页",
       version: packageVersion,
-      bundleId: "com.htmlai.workbench",
+      bundleId: "com.stemmio.app",
     }, expected),
     /runtime application name does not match build\.productName/u,
   );
   assert.throws(
     () => assertPackagedAppIdentity({
-      name: "PageRoot",
+      name: "Stemmio",
       version: packageVersion,
       bundleId: "com.example.changed",
     }, expected),
@@ -685,7 +685,7 @@ test("release dry-run workflow crosses two clean jobs without credentials or rel
     workflow,
     /Download the exact dry-run checkpoint[\s\S]+restore-dry-run[\s\S]+Rebuild the renderer oracle in the second clean job[\s\S]+npm run desktop:renderer[\s\S]+Revalidate the restored payload and metadata[\s\S]+Launch and verify product name, version and Bundle ID/u,
   );
-  assert.match(workflow, /PAGEROOT_REQUIRE_TELEMETRY_CONFIG:\s*"1"/u);
+  assert.match(workflow, /STEMMIO_REQUIRE_TELEMETRY_CONFIG:\s*"1"/u);
   assert.doesNotMatch(workflow, /secrets\.|CSC_LINK|CSC_KEY_PASSWORD|APPLE_ID|APPLE_TEAM_ID/u);
   assert.doesNotMatch(
     workflow,

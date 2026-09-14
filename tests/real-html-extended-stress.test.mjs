@@ -7,7 +7,7 @@ import { EXTENDED_BEHAVIORS, createExtendedLedger, markRemainingExtendedLedger,
   from "./e2e/electron/real-html/frozen-extended-stress.mjs";
 
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
-const id = n => `pr1_${n.toString(16).padStart(32, "0")}`;
+const id = n => `sm1_${n.toString(16).padStart(32, "0")}`;
 const textEntry = { path: [0], offset: 0, textSha256: "a".repeat(64), trailingText: "" };
 const baseTarget = (n, index, behaviors) => ({ index, clickId: id(n), selectedId: id(n), mapping: "self",
   clickTag: "p", selectedTag: "p", tabId: null, scrollContainer: "document",
@@ -87,7 +87,7 @@ test("clipboard source expectation requires one fresh br identity per rendered l
   const marker = "__MARK__";
   const { pattern, lineBreakCount } = clipboardSourceExpectation(marker, "甲\n乙\n丙");
   assert.equal(lineBreakCount, 2);
-  assert.equal(pattern.test(`${marker}甲<br data-pageroot-id="${id(91)}">乙<br data-pageroot-id="${id(92)}">丙`), true);
+  assert.equal(pattern.test(`${marker}甲<br data-stemmio-id="${id(91)}">乙<br data-stemmio-id="${id(92)}">丙`), true);
   assert.equal(pattern.test(`${marker}甲乙丙`), false);
 });
 

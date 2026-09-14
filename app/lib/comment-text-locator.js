@@ -5,7 +5,7 @@
 export function createElementTextLocator(sourceIndex, range) {
   if (!sourceIndex || !range || range.segments?.length === 0) return null;
   const element = (
-    (range.target?.elementId && sourceIndex.byPagerootId.get(range.target.elementId))
+    (range.target?.elementId && sourceIndex.byStemmioId.get(range.target.elementId))
     || (range.target?.nodeId && sourceIndex.byNodeId.get(range.target.nodeId))
     || null
   );

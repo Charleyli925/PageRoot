@@ -21,7 +21,7 @@ import {
 const fixtureAgent = fileURLToPath(new URL("./fixtures/codex-acp-agent.mjs", import.meta.url));
 
 async function isolatedHome(t) {
-  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "pageroot-codex-acp-")));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "stemmio-codex-acp-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -104,7 +104,7 @@ test("the default registry registers Codex through the shared ACP runtime", () =
   assert.equal(provider.securityProfile, "client-mediated");
   assert.equal("legacyDrivers" in provider, false);
   assert.equal(catalog.filter((entry) => entry.runtimeId === "acp").length, 2);
-  assert.equal(catalog.find((entry) => entry.providerId === "pageroot")?.runtimeId, "http");
+  assert.equal(catalog.find((entry) => entry.providerId === "stemmio")?.runtimeId, "http");
 });
 
 test("public catalog projection never includes command, path or stderr", async (t) => {
@@ -125,7 +125,7 @@ test("public catalog projection never includes command, path or stderr", async (
   assert.equal(serialized.includes("index.js"), false);
 });
 
-test("PageRoot-managed Codex ACP wins over a valid user copy", async (t) => {
+test("Stemmio-managed Codex ACP wins over a valid user copy", async (t) => {
   const root = await isolatedHome(t);
   const agentsRoot = path.join(root, "agents");
   const managed = await writeManagedCodex(agentsRoot);
@@ -195,9 +195,9 @@ test("explicit E2E Codex path wins after all candidate sources are collected", a
   const explicit = await probeCommand(root);
   const environment = {
     ...isolatedEnvironment(root),
-    PAGEROOT_E2E: "1",
-    PAGEROOT_CODEX_ACP_ALLOW_TEST_COMMAND: "1",
-    PAGEROOT_CODEX_ACP_COMMAND: explicit.command,
+    STEMMIO_E2E: "1",
+    STEMMIO_CODEX_ACP_ALLOW_TEST_COMMAND: "1",
+    STEMMIO_CODEX_ACP_COMMAND: explicit.command,
   };
   const catalog = createAgentCatalog({ agentsRoot });
   const resolved = await resolveCodexAcpCommand({

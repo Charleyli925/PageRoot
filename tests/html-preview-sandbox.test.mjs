@@ -28,7 +28,7 @@ test("disposable Runtime inert ownership stays outside the author DOM", async ()
   assert.match(sandboxSource, /root\.setAttribute\("inert", ""\)/u);
   assert.match(sandboxSource, /querySelectorAll\("\[autofocus\]"\)/u);
   assert.match(sandboxSource, /removeAttribute\("autofocus"\)/u);
-  assert.doesNotMatch(sandboxSource, /data-pageroot-runtime-candidate-inert/u);
+  assert.doesNotMatch(sandboxSource, /data-stemmio-runtime-candidate-inert/u);
   assert.match(editorSource, /candidateInertInjected: candidateInertOwnership\.injected/u);
   assert.match(editorSource, /if \(candidate\.candidateInertInjected\)/u);
 });
@@ -67,7 +67,7 @@ test("runtime source markers stay Stable-ID-only and skip unmarked injections", 
     new URL("../app/components/html-preview-sandbox.js", import.meta.url),
     "utf8",
   );
-  assert.match(source, /isValidPagerootElementId\(pagerootId\) \? pagerootId : null/u);
+  assert.match(source, /isValidStemmioElementId\(stemmioId\) \? stemmioId : null/u);
   assert.match(source, /if \(!marker\) continue;/u);
   assert.doesNotMatch(source, /synthetic:/u);
   assert.doesNotMatch(source, /data-html-ai-source-node-id/u);

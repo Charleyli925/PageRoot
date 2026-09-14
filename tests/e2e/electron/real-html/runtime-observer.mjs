@@ -107,13 +107,13 @@ export function attributeRuntimeObserverRequests(records) {
 }
 
 export function setRuntimeLifecycleObservationContext(_element, context) {
-  const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
+  const key = "__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__";
   const state = globalThis[key];
   if (!state) throw new Error("Runtime lifecycle observer is not active.");
   const valid = context && /^H\d{2}$/u.test(context.fileId)
     && Number.isInteger(context.round) && context.round > 0
     && Number.isInteger(context.targetIndex) && context.targetIndex >= 0
-    && /^pr1_[a-f0-9]{32}$/u.test(context.targetId)
+    && /^sm1_[a-f0-9]{32}$/u.test(context.targetId)
     && typeof context.behavior === "string" && context.behavior.length > 0
     && typeof context.operation === "string" && context.operation.length > 0;
   if (!valid) throw new Error("Runtime lifecycle execution context is invalid.");
@@ -122,7 +122,7 @@ export function setRuntimeLifecycleObservationContext(_element, context) {
 }
 
 export function startRuntimeCandidateObservation(element, options = {}) {
-  const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
+  const key = "__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__";
   globalThis[key]?.observer?.disconnect();
   const candidate = element.querySelector('iframe[data-frame-role="runtime-candidate"]');
   const candidateId = element.getAttribute("data-runtime-candidate-id");
@@ -363,7 +363,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
         lastActiveGeneration = generation || lastActiveGeneration;
         let documentId = null;
         try {
-          documentId = frame.contentWindow?.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ || null;
+          documentId = frame.contentWindow?.__STEMMIO_NATIVE_QA_DOCUMENT_TOKEN__ || null;
         } catch {
           documentId = null;
         }
@@ -456,7 +456,7 @@ export function startRuntimeCandidateObservation(element, options = {}) {
 export const startRuntimeLifecycleObservation = startRuntimeCandidateObservation;
 
 export function stopRuntimeCandidateObservation() {
-  const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
+  const key = "__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__";
   const state = globalThis[key];
   state?.observer?.disconnect();
   delete globalThis[key];
@@ -465,7 +465,7 @@ export function stopRuntimeCandidateObservation() {
 
 /** Return candidate and lifecycle records for new trust-chain consumers. */
 export function stopRuntimeLifecycleObservation() {
-  const key = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
+  const key = "__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__";
   const state = globalThis[key];
   state?.observer?.disconnect();
   delete globalThis[key];

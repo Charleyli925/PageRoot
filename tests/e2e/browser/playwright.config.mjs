@@ -6,7 +6,7 @@ import { playwrightRetries } from "../../../scripts/playwright-retry-policy.mjs"
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
-const externalBaseUrl = process.env.PAGEROOT_BASE_URL || "";
+const externalBaseUrl = process.env.STEMMIO_BASE_URL || "";
 const localPort = process.env.PORT || "3000";
 const baseURL = externalBaseUrl || `http://localhost:${localPort}`;
 

@@ -44,7 +44,7 @@ export class AgentBridgeService {
     if (!catalog || typeof catalog.install !== "function") {
       throw new AgentBridgeError(
         "AGENT_INSTALL_UNSUPPORTED",
-        "This Agent cannot be installed from PageRoot.",
+        "This Agent cannot be installed from Stemmio.",
         { status: 409 },
       );
     }
@@ -56,7 +56,7 @@ export class AgentBridgeService {
     if (!catalog || typeof catalog.cancelInstall !== "function") {
       throw new AgentBridgeError(
         "AGENT_INSTALL_UNSUPPORTED",
-        "This Agent cannot be installed from PageRoot.",
+        "This Agent cannot be installed from Stemmio.",
         { status: 409 },
       );
     }

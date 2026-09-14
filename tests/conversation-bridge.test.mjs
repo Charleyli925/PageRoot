@@ -31,7 +31,7 @@ function conversationQuery(sourcePath) {
 test("GET /conversation establishes and then restores the document's conversation", async (t) => {
   const { environment, sourcePath } = await startedProject(
     t,
-    "pageroot-bridge-conversation-",
+    "stemmio-bridge-conversation-",
   );
 
   const created = await environment.requestJson(conversationQuery(sourcePath));
@@ -65,7 +65,7 @@ test("GET /conversation establishes and then restores the document's conversatio
 test("a draft round trips without touching the message history", async (t) => {
   const { environment, sourcePath } = await startedProject(
     t,
-    "pageroot-bridge-conversation-draft-",
+    "stemmio-bridge-conversation-draft-",
   );
   const opened = await environment.requestJson(conversationQuery(sourcePath));
   const { conversationId } = opened.body.conversation;
@@ -96,7 +96,7 @@ test("a draft round trips without touching the message history", async (t) => {
 test("a draft for a conversation this document does not own is refused", async (t) => {
   const { environment, sourcePath } = await startedProject(
     t,
-    "pageroot-bridge-conversation-foreign-",
+    "stemmio-bridge-conversation-foreign-",
   );
   const opened = await environment.requestJson(conversationQuery(sourcePath));
 
@@ -115,7 +115,7 @@ test("a draft for a conversation this document does not own is refused", async (
 test("an unsafe conversation identity never reaches the filesystem", async (t) => {
   const { environment, sourcePath } = await startedProject(
     t,
-    "pageroot-bridge-conversation-unsafe-",
+    "stemmio-bridge-conversation-unsafe-",
   );
   const opened = await environment.requestJson(conversationQuery(sourcePath));
 
@@ -144,7 +144,7 @@ test("an unsafe conversation identity never reaches the filesystem", async (t) =
 test("a draft whose project identity does not match the source is refused", async (t) => {
   const { environment, sourcePath } = await startedProject(
     t,
-    "pageroot-bridge-conversation-identity-",
+    "stemmio-bridge-conversation-identity-",
   );
   const opened = await environment.requestJson(conversationQuery(sourcePath));
 
@@ -162,7 +162,7 @@ test("a draft whose project identity does not match the source is refused", asyn
 
 test("two documents in one project keep separate conversations", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-bridge-conversation-documents-",
+    prefix: "stemmio-bridge-conversation-documents-",
   });
   const firstSource = await environment.createSource("first.html", HTML);
   const secondSource = await environment.createSource("second.html", HTML);

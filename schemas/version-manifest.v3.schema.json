@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/version-manifest.v3.schema.json",
-  "title": "HTML AI immutable version manifest v3",
+  "$id": "https://stemmio.local/schemas/version-manifest.v3.schema.json",
+  "title": "Stemmio immutable version manifest v3",
   "description": "A committed, immutable HTML milestone. New records are either an initial V1 baseline or a validated internal-AI result; local edits and history restores are never Version records.",
   "oneOf": [
     {

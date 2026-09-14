@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://html-change.local/schemas/candidate-assessment.v1.schema.json",
-  "title": "PageRoot AI candidate assessment v1",
+  "$id": "https://stemmio.local/schemas/candidate-assessment.v1.schema.json",
+  "title": "Stemmio AI candidate assessment v1",
   "description": "A coarse candidate health and document-continuity assessment. Comment targets remain review guidance and are not an acceptance boundary.",
   "type": "object",
   "additionalProperties": false,
@@ -150,13 +150,13 @@
       "type": "array",
       "uniqueItems": true,
       "maxItems": 100,
-      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+      "items": { "type": "string", "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
     },
     "outsideTargetElementIdSample": {
       "type": "array",
       "uniqueItems": true,
       "maxItems": 100,
-      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+      "items": { "type": "string", "pattern": "^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
     },
     "truncated": {
       "type": "boolean"

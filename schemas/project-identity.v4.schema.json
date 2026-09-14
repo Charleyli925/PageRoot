@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pageroot.local/schemas/project-identity.v4.schema.json",
+  "$id": "https://stemmio.local/schemas/project-identity.v4.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "projectId", "documentId", "createdAt"],

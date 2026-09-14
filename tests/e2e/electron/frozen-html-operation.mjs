@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
 import { tmpdir } from "node:os";
-import { closePageRootGracefully, expect, launchPageRoot, managedWorkingCopyPath, removeIsolatedUserData, stopPageRoot,
+import { closeStemmioGracefully, expect, launchStemmio, managedWorkingCopyPath, removeIsolatedUserData, stopStemmio,
   waitForProjectReady, waitForRuntimeHandoffSettled } from "./electron-native-harness.mjs";
 import { executeFrozenSelection, frozenDigest, frozenFrameAccess, frozenInitialRuntimeDecision,
   readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay } from "./real-html/frozen-selection.mjs";
@@ -37,8 +37,8 @@ async function waitInitialRuntime(page, expected, sourceRevision) {
   return { decision, generation: handoff.activeFrameGeneration };
 }
 
-const manifestPath = process.env.PAGEROOT_FROZEN_MANIFEST;
-const manifestDigest = process.env.PAGEROOT_FROZEN_MANIFEST_SHA256;
+const manifestPath = process.env.STEMMIO_FROZEN_MANIFEST;
+const manifestDigest = process.env.STEMMIO_FROZEN_MANIFEST_SHA256;
 const plan = readFrozenSelection(readFileSync(manifestPath), manifestDigest);
 const version = workspaceSourceFingerprint();
 expect(version.workspaceSourceSha256, "FROZEN_SOURCE_VERSION_MISMATCH")
@@ -69,7 +69,7 @@ if (plan.operation === "mixed") {
     mixedCheckpointOperations(plan), plan.targets[0].selectedId) };
 }
 try {
-  session = await launchPageRoot({ activeSourcePath: importPath });
+  session = await launchStemmio({ activeSourcePath: importPath });
   const page = session.page;
   await waitForProjectReady(page);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true });
@@ -85,7 +85,7 @@ try {
   if (plan.operation === "mixed") {
     // A fresh import owns one declared Working Copy. Read its exact draft file,
     // never search projects or infer a comment's target from rendered text.
-    const control = path.join(path.dirname(workingPath), ".pageroot");
+    const control = path.join(path.dirname(workingPath), ".stemmio");
     const manifest = JSON.parse(readFileSync(path.join(control, "manifest.json")));
     expect(manifest.workingCopies).toHaveLength(1);
     const working = manifest.workingCopies[0];
@@ -136,9 +136,9 @@ try {
     inspectorCache.verify();
     const started = performance.now();
     try {
-      await closePageRootGracefully(session.electronApp, page);
+      await closeStemmioGracefully(session.electronApp, page);
       session.electronApp = null;
-      session = await launchPageRoot({ isolatedUserData: session.isolatedUserData });
+      session = await launchStemmio({ isolatedUserData: session.isolatedUserData });
       await waitForProjectReady(session.page);
       report.reopen.initialRuntime = await waitInitialRuntime(session.page, plan.initialRuntime, `sha256:${expectedFinal.sha256}`);
       inspectorCache = await boundFrozenInspectorCache(session.page);
@@ -157,7 +157,7 @@ try {
           report: report.mixed, expectedFinal, calls: report.calls });
       } else if (plan.operation === "structure") {
         expect(await reopenedTarget.textContent()).toBe(report.structure.originalText);
-        await expect(reopenedFrame.locator(`[data-pageroot-id="${report.structure.copyId}"]`)).toHaveCount(0);
+        await expect(reopenedFrame.locator(`[data-stemmio-id="${report.structure.copyId}"]`)).toHaveCount(0);
       } else await expect(reopenedTarget).toContainText(`PRCORE_${plan.fileId}`);
       const source = verifyFrozenBytes(await readPublishedWorkingCopy(workingPath, null), expectedFinal, "REOPEN_SOURCE_CHANGED");
       const display = verifyFrozenDisplay({ working: await reopenedEditor.getAttribute("data-working-source-sha256"),
@@ -199,7 +199,7 @@ try {
   }
   if (session) {
     try {
-      if (session.electronApp) await stopPageRoot(session.electronApp, session.isolatedUserData);
+      if (session.electronApp) await stopStemmio(session.electronApp, session.isolatedUserData);
       else removeIsolatedUserData(session.isolatedUserData);
       report.cleanup = "PASS";
     }

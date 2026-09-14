@@ -6,8 +6,8 @@
 // discovery step.  Execution never searches for a replacement target.
 
 export const TEXT_TARGET_COUNT = 3;
-export const TEXT_TARGET_SELECTOR = "[data-pageroot-id]";
-export const TEXT_TARGET_STABLE_ID_PATTERN = /^pr1_[0-9a-f]{32}$/u;
+export const TEXT_TARGET_SELECTOR = "[data-stemmio-id]";
+export const TEXT_TARGET_STABLE_ID_PATTERN = /^sm1_[0-9a-f]{32}$/u;
 
 export const TEXT_TARGET_REASON_CODES = Object.freeze({
   PLAN_INVALID: "TEXT_TARGET_PLAN_INVALID",
@@ -45,19 +45,19 @@ export function describeTextTarget(element) {
   const view = documentNode.defaultView;
   const style = view?.getComputedStyle(element);
   const rect = element.getBoundingClientRect();
-  const id = element.getAttribute("data-pageroot-id");
-  const parent = element.parentElement?.closest("[data-pageroot-id]") || null;
+  const id = element.getAttribute("data-stemmio-id");
+  const parent = element.parentElement?.closest("[data-stemmio-id]") || null;
   const descendantSourceNodes = Array.from(
-    element.querySelectorAll("[data-pageroot-id]"),
+    element.querySelectorAll("[data-stemmio-id]"),
   );
   const descendantSourceIds = descendantSourceNodes
-    .map((candidate) => candidate.getAttribute("data-pageroot-id"));
+    .map((candidate) => candidate.getAttribute("data-stemmio-id"));
   const descendantSourceTags = descendantSourceNodes.map((candidate) => candidate.localName);
   const excludedAncestor = element.closest(
     "button,a,input,textarea,select,option,nav,[role=tab],[role=tablist],[contenteditable=true]",
   );
   const tag = element.localName;
-  const sourceIdValid = /^pr1_[0-9a-f]{32}$/u.test(id || "");
+  const sourceIdValid = /^sm1_[0-9a-f]{32}$/u.test(id || "");
   const text = element.textContent?.replace(/\s+/gu, " ").trim() || "";
   const hiddenByAttribute = element.hasAttribute("hidden")
     || element.getAttribute("aria-hidden") === "true"
@@ -78,16 +78,16 @@ export function describeTextTarget(element) {
     underline: (style?.textDecorationLine || "").split(/\s+/u).includes("underline"),
   };
   const documentOrder = Array.from(
-    documentNode.querySelectorAll("[data-pageroot-id]"),
+    documentNode.querySelectorAll("[data-stemmio-id]"),
   ).indexOf(element);
   const domIdentityValid = sourceIdValid
-    && Array.from(documentNode.querySelectorAll("[data-pageroot-id]"))
-      .filter((candidate) => candidate.getAttribute("data-pageroot-id") === id)
+    && Array.from(documentNode.querySelectorAll("[data-stemmio-id]"))
+      .filter((candidate) => candidate.getAttribute("data-stemmio-id") === id)
       .length === 1;
   return {
     id,
     tag,
-    parentId: parent?.getAttribute("data-pageroot-id") || null,
+    parentId: parent?.getAttribute("data-stemmio-id") || null,
     documentOrder,
     textLength: text.length,
     childCount: element.childElementCount,

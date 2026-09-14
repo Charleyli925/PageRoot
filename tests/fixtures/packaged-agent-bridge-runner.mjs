@@ -83,7 +83,7 @@ async function stopChild(child) {
 
 async function run() {
   const temporaryRoot = await realpath(
-    await mkdtemp(path.join(os.tmpdir(), "pageroot-packaged-agent-")),
+    await mkdtemp(path.join(os.tmpdir(), "stemmio-packaged-agent-")),
   );
   let bridge = null;
   const logs = { stdout: "", stderr: "" };
@@ -128,13 +128,13 @@ async function run() {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: "1",
-        HTML_AI_WORKSPACE: workspaceRoot,
-        HTML_AI_PROJECT_FILES_ROOT: projectsRoot,
-        HTML_AI_BRIDGE_PORT: String(port),
-        HTML_AI_BRIDGE_AUTH_TOKEN: token,
-        PAGEROOT_E2E: "1",
-        PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
-        PAGEROOT_QODER_ACP_COMMAND: commandPath,
+        STEMMIO_WORKSPACE: workspaceRoot,
+        STEMMIO_PROJECT_FILES_ROOT: projectsRoot,
+        STEMMIO_BRIDGE_PORT: String(port),
+        STEMMIO_BRIDGE_AUTH_TOKEN: token,
+        STEMMIO_E2E: "1",
+        STEMMIO_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+        STEMMIO_QODER_ACP_COMMAND: commandPath,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -150,7 +150,7 @@ async function run() {
     const baseUrl = `http://127.0.0.1:${port}`;
     const requestJson = async (pathname, init = {}) => {
       const headers = new Headers(init.headers);
-      headers.set("x-html-ai-bridge-token", token);
+      headers.set("x-stemmio-bridge-token", token);
       if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
       const response = await fetch(`${baseUrl}${pathname}`, { ...init, headers });
       const text = await response.text();
@@ -272,7 +272,7 @@ async function run() {
         + `&versionId=${encodeURIComponent(ready.versionId)}`,
     );
     assert.equal(candidate.response.status, 200, JSON.stringify(candidate.body));
-    assert.match(candidate.body.content, /data-pageroot-qoder-acp="e2e"/u);
+    assert.match(candidate.body.content, /data-stemmio-qoder-acp="e2e"/u);
     const requestRoot = request.body.activeRun.requestPath;
     const [candidateRecord, completionRecord] = await Promise.all([
       readFile(path.join(requestRoot, "candidate.json"), "utf8").then(JSON.parse),
@@ -285,7 +285,7 @@ async function run() {
     const managedSourceHtml = await readFile(ensured.body.sourcePath, "utf8");
     assert.notEqual(managedSourceHtml, sourceHtml);
     const managedSourceIds = [...managedSourceHtml.matchAll(
-      /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+      /data-stemmio-id="(sm1_[0-9a-f]{32})"/gu,
     )].map((match) => match[1]);
     assert.equal(managedSourceIds.length, 6);
     assert.equal(new Set(managedSourceIds).size, managedSourceIds.length);

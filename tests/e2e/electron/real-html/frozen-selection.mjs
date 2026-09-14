@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { expect } from "@playwright/test";
 
-const ID = /^pr1_[a-f0-9]{32}$/u;
+const ID = /^sm1_[a-f0-9]{32}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
 export const frozenDigest = (value) => createHash("sha256").update(value).digest("hex");
 export const FROZEN_TEXT_OPERATIONS = Object.freeze([
@@ -124,8 +124,8 @@ export function readFrozenSelection(bytes, expectedDigest) {
       && target.copyCapability?.reason === "runtime-subtree-diverged"
       && (boundary || (target.copyCapability?.basis === "REVIEWED_RUNTIME_ATTRIBUTE_DIVERGENCE"
       && point === undefined && /^data-[a-z0-9-]+$/u.test(proof?.attribute || "")
-      && !/^data-(?:html-canvas-|pageroot-edit-runtime-|runtime-)/u.test(proof.attribute)
-      && proof.attribute !== "data-pageroot-v2-editing"
+      && !/^data-(?:html-canvas-|stemmio-edit-runtime-|runtime-)/u.test(proof.attribute)
+      && proof.attribute !== "data-stemmio-editing"
       && typeof proof?.value === "string" && proof.value.length > 0
       && target.copyCapability?.diagnostic === `root:attribute-extra:${proof.attribute}`))
       && HASH.test(proof?.sourceElementSha256 || "")
@@ -226,7 +226,7 @@ export function frozenFrameAccess(frame, target, calls) {
     target(id) {
       calls.push({ kind: "exact-target-lookup", id });
       requireFact(ids.has(id), "UNPLANNED_TARGET_LOOKUP", { id });
-      return frame.locator(`[data-pageroot-id="${id}"]`);
+      return frame.locator(`[data-stemmio-id="${id}"]`);
     },
     selected() {
       calls.push({ kind: "selection-state-read" });
@@ -288,7 +288,7 @@ export async function executeFrozenSelection({ access, keyboard, mouse, target, 
   if (priorSelectionId === null) await keyboard.press("Escape");
   const initial = access.selected();
   const initialCount = await initial.count();
-  const initialId = initialCount === 1 ? await initial.getAttribute("data-pageroot-id") : null;
+  const initialId = initialCount === 1 ? await initial.getAttribute("data-stemmio-id") : null;
   requireFact(priorSelectionId === null ? initialCount === 0 : initialCount === 1 && initialId === priorSelectionId,
     "FROZEN_SELECTION_INITIAL_STATE_MISMATCH", { initialCount, initialId, priorSelectionId });
   // A single fixed point on the frozen element. No alternate hit-point search.
@@ -311,7 +311,7 @@ export async function executeFrozenSelection({ access, keyboard, mouse, target, 
         const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
         return { x: x - box.left, y: y - box.top, width: rect.width, height: rect.height,
           text: node.textContent, hitId: element.ownerDocument.elementFromPoint(x, y)
-            ?.closest("[data-pageroot-id]")?.getAttribute("data-pageroot-id") };
+            ?.closest("[data-stemmio-id]")?.getAttribute("data-stemmio-id") };
       }, target.textEntry);
       requireFact(point && point.width > 0 && point.height > 0
         && frozenDigest(point.text) === target.textEntry.textSha256, "FROZEN_CLICK_TEXT_DRIFT");
@@ -329,9 +329,9 @@ export async function executeFrozenSelection({ access, keyboard, mouse, target, 
       const hit = await handle.evaluate((element, point) => {
         const rect = element.getBoundingClientRect();
         const hit = element.ownerDocument.elementFromPoint(rect.left + point.x, rect.top + point.y);
-        return { id: hit?.getAttribute("data-pageroot-id"), inside: point.x < rect.width && point.y < rect.height,
+        return { id: hit?.getAttribute("data-stemmio-id"), inside: point.x < rect.width && point.y < rect.height,
           pointerEvents: getComputedStyle(element).pointerEvents,
-          parentId: element.parentElement?.getAttribute("data-pageroot-id") };
+          parentId: element.parentElement?.getAttribute("data-stemmio-id") };
       }, point);
       requireFact(hit.inside && hit.id === point.expectedHitId
         && (point.basis !== "dedicated-canvas-through-parent" || (hit.pointerEvents === "none" && hit.parentId === point.expectedHitId)),
@@ -347,7 +347,7 @@ export async function executeFrozenSelection({ access, keyboard, mouse, target, 
     await expect.poll(async () => {
       const selected = access.selected();
       if (await selected.count() !== 1) return null;
-      return selected.getAttribute("data-pageroot-id");
+      return selected.getAttribute("data-stemmio-id");
     }, { timeout: 2_000 }).toBe(target.selectedId);
   } catch (cause) {
     if (cause.code) throw cause;
@@ -356,7 +356,7 @@ export async function executeFrozenSelection({ access, keyboard, mouse, target, 
     throw Object.assign(new Error("FROZEN_SELECTION_FAILED", { cause }), {
       code: "FROZEN_SELECTION_FAILED",
       details: { selectedCount: count, observedId: count === 1
-        ? await selected.getAttribute("data-pageroot-id") : null, expectedId: target.selectedId },
+        ? await selected.getAttribute("data-stemmio-id") : null, expectedId: target.selectedId },
     });
   } finally {
     await handle.dispose();

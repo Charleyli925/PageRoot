@@ -25,8 +25,8 @@ export function registerAgentIpc({
     INTEGRATION_CHANNELS.qoderHandoff,
     trustedProject((payload) => {
       if (
-        process.env.PAGEROOT_E2E === "1"
-        && process.env.PAGEROOT_E2E_QODER_HANDOFF_FAILURE === "1"
+        process.env.STEMMIO_E2E === "1"
+        && process.env.STEMMIO_E2E_QODER_HANDOFF_FAILURE === "1"
       ) {
         throw new ProjectFileError(
           "E2E_QODER_HANDOFF_FAILED",
@@ -110,7 +110,7 @@ export function registerAgentIpc({
         return Object.freeze({
           available: false,
           remembered: false,
-          providerId: "pageroot",
+          providerId: "stemmio",
           vendorId: null,
         });
       }

@@ -20,7 +20,7 @@ function removePreflightUserData(directoryPath) {
   const resolved = path.resolve(directoryPath);
   if (
     path.dirname(resolved) !== path.resolve(tmpdir())
-    || !path.basename(resolved).startsWith("pageroot-native-e2e-preflight-")
+    || !path.basename(resolved).startsWith("stemmio-native-e2e-preflight-")
   ) {
     throw new Error(`Refusing to remove non-preflight data: ${resolved}`);
   }
@@ -53,7 +53,7 @@ test("hosted macOS can show, schedule and paint a synthetic Electron renderer", 
   tag: "@infra-sensitive",
 }, async () => {
   const isolatedUserData = mkdtempSync(
-    path.join(tmpdir(), "pageroot-native-e2e-preflight-"),
+    path.join(tmpdir(), "stemmio-native-e2e-preflight-"),
   );
   let electronApp = null;
   try {
@@ -64,7 +64,7 @@ test("hosted macOS can show, schedule and paint a synthetic Electron renderer", 
       timeout: 15_000,
       env: {
         ...process.env,
-        PAGEROOT_ELECTRON_PREFLIGHT_USER_DATA: isolatedUserData,
+        STEMMIO_ELECTRON_PREFLIGHT_USER_DATA: isolatedUserData,
       },
     });
     const page = await electronApp.firstWindow({ timeout: 15_000 });

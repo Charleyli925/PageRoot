@@ -4,7 +4,7 @@ import path from "node:path";
 import { ProjectFileError, writeHtmlCopy } from "./project-files.mjs";
 import { readLastExportDirectory, recordLastExportDirectory } from "./ui-preferences.mjs";
 
-export const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
+export const PROJECT_IPC_PROTOCOL = "stemmio-project-result";
 export const PROJECT_IPC_VERSION = 1;
 
 const GENERIC_PROJECT_ERROR = Object.freeze({

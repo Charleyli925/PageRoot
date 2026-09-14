@@ -48,7 +48,7 @@ export function qoderAvailabilityPresentation(availability) {
     return Object.freeze({ statusLabel: "已连接", detail: "真实预检已完成，可直接交给 Qoder 修改", tone: "ready" });
   }
   if (status === "not-installed") {
-    return Object.freeze({ statusLabel: "未安装", detail: "如需从 PageRoot 直接发送，还需要 Qoder CLI。", tone: "attention" });
+    return Object.freeze({ statusLabel: "未安装", detail: "如需从 Stemmio 直接发送，还需要 Qoder CLI。", tone: "attention" });
   }
   if (status === "auth-required") {
     const waitingForLogin = availability?.guidanceCopied === "login";
@@ -63,14 +63,14 @@ export function qoderAvailabilityPresentation(availability) {
   if (availability?.reason === "invalid-installation") {
     return Object.freeze({
       statusLabel: "无法使用当前安装",
-      detail: "当前安装不是 PageRoot 支持的独立 Qoder CLI。",
+      detail: "当前安装不是 Stemmio 支持的独立 Qoder CLI。",
       tone: "attention",
     });
   }
   if (availability?.reason === "restart-required") {
     return Object.freeze({
-      statusLabel: "请重新打开 PageRoot",
-      detail: "Qoder CLI 已发生变化，重新打开 PageRoot 后即可继续。",
+      statusLabel: "请重新打开 Stemmio",
+      detail: "Qoder CLI 已发生变化，重新打开 Stemmio 后即可继续。",
       tone: "attention",
     });
   }
@@ -104,14 +104,14 @@ export function qoderGuidanceInstruction(kind) {
       "请帮我完成这台 Mac 上独立 Qoder CLI 的官方登录流程。",
       "使用 Qoder 官方支持的登录入口 `qodercli login`；如果需要交互式登录，请启动 `qodercli` 后使用 `/login`。",
       "完成浏览器或令牌登录后，验证 `qodercli --list-models` 能返回当前账号可用的模型。",
-      "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
+      "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
     ].join("\n");
   }
   return [
-    "请帮我在这台 Mac 上准备 PageRoot 支持的独立 Qoder CLI。",
+    "请帮我在这台 Mac 上准备 Stemmio 支持的独立 Qoder CLI。",
     "使用 Qoder 官方 npm 包 `@qoder-ai/qodercli@latest`，不要使用 Qoder 应用包内置的命令。",
     "将它安装到 Finder 或 Dock 启动的应用也能稳定发现的位置；优先使用用户可写的稳定全局目录，或保留当前 nvm、Volta、fnm、mise 配置并确保 qodercli 启动器真实存在。",
     "安装后使用 Qoder 官方登录流程完成登录，并验证 `qodercli --version` 与 `qodercli --list-models` 均可用。",
-    "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
+    "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
   ].join("\n");
 }

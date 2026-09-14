@@ -12,7 +12,7 @@ import {
   summarizeRuntimeObserverRecords,
 } from "../electron/real-html/runtime-observer.mjs";
 
-const OBSERVER_KEY = "__PAGEROOT_REAL_HTML_RUNTIME_OBSERVER__";
+const OBSERVER_KEY = "__STEMMIO_REAL_HTML_RUNTIME_OBSERVER__";
 
 test("repeated same-source rebuild requests remain separate without inventing missing requests", async ({ page }) => {
   await page.setContent('<main data-runtime-root></main>');
@@ -20,7 +20,7 @@ test("repeated same-source rebuild requests remain separate without inventing mi
   await root.evaluate(startRuntimeLifecycleObservation);
   await root.evaluate(setRuntimeLifecycleObservationContext, {
     fileId: "H01", round: 2, targetIndex: 3,
-    targetId: "pr1_11111111111111111111111111111111",
+    targetId: "sm1_11111111111111111111111111111111",
     behavior: "structure-rebuild", operation: "copy-edit-delete-element",
   });
   for (let cycle = 1; cycle <= 2; cycle++) {
@@ -131,7 +131,7 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
   await root.evaluate(startRuntimeLifecycleObservation);
   await root.evaluate(setRuntimeLifecycleObservationContext, {
     fileId: "H01", round: 2, targetIndex: 3,
-    targetId: "pr1_11111111111111111111111111111111",
+    targetId: "sm1_11111111111111111111111111111111",
     behavior: "structure-rebuild", operation: "copy-edit-delete-element",
   });
 
@@ -205,7 +205,7 @@ test("lifecycle observer proves Candidate, generation, promotion and Runtime ter
   expect(attributions[0]).toMatchObject({
     requestOrdinal: 1,
     execution: { fileId: "H01", round: 2, targetIndex: 3,
-      targetId: "pr1_11111111111111111111111111111111",
+      targetId: "sm1_11111111111111111111111111111111",
       behavior: "structure-rebuild", operation: "copy-edit-delete-element" },
     reason: "structure-edit",
     sourceRevision: "source-2",

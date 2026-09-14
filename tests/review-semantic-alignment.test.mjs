@@ -83,8 +83,8 @@ test("units from different parent keys never pair", () => {
 
 test("a persistent stable identity pairs across source parents", () => {
   const pairs = alignReviewSemanticUnits(
-    [unit("同一源码元素", { stableId: "pageroot:pr1_source", parentKey: "list-a" })],
-    [unit("同一源码元素已移动", { stableId: "pageroot:pr1_source", parentKey: "list-b" })],
+    [unit("同一源码元素", { stableId: "stemmio:sm1_source", parentKey: "list-a" })],
+    [unit("同一源码元素已移动", { stableId: "stemmio:sm1_source", parentKey: "list-b" })],
   );
 
   assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex, match }) => ({
@@ -98,12 +98,12 @@ test("persistent identity pairs independently of an authored tag change", () => 
   const pairs = alignReviewSemanticUnits(
     [unit("同一元素", {
       kind: "section:SECTION",
-      stableId: "pageroot:pr1_source",
+      stableId: "stemmio:sm1_source",
       parentKey: "before-parent",
     })],
     [unit("同一元素", {
       kind: "section:ARTICLE",
-      stableId: "pageroot:pr1_source",
+      stableId: "stemmio:sm1_source",
       parentKey: "after-parent",
     })],
   );
@@ -114,12 +114,12 @@ test("persistent identity pairs independently of an authored tag change", () => 
 test("exact markup cannot bridge conflicting or missing persistent identities", () => {
   const exact = (stableId) => unit("相同源码", {
     stableId,
-    exactSignature: "same-subtree-without-pageroot-id",
+    exactSignature: "same-subtree-without-stemmio-id",
     parentKey: "same-parent",
   });
-  for (const afterStableId of ["pageroot:pr1_other", null]) {
+  for (const afterStableId of ["stemmio:sm1_other", null]) {
     const pairs = alignReviewSemanticUnits(
-      [exact("pageroot:pr1_before")],
+      [exact("stemmio:sm1_before")],
       [exact(afterStableId)],
     );
     assert.equal(matchedPairs(pairs).length, 0);
@@ -137,8 +137,8 @@ test("a claimed persistent identity cannot re-enter any fallback pairing path", 
     parentKey: "same-parent",
   });
   for (const [name, beforeStableId, afterStableId] of [
-    ["deleted ID", "pageroot:pr1_before", null],
-    ["replaced ID", "pageroot:pr1_before", "pageroot:pr1_after"],
+    ["deleted ID", "stemmio:sm1_before", null],
+    ["replaced ID", "stemmio:sm1_before", "stemmio:sm1_after"],
     ["invalid ID claim", null, null],
     ["legacy identity under a persistent claim", "id:legacy", "id:legacy"],
   ]) {
@@ -165,7 +165,7 @@ test("an ID-bearing element cannot pair with identical markup after its ID is re
   const pairs = alignReviewSemanticUnits(
     [unit("相同内容", {
       ...sharedEvidence,
-      stableId: "pageroot:pr1_before",
+      stableId: "stemmio:sm1_before",
       persistentIdentityClaimed: true,
     })],
     [unit("相同内容", sharedEvidence)],

@@ -105,7 +105,7 @@ export async function openVerifiedAgentExecutable(executable, expectedExecutable
   if (executable !== expectedPath) {
     throw acpPolicyError(
       "ACP_AGENT_EXECUTABLE_CHANGED",
-      "The ACP Agent executable path changed after PageRoot preflight.",
+      "The ACP Agent executable path changed after Stemmio preflight.",
     );
   }
   const handle = await open(
@@ -114,7 +114,7 @@ export async function openVerifiedAgentExecutable(executable, expectedExecutable
   ).catch(() => {
     throw acpPolicyError(
       "ACP_AGENT_EXECUTABLE_CHANGED",
-      "The ACP Agent executable could not be reopened after PageRoot preflight.",
+      "The ACP Agent executable could not be reopened after Stemmio preflight.",
     );
   });
   try {
@@ -142,7 +142,7 @@ export async function openVerifiedAgentExecutable(executable, expectedExecutable
     ) {
       throw acpPolicyError(
         "ACP_AGENT_EXECUTABLE_CHANGED",
-        "The ACP Agent executable identity changed after PageRoot preflight.",
+        "The ACP Agent executable identity changed after Stemmio preflight.",
       );
     }
     return handle;
@@ -156,20 +156,20 @@ async function trustedCurrentJavaScriptRuntime() {
   const runtime = await realpath(process.execPath).catch(() => {
     throw acpPolicyError(
       "ACP_AGENT_RUNTIME_INVALID",
-      "The trusted PageRoot JavaScript runtime is unavailable.",
+      "The trusted Stemmio JavaScript runtime is unavailable.",
     );
   });
   const information = await lstat(runtime).catch(() => null);
   if (!information?.isFile() || information.isSymbolicLink()) {
     throw acpPolicyError(
       "ACP_AGENT_RUNTIME_INVALID",
-      "The trusted PageRoot JavaScript runtime is invalid.",
+      "The trusted Stemmio JavaScript runtime is invalid.",
     );
   }
   await access(runtime, fsConstants.X_OK).catch(() => {
     throw acpPolicyError(
       "ACP_AGENT_RUNTIME_INVALID",
-      "The trusted PageRoot JavaScript runtime is not executable.",
+      "The trusted Stemmio JavaScript runtime is not executable.",
     );
   });
   return runtime;

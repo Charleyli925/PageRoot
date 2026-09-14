@@ -34,7 +34,7 @@ export const FLAKY_EVIDENCE_SCHEMA_VERSION = 2;
 
 const ENVIRONMENT_STEP_PATTERN = /(?:npm ci|Install npm|Playwright|preflight|Restore Electron|hosted renderer|system dependencies|Install Playwright)/iu;
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const TRIAGE_COMMENT_PATTERN = /<!--\s*pageroot-ci-triage\b([\s\S]*?)-->/u;
+const TRIAGE_COMMENT_PATTERN = /<!--\s*stemmio-ci-triage\b([\s\S]*?)-->/u;
 const AGGREGATE_JOB_NAMES = new Set(["release-gate", "pr-feedback"]);
 
 export function classifyFlakyTest(test, spec = {}) {

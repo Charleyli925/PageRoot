@@ -28,7 +28,7 @@ import {
   prepareAiTaskRequest,
 } from "./project-file-repository-harness.mjs";
 
-test("save conflicts when both PageRoot and disk changed", async (t) => {
+test("save conflicts when both Stemmio and disk changed", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "save-boundary.html");
   const externalHtml = html("external edit before save write");
@@ -45,7 +45,7 @@ test("save conflicts when both PageRoot and disk changed", async (t) => {
   await assert.rejects(
     repository.saveWorkingCopy({
       target: imported.target,
-      html: html("PageRoot save that must not overwrite"),
+      html: html("Stemmio save that must not overwrite"),
       expectedSourceSha256: imported.target.sourceSha256,
       editRevision: 1,
     }),
@@ -56,7 +56,7 @@ test("save conflicts when both PageRoot and disk changed", async (t) => {
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
 });
 
-test("save silently adopts external disk bytes when PageRoot has no dirty buffer", async (t) => {
+test("save silently adopts external disk bytes when Stemmio has no dirty buffer", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "save-clean-adopt.html");
   const adoptedHtml = html("external clean change");
@@ -73,7 +73,7 @@ test("save silently adopts external disk bytes when PageRoot has no dirty buffer
   assert.equal(saved.currentSha256, sha256(Buffer.from(adoptedHtml, "utf8")));
   const state = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     `${imported.target.workingCopyId}.json`,
   ));
@@ -89,13 +89,13 @@ test("workspace recovers a legacy parked save journal to complete new bytes", as
   const recoveryId = `save_${imported.target.workingCopyId}_1_${"a".repeat(32)}`;
   const recoveryRoot = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "recovery",
     recoveryId,
   );
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   const workingCopy = manifest.workingCopies.find(
@@ -107,7 +107,7 @@ test("workspace recovers a legacy parked save journal to complete new bytes", as
   await rm(imported.target.exactSourcePath);
   await writeFile(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "transactions",
     `${recoveryId}.json`,
   ), JSON.stringify({
@@ -136,17 +136,17 @@ test("workspace recovers a legacy parked journal whose previous inode changed", 
   const value = await fixture(t);
   const imported = await importSource(value, "save-legacy-parked-conflict.html");
   const previousHtml = html("external descriptor write after publication");
-  const nextHtml = html("PageRoot save survives beside external write");
+  const nextHtml = html("Stemmio save survives beside external write");
   const recoveryId = `save_${imported.target.workingCopyId}_1_${"b".repeat(32)}`;
   const recoveryRoot = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "recovery",
     recoveryId,
   );
   const manifest = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   const workingCopy = manifest.workingCopies.find(
@@ -158,7 +158,7 @@ test("workspace recovers a legacy parked journal whose previous inode changed", 
   await writeFile(imported.target.exactSourcePath, nextHtml, "utf8");
   await writeFile(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "transactions",
     `${recoveryId}.json`,
   ), JSON.stringify({
@@ -193,7 +193,7 @@ test("save refuses a missing Working Copy state before replacing HTML", async (t
   const imported = await importSource(value, "save-state-boundary.html");
   const statePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     `${imported.target.workingCopyId}.json`,
   );
@@ -267,7 +267,7 @@ test("same-parent root and Working Copy renames preserve identity; moves outside
   assert.equal(saved.target.projectId, imported.target.projectId);
   const manifestAfterRename = await json(path.join(
     renamedRoot,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.equal(manifestAfterRename.workingCopies[0].sourceRelativePath, "用户改名.html");
@@ -353,7 +353,7 @@ test("a cross-volume-style move remains external until the project returns to it
   assert.equal(saved.target.projectId, imported.target.projectId);
   assert.equal(await readFile(returnedHtml, "utf8"), html("after registered return"));
 
-  // A copied project is an external HTML, even when it carries a .pageroot
+  // A copied project is an external HTML, even when it carries a .stemmio
   // directory. Its first persistence starts a fresh V1 without copied history.
   const importedCopy = await restarted.importExternal({
     sourcePath: movedHtml,
@@ -363,7 +363,7 @@ test("a cross-volume-style move remains external until the project returns to it
   assert.notEqual(importedCopy.target.projectId, imported.target.projectId);
   const copiedManifest = await json(path.join(
     importedCopy.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "manifest.json",
   ));
   assert.deepEqual(copiedManifest.versions.map((version) => version.versionId), ["ver_0001"]);
@@ -397,7 +397,7 @@ test("macOS /private/var spelling resolves the same managed Working Copy without
   assert.equal(workspace.target.workingCopyId, imported.target.workingCopyId);
 });
 
-test("a clean Working Copy adopts external disk bytes; pending PageRoot edits remain a conflict", async (t) => {
+test("a clean Working Copy adopts external disk bytes; pending Stemmio edits remain a conflict", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "external-change.html");
   const adoptedHtml = html("external clean change");
@@ -418,13 +418,13 @@ test("a clean Working Copy adopts external disk bytes; pending PageRoot edits re
 
   const statePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     "work_ver_0001.json",
   );
   const state = await json(statePath);
   await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
-  const conflictingDiskHtml = html("external while PageRoot pending");
+  const conflictingDiskHtml = html("external while Stemmio pending");
   await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
 
   await assert.rejects(
@@ -440,13 +440,13 @@ test("forceUnlockWorkingCopy adopts disk hash without rewriting HTML", async (t)
   const imported = await importSource(value, "force-unlock.html");
   const statePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     `${imported.target.workingCopyId}.json`,
   );
   const state = await json(statePath);
   await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
-  const conflictingDiskHtml = html("external while PageRoot pending");
+  const conflictingDiskHtml = html("external while Stemmio pending");
   await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
 
   await assert.rejects(
@@ -478,7 +478,7 @@ test("forceUnlockWorkingCopy rematerializes identities after explicitly adopting
   const imported = await importSource(value, "force-unlock-unmarked.html");
   const statePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     `${imported.target.workingCopyId}.json`,
   );
@@ -490,7 +490,7 @@ test("forceUnlockWorkingCopy rematerializes identities after explicitly adopting
     sourcePath: imported.target.exactSourcePath,
   });
   assert.equal(unlocked.status, "force-unlocked");
-  assert.match(unlocked.content, /<h1 data-pageroot-id="pr1_[0-9a-f]{32}">external<\/h1>/u);
+  assert.match(unlocked.content, /<h1 data-stemmio-id="sm1_[0-9a-f]{32}">external<\/h1>/u);
   assert.equal(unlocked.content, await readFile(imported.target.exactSourcePath, "utf8"));
   const nextState = await json(statePath);
   assert.equal(nextState.sourceElementIdentitySchemaVersion, 1);
@@ -502,24 +502,24 @@ test("forceUnlockWorkingCopy rematerializes identities after explicitly adopting
 test("external ID swaps require explicit adoption before their bindings change", async (t) => {
   const value = await fixture(t);
   const sourceHtml = html("V1").replace(
-    /<h1 data-pageroot-id="([^"]+)">V1<\/h1>/u,
-    '<p data-pageroot-id="$1">first</p>'
-      + '<p data-pageroot-id="pr1_6666666666664666a666666666666666">second</p>',
+    /<h1 data-stemmio-id="([^"]+)">V1<\/h1>/u,
+    '<p data-stemmio-id="$1">first</p>'
+      + '<p data-stemmio-id="sm1_6666666666664666a666666666666666">second</p>',
   );
   const imported = await importSource(value, "external-id-swap.html", sourceHtml);
   const managed = await readFile(imported.target.exactSourcePath, "utf8");
   const paragraphIds = inspectSourceElementIdentity(managed).elements
     .filter((element) => element.tagName === "p")
-    .map((element) => element.pagerootId);
+    .map((element) => element.stemmioId);
   assert.equal(paragraphIds.length, 2);
   const swapped = managed
-    .replace(paragraphIds[0], "__pageroot_first_id__")
+    .replace(paragraphIds[0], "__stemmio_first_id__")
     .replace(paragraphIds[1], paragraphIds[0])
-    .replace("__pageroot_first_id__", paragraphIds[1]);
+    .replace("__stemmio_first_id__", paragraphIds[1]);
   await writeFile(imported.target.exactSourcePath, swapped, "utf8");
   const statePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     `${imported.target.workingCopyId}.json`,
   );
@@ -548,11 +548,11 @@ test("force-unlock repairs identity loss even after its disk Hash was recorded",
   const value = await fixture(t);
   const imported = await importSource(value, "recorded-identity-loss.html");
   const managed = await readFile(imported.target.exactSourcePath, "utf8");
-  const unmarked = managed.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/gu, "");
+  const unmarked = managed.replace(/ data-stemmio-id="sm1_[a-f0-9]{32}"/gu, "");
   await writeFile(imported.target.exactSourcePath, unmarked, "utf8");
   const statePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     `${imported.target.workingCopyId}.json`,
   );
@@ -586,14 +586,14 @@ test("forceUnlockWorkingCopy clears a stuck activeRequest without rewriting HTML
   await prepareAiTaskRequest(value.repository, imported.target, "req_force_unlock_active");
   const runtimePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "runtime-state.json",
   );
   assert.ok((await json(runtimePath)).activeRequest);
 
   const statePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     `${imported.target.workingCopyId}.json`,
   );
@@ -633,7 +633,7 @@ test("validation errors return an in-memory errorPreview without persisting it",
   assert.match(String(completed.request.error.errorPreview || ""), /truncated/);
   const record = await json(path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     "req_invalid_preview",
     "request.json",
@@ -674,14 +674,14 @@ test("save fault injection recovers a complete durable state or a retained old s
     assert.equal(workspace.workingCopyState.saveState, "saved", failpoint);
     const transactions = (await readdir(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "transactions",
     ))).filter((entry) => entry.startsWith("save_"));
     assert.equal(transactions.length, failpoint === "save-prepared" ? 1 : 0, failpoint);
     if (transactions.length) {
       const transaction = await json(path.join(
         imported.target.projectRootPath,
-        ".pageroot",
+        ".stemmio",
         "transactions",
         transactions[0],
       ));
@@ -690,7 +690,7 @@ test("save fault injection recovers a complete durable state or a retained old s
     }
     const manifest = await json(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "manifest.json",
     ));
     assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"], failpoint);
@@ -707,7 +707,7 @@ test("save recovery refuses an externally changed Working Copy instead of overwr
   await assert.rejects(
     failing.saveWorkingCopy({
       target: imported.target,
-      html: html("interrupted PageRoot save"),
+      html: html("interrupted Stemmio save"),
       expectedSourceSha256: imported.target.sourceSha256,
       editRevision: 1,
     }),
@@ -730,7 +730,7 @@ test("save recovery refuses an externally changed Working Copy instead of overwr
 test("workspace validates Working Copy state before following its declared Draft path", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "state-before-draft.html");
-  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
   const statePath = path.join(controlRoot, "working-copies", "work_ver_0001.json");
   const state = await json(statePath);
   const untrustedDraftPath = path.join(controlRoot, "drafts", "untrusted.json");
@@ -752,7 +752,7 @@ test("workspace follows only the v4 Working Copy saveState vocabulary", async (t
   const imported = await importSource(value, "save-state-vocabulary.html");
   const statePath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "working-copies",
     "work_ver_0001.json",
   );
@@ -777,7 +777,7 @@ test("workspace rejects a malformed Working Copy Draft instead of publishing an 
   const imported = await importSource(value, "malformed-draft.html");
   const draftPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "drafts",
     "work_ver_0001.json",
   );
@@ -793,7 +793,7 @@ test("workspace rejects a malformed Working Copy Draft instead of publishing an 
 test("unknown manifest and Working Copy state members survive an ordinary save", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "清单未知成员.html");
-  const control = path.join(imported.target.projectRootPath, ".pageroot");
+  const control = path.join(imported.target.projectRootPath, ".stemmio");
   const manifestFile = path.join(control, "manifest.json");
 
   const manifest = await json(manifestFile);
@@ -840,7 +840,7 @@ test("unknown manifest and Working Copy state members survive an ordinary save",
 // runtime-state.json is layered rather than uniformly preserved or authored.
 // Its root is spread by normalizeRuntimeDisplayAnchors, and historyActivation is
 // mutated in place when the desktop confirms, so both carry a member a newer
-// PageRoot added. activeRequest is replaced with a fresh literal on every status
+// Stemmio added. activeRequest is replaced with a fresh literal on every status
 // transition and lastAiTask is re-derived from the AI task record, so those two
 // are authored and their schemas stay strict.
 
@@ -849,7 +849,7 @@ test("a stored Draft keeps its authoritative envelope while preserving unknown m
   const { target } = await importSource(value, "草稿信封.html");
   const draftFile = path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "drafts",
     `${target.workingCopyId}.json`,
   );
@@ -895,7 +895,7 @@ test("a stored Draft keeps its authoritative envelope while preserving unknown m
 
 // manifest.json is mutated in place and written back as the object that was
 // read, and the Working Copy state spreads the record it read before overriding
-// its authoritative members. Both orderings preserve a member a newer PageRoot
+// its authoritative members. Both orderings preserve a member a newer Stemmio
 // added; the stored Draft envelope above is the one that had to be corrected to
 // match them.
 //
@@ -916,7 +916,7 @@ test("a stored Draft records the author of each comment and ignores a supplied o
   });
   const draftFile = path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "drafts",
     `${target.workingCopyId}.json`,
   );
@@ -973,7 +973,7 @@ test("a Draft written without a device identity records no author", async (t) =>
   });
   const stored = await json(path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "drafts",
     `${target.workingCopyId}.json`,
   ));

@@ -43,7 +43,7 @@ type ExternalOpenRequest = {
 
 declare global {
   interface Window {
-    htmlAIAppLifecycle?: {
+    stemmioAppLifecycle?: {
       onAboutRequested: (listener: () => void) => () => void;
       onPrepareClose: (listener: (request: PrepareCloseRequest) => void) => () => void;
       reportReady: (requestId: string) => Promise<{ accepted: boolean }>;
@@ -72,8 +72,8 @@ declare global {
   }
 }
 
-const PREPARE_CLOSE_EVENT = "html-ai:prepare-close";
-const CLOSE_ABORTED_EVENT = "html-ai:close-aborted";
+const PREPARE_CLOSE_EVENT = "stemmio:prepare-close";
+const CLOSE_ABORTED_EVENT = "stemmio:close-aborted";
 
 window.addEventListener("error", (event) => {
   captureUsageEvent("renderer_fault", {
@@ -91,20 +91,20 @@ window.addEventListener("unhandledrejection", (event) => {
   });
 });
 
-window.htmlAIAppLifecycle?.onCloseAborted((request) => {
+window.stemmioAppLifecycle?.onCloseAborted((request) => {
   window.dispatchEvent(new CustomEvent<CloseAbortedRequest>(CLOSE_ABORTED_EVENT, {
     detail: request,
   }));
 });
 
-window.htmlAIAppLifecycle?.onPrepareClose(async (request) => {
+window.stemmioAppLifecycle?.onPrepareClose(async (request) => {
   const readinessChecks: Promise<CloseReadiness>[] = [];
   let acceptingChecks = true;
   const detail: PrepareCloseDetail = {
     ...request,
     waitUntil(readiness) {
       if (!acceptingChecks) {
-        throw new Error("waitUntil must be called while handling html-ai:prepare-close.");
+        throw new Error("waitUntil must be called while handling stemmio:prepare-close.");
       }
       readinessChecks.push(Promise.resolve(readiness));
     },
@@ -116,7 +116,7 @@ window.htmlAIAppLifecycle?.onPrepareClose(async (request) => {
   acceptingChecks = false;
 
   if (readinessChecks.length === 0) {
-    await window.htmlAIAppLifecycle?.reportBlocked(
+    await window.stemmioAppLifecycle?.reportBlocked(
       request.requestId,
       "编辑器尚未注册关闭前写入处理器。为避免丢失更改，本次关闭已取消。",
     );
@@ -127,7 +127,7 @@ window.htmlAIAppLifecycle?.onPrepareClose(async (request) => {
     const results = await Promise.all(readinessChecks);
     const blocked = results.find((result) => !result.ready);
     if (blocked && !blocked.ready) {
-      await window.htmlAIAppLifecycle?.reportBlocked(
+      await window.stemmioAppLifecycle?.reportBlocked(
         request.requestId,
         blocked.reason || "仍有更改尚未安全写入。",
         blocked.presentation,
@@ -135,9 +135,9 @@ window.htmlAIAppLifecycle?.onPrepareClose(async (request) => {
       );
       return;
     }
-    await window.htmlAIAppLifecycle?.reportReady(request.requestId);
+    await window.stemmioAppLifecycle?.reportReady(request.requestId);
   } catch (error) {
-    await window.htmlAIAppLifecycle?.reportBlocked(
+    await window.stemmioAppLifecycle?.reportBlocked(
       request.requestId,
       error instanceof Error ? error.message : "关闭前写入检查失败。",
     );

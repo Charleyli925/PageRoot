@@ -21,21 +21,21 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
   REGISTRY_BUSY:
     "项目登记表正被占用。如果是上一次异常退出留下的，稍后会自动解除，请重试。",
   UNSUPPORTED_REGISTRY_SCHEMA:
-    "项目登记表的格式无法识别。PageRoot 没有改动它，也没有改动任何内容；可重新打开 HTML 重建登记。",
+    "项目登记表的格式无法识别。Stemmio 没有改动它，也没有改动任何内容；可重新打开 HTML 重建登记。",
   INVALID_REGISTRY:
-    "项目登记表的内容无法校验。PageRoot 没有改动它，也没有改动任何内容；可重新打开 HTML 重建登记。",
+    "项目登记表的内容无法校验。Stemmio 没有改动它，也没有改动任何内容；可重新打开 HTML 重建登记。",
   PROJECT_IDENTITY_MISMATCH:
-    "项目记录暂时无法核对。PageRoot 没有覆盖源文件，请重新打开后再试。",
+    "项目记录暂时无法核对。Stemmio 没有覆盖源文件，请重新打开后再试。",
   SOURCE_REGISTRY_MISMATCH:
-    "当前文件与项目记录暂时无法对应。PageRoot 没有覆盖源文件。",
+    "当前文件与项目记录暂时无法对应。Stemmio 没有覆盖源文件。",
   CANONICAL_SOURCE_IDENTITY_MISMATCH:
-    "当前源 HTML 的身份已经变化。PageRoot 没有覆盖它，请重新载入后再试。",
+    "当前源 HTML 的身份已经变化。Stemmio 没有覆盖它，请重新载入后再试。",
   ACTIVE_SOURCE_PATH_COLLISION:
-    "当前文件已关联到另一份项目记录。PageRoot 没有覆盖它，请重新打开源页。",
+    "当前文件已关联到另一份项目记录。Stemmio 没有覆盖它，请重新打开源页。",
   SOURCE_CHANGED:
-    "源 HTML 已在其他位置发生变化；PageRoot 没有覆盖它。",
+    "源 HTML 已在其他位置发生变化；Stemmio 没有覆盖它。",
   SOURCE_HASH_CONFLICT:
-    "源 HTML 已在其他位置发生变化；PageRoot 没有覆盖它。",
+    "源 HTML 已在其他位置发生变化；Stemmio 没有覆盖它。",
   REGISTERED_PROJECT_UNAVAILABLE:
     "项目暂不可用，修改仍保留；放回原登记位置后自动恢复。",
   WORKING_COPY_UNAVAILABLE:
@@ -43,23 +43,23 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
   WORKING_COPY_CONFLICT:
     "磁盘文件与当前未保存修改都已保留；请先核对内容后再决定如何继续。",
   MANAGED_PATH_AMBIGUOUS:
-    "当前文件无法唯一对应到工作文件。PageRoot 没有写入，请先恢复唯一位置。",
+    "当前文件无法唯一对应到工作文件。Stemmio 没有写入，请先恢复唯一位置。",
   MANAGED_SOURCE_IDENTITY_MISMATCH:
-    "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+    "当前工作文件身份无法核对，Stemmio 没有切换路径。",
   INVALID_RENAME_STEM:
     "请输入不含路径、后缀和特殊符号的文件名。",
   REGISTERED_PROJECT_PATH_MISMATCH:
-    "当前文件夹不是项目的登记位置。PageRoot 没有写入。",
+    "当前文件夹不是项目的登记位置。Stemmio 没有写入。",
   REGISTERED_PROJECT_IDENTITY_CHANGED:
-    "登记位置的项目身份无法核对。PageRoot 没有写入。",
+    "登记位置的项目身份无法核对。Stemmio 没有写入。",
   PROJECT_IDENTITY_CHANGED:
-    "当前文件夹的项目身份已变化，PageRoot 没有写入。请重新打开正确的项目。",
+    "当前文件夹的项目身份已变化，Stemmio 没有写入。请重新打开正确的项目。",
   MANAGED_SOURCE_AMBIGUOUS:
-    "项目中存在多个可能的当前 HTML。PageRoot 没有写入，请重新打开目标文件。",
+    "项目中存在多个可能的当前 HTML。Stemmio 没有写入，请重新打开目标文件。",
   AMBIGUOUS_SOURCE_FILE_IDENTITY:
-    "当前 HTML 无法唯一对应到一个项目。PageRoot 没有写入，请打开正确的 HTML。",
+    "当前 HTML 无法唯一对应到一个项目。Stemmio 没有写入，请打开正确的 HTML。",
   CANDIDATE_SOURCE_CHANGED:
-    "候选生成后当前工作文件已变化，PageRoot 没有采纳过期结果。请重新核对或重新发起修改。",
+    "候选生成后当前工作文件已变化，Stemmio 没有采纳过期结果。请重新核对或重新发起修改。",
   DRAFT_REVISION_CONFLICT:
     "评论记录已在另一项操作中更新。当前内容仍保留，请重新载入后再试。",
   AUTOSAVE_NOT_FLUSHED:
@@ -67,7 +67,7 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
   FREEZE_REVISION_NOT_PERSISTED:
     "最后一次修改尚未安全写入源 HTML，请等待保存完成后再发送。",
   INVALID_AUTOSAVE_ACK:
-    "保存结果无法核对。当前编辑仍保留，PageRoot 不会采用不一致的内容。",
+    "保存结果无法核对。当前编辑仍保留，Stemmio 不会采用不一致的内容。",
   INVALID_SOURCE_HISTORY_ACK:
     "撤销结果无法核对。本次结果未采用，请重新打开源页后再试。",
   CANDIDATE_ASSESSMENT_INVALID:

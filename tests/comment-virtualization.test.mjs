@@ -78,7 +78,7 @@ test("independent comments on one exact source range share one Canvas marker", (
 test("stable element identity groups moved comments without selector or Hash equality", () => {
   const target = {
     id: "target_comment_001",
-    elementId: "pr1_11111111111141118111111111111111",
+    elementId: "sm1_11111111111141118111111111111111",
     selector: "main > section:nth-of-type(1)",
     level: "part",
     sourceAnchor: {
@@ -104,7 +104,7 @@ test("stable element identity groups moved comments without selector or Hash equ
     commentMarkerGroupKey(target),
     commentMarkerGroupKey({
       ...target,
-      elementId: "pr1_22222222222242229222222222222222",
+      elementId: "sm1_22222222222242229222222222222222",
     }),
   );
 });
@@ -112,7 +112,7 @@ test("stable element identity groups moved comments without selector or Hash equ
 test("runtime comments on one source host keep distinct visual objects apart", () => {
   const sourceTarget = {
     id: "target_comment_001",
-    elementId: "pr1_11111111111141118111111111111111",
+    elementId: "sm1_11111111111141118111111111111111",
     selector: "main",
     level: "part",
     sourceAnchor: {
@@ -152,7 +152,7 @@ test("runtime comments on one source host keep distinct visual objects apart", (
 test("runtime marker identity survives rendered text and box changes", () => {
   const target = {
     id: "target_comment_runtime_stable",
-    elementId: "pr1_11111111111141118111111111111111",
+    elementId: "sm1_11111111111141118111111111111111",
     selector: "main",
     level: "part",
     visualHint: {

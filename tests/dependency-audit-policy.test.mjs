@@ -161,21 +161,21 @@ test("packaged runtime closure resolves the selected platform and architecture m
 test("a later attestation only rechecks the lockfile snapshot instead of auditing twice", () => {
   const snapshot = createDependencyAuditSnapshot({
     packageLockText: '{"lockfileVersion":3}',
-    packageJsonText: '{"name":"pageroot"}',
+    packageJsonText: '{"name":"stemmio"}',
     now: new Date("2026-09-05T00:00:00.000Z"),
   });
   assert.equal(snapshot.schemaVersion, 1);
   assert.equal(
     verifyDependencyAuditSnapshot(snapshot, {
       packageLockText: '{"lockfileVersion":3}',
-      packageJsonText: '{"name":"pageroot"}',
+      packageJsonText: '{"name":"stemmio"}',
     }),
     true,
   );
   assert.throws(
     () => verifyDependencyAuditSnapshot(snapshot, {
       packageLockText: '{"lockfileVersion":2}',
-      packageJsonText: '{"name":"pageroot"}',
+      packageJsonText: '{"name":"stemmio"}',
     }),
     /package-lock\.json changed/u,
   );

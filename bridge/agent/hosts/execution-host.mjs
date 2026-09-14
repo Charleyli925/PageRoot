@@ -32,7 +32,7 @@ function validateSession(boundSessionId, receivedSessionId) {
   if (!boundSessionId || receivedSessionId !== boundSessionId) {
     throw policyError(
       "SESSION_ID_MISMATCH",
-      "The Agent operation does not belong to the active PageRoot task session.",
+      "The Agent operation does not belong to the active Stemmio task session.",
     );
   }
 }
@@ -59,7 +59,7 @@ function terminalOutputLimit(value) {
   if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TERMINAL_OUTPUT_BYTES) {
     throw policyError(
       "TERMINAL_OUTPUT_LIMIT_INVALID",
-      "The terminal output byte limit is outside PageRoot's supported range.",
+      "The terminal output byte limit is outside Stemmio's supported range.",
     );
   }
   return value;
@@ -247,7 +247,7 @@ export function createExecutionHost(policy, {
     || policy.mode !== "execution"
     || !Array.isArray(policy.readableFiles)
   ) {
-    throw new TypeError("Restricted execution host requires a verified PageRoot task policy.");
+    throw new TypeError("Restricted execution host requires a verified Stemmio task policy.");
   }
   if (
     typeof spawnProcess !== "function"
@@ -489,7 +489,7 @@ export function createExecutionHost(policy, {
             if (error?.code !== "ENOENT") throw error;
           }
           checkActive();
-          temporaryPath = `${policy.outputPath}.pageroot-agent-${randomUUID()}.tmp`;
+          temporaryPath = `${policy.outputPath}.stemmio-agent-${randomUUID()}.tmp`;
           const flags = fsConstants.O_WRONLY
             | fsConstants.O_CREAT
             | fsConstants.O_EXCL
@@ -548,7 +548,7 @@ export function createExecutionHost(policy, {
         if (!finalizerRequestMatches(params, policy.finalizer)) {
           throw policyError(
             "TERMINAL_NOT_AUTHORIZED",
-            "The Agent terminal may execute only the frozen PageRoot finalizer.",
+            "The Agent terminal may execute only the frozen Stemmio finalizer.",
           );
         }
         const outputInformation = await readVerifiedRegularFile(
@@ -658,7 +658,7 @@ export function createExecutionHost(policy, {
         ) {
           throw policyError(
             "FINALIZER_NOT_COMPLETED",
-            "The Agent turn stopped without one clean, complete PageRoot finalizer run.",
+            "The Agent turn stopped without one clean, complete Stemmio finalizer run.",
           );
         }
         const [output, completionFile] = await Promise.all([
@@ -683,7 +683,7 @@ export function createExecutionHost(policy, {
           );
         }
         const projectRoot = projectRootForRequest(policy.requestRoot, policy.requestId);
-        const controlRoot = path.join(projectRoot, ".pageroot");
+        const controlRoot = path.join(projectRoot, ".stemmio");
         const outputRelativePath = path.relative(controlRoot, policy.outputPath).split(path.sep).join("/");
         if (
           completion?.projectId !== policy.projectId
@@ -697,7 +697,7 @@ export function createExecutionHost(policy, {
         ) {
           throw policyError(
             "COMPLETION_IDENTITY_MISMATCH",
-            "The completion record does not match the frozen PageRoot task and Candidate.",
+            "The completion record does not match the frozen Stemmio task and Candidate.",
           );
         }
         checkActive();

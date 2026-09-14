@@ -58,7 +58,7 @@ function workspacePayload(sourcePath, html) {
     sourcePath,
     currentHtmlSha256: sha256(html),
     project: { displayName: id },
-    paths: { projectRecords: `/tmp/PageRoot/${id}` },
+    paths: { projectRecords: `/tmp/Stemmio/${id}` },
     versions: [{ id: `version_${id}` }],
     latestVersionId: `version_${id}`,
     currentBasedOnVersionId: `version_${id}`,
@@ -1797,7 +1797,7 @@ test("a Registry project open routes only its projectId through the desktop auth
   const openTarget = {
     projectId,
     documentId,
-    projectRootPath: "/tmp/PageRoot/B",
+    projectRootPath: "/tmp/Stemmio/B",
     targetKind: "working-copy",
     workingCopyId: "work_ver_0001",
     versionId: "ver_0001",
@@ -1993,7 +1993,7 @@ test("a v4 Working Copy transition uses the exact managed desktop activation", a
   const managedTarget = {
     projectId: "project_old",
     documentId: "document_old",
-    projectRootPath: "/tmp/PageRoot/项目/managed",
+    projectRootPath: "/tmp/Stemmio/项目/managed",
     targetKind: "working-copy",
     workingCopyId: "work_ver_0002",
     versionId: "ver_0002",
@@ -2039,7 +2039,7 @@ test("a v4 Working Copy transition uses the exact managed desktop activation", a
     documentId: "document_old",
     workingCopyId: "work_ver_0002",
     versionId: "ver_0002",
-    projectRootPath: "/tmp/PageRoot/项目/managed",
+    projectRootPath: "/tmp/Stemmio/项目/managed",
     operationId: "generated_transition_001",
   }]);
 });
@@ -2703,7 +2703,7 @@ test("two unregistered OS opens keep confirmation and acknowledgement order", as
           classification: "new-external",
           sourceFileName: `${requestId}.html`,
           visibleV1FileName: `${requestId}-V1.html`,
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async ackExternal(requestId) {
@@ -2836,7 +2836,7 @@ test("confirmed external open retries only its failed ack and never commits twic
           classification: "new-external",
           sourceFileName: "confirm.html",
           visibleV1FileName: "confirm-V1.html",
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async commitPrepared() {
@@ -2907,7 +2907,7 @@ test("structured reclassification DTO automatically converges the same prepared 
           classification: "new-external",
           sourceFileName: "incoming.html",
           visibleV1FileName: "incoming-V1.html",
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async commitPrepared(input) {
@@ -2962,7 +2962,7 @@ test("structured reclassification DTO with invalid identity cannot replace the p
           classification: "new-external",
           sourceFileName: "incoming.html",
           visibleV1FileName: "incoming-V1.html",
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async commitPrepared() {
@@ -3039,7 +3039,7 @@ test("close drains and acknowledges every queued external confirmation", async (
           classification: "new-external",
           sourceFileName: `${requestId}.html`,
           visibleV1FileName: `${requestId}-V1.html`,
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async ackExternal(requestId) {
@@ -4755,7 +4755,7 @@ test("Finder content-changed rebase keeps editor HTML and asks DocumentWorkflow 
   assert.equal(harness.documentWorkflow.observeCount, 1);
 });
 
-test("PageRoot rename after Finder rebase uses the recovered path", async (t) => {
+test("Stemmio rename after Finder rebase uses the recovered path", async (t) => {
   let renamePayload = null;
   const harness = createHarness({
     openTarget: managedOpenTarget(),
@@ -4766,7 +4766,7 @@ test("PageRoot rename after Finder rebase uses the recovered path", async (t) =>
           projectId: "project_old",
           documentId: "document_old",
           sourcePath,
-          project: { displayName: "pageroot-new" },
+          project: { displayName: "stemmio-new" },
         };
       },
     },
@@ -4785,9 +4785,9 @@ test("PageRoot rename after Finder rebase uses the recovered path", async (t) =>
         return {
           operationId: payload.operationId,
           previousSourcePath: RENAMED_PATH,
-          sourcePath: "/tmp/project-workflow-pageroot-new.html",
+          sourcePath: "/tmp/project-workflow-stemmio-new.html",
           sha256: sha256(OLD_HTML),
-          stem: "pageroot-new",
+          stem: "stemmio-new",
           lastModifiedAt: "2026-08-12T00:00:00.000Z",
         };
       },
@@ -4805,14 +4805,14 @@ test("PageRoot rename after Finder rebase uses the recovered path", async (t) =>
     reason: "watch",
     previousSourcePath: OLD_PATH,
   });
-  const outcome = await harness.workflow.renameSource({ stem: "pageroot-new" });
+  const outcome = await harness.workflow.renameSource({ stem: "stemmio-new" });
 
   assert.equal(outcome.status, "succeeded");
   assert.equal(renamePayload.sourcePath, RENAMED_PATH);
-  assert.equal(renamePayload.stem, "pageroot-new");
+  assert.equal(renamePayload.stem, "stemmio-new");
   assert.equal(
     harness.projectSession.context?.sourcePath,
-    "/tmp/project-workflow-pageroot-new.html",
+    "/tmp/project-workflow-stemmio-new.html",
   );
 });
 
@@ -4866,7 +4866,7 @@ test("startup confirmation commits without fencing a nonexistent Canvas", async 
           classification: "new-external",
           sourceFileName: "page.html",
           visibleV1FileName: "page-V1.html",
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async commitPrepared() {
@@ -4915,7 +4915,7 @@ test("a failed local Start import remains cancellable without publishing the ret
           classification: "new-external",
           sourceFileName: "local.html",
           visibleV1FileName: "local-V1.html",
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async cancelPrepared() {
@@ -4974,7 +4974,7 @@ test("a new-external picker result imports and opens in the same operation", asy
           classification: "new-external",
           sourceFileName: "page.html",
           visibleV1FileName: "page-V1.html",
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async commitPrepared(payload) {
@@ -5027,7 +5027,7 @@ test("canvas failure after import keeps the published project and never trashes"
           classification: "new-external",
           sourceFileName: "page.html",
           visibleV1FileName: "page-V1.html",
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async commitPrepared() {
@@ -5100,7 +5100,7 @@ test("canvas confirmation recovers after one failed acknowledgement", async (t) 
           classification: "new-external",
           sourceFileName: "page.html",
           visibleV1FileName: "page-V1.html",
-          projectsRootLabel: "文稿 › PageRoot › 项目",
+          projectsRootLabel: "文稿 › Stemmio › 项目",
         };
       },
       async commitPrepared() {

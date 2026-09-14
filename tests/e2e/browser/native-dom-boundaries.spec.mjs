@@ -17,7 +17,7 @@ import {
   selectionSnapshot,
   setTextSelection,
   waitForFramePaint,
-} from "./pageroot-driver.mjs";
+} from "./stemmio-driver.mjs";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -31,7 +31,7 @@ test("a renderer without Desktop preload fails explicitly", {
   await expect(failure).toContainText("能力声明缺失或无效");
   await expect(page.getByTestId("html-canvas-editor")).toHaveCount(0);
   await expect(page.locator('iframe[title="HTML 交互预览"]')).toHaveCount(0);
-  expect(await page.evaluate(() => Boolean(window.htmlAIProjects))).toBe(false);
+  expect(await page.evaluate(() => Boolean(window.stemmioProjects))).toBe(false);
 });
 
 test("the edit iframe is same-origin but never executes author scripts or refresh", {
@@ -162,7 +162,7 @@ test("caption selection promotes rich children to one canonical visual host", as
 
   await first.hover();
   await expect(hint).toBeVisible();
-  const canonicalTargetId = await canonicalTarget.getAttribute("data-pageroot-id");
+  const canonicalTargetId = await canonicalTarget.getAttribute("data-stemmio-id");
   const activeGeneration = await editor
     .locator('iframe[data-runtime-slot-role="active"]')
     .getAttribute("data-frame-generation");
@@ -385,7 +385,7 @@ test("source structure toolbar duplicates with fresh IDs and deletes only the se
 
   await expect(copies).toHaveCount(2);
   const duplicatedIds = await copies.evaluateAll((elements) => (
-    elements.map((element) => element.getAttribute("data-pageroot-id"))
+    elements.map((element) => element.getAttribute("data-stemmio-id"))
   ));
   expect(duplicatedIds.every(Boolean)).toBe(true);
   expect(new Set(duplicatedIds).size).toBe(2);

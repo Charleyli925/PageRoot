@@ -4,7 +4,7 @@ import {
   resolveTargetRef,
 } from "./target-resolver.js";
 
-export const PAGE_VIEW_CONTEXT_PROTOCOL = "pageroot-page-view-context";
+export const PAGE_VIEW_CONTEXT_PROTOCOL = "stemmio-page-view-context";
 export const PAGE_VIEW_CONTEXT_VERSION = 2;
 
 const MAX_SNAPSHOT_ENTRIES = 512;
@@ -227,7 +227,7 @@ export function createPageViewContext({
   for (const rawEntry of snapshot.entries) {
     const sourceNodeId = String(rawEntry?.sourceNodeId ?? "");
     if (!sourceNodeId || sourceNodeCounts.get(sourceNodeId) !== 1) continue;
-    const element = sourceIndex.byPagerootId.get(sourceNodeId)
+    const element = sourceIndex.byStemmioId.get(sourceNodeId)
       ?? sourceIndex.byNodeId.get(sourceNodeId);
     if (
       !element
@@ -382,11 +382,11 @@ function sourceElementKey(element) {
   // Persistent identity when present; parse-local handle only inside this
   // SourceIndex. Mixing the two as Map keys drops presentation actions after
   // the first page-view context is applied.
-  return element.pagerootId || element.nodeId;
+  return element.stemmioId || element.nodeId;
 }
 
 function sourceElementByKey(sourceIndex, key) {
-  const byStableId = sourceIndex.byPagerootId.get(key);
+  const byStableId = sourceIndex.byStemmioId.get(key);
   if (byStableId?.type === "element") return byStableId;
   const byParseKey = sourceIndex.byNodeId.get(key);
   return byParseKey?.type === "element" ? byParseKey : null;

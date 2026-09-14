@@ -78,7 +78,7 @@ jobs:
       - name: Verify app.asar, Bridge, schemas, resources and metadata
         timeout-minutes: 5
         env:
-          PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1"
+          STEMMIO_REQUIRE_TELEMETRY_CONFIG: "1"
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-dry-run-verify
@@ -116,7 +116,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-release-dry-run-assembly-diagnostics-${{ github.run_attempt }}
+          name: Stemmio-release-dry-run-assembly-diagnostics-${{ github.run_attempt }}
           path: |
             output/test-runs
             output/playwright
@@ -127,7 +127,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-release-dry-run-assembly-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-release-dry-run-assembly-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
           if-no-files-found: warn
           retention-days: 30
@@ -191,7 +191,7 @@ jobs:
       - name: Revalidate the restored payload and metadata
         timeout-minutes: 5
         env:
-          PAGEROOT_REQUIRE_TELEMETRY_CONFIG: "1"
+          STEMMIO_REQUIRE_TELEMETRY_CONFIG: "1"
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-dry-run-revalidate
@@ -204,8 +204,8 @@ jobs:
       - name: Launch and verify product name, version and Bundle ID
         timeout-minutes: 10
         env:
-          PAGEROOT_PACKAGED_APP_PATH: ${{ steps.restore.outputs.app_path }}
-          PAGEROOT_TEST_ARCH: arm64
+          STEMMIO_PACKAGED_APP_PATH: ${{ steps.restore.outputs.app_path }}
+          STEMMIO_TEST_ARCH: arm64
         run: >-
           node scripts/ci-evidence.mjs run
           --suite release-dry-run-startup
@@ -217,7 +217,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-release-dry-run-restore-diagnostics-${{ github.run_attempt }}
+          name: Stemmio-release-dry-run-restore-diagnostics-${{ github.run_attempt }}
           path: |
             output/test-runs
             output/playwright
@@ -228,7 +228,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-release-dry-run-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: Stemmio-release-dry-run-restore-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
           if-no-files-found: warn
           retention-days: 30

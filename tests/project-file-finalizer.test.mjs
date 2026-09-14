@@ -18,7 +18,7 @@ import {
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 
 function html(label) {
-  return `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head data-pageroot-id="pr1_22222222222242229222222222222222"><title data-pageroot-id="pr1_3333333333334333a333333333333333">${label}</title></head><body data-pageroot-id="pr1_4444444444444444b444444444444444"><h1 data-pageroot-id="pr1_55555555555545558555555555555555">${label}</h1></body></html>`;
+  return `<!doctype html><html data-stemmio-id="sm1_11111111111141118111111111111111"><head data-stemmio-id="sm1_22222222222242229222222222222222"><title data-stemmio-id="sm1_3333333333334333a333333333333333">${label}</title></head><body data-stemmio-id="sm1_4444444444444444b444444444444444"><h1 data-stemmio-id="sm1_55555555555545558555555555555555">${label}</h1></body></html>`;
 }
 
 function requestFor(summary) {
@@ -38,7 +38,7 @@ function requestFor(summary) {
 }
 
 async function preparedRequest(t, requestId) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-project-finalizer-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-project-finalizer-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sourcePath = path.join(root, "source.html");
   const source = html("V1");
@@ -57,13 +57,13 @@ async function preparedRequest(t, requestId) {
   });
   const requestRoot = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     request.requestId,
   );
   const outputPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     ...request.outputRelativePath.split("/"),
   );
   await writeFile(outputPath, html("Candidate"), "utf8");
@@ -71,7 +71,7 @@ async function preparedRequest(t, requestId) {
 }
 
 test("project-file finalizer freezes a Candidate output without publishing a Version", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-project-finalizer-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "stemmio-project-finalizer-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sourcePath = path.join(root, "source.html");
   const source = html("V1");
@@ -90,7 +90,7 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
   });
   const outputPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     ...request.outputRelativePath.split("/"),
   );
   await writeFile(outputPath, html("Candidate"), "utf8");
@@ -104,7 +104,7 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
   assert.equal(finalized.status, "completed");
   assert.equal(finalized.proposedVersionId, "ver_0002");
   const runtime = JSON.parse(await readFile(
-    path.join(imported.target.projectRootPath, ".pageroot", "runtime-state.json"),
+    path.join(imported.target.projectRootPath, ".stemmio", "runtime-state.json"),
     "utf8",
   ));
   assert.equal(runtime.activeRequest.candidateOutputSha256, null);
@@ -117,13 +117,13 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
   assert.equal(replayed.replayed, true);
   assert.equal(await readFile(sourcePath, "utf8"), source);
   const manifest = JSON.parse(await readFile(
-    path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"),
+    path.join(imported.target.projectRootPath, ".stemmio", "manifest.json"),
     "utf8",
   ));
   assert.equal(manifest.latestOfficialVersionId, "ver_0001");
   assert.equal(manifest.versions.length, 1);
 
-  const registryPath = path.join(root, "projects", ".pageroot-registry.json");
+  const registryPath = path.join(root, "projects", ".stemmio-registry.json");
   const registry = JSON.parse(await readFile(registryPath, "utf8"));
   delete registry.projects[imported.target.projectId];
   await writeFile(registryPath, JSON.stringify(registry), "utf8");
@@ -140,7 +140,7 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
 for (const legacyCompletion of [false, true]) {
   test(`identical HTML finalization retains one Candidate across replay and restart (legacy completion: ${legacyCompletion})`, async (t) => {
     const { repository, imported, request, requestRoot } = await preparedRequest(t, "req_identical_finalizer");
-    const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+    const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
     const record = JSON.parse(await readFile(path.join(requestRoot, "request.json"), "utf8"));
     const input = await readFile(path.join(controlRoot, record.inputRelativePath), "utf8");
     const outputPath = path.join(controlRoot, request.outputRelativePath);
@@ -182,7 +182,7 @@ for (const legacyCompletion of [false, true]) {
 test("project-file finalizer refreshes Registry identity only after every Candidate check succeeds", async (t) => {
   const { imported, request } = await preparedRequest(t, "req_registry_refresh_order");
   const projectsRoot = path.dirname(imported.target.projectRootPath);
-  const registryPath = path.join(projectsRoot, ".pageroot-registry.json");
+  const registryPath = path.join(projectsRoot, ".stemmio-registry.json");
   const registry = JSON.parse(await readFile(registryPath, "utf8"));
   const originalIdentity = registry.projects[imported.target.projectId].rootFileIdentity;
   const staleIdentity = {
@@ -193,7 +193,7 @@ test("project-file finalizer refreshes Registry identity only after every Candid
   await writeFile(registryPath, JSON.stringify(registry), "utf8");
   const outputPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     ...request.outputRelativePath.split("/"),
   );
   await writeFile(outputPath, "not a complete html document", "utf8");
@@ -233,7 +233,7 @@ test("project-file finalizer rechecks Candidate bytes after the size stat", asyn
   );
   const outputPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     ...request.outputRelativePath.split("/"),
   );
   await assert.rejects(
@@ -267,7 +267,7 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
     });
     const cancellationAuthority = JSON.parse(await readFile(path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "recovery",
       "cancellations",
       `${request.requestId}.${request.attemptId}.json`,
@@ -299,7 +299,7 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
       "req_cancelled_without_authority",
     );
     const requestPath = path.join(requestRoot, "request.json");
-    const runtimePath = path.join(imported.target.projectRootPath, ".pageroot", "runtime-state.json");
+    const runtimePath = path.join(imported.target.projectRootPath, ".stemmio", "runtime-state.json");
     const requestRecord = JSON.parse(await readFile(requestPath, "utf8"));
     const runtime = JSON.parse(await readFile(runtimePath, "utf8"));
     requestRecord.status = "cancelled";
@@ -368,7 +368,7 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
     const { imported, request } = await preparedRequest(subtest, "req_candidate_seal_shape");
     const runtimePath = path.join(
       imported.target.projectRootPath,
-      ".pageroot",
+      ".stemmio",
       "runtime-state.json",
     );
     const runtime = JSON.parse(await readFile(runtimePath, "utf8"));
@@ -419,7 +419,7 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
 
   await t.test("rejects a coordinated Request rewrite that updates its local manifest hash", async (subtest) => {
     const { imported, request, requestRoot } = await preparedRequest(subtest, "req_runtime_anchor");
-    const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+    const controlRoot = path.join(imported.target.projectRootPath, ".stemmio");
     const requestPath = path.join(requestRoot, "request.json");
     const changeRequestPath = path.join(requestRoot, "change-request.json");
     const inputManifestPath = path.join(requestRoot, "input-manifest.json");
@@ -484,10 +484,10 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
 
 test("manual finalizer rejects identity corruption without completion and allows a corrected retry", async (t) => {
   const { imported, request, requestRoot } = await preparedRequest(t, "req_manual_identity_repair");
-  const outputPath = path.join(imported.target.projectRootPath, ".pageroot", request.outputRelativePath);
+  const outputPath = path.join(imported.target.projectRootPath, ".stemmio", request.outputRelativePath);
   const completionPath = path.join(requestRoot, "attempts", request.attemptId, "completion.json");
   const good = await readFile(outputPath, "utf8");
-  await writeFile(outputPath, good.replace("pr1_11111111111141118111111111111111", "pr1_ffffffffffff4fff8fffffffffffffff"));
+  await writeFile(outputPath, good.replace("sm1_11111111111141118111111111111111", "sm1_ffffffffffff4fff8fffffffffffffff"));
   const args = { projectRoot: imported.target.projectRootPath, requestId: request.requestId, attemptId: request.attemptId };
   await assert.rejects(finalizeProjectFileAttempt(args), { code: "CANDIDATE_SOURCE_IDENTITY_FORGED" });
   await assert.rejects(readFile(completionPath), { code: "ENOENT" });

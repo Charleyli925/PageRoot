@@ -174,7 +174,7 @@ const SCHEMA_FILES = [
 ];
 
 const LEGAL_RESOURCE_FILES = [
-  "PageRoot 用户声明与免责声明.txt",
+  "源页 用户声明与免责声明.txt",
   "LICENSE",
   "NOTICE",
   "PRIVACY.md",
@@ -249,8 +249,8 @@ function fixtureExtraResources() {
       to: "app-update.yml",
     },
     {
-      from: "PageRoot 用户声明与免责声明.txt",
-      to: "PageRoot 用户声明与免责声明.txt",
+      from: "源页 用户声明与免责声明.txt",
+      to: "源页 用户声明与免责声明.txt",
     },
     {
       from: "output/release-metadata/usage-telemetry-config.json",
@@ -271,18 +271,18 @@ export function fixturePackageJson(profile, overrides = {}) {
   assertProfile(profile);
   const isDeveloper = profile === "developer";
   return mergePackageJson({
-    name: "pageroot",
+    name: "stemmio",
     version: FIXTURE_VERSION,
     main: "desktop/main.mjs",
     devDependencies: { electron: "43.2.0" },
     build: {
       appId: isDeveloper
-        ? "com.htmlai.workbench.developer-preview"
-        : "com.htmlai.workbench",
-      productName: isDeveloper ? "PageRoot Developer Preview" : "PageRoot",
+        ? "com.stemmio.app.developer-preview"
+        : "com.stemmio.app",
+      productName: isDeveloper ? "Stemmio Developer Preview" : "Stemmio",
       artifactName: isDeveloper
-        ? "PageRoot-Developer-Preview-${version}-${arch}.${ext}"
-        : "PageRoot-${version}-${arch}.${ext}",
+        ? "Stemmio-Developer-Preview-${version}-${arch}.${ext}"
+        : "Stemmio-${version}-${arch}.${ext}",
       directories: { output: "release" },
       extraResources: fixtureExtraResources(),
       publish: [
@@ -304,7 +304,7 @@ export function fixturePackageJson(profile, overrides = {}) {
 export function fixtureBuildInfo(overrides = {}) {
   return {
     schemaVersion: 1,
-    name: "pageroot",
+    name: "stemmio",
     version: FIXTURE_VERSION,
     architecture: FIXTURE_ARCHITECTURE,
     sourceRepository: FIXTURE_REPOSITORY,
@@ -322,7 +322,7 @@ export function fixtureTelemetryConfig(profile, overrides = {}) {
     version: 1,
     enabled,
     host: "https://us.i.posthog.com",
-    projectToken: enabled ? "phc_syntheticpageroot" : "",
+    projectToken: enabled ? "phc_syntheticstemmio" : "",
     ...overrides,
   };
 }
@@ -399,7 +399,7 @@ export async function createSyntheticAppBundle(t, {
   assert.equal(typeof t?.after, "function", "a Node test context with t.after is required");
   assert.match(architecture, /^(?:arm64|x64)$/u, "synthetic architecture must be arm64 or x64");
 
-  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-release-evidence-"));
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-release-evidence-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const productRoot = path.join(temporaryRoot, "product");
   const packageJson = fixturePackageJson(profile, {
@@ -534,7 +534,7 @@ export async function createSyntheticAppBundle(t, {
     writeFixtureFile(
       productRoot,
       "shared/openai-compatible-vendors.mjs",
-      "export const PAGEROOT_PROVIDER_ID = 'pageroot';\n",
+      "export const STEMMIO_PROVIDER_ID = 'stemmio';\n",
     ),
     writeFixtureFile(
       productRoot,
@@ -558,8 +558,18 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
-      "shared/pageroot-element-identity.mjs",
-      "export const PAGEROOT_ELEMENT_ID_SCHEMA_VERSION = 1;\n",
+      "shared/stemmio-element-identity.mjs",
+      "export const STEMMIO_ELEMENT_ID_SCHEMA_VERSION = 1;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/product-identity.mjs",
+      "export const PRODUCT_TECHNICAL_NAME = 'stemmio';\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/project-storage-contract.mjs",
+      "export const PROJECT_CONTROL_DIRECTORY = '.stemmio';\n",
     ),
     ...SCHEMA_FILES.map((fileName) => writeFixtureFile(
       productRoot,
@@ -629,7 +639,9 @@ export async function createSyntheticAppBundle(t, {
       "direct-edit-compatibility.mjs",
       "editable-island.mjs",
       "native-edit-capability.mjs",
-      "pageroot-element-identity.mjs",
+      "stemmio-element-identity.mjs",
+      "product-identity.mjs",
+      "project-storage-contract.mjs",
       "provenance.mjs",
       "semantic-identity-delta.mjs",
       "semantic-structure-plan.mjs",

@@ -22,8 +22,8 @@ import {
   resolvePreviewSourceRoot,
 } from "./preview-protocol.mjs";
 
-const AUTHOR_SCRIPT_PATH = /^\/.pageroot\/author\/(\d+)\.js$/u;
-const BOOTSTRAP_PATH = /^\/.pageroot\/bootstrap\/([a-f0-9]{24})\.js$/u;
+const AUTHOR_SCRIPT_PATH = /^\/.stemmio\/author\/(\d+)\.js$/u;
+const BOOTSTRAP_PATH = /^\/.stemmio\/bootstrap\/([a-f0-9]{24})\.js$/u;
 const SCRIPT_EXTENSIONS = new Set([".js", ".mjs"]);
 const ALLOWED_CDN_HOSTS = new Set([
   "cdn.jsdelivr.net",
@@ -765,6 +765,6 @@ export function editRuntimeBootstrapUrl(sessionId, executionId) {
   }
   return editRuntimeProtocolUrl(
     sessionId,
-    "/.pageroot/bootstrap/" + String(executionId).toLowerCase() + ".js",
+    "/.stemmio/bootstrap/" + String(executionId).toLowerCase() + ".js",
   );
 }

@@ -5,6 +5,6 @@ export type DesktopEditRuntimeApi = EditRuntimePort;
 
 declare global {
   interface Window {
-    htmlAIEditRuntime?: DesktopEditRuntimeApi;
+    stemmioEditRuntime?: DesktopEditRuntimeApi;
   }
 }

@@ -56,14 +56,14 @@ function finalizerPrompt(policy) {
     env: Object.entries(policy.finalizer.env).map(([name, value]) => ({ name, value })),
   };
   return [
-    "Complete this single frozen PageRoot task.",
+    "Complete this single frozen Stemmio task.",
     `Read ${policy.manifestPath} and then every file in its exact readOrder.`,
     `Follow ${policy.promptPath}.`,
     `Write one complete HTML document only to ${policy.outputPath}.`,
     "Then invoke ACP terminal/create exactly once with this JSON request:",
     JSON.stringify(terminalRequest),
     "Do not use a shell wrapper or write any other path.",
-    "The result remains a Candidate pending PageRoot review and must not replace the Working Copy.",
+    "The result remains a Candidate pending Stemmio review and must not replace the Working Copy.",
   ].join("\n");
 }
 
@@ -120,13 +120,13 @@ for (const nativeMode of [null, "complete", "missing-finalizer"]) test(`Codex ${
   });
   const requestRoot = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     request.requestId,
   );
   const outputPath = path.join(
     imported.target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     ...request.outputRelativePath.split("/"),
   );
   const policy = await loadExecutionPolicy({

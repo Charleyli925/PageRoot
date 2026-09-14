@@ -38,14 +38,14 @@ test("workspace Bridge local imports stay inside the packaged Bridge dependency 
 
 test("stable Bridge preserves readiness when project repository initialization fails", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-bridge-stable-degraded-",
+    prefix: "stemmio-bridge-stable-degraded-",
   });
   const unavailableProjectsRoot = join(environment.root, "project-root-file");
   await writeFile(unavailableProjectsRoot, "not-a-directory");
   const bridge = await environment.start({
-    HTML_AI_RUNTIME_CHANNEL: "stable",
-    HTML_AI_PROJECT_FILES_ROOT: unavailableProjectsRoot,
-    HTML_AI_AGENTS_ROOT: join(environment.root, "agents"),
+    STEMMIO_RUNTIME_CHANNEL: "stable",
+    STEMMIO_PROJECT_FILES_ROOT: unavailableProjectsRoot,
+    STEMMIO_AGENTS_ROOT: join(environment.root, "agents"),
   });
   const health = await bridge.requestJson("/health");
   assert.equal(health.response.status, 200, JSON.stringify(health.body));
@@ -55,15 +55,15 @@ test("stable Bridge preserves readiness when project repository initialization f
 
 test("preview Bridge fails before readiness when project repository initialization fails", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-bridge-preview-fatal-",
+    prefix: "stemmio-bridge-preview-fatal-",
   });
   const unavailableProjectsRoot = join(environment.root, "project-root-file");
   await writeFile(unavailableProjectsRoot, "not-a-directory");
   await assert.rejects(
     environment.start({
-      HTML_AI_RUNTIME_CHANNEL: "preview",
-      HTML_AI_PROJECT_FILES_ROOT: unavailableProjectsRoot,
-      HTML_AI_AGENTS_ROOT: join(environment.root, "agents"),
+      STEMMIO_RUNTIME_CHANNEL: "preview",
+      STEMMIO_PROJECT_FILES_ROOT: unavailableProjectsRoot,
+      STEMMIO_AGENTS_ROOT: join(environment.root, "agents"),
     }),
     (error) => {
       assert.match(error.message, /fatal/iu);
@@ -75,7 +75,7 @@ test("preview Bridge fails before readiness when project repository initializati
 
 test("POST /version remains a 410 tombstone", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-bridge-version-tombstone-",
+    prefix: "stemmio-bridge-version-tombstone-",
   });
   const bridge = await environment.start();
   const response = await bridge.postJson("/version", {
@@ -88,7 +88,7 @@ test("POST /version remains a 410 tombstone", async (t) => {
 
 test("retired Discussion routes expose no Bridge authority", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-bridge-no-discussion-",
+    prefix: "stemmio-bridge-no-discussion-",
   });
   const bridge = await environment.start();
   const responses = await Promise.all([
@@ -104,7 +104,7 @@ test("retired Discussion routes expose no Bridge authority", async (t) => {
 
 test("retired source history action route exposes no Bridge authority", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-bridge-no-source-history-action-",
+    prefix: "stemmio-bridge-no-source-history-action-",
   });
   const bridge = await environment.start();
   const response = await bridge.postJson("/source-history/action", {});
@@ -114,11 +114,11 @@ test("retired source history action route exposes no Bridge authority", async (t
 
 test("configured bridge authentication protects every route and leaves CORS preflight usable", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-bridge-auth-",
+    prefix: "stemmio-bridge-auth-",
   });
   const authToken = "bridge-test-token-with-sufficient-entropy";
   const bridge = await environment.start({
-    HTML_AI_BRIDGE_AUTH_TOKEN: authToken,
+    STEMMIO_BRIDGE_AUTH_TOKEN: authToken,
   });
 
   const missing = await bridge.requestJson("/health", undefined, {
@@ -128,7 +128,7 @@ test("configured bridge authentication protects every route and leaves CORS pref
   assert.equal(missing.body.error.code, "UNAUTHORIZED");
 
   const incorrect = await bridge.requestJson("/health", {
-    headers: { "x-html-ai-bridge-token": "wrong-token" },
+    headers: { "x-stemmio-bridge-token": "wrong-token" },
   });
   assert.equal(incorrect.response.status, 401);
   assert.equal(incorrect.body.error.code, "UNAUTHORIZED");
@@ -158,19 +158,19 @@ test("configured bridge authentication protects every route and leaves CORS pref
       origin: "http://localhost:3000",
       "access-control-request-method": "GET",
       "access-control-request-headers":
-        "content-type,x-html-ai-bridge-token",
+        "content-type,x-stemmio-bridge-token",
     },
   });
   assert.equal(preflight.status, 204);
   assert.match(
     preflight.headers.get("access-control-allow-headers") ?? "",
-    /X-HTML-AI-Bridge-Token/i,
+    /X-Stemmio-Bridge-Token/i,
   );
 });
 
 test("workspace Bridge rejects non-UTF-8 source bytes without creating a project or rewriting the file", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-bridge-encoding-",
+    prefix: "stemmio-bridge-encoding-",
   });
   const sourcePath = join(environment.sources, "legacy-encoding.html");
   const original = Buffer.concat([
@@ -199,9 +199,9 @@ test("workspace Bridge rejects non-UTF-8 source bytes without creating a project
     .catch(() => []);
   // Startup now initializes Repository even before the first import. An empty
   // registry is service metadata; rejected bytes must still create no project.
-  assert.deepEqual(projectEntries, [".pageroot-registry.json"]);
+  assert.deepEqual(projectEntries, [".stemmio-registry.json"]);
   const registry = JSON.parse(await readFile(
-    join(environment.root, "project-files", ".pageroot-registry.json"), "utf8",
+    join(environment.root, "project-files", ".stemmio-registry.json"), "utf8",
   ));
   assert.deepEqual(registry.projects, {});
 });

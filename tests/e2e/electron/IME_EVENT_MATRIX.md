@@ -1,4 +1,4 @@
-# PageRoot 输入法事件与发布矩阵
+# Stemmio 输入法事件与发布矩阵
 
 本文件是输入法问题的长期回归合同。真实 HTML 的 authored DOM 与源码是
 唯一事实源；输入法候选期产生的 marked text 或临时 inline wrapper 只属于

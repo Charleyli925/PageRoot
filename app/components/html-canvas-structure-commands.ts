@@ -23,7 +23,7 @@ function sourceSelectionForElementId(
   elementId: string,
   original?: HtmlCanvasSelection | null,
 ): HtmlCanvasSelection {
-  const element = sourceIndex.byPagerootId.get(elementId);
+  const element = sourceIndex.byStemmioId.get(elementId);
   if (!element || element.type !== "element") {
     throw new Error("源码元素已不存在，无法执行结构操作。");
   }

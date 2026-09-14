@@ -70,7 +70,7 @@ export function releaseCandidateArtifactName(
   runAttempt,
 ) {
   return [
-    "PageRoot-release-candidate",
+    "Stemmio-release-candidate",
     assertSha(treeSha, "treeSha"),
     assertVersion(packageVersion, "packageVersion"),
     assertArchitecture(architecture),
@@ -79,9 +79,9 @@ export function releaseCandidateArtifactName(
 }
 
 function expectedAssetNames(packageVersion, architecture) {
-  const updateZip = `PageRoot-${packageVersion}-${architecture}.zip`;
+  const updateZip = `Stemmio-${packageVersion}-${architecture}.zip`;
   return [
-    `PageRoot-${packageVersion}-${architecture}.dmg`,
+    `Stemmio-${packageVersion}-${architecture}.dmg`,
     updateZip,
     `${updateZip}.blockmap`,
     "latest-mac.yml",

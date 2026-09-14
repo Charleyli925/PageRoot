@@ -1,9 +1,9 @@
 import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
 import { EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE } from "../domain/edit-runtime-contract.js";
 import {
-  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  isValidPagerootElementId,
-} from "../../shared/pageroot-element-identity.mjs";
+  STEMMIO_ELEMENT_ID_ATTRIBUTE,
+  isValidStemmioElementId,
+} from "../../shared/stemmio-element-identity.mjs";
 import type {
   HtmlCanvasSelection,
   HtmlCanvasTargetResolution,
@@ -173,7 +173,7 @@ const TRUSTED_DOM_INSPECTION = captureTrustedDomInspection();
 type CanonicalCopySource = Readonly<{
   source: string;
   sourceSha256: string;
-  rootsByPagerootId: ReadonlyMap<string, HTMLElement | null>;
+  rootsByStemmioId: ReadonlyMap<string, HTMLElement | null>;
 }>;
 
 // Exact SourceIndex objects are immutable revision snapshots. Cache only their
@@ -202,25 +202,25 @@ function canonicalCopySource(
   if (!inspection) return null;
   try {
     const canonicalDocument = inspection.parse(sourceIndex.source);
-    const rootsByPagerootId = new Map<string, HTMLElement | null>();
+    const rootsByStemmioId = new Map<string, HTMLElement | null>();
     for (const candidate of inspection.query(
       canonicalDocument,
-      `[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`,
+      `[${STEMMIO_ELEMENT_ID_ATTRIBUTE}]`,
     )) {
-      const pagerootId = inspection.attributeValue(
+      const stemmioId = inspection.attributeValue(
         candidate,
-        PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+        STEMMIO_ELEMENT_ID_ATTRIBUTE,
       );
-      if (!pagerootId || !isValidPagerootElementId(pagerootId)) continue;
-      rootsByPagerootId.set(
-        pagerootId,
-        rootsByPagerootId.has(pagerootId) ? null : candidate as HTMLElement,
+      if (!stemmioId || !isValidStemmioElementId(stemmioId)) continue;
+      rootsByStemmioId.set(
+        stemmioId,
+        rootsByStemmioId.has(stemmioId) ? null : candidate as HTMLElement,
       );
     }
     const result = Object.freeze({
       source: sourceIndex.source,
       sourceSha256: sourceIndex.sourceSha256,
-      rootsByPagerootId,
+      rootsByStemmioId,
     });
     CANONICAL_COPY_SOURCE_BY_INDEX.set(sourceIndex, result);
     return result;
@@ -238,14 +238,14 @@ function isProjectionOnlyAttribute(name: string, sourceHasAttribute: boolean): b
   const normalized = name.toLowerCase();
   return normalized === EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE
     || normalized.startsWith("data-html-canvas-")
-    || normalized.startsWith("data-pageroot-edit-runtime-")
+    || normalized.startsWith("data-stemmio-edit-runtime-")
     || (
       !sourceHasAttribute
       && (
         // Native Edit owns the first two. Page runtime readiness/diagnostic
         // markers do not become part of the canonical source subtree copied.
         normalized === "aria-label"
-        || normalized === "data-pageroot-v2-editing"
+        || normalized === "data-stemmio-editing"
         || normalized.startsWith("data-runtime-")
       )
     )
@@ -419,11 +419,11 @@ function assessRuntimeSubtreeAgainstSource(
   const inspection = TRUSTED_DOM_INSPECTION;
   if (!inspection) return "canonical-source-unavailable";
   try {
-    const pagerootId = inspection.attributeValue(root, PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-    if (!pagerootId) return "canonical-target-unavailable";
+    const stemmioId = inspection.attributeValue(root, STEMMIO_ELEMENT_ID_ATTRIBUTE);
+    if (!stemmioId) return "canonical-target-unavailable";
     const canonicalSource = canonicalCopySource(sourceIndex);
     if (!canonicalSource) return "canonical-source-unavailable";
-    const canonicalRoot = canonicalSource?.rootsByPagerootId.get(pagerootId) ?? null;
+    const canonicalRoot = canonicalSource?.rootsByStemmioId.get(stemmioId) ?? null;
     if (!canonicalRoot) return "canonical-target-unavailable";
     const mismatch = { diagnostic: null as string | null };
     const matches = runtimeNodeMatchesSource(
@@ -478,7 +478,7 @@ export function elementCopyAssessmentForTarget({
   }
   const sourceMutationAuthority = runtimeExpected
     ? Boolean(isProvenRuntimeSourceElement?.(element))
-    : Boolean(inspection.attributeValue(element, PAGEROOT_ELEMENT_ID_ATTRIBUTE));
+    : Boolean(inspection.attributeValue(element, STEMMIO_ELEMENT_ID_ATTRIBUTE));
   if (!sourceMutationAuthority) {
     return Object.freeze({
       availability: "unsupported",
@@ -644,7 +644,7 @@ export function canvasTargetKeyFor({
     : createCanvasTargetIdentityScope(normalized);
   if (!runtimeGenerated) {
     const elementId = [sourceRef?.elementId, selection.elementId]
-      .find((candidate) => isValidPagerootElementId(candidate));
+      .find((candidate) => isValidStemmioElementId(candidate));
     if (elementId) return `element:${elementId}`;
     if (sourceRef?.targetId) return `target:${sourceRef.targetId}`;
   }
@@ -671,8 +671,8 @@ function canvasVisualKeyFor({
     ? identityScope
     : createCanvasTargetIdentityScope(normalized);
   if (!runtimeGenerated) {
-    const elementId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-    if (isValidPagerootElementId(elementId)) return `element:${elementId}`;
+    const elementId = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
+    if (isValidStemmioElementId(elementId)) return `element:${elementId}`;
   }
   return transientTargetKeyForElement(
     element,
@@ -691,7 +691,7 @@ export function canvasVisualTargetElement(
     return runtimeVisualTargetElement(element) ?? element;
   }
   const dedicatedSurface = element.closest("svg, math") as HTMLElement | null;
-  if (dedicatedSurface?.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)) return dedicatedSurface;
+  if (dedicatedSurface?.hasAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE)) return dedicatedSurface;
   return nativeEditHostForElement(element, sourceIndex) ?? element;
 }
 
@@ -928,7 +928,7 @@ function runtimeCommentAnchorForTarget(
           }
         : rawSelection;
       const ref = sourceTargetRefForSelection(selection) as SourceTargetRef;
-      if (isValidPagerootElementId(selection.elementId)) {
+      if (isValidStemmioElementId(selection.elementId)) {
         return { element: current, selection, ref };
       }
     }

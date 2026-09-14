@@ -97,6 +97,10 @@ export const RUNTIME_SELECTION_CONFIGS = Object.freeze({
 export function classifyPlaywrightSpec(file) {
   const normalized = String(file).replaceAll("\\", "/");
   if (!normalized.endsWith(".spec.mjs")) return null;
+  // The hosted-window preflight has its own infra-sensitive config and retry
+  // policy. Keep it out of the product Electron smoke union, whose config
+  // intentionally excludes this suite and never retries product tests.
+  if (normalized === "tests/e2e/electron/ci-environment-preflight.spec.mjs") return null;
   if (normalized.startsWith("tests/e2e/browser/")) {
     return { suiteId: "browser-changed-specs", file: normalized };
   }

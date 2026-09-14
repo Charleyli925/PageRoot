@@ -36,7 +36,7 @@ test("release evidence fixtures require explicit profiles and return fresh value
   const firstTelemetry = fixtureTelemetryConfig("release");
   const secondTelemetry = fixtureTelemetryConfig("release");
   firstTelemetry.projectToken = "phc_mutated";
-  assert.equal(secondTelemetry.projectToken, "phc_syntheticpageroot");
+  assert.equal(secondTelemetry.projectToken, "phc_syntheticstemmio");
 
   const firstCandidate = fixtureCandidateIdentity();
   const secondCandidate = fixtureCandidateIdentity();
@@ -52,10 +52,10 @@ test("release evidence fixtures require explicit profiles and return fresh value
 test("release evidence fixture profiles preserve their separate trust identities", () => {
   const developer = fixturePackageJson("developer");
   const release = fixturePackageJson("release");
-  assert.equal(developer.build.appId, "com.htmlai.workbench.developer-preview");
-  assert.equal(developer.build.productName, "PageRoot Developer Preview");
-  assert.equal(release.build.appId, "com.htmlai.workbench");
-  assert.equal(release.build.productName, "PageRoot");
+  assert.equal(developer.build.appId, "com.stemmio.app.developer-preview");
+  assert.equal(developer.build.productName, "Stemmio Developer Preview");
+  assert.equal(release.build.appId, "com.stemmio.app");
+  assert.equal(release.build.productName, "Stemmio");
 
   const developerTelemetry = fixtureTelemetryConfig("developer");
   const dryRunTelemetry = fixtureTelemetryConfig("dry-run");

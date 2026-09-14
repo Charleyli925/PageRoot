@@ -12,7 +12,7 @@ import {
 
 export function sourceBindingPath(projectRootPath, workingCopyId) {
   assertId(workingCopyId, WORKING_COPY_ID, "workingCopyId");
-  return path.join(projectRootPath, ".pageroot", "source-bindings", `${workingCopyId}.ref`);
+  return path.join(projectRootPath, ".stemmio", "source-bindings", `${workingCopyId}.ref`);
 }
 
 export async function readSourceBinding(projectRootPath, workingCopyId) {

@@ -90,8 +90,8 @@ export function readEditPipelineCounters() {
 
 export function installEditPipelineTestHooks(target = typeof window === "undefined" ? null : window) {
   if (!target) return;
-  target.__PAGEROOT_ENABLE_EDIT_PIPELINE_COUNTERS__ = () => enableEditPipelineCounters();
-  target.__PAGEROOT_DISABLE_EDIT_PIPELINE_COUNTERS__ = () => disableEditPipelineCounters();
-  target.__PAGEROOT_RESET_EDIT_PIPELINE_COUNTERS__ = () => resetEditPipelineCounters();
-  target.__PAGEROOT_READ_EDIT_PIPELINE_COUNTERS__ = () => readEditPipelineCounters();
+  target.__STEMMIO_ENABLE_EDIT_PIPELINE_COUNTERS__ = () => enableEditPipelineCounters();
+  target.__STEMMIO_DISABLE_EDIT_PIPELINE_COUNTERS__ = () => disableEditPipelineCounters();
+  target.__STEMMIO_RESET_EDIT_PIPELINE_COUNTERS__ = () => resetEditPipelineCounters();
+  target.__STEMMIO_READ_EDIT_PIPELINE_COUNTERS__ = () => readEditPipelineCounters();
 }

@@ -14,7 +14,7 @@ async function writeSyntheticBridge(root) {
     `import { appendFileSync } from "node:fs";
 import { createServer } from "node:http";
 
-const token = process.env.HTML_AI_BRIDGE_AUTH_TOKEN || "";
+const token = process.env.STEMMIO_BRIDGE_AUTH_TOKEN || "";
 const mutationLog = process.env.BRIDGE_TEST_MUTATION_LOG || "";
 const label = process.env.BRIDGE_TEST_LABEL || "default";
 process.stdout.write("synthetic bridge " + label + "\\n");
@@ -23,7 +23,7 @@ const respond = (response, status, body) => {
   response.end(JSON.stringify(body));
 };
 const server = createServer((request, response) => {
-  if (token && request.headers["x-html-ai-bridge-token"] !== token) {
+  if (token && request.headers["x-stemmio-bridge-token"] !== token) {
     respond(response, 401, { error: "missing token" });
     return;
   }
@@ -38,7 +38,7 @@ const server = createServer((request, response) => {
   }
   respond(response, 404, { error: "not found" });
 });
-server.listen(Number(process.env.HTML_AI_BRIDGE_PORT), "127.0.0.1");
+server.listen(Number(process.env.STEMMIO_BRIDGE_PORT), "127.0.0.1");
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
 `,
     "utf8",
@@ -49,12 +49,12 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
 test("Bridge test environments isolate roots, ports, logs, auth, and cleanup", async (t) => {
   const first = await createBridgeTestEnvironment(t, {
     environment: {
-      HTML_AI_BRIDGE_AUTH_TOKEN: "first-synthetic-token",
+      STEMMIO_BRIDGE_AUTH_TOKEN: "first-synthetic-token",
     },
   });
   const second = await createBridgeTestEnvironment(t, {
     environment: {
-      HTML_AI_BRIDGE_AUTH_TOKEN: "second-synthetic-token",
+      STEMMIO_BRIDGE_AUTH_TOKEN: "second-synthetic-token",
     },
   });
   const [firstScript, secondScript] = await Promise.all([
@@ -94,7 +94,7 @@ test("Bridge test environments isolate roots, ports, logs, auth, and cleanup", a
   );
   assert.equal(unauthenticated.response.status, 401);
   const wrongToken = await firstBridge.requestJson("/health", {
-    headers: { "x-html-ai-bridge-token": "second-synthetic-token" },
+    headers: { "x-stemmio-bridge-token": "second-synthetic-token" },
   });
   assert.equal(wrongToken.response.status, 401);
 

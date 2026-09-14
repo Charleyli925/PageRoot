@@ -59,7 +59,7 @@ function trustedTriage({
   return {
     author_association: authorAssociation,
     body: [
-      "<!-- pageroot-ci-triage",
+      "<!-- stemmio-ci-triage",
       "schemaVersion: 1",
       "classification: ci_environment",
       `sha: ${sha}`,
@@ -256,7 +256,7 @@ test("a failed release-gate after an environment recovery does not lock attestat
 });
 
 test("loadFlakyEvidence reads only repository flaky summaries", async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-flaky-evidence-"));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-flaky-evidence-"));
   try {
     const evidenceDir = path.join(tempRoot, "output");
     await mkdir(evidenceDir, { recursive: true });
@@ -284,7 +284,7 @@ test("flaky evidence round-trips upload layout and reuses an earlier successful 
       const attempt = suite === "electron-ai" ? 1 : 2;
       const directory = path.join(
         attemptsDir,
-        `PageRoot-${suite}-evidence-44-${attempt}`,
+        `Stemmio-${suite}-evidence-44-${attempt}`,
       );
       await mkdir(directory, { recursive: true });
       await writeFile(

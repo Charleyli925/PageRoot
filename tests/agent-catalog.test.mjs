@@ -14,7 +14,7 @@ import {
 
 async function isolatedHome(t) {
   const root = await realpath(
-    await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-catalog-")),
+    await mkdtemp(path.join(os.tmpdir(), "stemmio-agent-catalog-")),
   );
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
@@ -66,7 +66,7 @@ test("public catalog projection never includes command, path or stderr", async (
   assert.equal(serialized.includes("qodercli.js"), false);
 });
 
-test("PageRoot-managed Qoder wins over a valid user copy", async (t) => {
+test("Stemmio-managed Qoder wins over a valid user copy", async (t) => {
   const root = await isolatedHome(t);
   const agentsRoot = path.join(root, "agents");
   const managed = await writeManagedQoder(agentsRoot);
@@ -113,7 +113,7 @@ test("managed Qoder is used only when no user CLI exists", async (t) => {
 test("Qoder diagnosis requires an ACP identity and session smoke check", async (t) => {
   const root = await isolatedHome(t);
   const command = path.join(root, "qoder-diagnose");
-  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo PageRoot-E2E; fi\n", { mode: 0o755 });
+  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo Stemmio-E2E; fi\n", { mode: 0o755 });
   await chmod(command, 0o755);
   let probe = null;
   const diagnostic = await diagnoseQoder(
@@ -126,13 +126,13 @@ test("Qoder diagnosis requires an ACP identity and session smoke check", async (
   assert.equal(diagnostic.facts.protocol, "ready");
   assert.equal(diagnostic.facts.service, "ready");
   assert.deepEqual(probe.args, ["--acp"]);
-  assert.match("pageroot-e2e-qoder", probe.expectedAgentName);
+  assert.match("stemmio-e2e-qoder", probe.expectedAgentName);
 });
 
 test("Qoder diagnosis keeps authentication ready when ACP identity fails", async (t) => {
   const root = await isolatedHome(t);
   const command = path.join(root, "qoder-diagnose-identity");
-  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo PageRoot-E2E; fi\n", { mode: 0o755 });
+  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo Stemmio-E2E; fi\n", { mode: 0o755 });
   await chmod(command, 0o755);
   const diagnostic = await diagnoseQoder(
     { command, version: "1.1.27", source: "e2e-override" },
@@ -154,7 +154,7 @@ test("Qoder diagnosis keeps authentication ready when ACP identity fails", async
 test("Qoder diagnosis fails closed when ACP process cleanup is unconfirmed", async (t) => {
   const root = await isolatedHome(t);
   const command = path.join(root, "qoder-diagnose-cleanup");
-  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo PageRoot-E2E; fi\n", { mode: 0o755 });
+  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo Stemmio-E2E; fi\n", { mode: 0o755 });
   await chmod(command, 0o755);
   await assert.rejects(
     diagnoseQoder(

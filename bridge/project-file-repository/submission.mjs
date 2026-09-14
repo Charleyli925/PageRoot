@@ -20,7 +20,7 @@ function receiptPath(loaded, operationId) {
   if (!/^submission_[a-f0-9]{32}$/u.test(String(operationId || ""))) {
     throw new ProjectFileRepositoryError("SUBMISSION_ID_INVALID", "Submission identity is invalid.");
   }
-  return path.join(loaded.paths.projectRootPath, ".pageroot", "submissions", `${operationId}.json`);
+  return path.join(loaded.paths.projectRootPath, ".stemmio", "submissions", `${operationId}.json`);
 }
 
 export async function readSubmissionReceipt(loaded, operationId) {
@@ -68,7 +68,7 @@ export async function saveSubmissionReceipt(loaded, { operationId, input, projec
     return existing;
   }
   const suffix = operationId.slice("submission_".length);
-  const conversationContext = { projectRoot: path.join(loaded.paths.projectRootPath, ".pageroot"),
+  const conversationContext = { projectRoot: path.join(loaded.paths.projectRootPath, ".stemmio"),
     projectId: loaded.project.projectId, documentId: loaded.project.documentId };
   const conversation = await rotateConversationAtLimit(conversationContext,
     await ensureCurrentConversation(conversationContext),
@@ -105,7 +105,7 @@ export async function finishSubmissionReceipt(loaded, { operationId, status, err
 // The receipt is the recovery record. If projection fails, replay this same
 // record; never infer that the Agent should run again.
 export async function projectSubmissionReceipt(loaded, receipt) {
-  const context = { projectRoot: path.join(loaded.paths.projectRootPath, ".pageroot"),
+  const context = { projectRoot: path.join(loaded.paths.projectRootPath, ".stemmio"),
     projectId: receipt.projectId, documentId: receipt.documentId };
   const conversation = await readConversation(context, receipt.conversationId);
   if (!conversation) throw new ProjectFileRepositoryError("SUBMISSION_CONVERSATION_MISSING", "Submission history requires recovery.");
@@ -136,13 +136,13 @@ export async function projectSubmissionReceipt(loaded, receipt) {
     const turn = next.turns.find((entry) => entry.turnId === receipt.turnId);
     if (receipt.status === "not-started" && ["queued", "running"].includes(turn.status)) {
       next = sealConversationTurn(next, { turnId: receipt.turnId, status: "failed", messages: [{
-        messageId: `message_${suffix}_not_started`, actor: "pageroot", kind: "error", status: "completed",
+        messageId: `message_${suffix}_not_started`, actor: "stemmio", kind: "error", status: "completed",
         text: "本次未开始，修改要求已保留。请修复服务后重新尝试。", errorCode: receipt.errorCode,
       }] }, { now: () => receipt.completedAt });
     }
     if (receipt.eventsTruncated) {
       next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
-        messageId: `message_${suffix}_truncated`, actor: "pageroot", kind: "text", status: "completed",
+        messageId: `message_${suffix}_truncated`, actor: "stemmio", kind: "text", status: "completed",
         text: "部分早期过程已省略；修改要求与最终结果仍保留。",
       } }, { now });
     }
@@ -155,7 +155,7 @@ export async function projectSubmissionReceipt(loaded, receipt) {
       const agentOwned = ["public-summary", "reading-task", "writing-candidate", "finalizing",
         "receiving-response", "generating-modification", "response-received", "execution-ended"].includes(event.kind);
       next = appendConversationTurnMessage(next, { turnId: receipt.turnId, message: {
-        messageId, actor: agentOwned && receipt.snapshot.agentDelivery.selection?.providerId ? "agent" : "pageroot",
+        messageId, actor: agentOwned && receipt.snapshot.agentDelivery.selection?.providerId ? "agent" : "stemmio",
         ...(agentOwned && receipt.snapshot.agentDelivery.selection?.providerId
           ? { providerId: receipt.snapshot.agentDelivery.selection.providerId } : {}),
         kind: next.messages.find((message) => message.messageId === messageId)?.kind || messageKind, status: "completed",

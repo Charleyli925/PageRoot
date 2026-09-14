@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "$comment": "Forward compatible transaction records preserve unknown members. Structural schema checks are supplemented by Repository lineage, content and filesystem authority checks.",
-  "$id": "https://pageroot.local/schemas/preserved-draft.v1.schema.json",
+  "$id": "https://stemmio.local/schemas/preserved-draft.v1.schema.json",
   "required": [
     "schemaVersion",
     "projectId",

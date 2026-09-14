@@ -8,7 +8,7 @@ import {
   unsafeRelinkComments,
 } from "../app/workbench/comment-relink-model.js";
 
-const ELEMENT_ID = "pr1_11111111111141118111111111111111";
+const ELEMENT_ID = "sm1_11111111111141118111111111111111";
 
 function comment(overrides = {}) {
   return {
@@ -82,7 +82,7 @@ test("commentHasContent accepts text or attachments", () => {
 });
 
 test("globalPageCommentTargetFromHtml binds the body's Stable ID", () => {
-  const html = `<!doctype html><html><body data-pageroot-id="${ELEMENT_ID}"><p>欢迎</p></body></html>`;
+  const html = `<!doctype html><html><body data-stemmio-id="${ELEMENT_ID}"><p>欢迎</p></body></html>`;
   assert.deepEqual(globalPageCommentTargetFromHtml(html), {
     id: "target_global_page",
     elementId: ELEMENT_ID,

@@ -15,7 +15,7 @@ export default function WorkbenchActiveDocumentCanvas({
 }) {
   useEffect(() => {
     if (!activeTabId || !activeSourceSha256 || !activeElement) return;
-    performance.mark("pageroot:runtime-hot:visible-ready", {
+    performance.mark("stemmio:runtime-hot:visible-ready", {
       detail: Object.freeze({ tabId: activeTabId, sourceSha256: activeSourceSha256 }),
     });
   }, [activeElement, activeSourceSha256, activeTabId]);

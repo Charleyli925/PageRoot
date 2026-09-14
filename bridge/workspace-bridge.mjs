@@ -56,8 +56,8 @@ import {
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
-const SERVICE_NAME = "html-ai-workspace-bridge";
-const RUNTIME_CHANNEL = String(process.env.HTML_AI_RUNTIME_CHANNEL || "test").trim().toLowerCase();
+const SERVICE_NAME = "stemmio-workspace-bridge";
+const RUNTIME_CHANNEL = String(process.env.STEMMIO_RUNTIME_CHANNEL || "test").trim().toLowerCase();
 if (!["stable", "preview", "source", "e2e", "test"].includes(RUNTIME_CHANNEL)) {
   const error = new Error(`Unsupported runtime channel: ${RUNTIME_CHANNEL || "(missing)"}.`);
   error.code = "RUNTIME_CHANNEL_INVALID";
@@ -74,11 +74,11 @@ function requiredRuntimeRoot(name) {
   return path.resolve(configured);
 }
 
-const WORKSPACE_ROOT = requiredRuntimeRoot("HTML_AI_WORKSPACE");
-const PROJECT_FILE_ROOT = requiredRuntimeRoot("HTML_AI_PROJECT_FILES_ROOT");
+const WORKSPACE_ROOT = requiredRuntimeRoot("STEMMIO_WORKSPACE");
+const PROJECT_FILE_ROOT = requiredRuntimeRoot("STEMMIO_PROJECT_FILES_ROOT");
 
 function e2eAgentInstallFetch(_url, { signal } = {}) {
-  if (process.env.PAGEROOT_AGENT_INSTALL_STUB_FETCH === "pending") {
+  if (process.env.STEMMIO_AGENT_INSTALL_STUB_FETCH === "pending") {
     return new Promise((_, reject) => {
       const abort = () => reject(signal?.reason || new Error("Agent install cancelled."));
       if (signal?.aborted) abort();
@@ -102,7 +102,7 @@ const agentBridgeService = new AgentBridgeService({
     await projectFileRepository.recordExecutionFact({ target, requestId: identity.requestId,
       attemptId: identity.attemptId, event });
   },
-  ...(process.env.PAGEROOT_E2E === "1" && process.env.PAGEROOT_AGENT_INSTALL_STUB_FETCH
+  ...(process.env.STEMMIO_E2E === "1" && process.env.STEMMIO_AGENT_INSTALL_STUB_FETCH
     ? {
       installerOptions: {
         fetchImpl: e2eAgentInstallFetch,
@@ -119,10 +119,10 @@ function normalizeDispatchableAgentDelivery(value) {
 }
 const projectFileRepository = new ProjectFileRepository({
   projectsRoot: PROJECT_FILE_ROOT,
-  deviceId: process.env.HTML_AI_DEVICE_ID || null,
+  deviceId: process.env.STEMMIO_DEVICE_ID || null,
   agentDeliveryNormalizer: normalizeDispatchableAgentDelivery,
-  failpoint: process.env.HTML_AI_FAILPOINT
-    ? async (name) => name === process.env.HTML_AI_FAILPOINT
+  failpoint: process.env.STEMMIO_FAILPOINT
+    ? async (name) => name === process.env.STEMMIO_FAILPOINT
     : null,
 });
 const FINALIZER_PATH = fileURLToPath(
@@ -131,11 +131,11 @@ const FINALIZER_PATH = fileURLToPath(
 const MAX_BODY_BYTES = PRODUCT_MAX_BRIDGE_BODY_BYTES;
 const MAX_FILE_BYTES = PRODUCT_MAX_HTML_BYTES;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-const BRIDGE_AUTH_TOKEN = process.env.HTML_AI_BRIDGE_AUTH_TOKEN || null;
+const BRIDGE_AUTH_TOKEN = process.env.STEMMIO_BRIDGE_AUTH_TOKEN || null;
 const execFileAsync = promisify(execFile);
 
 const configuredPort = Number.parseInt(
-  process.env.HTML_AI_BRIDGE_PORT ?? String(DEFAULT_PORT),
+  process.env.STEMMIO_BRIDGE_PORT ?? String(DEFAULT_PORT),
   10,
 );
 if (
@@ -148,7 +148,7 @@ if (
       type: "fatal",
       error: {
         code: "INVALID_PORT",
-        message: "HTML_AI_BRIDGE_PORT must be an integer from 1 to 65535.",
+        message: "STEMMIO_BRIDGE_PORT must be an integer from 1 to 65535.",
       },
     })}\n`,
   );
@@ -643,7 +643,7 @@ async function versionRequirement(cacheScope, projectRootPath, requestId) {
     const raw = await readFile(
       path.join(
         projectRootPath,
-        ".pageroot",
+        ".stemmio",
         "requests",
         String(requestId),
         "change-request.json",
@@ -746,14 +746,14 @@ function projectFileRunForRequest({ request, candidate = null, target }) {
   const sourcePath = target.exactSourcePath;
   const requestPath = path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     request.requestId,
   );
   const attemptPath = path.join(requestPath, "attempts", request.attemptId);
   const outputPath = path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     ...String(request.outputRelativePath || "").split("/"),
   );
   const completion = candidateReady
@@ -1188,7 +1188,7 @@ function promptListItem(value) {
 function projectFilePromptForRequest(target, request, taskSpec) {
   const requestRoot = path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     request.requestId,
   );
@@ -1199,7 +1199,7 @@ function projectFilePromptForRequest(target, request, taskSpec) {
   const annotationsPath = path.join(requestRoot, "input", "annotations", "records.json");
   const outputPath = path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     ...String(request.outputRelativePath || "").split("/"),
   );
   const objective = promptListItem(taskSpec.objective);
@@ -1240,7 +1240,7 @@ function projectFilePromptForRequest(target, request, taskSpec) {
     )),
   ];
   const nonGoalLines = taskSpec.nonGoals.map((nonGoal) => `- ${promptListItem(nonGoal)}`);
-  return `# PageRoot AI Candidate\n\n## 本轮目标\n\n${objective}\n\n## 修改范围\n\n${scopeLabel}（\`${scopePolicy}\`）\n\n## 本轮要求\n\n${instructionLines.join("\n")}\n\n## 运行时可见内容评论规则\n\n评论可能指向由某个源码宿主生成的表格、图表、SVG、Canvas 或其他可见内容。每条评论的 \`sourceAnchor\` 是唯一拥有保存、跨版本重绑和源码定位权限的稳定源码 TargetRef；\`visualHint\` 只用于区分用户实际看到的对象。用户评论的是由该源码宿主生成的可见内容。请修改生成该内容的 HTML、数据或 Script，不要修改或保存临时 Runtime DOM，也不要把 \`visualHint\` 当作源码身份或编辑权限。\n\n${acceptanceLines.length > 0 ? `## 验收标准\n\n${acceptanceLines.join("\n")}\n\n` : ""}## 明确不做\n\n${nonGoalLines.length > 0 ? nonGoalLines.join("\n") : "评论中没有额外明确的不做项。"}\n\n## 冻结输入与输出\n\n从 \`${inputManifestPath}\` 开始，严格按 \`readOrder\` 读取。跨任务不变的合同在 \`input/AI_RULES.md\`；本轮 Task Spec 以 \`${changeRequestPath}\` 为准。\n\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 评论、目标与审计上下文：\`${annotationsPath}\`\n- 唯一输出：\`${outputPath}\`\n\n## 完成\n\n完成输出写入后，最后执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
+  return `# Stemmio AI Candidate\n\n## 本轮目标\n\n${objective}\n\n## 修改范围\n\n${scopeLabel}（\`${scopePolicy}\`）\n\n## 本轮要求\n\n${instructionLines.join("\n")}\n\n## 运行时可见内容评论规则\n\n评论可能指向由某个源码宿主生成的表格、图表、SVG、Canvas 或其他可见内容。每条评论的 \`sourceAnchor\` 是唯一拥有保存、跨版本重绑和源码定位权限的稳定源码 TargetRef；\`visualHint\` 只用于区分用户实际看到的对象。用户评论的是由该源码宿主生成的可见内容。请修改生成该内容的 HTML、数据或 Script，不要修改或保存临时 Runtime DOM，也不要把 \`visualHint\` 当作源码身份或编辑权限。\n\n${acceptanceLines.length > 0 ? `## 验收标准\n\n${acceptanceLines.join("\n")}\n\n` : ""}## 明确不做\n\n${nonGoalLines.length > 0 ? nonGoalLines.join("\n") : "评论中没有额外明确的不做项。"}\n\n## 冻结输入与输出\n\n从 \`${inputManifestPath}\` 开始，严格按 \`readOrder\` 读取。跨任务不变的合同在 \`input/AI_RULES.md\`；本轮 Task Spec 以 \`${changeRequestPath}\` 为准。\n\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 评论、目标与审计上下文：\`${annotationsPath}\`\n- 唯一输出：\`${outputPath}\`\n\n## 完成\n\n完成输出写入后，最后执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
 }
 
 function projectFileReadyPayload({ request, candidate: candidateInput, target }) {
@@ -1302,8 +1302,8 @@ function projectFileReadyPayload({ request, candidate: candidateInput, target })
       attemptId: candidate.attemptId,
       status: "ready-to-open",
       sourcePath: target.exactSourcePath,
-      requestPath: path.join(target.projectRootPath, ".pageroot", "requests", candidate.requestId),
-      attemptPath: path.join(target.projectRootPath, ".pageroot", "requests", candidate.requestId, "attempts", candidate.attemptId),
+      requestPath: path.join(target.projectRootPath, ".stemmio", "requests", candidate.requestId),
+      attemptPath: path.join(target.projectRootPath, ".stemmio", "requests", candidate.requestId, "attempts", candidate.attemptId),
       handoffMessage: String(request.request?.handoffMessage || ""),
       agentDelivery: request.request?.agentDelivery || { mode: "clipboard" },
       baseSnapshotSha256: candidate.expectedSourceSha256,
@@ -1401,7 +1401,7 @@ async function createProjectFileRequest(body) {
   };
   const handoffMessage = `请执行 ${path.join(
     target.projectRootPath,
-    ".pageroot",
+    ".stemmio",
     "requests",
     requestId,
     "PROMPT.md",
@@ -1437,7 +1437,7 @@ async function createProjectFileRequest(body) {
       projectRoot: target.projectRootPath,
       inputPath: path.join(
         target.projectRootPath,
-        ".pageroot",
+        ".stemmio",
         "requests",
         requestId,
         "input",
@@ -2305,7 +2305,7 @@ function conversationContext(workspace) {
   return {
     // The repository's `projectRoot` is the managed control root, matching the
     // convention already used by the source-history service.
-    projectRoot: path.join(workspace.target.projectRootPath, ".pageroot"),
+    projectRoot: path.join(workspace.target.projectRootPath, ".stemmio"),
     projectId: workspace.project.projectId,
     documentId: workspace.project.documentId,
   };
@@ -2537,7 +2537,7 @@ async function readBody(request) {
 
 function originAllowed(origin) {
   if (!origin) return true;
-  if (origin === "null" && process.env.HTML_AI_ALLOW_FILE_ORIGIN === "1") {
+  if (origin === "null" && process.env.STEMMIO_ALLOW_FILE_ORIGIN === "1") {
     return true;
   }
   try {
@@ -2565,13 +2565,13 @@ function applyCors(request, response) {
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   response.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, X-HTML-AI-Bridge-Token",
+    "Content-Type, X-Stemmio-Bridge-Token",
   );
 }
 
 function requireBridgeAuthorization(request) {
   if (!BRIDGE_AUTH_TOKEN) return;
-  const suppliedHeader = request.headers["x-html-ai-bridge-token"];
+  const suppliedHeader = request.headers["x-stemmio-bridge-token"];
   const suppliedToken =
     typeof suppliedHeader === "string"
       ? suppliedHeader
@@ -2795,8 +2795,8 @@ async function route(request, response) {
   }
   if (request.method === "POST" && url.pathname === "/autosave") {
     if (
-      process.env.PAGEROOT_E2E === "1"
-      && process.env.PAGEROOT_E2E_AUTOSAVE_FAILURE === "1"
+      process.env.STEMMIO_E2E === "1"
+      && process.env.STEMMIO_E2E_AUTOSAVE_FAILURE === "1"
     ) {
       await readBody(request);
       sendJson(response, 503, {
@@ -3125,7 +3125,7 @@ server.on("error", (error) => {
 if (RUNTIME_CHANNEL === "preview") {
   // Preview is a fully isolated environment. Its project repository and
   // workspace root must be ready before the Bridge advertises readiness; a
-  // failure must not fall back to the formal PageRoot directory.
+  // failure must not fall back to the formal Stemmio directory.
   try {
     await Promise.all([
       ensureDirectory(WORKSPACE_ROOT),

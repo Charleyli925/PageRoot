@@ -22,19 +22,19 @@ import {
 } from "./project-file-repository-harness.mjs";
 
 const ids = {
-  html: "pr1_a0000000000040008000000000000001",
-  head: "pr1_a0000000000040008000000000000002",
-  title: "pr1_a0000000000040008000000000000003",
-  body: "pr1_a0000000000040008000000000000004",
-  left: "pr1_a0000000000040008000000000000005",
-  first: "pr1_a0000000000040008000000000000006",
-  strong: "pr1_a0000000000040008000000000000007",
-  second: "pr1_a0000000000040008000000000000008",
-  right: "pr1_a0000000000040008000000000000009",
-  module: "pr1_a000000000004000800000000000000a",
+  html: "sm1_a0000000000040008000000000000001",
+  head: "sm1_a0000000000040008000000000000002",
+  title: "sm1_a0000000000040008000000000000003",
+  body: "sm1_a0000000000040008000000000000004",
+  left: "sm1_a0000000000040008000000000000005",
+  first: "sm1_a0000000000040008000000000000006",
+  strong: "sm1_a0000000000040008000000000000007",
+  second: "sm1_a0000000000040008000000000000008",
+  right: "sm1_a0000000000040008000000000000009",
+  module: "sm1_a000000000004000800000000000000a",
 };
 
-const SOURCE = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Managed</title></head><body data-pageroot-id="${ids.body}"><section data-pageroot-id="${ids.left}"><p data-pageroot-id="${ids.first}">A <strong data-pageroot-id="${ids.strong}">one</strong></p><p data-pageroot-id="${ids.second}">B</p></section><aside data-pageroot-id="${ids.right}"><div data-pageroot-id="${ids.module}">module</div></aside></body></html>`;
+const SOURCE = `<!doctype html><html data-stemmio-id="${ids.html}"><head data-stemmio-id="${ids.head}"><title data-stemmio-id="${ids.title}">Managed</title></head><body data-stemmio-id="${ids.body}"><section data-stemmio-id="${ids.left}"><p data-stemmio-id="${ids.first}">A <strong data-stemmio-id="${ids.strong}">one</strong></p><p data-stemmio-id="${ids.second}">B</p></section><aside data-stemmio-id="${ids.right}"><div data-stemmio-id="${ids.module}">module</div></aside></body></html>`;
 
 function precondition(source, elementId) {
   return createSemanticElementPrecondition(source, elementId);
@@ -109,7 +109,7 @@ test("managed Working Copy persists every authorized semantic identity transitio
   ({ target, source } = await applySave(value.repository, target, source, setText, {
     editRevision: ++revision,
   }));
-  assert.equal(buildSourceIndex(source).byPagerootId.has(ids.strong), false);
+  assert.equal(buildSourceIndex(source).byStemmioId.has(ids.strong), false);
 
   const replace = operation(source, "replaceSubtree", {
     target: precondition(source, ids.module),
@@ -120,7 +120,7 @@ test("managed Working Copy persists every authorized semantic identity transitio
     randomUUID: sequentialUuidFactory("11000000-"),
   });
   ({ target, source } = replaced);
-  assert.equal(buildSourceIndex(source).byPagerootId.get(ids.module).tagName, "article");
+  assert.equal(buildSourceIndex(source).byStemmioId.get(ids.module).tagName, "article");
   assert.equal(replaced.result.identityDelta.retainedTargetRootElementId, ids.module);
   assert.equal(replaced.result.identityDelta.addedElementIds.length, 1);
 
@@ -136,8 +136,8 @@ test("managed Working Copy persists every authorized semantic identity transitio
   }));
   {
     const movedIndex = buildSourceIndex(source);
-    const moved = movedIndex.byPagerootId.get(ids.second);
-    assert.equal(movedIndex.byNodeId.get(moved.parentId).pagerootId, ids.right);
+    const moved = movedIndex.byStemmioId.get(ids.second);
+    assert.equal(movedIndex.byNodeId.get(moved.parentId).stemmioId, ids.right);
   }
 
   const sameParentMove = createMoveElementOperation(source, {
@@ -183,7 +183,7 @@ test("managed Working Copy persists every authorized semantic identity transitio
   ({ target, source } = await applySave(value.repository, target, source, deleting, {
     editRevision: ++revision,
   }));
-  assert.equal(buildSourceIndex(source).byPagerootId.has(ids.first), false);
+  assert.equal(buildSourceIndex(source).byStemmioId.has(ids.first), false);
 
   const reopened = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
     sourcePath: target.exactSourcePath,
@@ -249,7 +249,7 @@ test("session-local undo and redo carry system-derived identity evidence into Re
     editRevision: 2,
     sourceHistoryOperations: session.pendingOperations,
   });
-  assert.equal(buildSourceIndex(undone.html).byPagerootId.has(ids.first), true);
+  assert.equal(buildSourceIndex(undone.html).byStemmioId.has(ids.first), true);
   assert.equal(session.pendingOperations[0].semanticDirection, "undo");
   assert.deepEqual(
     session.acknowledge(context, session.pendingOperations, undone.sourceSha256),
@@ -264,7 +264,7 @@ test("session-local undo and redo carry system-derived identity evidence into Re
     editRevision: 3,
     sourceHistoryOperations: session.pendingOperations,
   });
-  assert.equal(buildSourceIndex(redone.html).byPagerootId.has(ids.first), false);
+  assert.equal(buildSourceIndex(redone.html).byStemmioId.has(ids.first), false);
   assert.equal(session.pendingOperations[0].semanticDirection, "redo");
 
   const restartedSession = new SourceHistorySession();
@@ -310,10 +310,10 @@ test("semantic saves retain CAS and crash recovery, and reject unproved or runti
   const value = await fixture(t);
   const imported = await importSource(value, "semantic-external-guard.html", SOURCE);
   const source = await readFile(imported.target.exactSourcePath, "utf8");
-  const runtimeId = "pr1_f0000000000040008000000000000001";
+  const runtimeId = "sm1_f0000000000040008000000000000001";
   const runtimeInjected = source.replace(
     "</body>",
-    `<canvas data-pageroot-id="${runtimeId}"></canvas></body>`,
+    `<canvas data-stemmio-id="${runtimeId}"></canvas></body>`,
   );
   await assert.rejects(
     value.repository.saveWorkingCopy({

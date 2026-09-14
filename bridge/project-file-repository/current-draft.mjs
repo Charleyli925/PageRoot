@@ -253,7 +253,7 @@ export async function migrateCurrentDraft(loaded, { resolveSource, clock, hit })
       for (const element of [...before.missing].sort((a, b) => b.closingDelimiterOffset - a.closingDelimiterOffset)) {
         const index = before.elements.indexOf(element);
         materialized = materialized.slice(0, element.closingDelimiterOffset)
-          + ` data-pageroot-id="${after.elements[index].pagerootId}"` + materialized.slice(element.closingDelimiterOffset);
+          + ` data-stemmio-id="${after.elements[index].stemmioId}"` + materialized.slice(element.closingDelimiterOffset);
       }
       if (materialized === activeEvidence.source.html) {
         activeEvidence.state.snapshotBaselineSha256 = activeEvidence.source.sha256;

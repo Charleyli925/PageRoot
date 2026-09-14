@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 
 const productRoot = fileURLToPath(new URL("../../", import.meta.url));
 const bridgeScript = join(productRoot, "bridge", "workspace-bridge.mjs");
-const authHeader = "x-html-ai-bridge-token";
+const authHeader = "x-stemmio-bridge-token";
 
 async function reservePort() {
   const server = createServer();
@@ -196,7 +196,7 @@ export async function createBridgeTestEnvironment(t, options = {}) {
   }
 
   const root = await realpath(
-    await mkdtemp(join(tmpdir(), options.prefix || "pageroot-bridge-test-")),
+    await mkdtemp(join(tmpdir(), options.prefix || "stemmio-bridge-test-")),
   );
   const workspace = join(root, options.workspaceRelativePath || "workspace");
   const sources = join(root, options.sourcesRelativePath || "sources");
@@ -257,7 +257,7 @@ export async function createBridgeTestEnvironment(t, options = {}) {
       const authToken =
         startAuthToken
         ?? options.authToken
-        ?? environmentOverrides.HTML_AI_BRIDGE_AUTH_TOKEN
+        ?? environmentOverrides.STEMMIO_BRIDGE_AUTH_TOKEN
         ?? "";
       const command = startCommand || options.command || process.execPath;
       const args =
@@ -268,9 +268,9 @@ export async function createBridgeTestEnvironment(t, options = {}) {
         cwd: startCwd || options.cwd || productRoot,
         env: {
           ...process.env,
-          HTML_AI_WORKSPACE: workspace,
-          HTML_AI_PROJECT_FILES_ROOT: join(root, "project-files"),
-          HTML_AI_BRIDGE_PORT: String(port),
+          STEMMIO_WORKSPACE: workspace,
+          STEMMIO_PROJECT_FILES_ROOT: join(root, "project-files"),
+          STEMMIO_BRIDGE_PORT: String(port),
           ...environmentOverrides,
         },
         stdio: ["ignore", "pipe", "pipe"],

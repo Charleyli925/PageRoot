@@ -183,7 +183,7 @@ test("only a Registry pending-import intent can recover a published import", asy
     assert.equal(await readFile(sourcePath, "utf8"), source, failpoint);
     assert.deepEqual(
       (await readdir(value.projects)).filter(
-        (entry) => entry !== ".pageroot-registry.json",
+        (entry) => entry !== ".stemmio-registry.json",
       ),
       [],
       failpoint,
@@ -208,7 +208,7 @@ test("only a Registry pending-import intent can recover a published import", asy
   );
   const pendingRegistry = await json(path.join(
     published.projects,
-    ".pageroot-registry.json",
+    ".stemmio-registry.json",
   ));
   assert.equal(Object.keys(pendingRegistry.projects).length, 0);
   assert.equal(Object.keys(pendingRegistry.pendingImports).length, 1);
@@ -223,7 +223,7 @@ test("only a Registry pending-import intent can recover a published import", asy
   assert.equal(reopenedPublished.targetKind, "working-copy");
   const recoveredRegistry = await json(path.join(
     published.projects,
-    ".pageroot-registry.json",
+    ".stemmio-registry.json",
   ));
   assert.equal(Object.keys(recoveredRegistry.pendingImports).length, 0);
   assert.equal(Object.keys(recoveredRegistry.projects).length, 1);
@@ -265,7 +265,7 @@ test("only a Registry pending-import intent can recover a published import", asy
   assert.equal(retriedImport.target.workingCopyId, "work_ver_0001");
   const committedRegistry = await json(path.join(
     committed.projects,
-    ".pageroot-registry.json",
+    ".stemmio-registry.json",
   ));
   assert.equal(Object.keys(committedRegistry.projects).length, 1);
 
@@ -273,7 +273,7 @@ test("only a Registry pending-import intent can recover a published import", asy
   const imported = await importSource(recovered, "recovery.html");
   const copiedRoot = path.join(recovered.projects, "unregistered-copy");
   await cp(imported.target.projectRootPath, copiedRoot, { recursive: true });
-  const registryPath = path.join(recovered.projects, ".pageroot-registry.json");
+  const registryPath = path.join(recovered.projects, ".stemmio-registry.json");
   const registry = await json(registryPath);
   delete registry.projects[imported.target.projectId];
   await writeFile(registryPath, JSON.stringify(registry), "utf8");

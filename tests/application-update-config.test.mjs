@@ -14,7 +14,7 @@ import {
 
 function packageJson(overrides = {}) {
   return {
-    name: "pageroot",
+    name: "stemmio",
     build: {
       publish: [
         {
@@ -36,7 +36,7 @@ test("formal packaging generates one deterministic stable update config", async 
     repo: "PageRoot",
     provider: "github",
     releaseType: "release",
-    updaterCacheDirName: "pageroot-updater",
+    updaterCacheDirName: "stemmio-updater",
   };
   assert.deepEqual(expectedApplicationUpdateConfig(manifest), expected);
   assert.equal(
@@ -46,12 +46,12 @@ test("formal packaging generates one deterministic stable update config", async 
       "repo: PageRoot",
       "provider: github",
       "releaseType: release",
-      "updaterCacheDirName: pageroot-updater",
+      "updaterCacheDirName: stemmio-updater",
       "",
     ].join("\n"),
   );
 
-  const productRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-update-config-"));
+  const productRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-update-config-"));
   t.after(() => rm(productRoot, { recursive: true, force: true }));
   const result = await writeApplicationUpdateConfig({ productRoot, packageJson: manifest });
   assert.equal(
@@ -92,7 +92,7 @@ test("update config fails closed when provider or embedded channel drifts", () =
         "repo: OtherRepo",
         "provider: github",
         "releaseType: release",
-        "updaterCacheDirName: pageroot-updater",
+        "updaterCacheDirName: stemmio-updater",
         "",
       ].join("\n"),
       packageJson(),

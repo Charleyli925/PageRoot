@@ -24,10 +24,10 @@ function page(title) {
 }
 
 test("managed welcome HTML is a normal source file and is never reset after editing", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "pageroot-welcome-"));
-  const workspaceRoot = join(directory, "PageRoot", "项目记录");
-  const sourcePath = join(directory, "PageRoot", WELCOME_PROJECT_NAME);
-  const logoPath = join(directory, "PageRoot", WELCOME_LOGO_RELATIVE_PATH);
+  const directory = await mkdtemp(join(tmpdir(), "stemmio-welcome-"));
+  const workspaceRoot = join(directory, "Stemmio", "项目记录");
+  const sourcePath = join(directory, "Stemmio", WELCOME_PROJECT_NAME);
+  const logoPath = join(directory, "Stemmio", WELCOME_LOGO_RELATIVE_PATH);
   t.after(() => rm(directory, { recursive: true, force: true }));
 
   assert.equal(managedWelcomeSourcePath(workspaceRoot), sourcePath);
@@ -52,7 +52,7 @@ test("managed welcome HTML is a normal source file and is never reset after edit
 
 test("desktop writer serializes revisions and never lets an older write win", async (t) => {
   resetProjectFileQueuesForTests();
-  const directory = await mkdtemp(join(tmpdir(), "html-ai-writer-"));
+  const directory = await mkdtemp(join(tmpdir(), "stemmio-writer-"));
   const sourcePath = join(directory, "source.html");
   const initial = page("initial");
   await writeFile(sourcePath, initial, "utf8");
@@ -93,7 +93,7 @@ test("desktop writer serializes revisions and never lets an older write win", as
 
 test("desktop writer reports structured external conflicts without overwriting", async (t) => {
   resetProjectFileQueuesForTests();
-  const directory = await mkdtemp(join(tmpdir(), "html-ai-writer-conflict-"));
+  const directory = await mkdtemp(join(tmpdir(), "stemmio-writer-conflict-"));
   const sourcePath = join(directory, "source.html");
   const initial = page("initial");
   const external = page("external");
@@ -122,7 +122,7 @@ test("desktop writer reports structured external conflicts without overwriting",
 
 test("export creates an independent copy and readback reports exact hash", async (t) => {
   resetProjectFileQueuesForTests();
-  const directory = await mkdtemp(join(tmpdir(), "html-ai-export-"));
+  const directory = await mkdtemp(join(tmpdir(), "stemmio-export-"));
   const destinationPath = join(directory, "copy.html");
   const html = page("export");
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -136,16 +136,16 @@ test("export creates an independent copy and readback reports exact hash", async
 
 test("export preserves the complete Working Copy bytes with embedded HTML payloads", async (t) => {
   resetProjectFileQueuesForTests();
-  const directory = await mkdtemp(join(tmpdir(), "html-ai-export-rich-"));
+  const directory = await mkdtemp(join(tmpdir(), "stemmio-export-rich-"));
   const destinationPath = join(directory, "rich-copy.html");
   const html = [
-    '<!doctype html><html data-pageroot-id="pr1_root"><head>',
-    '<style>.marker::before{content:"data-pageroot-id"}</style>',
-    '</head><body data-pageroot-id="pr1_body">',
-    '<script>window.echarts = { init() { return "data-pageroot-id"; } };</script>',
-    '<svg viewBox="0 0 10 10"><text>data-pageroot-id</text></svg>',
+    '<!doctype html><html data-stemmio-id="sm1_root"><head>',
+    '<style>.marker::before{content:"data-stemmio-id"}</style>',
+    '</head><body data-stemmio-id="sm1_body">',
+    '<script>window.echarts = { init() { return "data-stemmio-id"; } };</script>',
+    '<svg viewBox="0 0 10 10"><text>data-stemmio-id</text></svg>',
     '<canvas width="10" height="10"></canvas>',
-    '<p>data-pageroot-id</p></body></html>',
+    '<p>data-stemmio-id</p></body></html>',
   ].join("");
   t.after(() => rm(directory, { recursive: true, force: true }));
 
@@ -155,12 +155,12 @@ test("export preserves the complete Working Copy bytes with embedded HTML payloa
   assert.equal(exported.sha256, htmlSha256(html));
   assert.equal(inspected.sha256, exported.sha256);
   assert.equal(inspected.html, html);
-  assert.equal((inspected.html.match(/data-pageroot-id/gu) ?? []).length, 6);
+  assert.equal((inspected.html.match(/data-stemmio-id/gu) ?? []).length, 6);
 });
 
 test("desktop reader fails closed on non-UTF-8 HTML without rewriting bytes", async (t) => {
   resetProjectFileQueuesForTests();
-  const directory = await mkdtemp(join(tmpdir(), "pageroot-encoding-"));
+  const directory = await mkdtemp(join(tmpdir(), "stemmio-encoding-"));
   const sourcePath = join(directory, "legacy-encoding.html");
   const original = Buffer.concat([
     Buffer.from("<!doctype html><html><body>", "utf8"),

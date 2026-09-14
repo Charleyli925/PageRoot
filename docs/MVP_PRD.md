@@ -16,7 +16,7 @@
 
 ## 1. 产品结论
 
-PageRoot 让用户在真实本地 HTML 上完成两类工作：
+Stemmio 让用户在真实本地 HTML 上完成两类工作：
 
 1. 文字、inline 样式和同级模块顺序等直接编辑，由单一 SourcePatchEngine 对真实源码做局部 Patch 后自动写回源文件。
 2. 生成内容、跨区域修改和整体调整，通过页面评论冻结为 Request，交给内部 AI 返回完整 HTML。
@@ -42,7 +42,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 新 Version 打开时，版本身份、源 HTML、历史快照和画布内容严格一致。
 - 连续 AI 修改保持同一当前稿身份与路径；外部原稿、每轮冻结输入及所有历史快照不变，被替换前稿件通过恢复入口保留。
 - 历史查看与创建新 Version 是两个不同动作；历史页只读，不提供覆盖当前 HTML 的恢复旁路。
-- 纯浏览器预览是正式只读能力：可运行页面自身交互，但不能编辑 PageRoot HTML、添加评论、附件或发送 AI，且所有页面操作都不会保存。
+- 纯浏览器预览是正式只读能力：可运行页面自身交互，但不能编辑 Stemmio HTML、添加评论、附件或发送 AI，且所有页面操作都不会保存。
 - 桌面交互预览真实运行当前 HTML；从预览点击“编辑”时直接打开刚才
   选择的 source-backed Tab/显示状态，不增加第三种模式、额外确认或
   滚动定位。
@@ -173,7 +173,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 用户合同不是固定 700 毫秒，而是“无需手动保存，状态真实可见”。实现应以约 700 毫秒为初值并通过性能测试调整。
 
-PageRoot 0.9.0 只有一个受控 `contenteditable="true"` 路线，不再在
+Stemmio 0.9.0 只有一个受控 `contenteditable="true"` 路线，不再在
 `plaintext-only`、浏览器富文本和自定义补丁间切换。粘贴只读取纯文本；
 换行固定生成 `<br>`；折叠光标在可视段首向右继承，其余文字、样式和
 链接边界向左继承。Controller 以 grapheme 为单位处理删除，并以冻结
@@ -301,7 +301,7 @@ Request 已持久化后，才从冻结 Prompt 建立 `AI任务/<日期>-候选�
 才可重试同一 Request 或回退复制。Bridge 崩溃、进程清理无法确认或存在残留时，本轮变为
 不可重试：用户先结束旧 Request 形成持久 fence，再重新发送为新 Request。取消受管会话时，
 必须先关闭 ACP mutation surface 并有界停止 Qoder 进程组，再持久取消 Request；重启后的
-未知旧进程无法由 PageRoot 停止时，durable cancel 本身是 authority fence，界面必须保守
+未知旧进程无法由 Stemmio 停止时，durable cancel 本身是 authority fence，界面必须保守
 提示它仍可能运行。无论采用哪种交付方式，结果都只能成为待审阅 Candidate，不得自动替换
 当前 HTML。
 
@@ -346,7 +346,7 @@ editing
 
 ### 5.8 内部 AI 输出与 finalizer
 
-每个新 Attempt 的唯一 HTML 输出是 PageRoot 冻结的 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Prompt 给出固定绝对输出路径，AI 不得自行命名。通过 finalizer 后，Repository 才能按已验证 Candidate 字节生成可见 `AI任务/` 派生 HTML；该名称不反向决定 Version 身份或正式工作文件命名。
+每个新 Attempt 的唯一 HTML 输出是 Stemmio 冻结的 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Prompt 给出固定绝对输出路径，AI 不得自行命名。通过 finalizer 后，Repository 才能按已验证 Candidate 字节生成可见 `AI任务/` 派生 HTML；该名称不反向决定 Version 身份或正式工作文件命名。
 
 内部 AI 完成全部修改后必须执行 Prompt 中的完整 finalizer 命令。finalizer：
 
@@ -471,14 +471,14 @@ editing
 ## 6. 数据与目录
 
 ```text
-~/Documents/PageRoot/项目/<project-name>/
+~/Documents/Stemmio/项目/<project-name>/
 ├── <stem>.html                    # 唯一当前稿；存量迁移保留活动文件原名称
 ├── PROJECT.md
 ├── AI任务/                         # 既有可删除、可重建派生展示
 │   └── <YYYY-MM-DD>-候选版本N/
 │       ├── PROMPT.md
 │       └── <stem>-Vn-待审阅.html  # Candidate ready 后才存在
-└── .pageroot/                      # 唯一权威与技术记录
+└── .stemmio/                      # 唯一权威与技术记录
     ├── project.json
     ├── manifest.json
     ├── working-copies/
@@ -492,7 +492,7 @@ editing
 | 事实 | 权威位置 |
 |---|---|
 | 当前可编辑 HTML | 项目唯一当前稿；完整 source/OpenTarget/Hash 在项目运行态与 manifest 映射中验证 |
-| 项目/文档身份、显示名、登记根 | `.pageroot/project.json` 与 Registry；Registry 同时决定项目目录成员与写入授权 |
+| 项目/文档身份、显示名、登记根 | `.stemmio/project.json` 与 Registry；Registry 同时决定项目目录成员与写入授权 |
 | 整个项目长期使用的 AI 规则 | `PROJECT.md` |
 | active run、项目锁、冲突与恢复事务 | `runtime-state.json` |
 | 当前评论、edit event、删除 tombstone、草稿 revision 与已处理 operation ID | `draft/annotations.json`；`runtime-state.json` 只保存其指针与 revision |
@@ -501,7 +501,7 @@ editing
 | 冻结输入 | Request 的 `input/` |
 | AI 完成 | Attempt 的 `completion.json` |
 | 正式 Version | 带有效 `committed.json` 的 Version 目录 |
-| `AI任务/` 展示路径与进度 | 仅 `.pageroot/recovery/ai-task-projections/` 收据；不可作为 Request/Candidate/Promotion 权威 |
+| `AI任务/` 展示路径与进度 | 仅 `.stemmio/recovery/ai-task-projections/` 收据；不可作为 Request/Candidate/Promotion 权威 |
 
 任何渲染缓存都可丢弃，不能参与判断当前事实或最新 Version。
 

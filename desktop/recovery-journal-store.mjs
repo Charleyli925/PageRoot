@@ -9,6 +9,10 @@ import {
   rm,
 } from "node:fs/promises";
 import path from "node:path";
+// This desktop module is loaded from app.asar; the Bridge gets the shared
+// contract as an extra resource. Keep the local temp prefix in lockstep with
+// shared/product-identity.mjs (the runtime contract test pins both).
+const PRODUCT_NON_REPLACE_TEMP_PREFIX = ".stemmio-new-";
 
 import { PRODUCT_MAX_HTML_BYTES } from "./product-contract.mjs";
 
@@ -137,7 +141,7 @@ export async function atomicWriteRecoveryJournalFile(filePath, content, {
   await ensureOwnedDirectory(parent);
   const temporary = path.join(
     parent,
-    `.pageroot-recovery-${process.pid}-${randomUUID()}.tmp`,
+    `${PRODUCT_NON_REPLACE_TEMP_PREFIX.replace(/-$/u, "-recovery-")}${process.pid}-${randomUUID()}.tmp`,
   );
   let published = false;
   try {

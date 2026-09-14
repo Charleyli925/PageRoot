@@ -319,7 +319,7 @@ test("a newer OS request waits behind an unanswered confirmation", async () => {
     classification: "new-external",
     sourceFileName: "first.html",
     visibleV1FileName: "first-V1.html",
-    projectsRootLabel: "文稿 › PageRoot › 项目",
+    projectsRootLabel: "文稿 › Stemmio › 项目",
   };
   const second = {
     requestId: "external_second",

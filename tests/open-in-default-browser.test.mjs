@@ -30,7 +30,7 @@ function createHarness({
 test("the default-browser operation launches one validated known HTML file URL", async () => {
   const sourcePath = path.join(
     os.tmpdir(),
-    "pageroot-default-browser-test",
+    "stemmio-default-browser-test",
     "页面 A.html",
   );
   const checks = [];
@@ -118,7 +118,7 @@ test("unknown projects and unsafe HTML filesystem entries never launch the shell
 
 test("untrusted renderer senders and frames are rejected before shell launch", async () => {
   const trustedUrl =
-    "file:///Applications/PageRoot.app/Contents/Resources/app.asar/desktop/renderer/index.html";
+    "file:///Applications/Stemmio.app/Contents/Resources/app.asar/desktop/renderer/index.html";
   const trustedFrame = {
     url: trustedUrl,
   };

@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("setup-pageroot-npm composite action can load without unsupported step timeouts", async () => {
+test("setup-stemmio-npm composite action can load without unsupported step timeouts", async () => {
   const source = await readFile(
-    path.join(productRoot, ".github/actions/setup-pageroot-npm/action.yml"),
+    path.join(productRoot, ".github/actions/setup-stemmio-npm/action.yml"),
     "utf8",
   );
   assert.match(source, /^runs:\n  using: composite\n/mu);

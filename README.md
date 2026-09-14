@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/brand-logo.png" width="96" alt="PageRoot logo / 源页 Logo" />
+  <img src="public/brand-logo.png" width="96" alt="Stemmio logo / 源页 Logo" />
 </p>
 
-<h1 align="center">PageRoot</h1>
+<h1 align="center">Stemmio</h1>
 
 <p align="center">
   <strong>Edit visually. Hand off to any AI agent. Review before you adopt.</strong><br />
@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Charleyli925/PageRoot/releases/latest"><img src="https://img.shields.io/github/v/release/Charleyli925/PageRoot?style=flat-square&label=latest" alt="Latest PageRoot release" /></a>
-  <a href="https://github.com/Charleyli925/PageRoot/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Charleyli925/PageRoot/ci.yml?branch=main&style=flat-square&label=build" alt="PageRoot build status" /></a>
+  <a href="https://github.com/Charleyli925/PageRoot/releases/latest"><img src="https://img.shields.io/github/v/release/Charleyli925/PageRoot?style=flat-square&label=latest" alt="Latest Stemmio release" /></a>
+  <a href="https://github.com/Charleyli925/PageRoot/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Charleyli925/PageRoot/ci.yml?branch=main&style=flat-square&label=build" alt="Stemmio build status" /></a>
   <img src="https://img.shields.io/badge/macOS-12%2B-111111?style=flat-square&logo=apple" alt="macOS 12 or later" />
   <img src="https://img.shields.io/badge/Apple%20silicon-arm64-6e5de7?style=flat-square" alt="Apple silicon arm64" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-4d66cc?style=flat-square" alt="Apache 2.0 license" /></a>
@@ -29,23 +29,23 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/pageroot-welcome-hero.png" width="1040" alt="PageRoot visual HTML workspace with review-before-adopt AI collaboration / 源页支持修改前后审阅的 AI Agent 可视化 HTML 工作台" />
+  <img src="docs/assets/stemmio-welcome-hero.png" width="1040" alt="Stemmio visual HTML workspace with review-before-adopt AI collaboration / 源页支持修改前后审阅的 AI Agent 可视化 HTML 工作台" />
 </p>
 
 <p align="center">
-  <sub>Rendered from the welcome project included with PageRoot · 截取自源页内置欢迎项目</sub>
+  <sub>Rendered from the welcome project included with Stemmio · 截取自源页内置欢迎项目</sub>
 </p>
 
 <a id="english"></a>
 
 ## The visual workspace between your page and your AI agent
 
-PageRoot turns what you point at on a page into an agent-ready local task. Anchor a request to the whole page, a section, specific text, or an insertion point; add comments, images, files, and long-lived project rules; then let PageRoot freeze the exact HTML and every piece of context your AI agent needs.
+Stemmio turns what you point at on a page into an agent-ready local task. Anchor a request to the whole page, a section, specific text, or an insertion point; add comments, images, files, and long-lived project rules; then let Stemmio freeze the exact HTML and every piece of context your AI agent needs.
 
-**Qoder CLI can run the task automatically through PageRoot's managed ACP session; Claude Code, Codex, WorkBuddy, Qoder, and other local-file-capable agents remain available through the clipboard fallback.** Both modes use the same managed local task, and the automatic Qoder path does not read or write the clipboard.
+**Qoder CLI can run the task automatically through Stemmio's managed ACP session; Claude Code, Codex, WorkBuddy, Qoder, and other local-file-capable agents remain available through the clipboard fallback.** Both modes use the same managed local task, and the automatic Qoder path does not read or write the clipboard.
 
 ```text
-Point and comment in PageRoot
+Point and comment in Stemmio
   → freeze exact HTML + targets + attachments + project rules
   → hand off one local task to your AI agent
   → validate and hold the result as a separate candidate
@@ -55,32 +55,32 @@ Point and comment in PageRoot
 
 ## Visual HTML editing without surrendering your source
 
-PageRoot is a local-first visual HTML editor for macOS—a source-preserving alternative to conventional WYSIWYG website editors for real `.html` files. Open a local page, double-click supported text, and edit with the browser’s native caret, selection, paste, and input-method behavior. PageRoot maps that intent back to the exact source range and writes a minimal patch instead of serializing the preview DOM.
+Stemmio is a local-first visual HTML editor for macOS—a source-preserving alternative to conventional WYSIWYG website editors for real `.html` files. Open a local page, double-click supported text, and edit with the browser’s native caret, selection, paste, and input-method behavior. Stemmio maps that intent back to the exact source range and writes a minimal patch instead of serializing the preview DOM.
 
-For larger or generative changes, PageRoot prepares a complete local task package. You can let a verified standalone Qoder CLI execute it through a PageRoot-managed ACP session, or copy one concise instruction to another local AI agent. In either mode the agent reads the frozen HTML and declared context, writes one complete HTML result to the designated output path, and runs the included finalizer. PageRoot validates the result and keeps it separate, then makes a read-only side-by-side review the primary next step before you choose which version to use.
+For larger or generative changes, Stemmio prepares a complete local task package. You can let a verified standalone Qoder CLI execute it through a Stemmio-managed ACP session, or copy one concise instruction to another local AI agent. In either mode the agent reads the frozen HTML and declared context, writes one complete HTML result to the designated output path, and runs the included finalizer. Stemmio validates the result and keeps it separate, then makes a read-only side-by-side review the primary next step before you choose which version to use.
 
 It is built for people editing landing pages, prototypes, documentation pages, and static pages generated by AI agents or authored by hand—without giving up visual speed or source fidelity.
 
-### Why PageRoot
+### Why Stemmio
 
 - **Edit directly on the page.** Double-click safe text, place the caret where you clicked, type with a native-feeling workflow, format supported text, and reorder supported sibling sections.
 - **Preserve the HTML you actually own.** Every persistent visual edit becomes a source-level patch limited to the resolved target. Unrelated markup, formatting, and authored structure are not rebuilt from the DOM.
 - **Review AI changes on the page, not in a raw diff.** Before and after open side by side; copy, structure, and visual changes are labeled separately, while your original comments remain pinned to their targets.
-- **Choose a managed or portable handoff.** PageRoot can start and stop a verified standalone Qoder CLI over ACP, while the clipboard fallback continues to work with Claude Code, Codex, WorkBuddy, Qoder, and other filesystem-capable agents.
+- **Choose a managed or portable handoff.** Stemmio can start and stop a verified standalone Qoder CLI over ACP, while the clipboard fallback continues to work with Claude Code, Codex, WorkBuddy, Qoder, and other filesystem-capable agents.
 - **Bring AI agent changes back as verified versions.** The submitted source is frozen, returned HTML must pass fail-closed checks, and pre-submit files remain available.
 - **Detect conflicts instead of overwriting them.** Local writes are serialized and atomic; an unexpected external file change pauses writeback and asks you to resolve it.
 
 <p align="center">
-  <img src="docs/assets/pageroot-welcome-features.png" width="1040" alt="PageRoot visual editing, AI agent handoff, and review-before-adopt workflow / 源页可视化编辑、AI Agent 交接与修改前后审阅流程" />
+  <img src="docs/assets/stemmio-welcome-features.png" width="1040" alt="Stemmio visual editing, AI agent handoff, and review-before-adopt workflow / 源页可视化编辑、AI Agent 交接与修改前后审阅流程" />
 </p>
 
 ### Review what changed before it becomes current
 
-An AI result can look plausible while still hiding a missed detail. PageRoot makes review the primary next step: both versions open at the first change, scroll together by default, and keep unchanged context quiet so the differences are easy to scan. You can filter copy, structure, or visual changes; inspect the content map; switch to either page; and reveal the comments that originally asked for the work.
+An AI result can look plausible while still hiding a missed detail. Stemmio makes review the primary next step: both versions open at the first change, scroll together by default, and keep unchanged context quiet so the differences are easy to scan. You can filter copy, structure, or visual changes; inspect the content map; switch to either page; and reveal the comments that originally asked for the work.
 
 <p align="center">
-  <img src="docs/assets/pageroot-ai-review.png" width="1200" alt="PageRoot side-by-side AI result review with review controls and an anchored user comment / 源页并排审阅 AI 修改结果，并在原位置显示用户评论" />
-  <br /><sub>Actual PageRoot review workspace with synthetic demo content · 源页真实审阅界面，页面内容为合成演示数据</sub>
+  <img src="docs/assets/stemmio-ai-review.png" width="1200" alt="Stemmio side-by-side AI result review with review controls and an anchored user comment / 源页并排审阅 AI 修改结果，并在原位置显示用户评论" />
+  <br /><sub>Actual Stemmio review workspace with synthetic demo content · 源页真实审阅界面，页面内容为合成演示数据</sub>
 </p>
 
 When the result is right, choose **Open AI changes**. When it is not, return to the pre-AI page and continue editing. The candidate remains safely preserved either way; review never silently replaces your current HTML.
@@ -88,8 +88,8 @@ When the result is right, choose **Open AI changes**. When it is not, return to 
 ### From a local HTML file to a reviewed version
 
 1. **Open and edit.** Open a real local HTML file. Safe text edits and supported visual adjustments write back automatically through precise source patches.
-2. **Comment and hand off.** Mark the exact place that needs a larger change, add context or attachments, then let PageRoot freeze the task and either start Qoder CLI or copy the agent-ready handoff.
-3. **Review the AI result.** PageRoot checks and preserves the returned HTML, then shows before and after side by side with each kind of change labeled on the page.
+2. **Comment and hand off.** Mark the exact place that needs a larger change, add context or attachments, then let Stemmio freeze the task and either start Qoder CLI or copy the agent-ready handoff.
+3. **Review the AI result.** Stemmio checks and preserves the returned HTML, then shows before and after side by side with each kind of change labeled on the page.
 4. **Choose what becomes current.** Open the AI version when it is right, or return to the pre-AI page and keep working. Neither side is silently overwritten.
 
 ### Source-first by design
@@ -102,19 +102,19 @@ Authored HTML
   → hash-checked atomic file write
 ```
 
-The current HTML bytes are authoritative. Preview DOM is disposable and is never serialized back as the persistence source. PageRoot is not a low-code page builder, and unsafe or ambiguous edits stop instead of guessing.
+The current HTML bytes are authoritative. Preview DOM is disposable and is never serialized back as the persistence source. Stemmio is not a low-code page builder, and unsafe or ambiguous edits stop instead of guessing.
 
 ### Download and requirements
 
-[Download the latest PageRoot DMG](https://github.com/Charleyli925/PageRoot/releases/latest) from GitHub Releases.
+[Download the latest Stemmio DMG](https://github.com/Charleyli925/PageRoot/releases/latest) from GitHub Releases.
 
 - macOS 12 or later
 - Apple silicon (`arm64`)
 - Current desktop interface: Simplified Chinese
 - Optional managed Qoder execution requires a separately installed and signed-in `@qoder-ai/qodercli` 1.1.27 or newer; clipboard handoff does not.
-- Current builds use ad-hoc signing and are not Apple-notarized. On first launch, Control-click PageRoot and choose **Open** if macOS blocks it.
+- Current builds use ad-hoc signing and are not Apple-notarized. On first launch, Control-click Stemmio and choose **Open** if macOS blocks it.
 - Verify the DMG with the release’s `SHA256SUMS.txt`. Every official release also includes `update-manifest.json` and `build-info.json` for version and source provenance.
-- Packaged desktop builds send limited allowlisted PageRoot usage and fault statistics by default. That telemetry does not send HTML, comments, attachments, filenames, paths, clipboard contents, Mac serial numbers, or raw errors; user-authorized Qoder/Agent processing is a separate third-party data path. See the [usage data notice](PRIVACY.md).
+- Packaged desktop builds send limited allowlisted Stemmio usage and fault statistics by default. That telemetry does not send HTML, comments, attachments, filenames, paths, clipboard contents, Mac serial numbers, or raw errors; user-authorized Qoder/Agent processing is a separate third-party data path. See the [usage data notice](PRIVACY.md).
 
 <a id="chinese"></a>
 
@@ -155,7 +155,7 @@ The current HTML bytes are authoritative. Preview DOM is disposable and is never
 AI 结果看起来合理，也可能藏着遗漏。源页把“审阅对比”放在结果返回后的首要位置：默认从第一处变化开始，修改前后同步滚动，未改区域降低存在感，让真正需要判断的内容更醒目。你可以在“全部 / 文字 / 元素”之间筛选，切换单页，也可以回看当初提出要求的评论。位置、样式、排版和运行态视觉差异不进入本版审阅。
 
 <p align="center">
-  <img src="docs/assets/pageroot-ai-review.png" width="1200" alt="源页并排审阅 AI 修改结果，并在原位置显示用户评论" />
+  <img src="docs/assets/stemmio-ai-review.png" width="1200" alt="源页并排审阅 AI 修改结果，并在原位置显示用户评论" />
   <br /><sub>源页真实审阅界面，页面内容为合成演示数据</sub>
 </p>
 
@@ -182,19 +182,19 @@ AI 结果看起来合理，也可能藏着遗漏。源页把“审阅对比”�
 
 ### 下载与运行要求
 
-从 [GitHub Releases](https://github.com/Charleyli925/PageRoot/releases/latest) 下载最新版 PageRoot DMG。
+从 [GitHub Releases](https://github.com/Charleyli925/PageRoot/releases/latest) 下载最新版 Stemmio DMG。
 
 - macOS 12 或更高版本
 - Apple 芯片 Mac（`arm64`）
 - 当前桌面界面语言：简体中文
 - 可选的“Qoder CLI”自动执行需要独立安装并登录 `@qoder-ai/qodercli` 1.1.27 或更高版本；“复制任务”不需要。
-- 当前构建使用 ad-hoc 签名，尚未完成 Apple 公证。首次启动如被 macOS 拦截，请按住 Control 点击 PageRoot，然后选择“打开”。
+- 当前构建使用 ad-hoc 签名，尚未完成 Apple 公证。首次启动如被 macOS 拦截，请按住 Control 点击 Stemmio，然后选择“打开”。
 - 可使用 Release 中的 `SHA256SUMS.txt` 校验 DMG；正式 Release 还包含 `update-manifest.json` 与 `build-info.json`，用于核对版本和源码来源。
-- 正式桌面版本默认回传有限、白名单化的 PageRoot 使用与故障统计；该遥测不回传 HTML、评论、附件、文件名/路径、剪贴板、电脑序列号或原始错误。用户明确选择的 Qoder/Agent 第三方处理是另一条数据路径，详见[使用数据说明](PRIVACY.md)。
+- 正式桌面版本默认回传有限、白名单化的 Stemmio 使用与故障统计；该遥测不回传 HTML、评论、附件、文件名/路径、剪贴板、电脑序列号或原始错误。用户明确选择的 Qoder/Agent 第三方处理是另一条数据路径，详见[使用数据说明](PRIVACY.md)。
 
 ## Build and contribute / 开发与贡献
 
-PageRoot is an Electron desktop application built with React and TypeScript. The repository includes the renderer, desktop boundary, source-patch engine, validation protocol, fixtures, automated gates, and release provenance tooling.
+Stemmio is an Electron desktop application built with React and TypeScript. The repository includes the renderer, desktop boundary, source-patch engine, validation protocol, fixtures, automated gates, and release provenance tooling.
 
 源页是使用 React、TypeScript 与 Electron 构建的桌面应用。仓库包含渲染界面、桌面权限边界、源码 Patch 引擎、校验协议、固定样本、自动化门禁和发布溯源工具。
 
@@ -251,6 +251,6 @@ Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Condu
 
 ## License / 许可证
 
-Code is licensed under the [Apache License 2.0](LICENSE). The PageRoot name and visual identity are not granted under the code license; see [TRADEMARKS.md](TRADEMARKS.md). Third-party notices are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Code is licensed under the [Apache License 2.0](LICENSE). The Stemmio name and visual identity are not granted under the code license; see [TRADEMARKS.md](TRADEMARKS.md). Third-party notices are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-代码以 [Apache License 2.0](LICENSE) 开源。PageRoot 名称和视觉标识不随代码许可证授权，详见 [TRADEMARKS.md](TRADEMARKS.md)。第三方依赖说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+代码以 [Apache License 2.0](LICENSE) 开源。Stemmio 名称和视觉标识不随代码许可证授权，详见 [TRADEMARKS.md](TRADEMARKS.md)。第三方依赖说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
