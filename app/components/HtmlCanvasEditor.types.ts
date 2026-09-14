@@ -274,6 +274,8 @@ export type HtmlCanvasEditorHandle = {
   checkpointNativeTextIntent: (options?: {
     trigger?: NativeEditCheckpointTrigger;
   }) => HtmlCanvasCommitResult;
+  /** Reclaims the current native edit target after a host-owned async command. */
+  restoreNativeEditFocus: () => boolean;
   /**
    * Freezes Working Copy source for a leave/submit/history boundary.
    * May rebuild Runtime after the caller decides whether source changed.

@@ -118,6 +118,7 @@ import {
   applyStructuralProjectionObservation,
   decideStructuralProjection,
   executeVerifiedStructuralProjection,
+  resolveDeleteSelectionLanding,
 } from "./html-canvas-structural-projection.js";
 import {
   insertStructureCommand,
@@ -3999,6 +4000,33 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ]),
         ],
       };
+      const structuralOutputSelection = mutation.kind === "structure"
+        ? semanticResult.insertedRootElementId
+          ? sourceSelectionForElementId(
+            result.sourceIndex,
+            semanticResult.insertedRootElementId,
+            null,
+          )
+          : mutation.property === "delete"
+            ? (() => {
+                const landingElementId = resolveDeleteSelectionLanding(
+                  sourceIndex,
+                  mutation.target.elementId || "",
+                );
+                return landingElementId
+                  ? sourceSelectionForElementId(result.sourceIndex, landingElementId, null)
+                  : null;
+              })()
+            : mutation.property === "move" && mutation.target.elementId
+              ? sourceSelectionForElementId(
+                result.sourceIndex,
+                mutation.target.elementId,
+                appliedMutation.target,
+              )
+              : null
+        : null;
+      const operationOutputSelection = structuralOutputSelection
+        ?? (mutation.property === "delete" ? null : appliedMutation.target);
       const beforeHistorySelection = historySelectionFromMutationValue(
         mutation.before,
       );
@@ -4217,13 +4245,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           const nextSelection = sourceSelectionForElementId(
             result.sourceIndex,
             executed.selectedElementId,
-            mutation.property === "delete" ? null : appliedMutation.target,
+            mutation.property === "move" ? appliedMutation.target : null,
           );
           const liveSelected = uniqueSourceElement(
             documentNode,
             executed.selectedElementId,
           );
           selectedSourceSelectionRef.current = nextSelection;
+          // The structural projection may move selection to an operation
+          // output (for example a fresh duplicate) or to the delete landing.
+          // Keep the comment anchor in lockstep with that new logical target;
+          // the previous anchor is no longer authorized after a target handoff.
+          selectedCommentAnchorRef.current = (
+            nextSelection.resolution === "exact"
+            || nextSelection.resolution === "rebound"
+          ) ? nextSelection : null;
           pendingSelectionRef.current = nextSelection;
           pendingToolbarVisibleRef.current = true;
           setSelection(nextSelection);
@@ -4240,6 +4276,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           pendingSelectionRef.current = null;
           pendingToolbarVisibleRef.current = false;
           selectedSourceSelectionRef.current = null;
+          selectedCommentAnchorRef.current = null;
           selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
           selectedElementRef.current = null;
           setSelection(null);
@@ -4270,8 +4307,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && staleCandidate
         && staleCandidate.source !== result.html
       ) {
-        pendingSelectionRef.current = appliedMutation.target;
-        pendingToolbarVisibleRef.current = toolbarVisibleRef.current;
+        pendingSelectionRef.current = operationOutputSelection;
+        pendingToolbarVisibleRef.current = Boolean(operationOutputSelection)
+          && toolbarVisibleRef.current;
+        selectedSourceSelectionRef.current = operationOutputSelection;
+        selectedCommentAnchorRef.current = operationOutputSelection;
         recordRuntimeRefreshDecision({
           action: "candidate-now",
           reason: "supersede-stale-candidate",
@@ -4287,22 +4327,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ) {
           advanceLastKnownGoodRuntimeProjection(result.html, result.sourceIndex);
         }
-        const selectionDeleted = mutation.property === "delete";
-        pendingSelectionRef.current = selectionDeleted
-          ? null
-          : appliedMutation.target;
-        pendingToolbarVisibleRef.current = selectionDeleted
-          ? false
-          : toolbarVisibleRef.current;
-        selectedSourceSelectionRef.current = selectionDeleted
-          ? null
-          : appliedMutation.target;
+        const nextSelection = operationOutputSelection;
+        pendingSelectionRef.current = nextSelection;
+        pendingToolbarVisibleRef.current = Boolean(nextSelection)
+          && toolbarVisibleRef.current;
+        selectedSourceSelectionRef.current = nextSelection;
+        selectedCommentAnchorRef.current = nextSelection;
         const currentRuntime = runtimeFrameRef.current;
         const preserveRuntimeActiveFrame = Boolean(
           currentRuntime?.settled
           && currentRuntime.elementGeneration === frameLoadGenerationRef.current,
         );
-        if (selectionDeleted || !preserveRuntimeActiveFrame) {
+        if (!nextSelection || !preserveRuntimeActiveFrame) {
           renderedSourceHtmlRef.current = null;
           selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
           selectedElementRef.current = null;
@@ -4314,7 +4350,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         setMoveAvailability(
           mutation.kind === "reorder"
             ? sourceMoveAvailability(result.sourceIndex, appliedMutation.target)
-            : { up: false, down: false },
+            : nextSelection
+              ? sourceMoveAvailability(result.sourceIndex, nextSelection)
+              : { up: false, down: false },
         );
         if (preserveRuntimeActiveFrame) requestDynamicRuntimeRefresh(result.html);
         else loadFrameSource(result.html, { preserveViewport: true });
@@ -4501,6 +4539,44 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       && nativeEditLeasesMatch(currentNativeEditLeaseRef.current, active.lease)
     );
   }, []);
+
+  const nativeEditFocusIsCurrent = useCallback((active: ActiveNativeEdit) => {
+    if (!nativeEditAuthorityIsCurrent(active)) return false;
+    const documentNode = active.rootElement.ownerDocument;
+    const selection = documentNode.getSelection();
+    const selectionInside = Boolean(
+      selection?.anchorNode
+      && selection.focusNode
+      && (
+        selection.anchorNode === active.rootElement
+        || active.rootElement.contains(selection.anchorNode)
+      )
+      && (
+        selection.focusNode === active.rootElement
+        || active.rootElement.contains(selection.focusNode)
+      )
+    );
+    return documentNode.activeElement === active.rootElement
+      && active.rootElement.isContentEditable
+      && selectionInside;
+  }, [nativeEditAuthorityIsCurrent]);
+
+  const restoreNativeEditFocus = useCallback((): boolean => {
+    const active = activeNativeEditRef.current;
+    if (!active || !nativeEditAuthorityIsCurrent(active)) return false;
+    // Restore the last owned caret, not the session's initial baseline. This
+    // is used after host-owned async work such as Save.
+    active.rootElement.focus({ preventScroll: true });
+    active.session.restoreSelection(active.selection);
+    if (!nativeEditFocusIsCurrent(active)) {
+      // Chromium can deliver a late blur/focus transition in the same task as
+      // the host command. A second synchronous claim is bounded and remains
+      // tied to the same target, lease and document generation.
+      active.rootElement.focus({ preventScroll: true });
+      active.session.restoreSelection(active.selection);
+    }
+    return nativeEditFocusIsCurrent(active);
+  }, [nativeEditAuthorityIsCurrent, nativeEditFocusIsCurrent]);
 
   const restoreNativeEditSelectionForCommand = useCallback((
     active: ActiveNativeEdit,
@@ -5288,7 +5364,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     const existing = activeNativeEditRef.current;
     if (existing) {
-      existing.session.focusAtPoint(caretPoint);
+      if (!nativeEditAuthorityIsCurrent(existing)) {
+        const committed = finishNativeEditing(true, "manual");
+        if (!committed.ok || committed.frameReloading) {
+          containerRef.current?.setAttribute(
+            "data-native-start-status",
+            "stale-session",
+          );
+          return false;
+        }
+      } else if (caretPoint) {
+        existing.session.focusAtPoint(caretPoint);
+      } else {
+        restoreNativeEditFocus();
+      }
+      const current = activeNativeEditRef.current;
+      if (current && !nativeEditFocusIsCurrent(current)) {
+        restoreNativeEditFocus();
+      }
+      if (activeNativeEditRef.current && !nativeEditFocusIsCurrent(activeNativeEditRef.current)) {
+        containerRef.current?.setAttribute(
+          "data-native-start-status",
+          "focus-mismatch",
+        );
+        return false;
+      }
       containerRef.current?.setAttribute("data-native-start-status", "existing");
       return true;
     }
@@ -5540,9 +5640,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           drainPendingNativeCommandRef.current(session);
         },
         // V2 does not use blur as a commit boundary. Explicit target switches,
-        // Escape, save/export and mode changes own that lifecycle; transient
-        // iframe or toolbar focus movement must not retire the text island.
-        onBlur: () => undefined,
+        // Escape, save/export and mode changes own that lifecycle. If Chromium
+        // only moved focus to the iframe body, reclaim the same leased target
+        // in the next microtask; any explicit outer-document focus remains
+        // the user's deliberate destination.
+        onBlur: () => {
+          const ownerDocument = containerRef.current?.ownerDocument;
+          const outerActive = ownerDocument?.activeElement;
+          const deliberateExternalFocus = Boolean(
+            outerActive
+            && outerActive !== ownerDocument?.body
+            && outerActive !== iframeRef.current,
+          );
+          if (deliberateExternalFocus) return;
+          window.queueMicrotask(() => {
+            const current = activeNativeEditRef.current;
+            if (
+              current?.session === session
+              && nativeEditLeasesMatch(currentNativeEditLeaseRef.current, current.lease)
+              && !nativeEditFocusIsCurrent(current)
+            ) restoreNativeEditFocus();
+          });
+        },
         onEscape: () => finishNativeEditing(true, "manual"),
         onError: reportBlockedEdit,
       });
@@ -5607,6 +5726,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // the stale activation point. Only overlay measurement needs a frame.
       if (caretPoint && !restoredSelection) session.focusAtPoint(caretPoint);
       else session.focusSelection();
+      if (!nativeEditFocusIsCurrent(active)) {
+        // Do not report a started session while Chromium is actually focused
+        // on the iframe body or another element. Retry once against the same
+        // lease before failing closed at edit entry.
+        restoreNativeEditFocus();
+      }
+      if (!nativeEditFocusIsCurrent(active)) {
+        throw new Error("文字编辑目标没有取得当前浏览器焦点。");
+      }
       requestAnimationFrame(() => {
         if (
           activeNativeEditRef.current?.session !== session
@@ -5631,9 +5759,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     clearNativeEditCheckpointTimer,
     endRuntimeNativeEdit,
     finishNativeEditing,
+    nativeEditAuthorityIsCurrent,
+    nativeEditFocusIsCurrent,
     refreshNativeEditRangeState,
     reportBlockedEdit,
     registerRestoredRuntimeElements,
+    restoreNativeEditFocus,
     transferRuntimeSourceElement,
     selectElement,
     selectedElementHasSourceMutationAuthority,
@@ -5914,7 +6045,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         operation,
       }, mutation);
       if (!result) return false;
-      if (action === "delete" && result.projection !== "current") clearSelection();
+      if (
+        action === "delete"
+        && result.projection !== "current"
+        && !selectedSourceSelectionRef.current
+      ) clearSelection();
       return true;
     } catch (cause) {
       reportBlockedEdit(cause);
@@ -7178,6 +7313,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       getScrollTop,
       scrollToTop,
       checkpointNativeTextIntent,
+      restoreNativeEditFocus,
       freezeWorkingSource,
       endNativeTextIntent,
       freezeNow,
@@ -7207,6 +7343,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       checkpointNativeTextIntent,
       freezeWorkingSource,
       endNativeTextIntent,
+      restoreNativeEditFocus,
       deferNativeCommand,
       freezeNow,
       getScrollTop,

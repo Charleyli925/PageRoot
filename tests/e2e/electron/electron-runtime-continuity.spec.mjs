@@ -12,6 +12,7 @@ import { EDIT_AUTHOR_RUNTIME_BUDGET } from "../../../app/domain/edit-runtime-con
 
 import {
   activateNativeEdit,
+  bridgeJson,
   closeStemmioGracefully,
   currentEditorFrame,
   disableStructuralInPlace,
@@ -391,6 +392,90 @@ test("successful Candidate retirement does not retain a growing Document chain",
       await testInfo.attach("retirement-dom-counts", { body: JSON.stringify(samples), contentType: "application/json" });
       await cdp.detach();
     }
+  });
+});
+
+test("structural output owns direct comment, format, and delete-landing actions", {
+  tag: ["@cap-canvas-editing"],
+}, async () => {
+  const source = `<!doctype html><html><head><title>Target handoff</title></head><body>
+    <section data-native-case="handoff-parent">
+      <p data-native-case="handoff-copy">副本前的原始文字</p>
+      <p data-native-case="handoff-landing">删除后的落点</p>
+    </section>
+  </body></html>`;
+  await withRuntimeProject("stemmio-structural-target-handoff-", {
+    "runtime-report.html": source,
+  }, async ({ page, sourcePath }) => {
+    const { editor, frame } = await loadedDiskFrame(page, sourcePath, "handoff-copy");
+    const working = await managedWorkingCopyPath(page, sourcePath);
+    const readDraftComments = async () => {
+      const response = await bridgeJson(page, `/workspace?sourcePath=${encodeURIComponent(working)}`);
+      return response.body?.runtimeState?.draft?.comments
+        || response.body?.activeDraft?.comments
+        || [];
+    };
+    const original = frame.locator('[data-native-case="handoff-copy"]').first();
+    const landing = frame.locator('[data-native-case="handoff-landing"]');
+    const originalId = await original.getAttribute("data-stemmio-id");
+    const landingId = await landing.getAttribute("data-stemmio-id");
+    const originalText = await original.textContent();
+    expect(originalId).toMatch(/^sm1_[a-f0-9]{32}$/u);
+    expect(landingId).toMatch(/^sm1_[a-f0-9]{32}$/u);
+    await original.click();
+
+    await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+    await expect.poll(() => frame.locator('[data-native-case="handoff-copy"]').count()).toBe(2);
+    const copyIds = await frame.locator('[data-native-case="handoff-copy"]')
+      .evaluateAll(elements => elements.map(element => element.getAttribute("data-stemmio-id")));
+    const copyId = copyIds.find(id => id && id !== originalId);
+    expect(copyId).toMatch(/^sm1_[a-f0-9]{32}$/u);
+    await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute("data-stemmio-id", copyId);
+
+    const copyCommentText = "副本评论不应回到原元素";
+    await editor.getByRole("button", { name: /留评论/u }).click();
+    const composer = page.getByRole("region", { name: "添加评论" });
+    await composer.getByRole("textbox", { name: "评论内容" }).fill(copyCommentText);
+    await composer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect.poll(async () => (await readDraftComments()).filter(comment => comment.text === copyCommentText))
+      .toHaveLength(1);
+    const copyComment = (await readDraftComments()).find(comment => comment.text === copyCommentText);
+    expect(copyComment?.sourceAnchor).toMatchObject({ elementId: copyId, resolution: "exact" });
+
+    // Enter the already selected copy through the toolbar; do not click the
+    // copy again before selecting and applying the format.
+    await editor.getByRole("button", { name: "编辑", exact: true }).click();
+    const copy = frame.locator(`[data-stemmio-id="${copyId}"]`);
+    await expect(copy).toHaveAttribute("contenteditable", /^(?:true|plaintext-only)$/u);
+    await copy.press("End");
+    await copy.press("Shift+Home");
+    const bold = editor.getByRole("button", { name: "加粗", exact: true });
+    await expect(bold).toBeEnabled();
+    await bold.click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press(keyShortcut("s"));
+    await expect.poll(() => readPublishedWorkingCopy(working, "utf8"))
+      .toContain("font-weight: 700");
+    const formattedSource = await readPublishedWorkingCopy(working, "utf8");
+    expect(formattedSource).toContain(originalText);
+    expect(formattedSource.match(/副本前的原始文字/gu)).toHaveLength(2);
+
+    await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute("data-stemmio-id", copyId);
+    await page.once("dialog", dialog => dialog.accept());
+    await editor.getByRole("button", { name: "删除元素", exact: true }).click();
+    await expect.poll(() => frame.locator(`[data-stemmio-id="${copyId}"]`).count()).toBe(0);
+    await expect(frame.locator("[data-html-canvas-selected]")).toHaveAttribute("data-stemmio-id", landingId);
+
+    const landingCommentText = "删除后评论必须落在新落点";
+    await editor.getByRole("button", { name: /留评论/u }).click();
+    const landingComposer = page.getByRole("region", { name: "添加评论" });
+    await landingComposer.getByRole("textbox", { name: "评论内容" }).fill(landingCommentText);
+    await landingComposer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect.poll(async () => (await readDraftComments()).filter(comment => comment.text === landingCommentText))
+      .toHaveLength(1);
+    const landingComment = (await readDraftComments()).find(comment => comment.text === landingCommentText);
+    expect(landingComment?.sourceAnchor).toMatchObject({ elementId: landingId, resolution: "exact" });
+    expect((await readPublishedWorkingCopy(working, "utf8")).match(/副本前的原始文字/gu)).toHaveLength(1);
   });
 });
 
