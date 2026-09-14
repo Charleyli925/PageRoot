@@ -5,6 +5,8 @@ import { executeFrozenSelection, frozenDigest, frozenFrameAccess } from "./froze
 import { readFrozenActiveGeneration, requireCurrentTextDocument, requireFrozenTextFocus,
   requireTextOperationLedger, verifyFrozenHistory } from "./frozen-text.mjs";
 import { compareElementScopedMutation, compareElementStyleMutation, SOURCE_SCOPE_POLICIES } from "./source-scope.mjs";
+import { resolveDeleteSelectionLanding } from "../../../../app/components/html-canvas-structural-projection.js";
+import { buildSourceIndex } from "../../../../app/lib/source-index.js";
 
 const ID = /^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u;
 const failUnless = (condition, code, details) => {
@@ -352,7 +354,7 @@ export async function probeFrozenEndedContinuation({ page, frame, editor, target
 export async function executeFrozenStructure({ frame, target, page, editor, electronApp, fileId, readSource, rows, calls }) {
   const baseline = await readSource();
   const closedLoop = target.operations.includes("style-copy");
-  let currentBytes = baseline, copyTarget, copiedBytes, savedBytes, restoredBytes;
+  let currentBytes = baseline, copyTarget, copiedBytes, savedBytes, restoredBytes, selectionAfterDelete = null;
   let handle, documentHandle;
   const marker = ` PRCOPY_${fileId}`;
   const restoredMarker = ` PRREST_${fileId}`;
@@ -590,6 +592,10 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       return selectCopy(await currentKnownPrior([copyTarget.selectedId]));
     });
     await record("delete-copy", { sourceRestored: frozenDigest(baseline) }, async () => {
+      const expectedLandingId = resolveDeleteSelectionLanding(
+        buildSourceIndex(currentBytes.toString("utf8")),
+        copyTarget.selectedId,
+      );
       const result = await rebuild(async () => {
         page.once("dialog", dialog => dialog.accept());
         await editor.getByRole("button", { name: "删除元素", exact: true }).click({ timeout: 2_000 });
@@ -603,7 +609,17 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
       failUnless(await frozenFrameAccess(frame, copyTarget, calls).target(copyTarget.selectedId).count() === 0, "DELETED_COPY_STILL_PRESENT");
       const original = frozenFrameAccess(frame, target, calls).target(target.selectedId);
       failUnless(await original.count() === 1 && await original.textContent() === originalText, "ORIGINAL_IDENTITY_CHANGED");
-      return result;
+      const selected = frame.locator("[data-html-canvas-selected]");
+      const selectedCount = await selected.count();
+      failUnless(selectedCount <= 1, "FROZEN_SELECTION_NOT_UNIQUE", { selectedCount });
+      selectionAfterDelete = selectedCount === 1
+        ? await selected.getAttribute("data-stemmio-id")
+        : null;
+      failUnless(selectionAfterDelete === expectedLandingId, "FROZEN_DELETE_SELECTION_LANDING_MISMATCH", {
+        expectedLandingId,
+        actualLandingId: selectionAfterDelete,
+      });
+      return { ...result, selectionAfterDelete };
     });
     if (target.continuationProbe) await record("probe-after-delete", { mode: target.continuationProbe }, () =>
       probeFrozenEndedContinuation({ page, frame, editor, target, readSource, calls, marker: `PRDIRECT_${fileId}_DELETE` }));
@@ -661,7 +677,7 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
     return {
       finalSha256: frozenDigest(currentBytes), finalSize: currentBytes.length, originalText,
       copyId: copyTarget.selectedId, restoredMarker: closedLoop ? restoredMarker : null,
-      reopenCopyPresent: closedLoop,
+      reopenCopyPresent: closedLoop, selectionAfterDelete,
     };
   } finally { await handle?.dispose(); await documentHandle?.dispose(); }
 }

@@ -249,7 +249,16 @@ export async function executeFrozenMixed({ plan, page, editor, readSource, readC
       fileId: markerId, readSource, rows: cycle.structure, calls });
     report.copyIds.push(structure.copyId);
     frame = await activeFrame(editor); // Only after proven Candidate/generation/terminal and direct-focus probe.
-    await record(cycle.control, "resume-text", () => select(page, frame, nextBinding.text, calls, null));
+    // Structural delete has an explicit, source-derived landing target. Keep
+    // that verified handoff as the next selection precondition instead of
+    // treating the browser's still-selected landing as a stale harness state.
+    await record(cycle.control, "resume-text", () => select(
+      page,
+      frame,
+      nextBinding.text,
+      calls,
+      structure.selectionAfterDelete ?? null,
+    ));
     const continuation = Object.freeze({ ...nextBinding.text, operations: continuationOperations(nextBinding.text) });
     await executeFrozenText({ frame, target: continuation, access: frozenFrameAccess(frame, continuation, calls), page,
       editor, fileId: `${markerId}_RESUME`, readSource, rows: cycle.continuation, calls });

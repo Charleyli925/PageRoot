@@ -1664,13 +1664,21 @@ test("runtime handoff refreshes the Presentation Anchor after candidate-time scr
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await armRuntimeHandoffSamples(page);
-    const expectedViewportSample = await duplicateButton.evaluate((button) => {
-      button.click();
+    const priorSelectedId = await page.evaluate(() => {
+      const activeFrame = document.querySelector(
+        '[data-testid="html-canvas-editor"] iframe:not([data-frame-role])',
+      );
+      return activeFrame?.contentDocument?.querySelector(
+        "[data-html-canvas-selected]",
+      )?.getAttribute("data-stemmio-id") || null;
+    });
+    await duplicateButton.click();
+    const expectedViewportSampleHandle = await page.waitForFunction((previousId) => {
       const editor = document.querySelector('[data-testid="html-canvas-editor"]');
       const stage = editor?.closest(".review-scroll-stage");
       const activeFrame = editor?.querySelector("iframe:not([data-frame-role])");
       if (!(stage instanceof HTMLElement) || !(activeFrame instanceof HTMLIFrameElement)) {
-        throw new Error("Runtime handoff viewport was not available.");
+        return false;
       }
       stage.scrollTop = 560;
       const selected = activeFrame.contentDocument?.querySelector(
@@ -1679,13 +1687,16 @@ test("runtime handoff refreshes the Presentation Anchor after candidate-time scr
       const selectedRect = selected?.getBoundingClientRect();
       const frameRect = activeFrame.getBoundingClientRect();
       const stableId = selected?.getAttribute("data-stemmio-id") || null;
+      if (!stableId || stableId === previousId || !selectedRect) return false;
       return {
         sharedScrollTop: stage.scrollTop,
-        selectedScreenTop: selectedRect ? frameRect.top + selectedRect.top : null,
+        selectedScreenTop: frameRect.top + selectedRect.top,
         selectionStableId: stableId,
         viewportAnchorStableId: stableId,
       };
-    });
+    }, priorSelectedId, { polling: "raf", timeout: 10_000 });
+    const expectedViewportSample = await expectedViewportSampleHandle.jsonValue();
+    await expectedViewportSampleHandle.dispose();
     expect(expectedViewportSample).toBeTruthy();
     expect(expectedViewportSample.sharedScrollTop).toBeGreaterThan(520);
     expect(expectedViewportSample.selectedScreenTop).not.toBeNull();
@@ -2895,7 +2906,7 @@ test("latest required Runtime candidate wins across slow ECharts, in-place text 
     frame = await currentEditorFrame(page);
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await expect(heading).not.toHaveAttribute("contenteditable", "true");
-    await expect(frame.locator('[data-native-case="runtime-latest-wins-boundary"]').first())
+    await expect(frame.locator('[data-native-case="runtime-latest-wins-boundary"]').last())
       .toHaveAttribute("data-html-canvas-selected", "module");
     await expect(heading).toContainText("你好");
 

@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } fr
 import path from "node:path";
 import { boundFrozenInspectorCache } from "./helpers/frozen-inspector-cache.mjs";
 import { tmpdir } from "node:os";
-import { closeStemmioGracefully, expect, launchStemmio, managedWorkingCopyPath, removeIsolatedUserData, stopStemmio,
+import { closeStemmioGracefully, disableStructuralInPlace, expect, launchStemmio, managedWorkingCopyPath, removeIsolatedUserData, stopStemmio,
   waitForProjectReady, waitForRuntimeHandoffSettled } from "./electron-native-harness.mjs";
 import { executeFrozenSelection, frozenDigest, frozenFrameAccess, frozenInitialRuntimeDecision,
   readFrozenSelection, verifyFrozenBytes, verifyFrozenDisplay } from "./real-html/frozen-selection.mjs";
@@ -82,6 +82,7 @@ try {
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true });
   await expect(editor).toHaveCount(1);
   await expect(editor).toHaveAttribute("aria-readonly", "false");
+  if (process.env.STEMMIO_DISABLE_STRUCTURAL_IN_PLACE === "1") await disableStructuralInPlace(page);
   report.initialRuntime = await waitInitialRuntime(page, plan.initialRuntime, `sha256:${plan.seed.sha256}`);
   inspectorCache = await boundFrozenInspectorCache(page);
   report.inspectorCache = inspectorCache.evidence;
