@@ -68,9 +68,9 @@ async function createPreviewRepository() {
   return { root, repository };
 }
 
-function createOfficialStableTag(repository, version) {
+function createOfficialStableTag(repository, version, brand = "Stemmio") {
   const tag = `v${version}`;
-  runGit(repository, ["tag", "-a", tag, "-m", `Stemmio ${version}`]);
+  runGit(repository, ["tag", "-a", tag, "-m", `${brand} ${version}`]);
   runGit(repository, ["push", "origin", `refs/tags/${tag}`]);
 }
 
@@ -159,6 +159,28 @@ test("developer preview identity uses committed first-parent order after the lat
     assert.equal(second.buildSequence, 2);
     assert.equal(second.sequenceVersion, "0.9.69992");
     assert.equal(second.version, `0.9.69992-dev.g${secondCommit}`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("developer preview accepts immutable pre-cutover stable tag messages", async () => {
+  const { root, repository } = await createPreviewRepository();
+  try {
+    await writeFile(path.join(repository, "identity.txt"), "stable\n");
+    runGit(repository, ["add", "identity.txt"]);
+    runGit(repository, ["-c", "commit.gpgsign=false", "commit", "-m", "stable"]);
+    createOfficialStableTag(repository, "0.9.8", "PageRoot");
+
+    await writeFile(path.join(repository, "identity.txt"), "preview\n");
+    runGit(repository, ["add", "identity.txt"]);
+    runGit(repository, ["-c", "commit.gpgsign=false", "commit", "-m", "preview"]);
+    const identity = resolveDeveloperPreviewIdentity({
+      productRoot: repository,
+      packageJson: developerPreviewSourcePackageJson(),
+    });
+    assert.equal(identity.stableTag, "v0.9.8");
+    assert.equal(identity.sequenceVersion, "0.9.99991");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

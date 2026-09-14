@@ -159,11 +159,16 @@ function officialStableTag(productRoot, tag, remoteTagObjects) {
   const targetType = headers.find((header) => header.startsWith("type "))?.slice("type ".length);
   const declaredTag = headers.find((header) => header.startsWith("tag "))?.slice("tag ".length);
   const message = annotation.slice(divider + 2).trim();
+  // Existing official tags were created before the identity cutover and keep
+  // their immutable legacy-brand message. New tags use the Stemmio message; both
+  // are valid baselines, but no new tag is written by this preview flow.
+  const validMessage = message === `Stemmio ${version}`
+    || message === `PageRoot ${version}`;
   if (
     !GIT_SHA_PATTERN.test(target ?? "")
     || targetType !== "commit"
     || declaredTag !== tag
-    || message !== `Stemmio ${version}`
+    || !validMessage
   ) {
     return null;
   }

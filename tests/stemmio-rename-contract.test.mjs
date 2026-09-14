@@ -43,7 +43,10 @@ function removeContractExceptions(contents) {
     .replace(/data-html-ai-source-node-id/gu, "")
     .replace(/html-ai-(?:document-id|version-id|version-label|based-on-version-id|request-id)/gu, "")
     // This comment documents the retained v1 projection boundary.
-    .replace(/historical PageRoot actor contract/gu, "");
+    .replace(/historical PageRoot actor contract/gu, "")
+    // Existing annotated release tags retain their immutable pre-cutover
+    // message; the preview baseline parser accepts that exact form.
+    .replace(/PageRoot \$\{version\}/gu, "");
 }
 
 test("current Stemmio contracts have no unexplained retired product identifiers", async () => {
