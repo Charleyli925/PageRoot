@@ -76,14 +76,26 @@ function stableValue(value) {
   );
 }
 
+// Comments and edit events carry a server-authored `provenance` that no client
+// can reproduce. The aggregate comparison answers "is this content already
+// persisted?", so only renderer-authored fields decide it. Keeping a field the
+// client never writes would make every flush look like a fresh mutation and
+// would turn one edit into repeated no-op revisions.
+function withoutServerAuthoredFields(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  const { provenance, ...rest } = record;
+  void provenance;
+  return rest;
+}
+
 function draftFingerprint({
   comments = [],
   changeEvents = [],
   deletedCommentIds = [],
 }) {
   return JSON.stringify(stableValue({
-    comments,
-    changeEvents,
+    comments: comments.map(withoutServerAuthoredFields),
+    changeEvents: changeEvents.map(withoutServerAuthoredFields),
     deletedCommentIds: [...new Set(
       deletedCommentIds.map(String).filter(Boolean),
     )].sort(),
