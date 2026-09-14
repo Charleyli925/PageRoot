@@ -11,11 +11,15 @@ import { EDIT_RUNTIME_PROTOCOL_SCHEME } from "../app/domain/edit-runtime-contrac
 export function createWindowLifecycle(ctx) {
   function presentMainWindow({ userInitiated = false } = {}) {
     if (
-      (ctx.e2eWindowRunsInBackground && !userInitiated)
+      (ctx.e2eWindowMode === "hidden" && !userInitiated)
       || !ctx.mainWindow
       || ctx.mainWindow.isDestroyed()
     ) return false;
     if (ctx.mainWindow.isMinimized()) ctx.mainWindow.restore();
+    if (ctx.e2eWindowMode === "visible-background" && !userInitiated) {
+      ctx.mainWindow.showInactive();
+      return true;
+    }
     ctx.mainWindow.show();
     ctx.mainWindow.focus();
     return true;
@@ -23,7 +27,7 @@ export function createWindowLifecycle(ctx) {
 
   async function createWindow() {
     const {
-      e2eWindowForeground,
+      e2eWindowMode,
       registerProjectIpc,
       startBridge,
       rendererPath,
@@ -42,7 +46,7 @@ export function createWindowLifecycle(ctx) {
       minHeight: 720,
       backgroundColor: "#f7f8fa",
       title: ctx.applicationName || "源页",
-      show: e2eWindowForeground,
+      show: e2eWindowMode === "foreground",
       ...(process.platform === "darwin"
         ? {
             titleBarStyle: "hiddenInset",

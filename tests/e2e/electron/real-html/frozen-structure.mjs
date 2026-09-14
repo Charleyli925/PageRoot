@@ -5,6 +5,7 @@ import { executeFrozenSelection, frozenDigest, frozenFrameAccess } from "./froze
 import { readFrozenActiveGeneration, requireCurrentTextDocument, requireFrozenTextFocus,
   requireTextOperationLedger, verifyFrozenHistory } from "./frozen-text.mjs";
 import { compareElementScopedMutation, compareElementStyleMutation, SOURCE_SCOPE_POLICIES } from "./source-scope.mjs";
+import { withExpectedDeleteConfirmation } from "./expected-delete-dialog.mjs";
 import { resolveDeleteSelectionLanding } from "../../../../app/components/html-canvas-structural-projection.js";
 import { buildSourceIndex } from "../../../../app/lib/source-index.js";
 
@@ -152,7 +153,7 @@ export function verifyFrozenStructureLifecycle({ path, before, after, sourceHash
     failUnless(Object.values(conditions).every(Boolean), "FROZEN_STRUCTURE_IN_PLACE_INVALID", {
       conditions, before, after,
     });
-    return { conditions, generation: after.generation, runtime: "in-place" };
+    return { conditions, path: "in-place", generation: after.generation, runtime: "in-place" };
   }
   if (path === "runtime-candidate") {
     const lifecycle = verifyFrozenHistory({ expectedPath: path, before,
@@ -171,8 +172,14 @@ export function verifyFrozenStructureLifecycle({ path, before, after, sourceHash
     staticTerminal: after.phase === "static" && after.outcome === "not-candidate",
   };
   failUnless(Object.values(conditions).every(Boolean), "FROZEN_STATIC_REBUILD_INVALID", { conditions, before, after });
-  return { conditions, candidate: { state: "NOT_APPLICABLE", reason: "AUTHORED_STATIC_PAGE_NOT_RUNTIME_CANDIDATE" },
-    generation: after.generation, runtime: "static:not-candidate" };
+  return {
+    conditions,
+    path: "static-rebuild",
+    terminalConditions: { phaseStatic: after.phase === "static", runtimeNotCandidate: after.outcome === "not-candidate" },
+    candidate: { state: "NOT_APPLICABLE", reason: "AUTHORED_STATIC_PAGE_NOT_RUNTIME_CANDIDATE" },
+    generation: after.generation,
+    runtime: "static:not-candidate",
+  };
 }
 
 export async function readFrozenCopyCapability(editor, target, sourceBytes) {
@@ -596,10 +603,13 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
         buildSourceIndex(currentBytes.toString("utf8")),
         copyTarget.selectedId,
       );
-      const result = await rebuild(async () => {
-        page.once("dialog", dialog => dialog.accept());
+      const toolbarLabel = await editor.getByRole("toolbar").getAttribute("aria-label");
+      const deleteTargetLabel = typeof toolbarLabel === "string"
+        ? toolbarLabel.replace(/^(?:编辑|评论)/u, "") : "";
+      failUnless(deleteTargetLabel.length > 0, "DELETE_TARGET_LABEL_MISSING", { toolbarLabel });
+      const result = await rebuild(() => withExpectedDeleteConfirmation(page, async () => {
         await editor.getByRole("button", { name: "删除元素", exact: true }).click({ timeout: 2_000 });
-      }, after => {
+      }, { targetText: deleteTargetLabel }), after => {
         const restored = after.equals(baseline);
         failUnless(restored, "DELETE_COPY_SOURCE_NOT_RESTORED", { restored,
           expectedSha256: frozenDigest(baseline), actualSha256: frozenDigest(after),

@@ -219,7 +219,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Workflow 源码扫描只证明凭证、exact Tree、权限和阶段顺序等 release architecture 边界；普通步骤文案和已由 verifier/owner 覆盖的行为不得作为第二个字符串 oracle。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。裸文本片段结束会话后必须仍能把工具条/快捷键格式写入源码，不能把已拆除的 fragment 宿主当成失连而阻断。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
-- Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `STEMMIO_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
+- Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化。冻结 real-HTML 入口的本地运行默认使用 `STEMMIO_E2E_WINDOW_MODE=visible-background`，通过 `showInactive()` 可见但不激活，且该策略贯穿首次启动、重开和错误处理；`hidden` 用于 CI，`foreground` 仅用于明确的前台调试，`STEMMIO_E2E_FOREGROUND=1` 是兼容别名。自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志；预期删除确认由用例助手逐次核对并处理，未预期弹窗使场景失败。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
 - 交互预览与 Edit 可丢弃 Script 页：Electron 用四类真实用例证明普通脚本
   持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及无法
   证明原地条件的语义结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。
@@ -503,9 +503,21 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 浏览器双击助手在宿主 realm 等待 iframe 祖先的有限布局动画结束，再测量文字点击位置。
 禁脚本 iframe 的 Playwright 重试计时器可能停滞；不得通过 force、开放脚本权限或加长超时规避。
 保留动画期间直接双击的失败负例，以及宿主等待后的正常选词正例。
-`local-html-corpus.mjs` 当前只允许 `capability-preflight-only`；旧的现场发现资格入口
-以 `AUTOMATIC_DISCOVERY_EXECUTION_RETIRED` 终止，尚未迁移的行为不会假算为完成。
-微验收入口 `frozen-html-operation.mjs` 消费 `STEMMIO_FROZEN_MANIFEST` 与独立传入的
+`frozen-html-scenarios.mjs` 是真实 Electron 私有验收的唯一公共薄入口。`--list` 只列出
+A/B/C 场景合同，`--plan` 只校验复合冻结清单，执行模式按 A→B→C 分派到已有冻结执行器；
+入口不自动发现、替换目标或重放失败动作。复合清单必须绑定当前 HEAD、Tree、workspace
+source Hash，包含三个不同的嵌套清单，并在启动 Electron 前完成摘要、scope、runner 和
+周期校验。A 对应普通文字/格式/历史原位连续性，B 对应编辑→历史→复制→评论→继续编辑，
+C 对应必要重建→接管→继续编辑→重开。场景失败保留首个失败，但不阻止独立后续场景取证。
+父报告必须关联每个子 `result.json`，核对场景/清单摘要、源码版本、操作行、重开和生命周期
+证据；子进程退出 0 但报告缺失、身份不符或关键步骤未完成时不得记为 PASS。C 只接受
+`core-structure-closed-loop`：必须实际执行预期为 candidate/recovered 的 `move-copy`，
+随后完成 `input-restored` 与 `save-restored` 并重开；`core-structure-path-race` 和压力场景
+仍保留为独立专项证据，不能冒充完整 C。
+`local-html-corpus.mjs` 只通过入口的 `--preflight` 以 `capability-preflight-only` 模式运行；
+旧的现场发现资格入口以 `AUTOMATIC_DISCOVERY_EXECUTION_RETIRED` 终止，尚未迁移的行为不会
+假算为完成。
+低层微验收入口 `frozen-html-operation.mjs` 仍消费 `STEMMIO_FROZEN_MANIFEST` 与独立传入的
 `STEMMIO_FROZEN_MANIFEST_SHA256`，精确绑定工作稿种子字节、源码指纹和单行 A→B 目标。
 清单另冻结初始 Runtime 预期；启动和重开都先等待其明确终态，再等待 handoff 完成。
 冻结执行器在初始 Runtime 就绪后限制 Playwright 自身 Inspector 网络响应缓存：总量 64 KiB、
@@ -586,7 +598,11 @@ iframe 内 elementFromPoint 成功就点击被宿主裁剪的坐标，也不查�
 
 长期要求：涉及编辑、格式化、选择、历史、页面切换、Runtime/iframe、加载恢复或保存重开的相关改动，必须在真实 Electron App 中使用用户指定的本地 HTML 语料进行验收；通用编辑或 Runtime 生命周期变更覆盖语料目录内全部 HTML。语料路径由本地工作区规则或环境配置提供，不写入公共仓库。此要求适用于以后所有相关任务，不只某次问题修复。合成物料仅用于可公开的确定性测试与边界覆盖，不能替代真实文档验收。
 
-`STEMMIO_REAL_HTML_DIR` 指向该语料目录后，运行 `npm run test:real-html:electron`；缺少目录或空目录直接失败，完整结果与截图写入系统临时目录，不进入 Git。该入口先冻结文件 / 阶段 / 操作计划，再分为 A 文字编辑、B 元素结构、C Runtime/iframe、D 元素能力与行为覆盖、E 编辑到重建再续写的连续链路。A/B/C/D/E 均从恢复后的本地副本和独立 Electron session 开始，但 E 内部的多轮链路必须保持同一长会话。阶段之间不继承 Selection、编辑 session、Candidate 或 iframe generation；一个阶段失败不得阻止其他独立阶段继续取证。
+`STEMMIO_REAL_HTML_DIR` 指向该语料目录后，先运行
+`npm run test:real-html:electron -- --preflight`；缺少目录或空目录直接失败，完整结果与截图写入系统临时目录，不进入 Git。
+预检通过后，执行同一份经摘要和源码指纹校验的复合冻结计划：
+`npm run test:real-html:electron -- --manifest "$FROZEN_SCENARIO_PLAN" --manifest-sha256 "$FROZEN_SCENARIO_PLAN_SHA256"`。
+计划分为 A 文字编辑、B 元素结构、C Runtime/iframe、D 元素能力与行为覆盖、E 编辑到重建再续写的连续链路；公共 A/B/C 场景账本由薄入口维护，D/E 的专项事实仍由各自冻结执行器负责。A/B/C/D/E 均从恢复后的本地副本和独立 Electron session 开始，但 E 内部的多轮链路必须保持同一长会话。阶段之间不继承 Selection、编辑 session、Candidate 或 iframe generation；一个阶段失败不得阻止其他独立阶段继续取证。
 
 测试可信度出现疑问时必须冻结全量语料，先用极小合成案例分别验证 Native Edit 宿主解析、逻辑输入位置与 Candidate 观察器。每个判定必须成对证明正确事实可通过、故意错误会失败；任何失败先保留为单一最小复现并归因为产品或测试缺陷，再决定修改对象。三组判定稳定前不得修改断言后直接重跑全量，也不得进入 20/50/100 次压力测试；稳定后只恢复一次完整语料验收。
 

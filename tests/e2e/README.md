@@ -66,14 +66,24 @@ only when `STEMMIO_E2E=1` and the path is an isolated
 `stemmio-native-e2e-*` directory under the system temporary directory. They
 run the native window hidden by default, keep its renderer unthrottled, place
 the bridge workspace inside that directory, remove only validated test
-directories, and never change `HOME` or open the user's real HTML project. Set
-`STEMMIO_E2E_FOREGROUND=1` only for deliberate visual debugging. Background
-mode keeps the macOS Dock icon (click it to inspect or minimize the window)
-and all E2E modes suppress automatically triggered native dialogs, logging
-them instead. The real-file case checkpoints and autosaves a temporary disk
+directories, and never change `HOME` or open the user's real HTML project. The
+frozen real-HTML dispatcher sets `STEMMIO_E2E_WINDOW_MODE=visible-background`
+for local runs, which displays the window through `showInactive()` without
+activating it; use `hidden` for CI and `foreground` only for deliberate visual
+debugging. `STEMMIO_E2E_FOREGROUND=1` remains a compatibility alias for
+`foreground`. The mode is preserved through close/reopen. All E2E modes
+suppress automatically triggered native dialogs, while expected delete
+confirmations are explicitly accepted or cancelled by the scenario helper and
+unexpected dialogs fail the scenario. The real-file case checkpoints and autosaves a temporary disk
 HTML, proves that
 only the authorized bytes changed, and then closes and reopens the app against
 the same forward result.
+
+The native Electron suite includes a public `public frozen-entry sample` smoke
+that launches a synthetic fixture in `visible-background`, verifies the window
+does not take focus, then closes and reopens the same isolated project. This
+checks the shared build/environment/startup/reopen plumbing used by the entry
+without claiming private-corpus acceptance.
 
 ## Coverage and release interpretation
 
@@ -150,11 +160,19 @@ dispatches synthetic DOM input events and is reported only as a **DOM editing
 compatibility scan**; it is not real mouse/keyboard acceptance. The fixed
 Electron sample in `electron-native-input.spec.mjs` owns real click/dblclick,
 keyboard input, Backspace, Delete and Enter. Private
-corpus acceptance remains `STEMMIO_REAL_HTML_DIR=... npm run
-test:real-html:electron` and reports A text, B structure and C Runtime/iframe
-as separate file/stage/operation rows. Operations execute and report in the
-same order; every A mutation freezes and checks its own source baseline. The
-private report binds HEAD plus staged, unstaged and untracked source bytes.
+corpus acceptance remains a reviewed composite-plan execution through
+`STEMMIO_REAL_HTML_DIR=... npm run test:real-html:electron -- --preflight` for
+read-only capability preparation, followed by
+`npm run test:real-html:electron -- --manifest "$FROZEN_SCENARIO_PLAN"\
+ --manifest-sha256 "$FROZEN_SCENARIO_PLAN_SHA256"`. The public entry reports
+A ordinary edit/format/history continuity, B edit/history/copy/comment/
+continuation, and C rebuild/takeover/continuation/reopen as independent
+scenario rows. `--list` and `--plan` do not start Electron. The entry dispatches
+only to the existing reviewed frozen executors; it does not auto-discover or
+replace a failed target, and it never retries a failed child. Operations execute
+and report in the same order; every A mutation freezes and checks its own source
+baseline. The private report binds HEAD plus staged, unstaged and untracked
+source bytes.
 The private deterministic paste probe requires an empty system clipboard and verifies that it is
 empty again afterward. Any non-empty clipboard marks only Paste as
 `NOT_APPLICABLE` before mutation; lossless preservation of system clipboard

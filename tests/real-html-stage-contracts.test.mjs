@@ -1040,11 +1040,18 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
         scope: "element",
         basis: "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER",
       },
-      projectionByOperation: { copy: "candidate" },
+      projectionByOperation: { copy: "candidate", "move-copy": "candidate" },
     }],
   };
   const closedLoopBytes = Buffer.from(JSON.stringify(closedLoopPlan));
   assert.equal(readFrozenSelection(closedLoopBytes, frozenDigest(closedLoopBytes)).scope, "core-structure-closed-loop");
+  const inPlaceClosedLoopBytes = Buffer.from(JSON.stringify({
+    ...closedLoopPlan,
+    targets: [{ ...closedLoopPlan.targets[0], expectedProjection: "in-place",
+      projectionByOperation: { copy: "in-place", "move-copy": "in-place" } }],
+  }));
+  assert.equal(readFrozenSelection(inPlaceClosedLoopBytes, frozenDigest(inPlaceClosedLoopBytes))
+    .targets[0].projectionByOperation["move-copy"], "in-place");
   assert.throws(() => readFrozenSelection(Buffer.from(JSON.stringify({
     ...closedLoopPlan,
     targets: [{ ...closedLoopPlan.targets[0], operations: FROZEN_STRUCTURE_OPERATIONS }],

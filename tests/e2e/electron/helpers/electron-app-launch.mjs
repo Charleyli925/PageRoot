@@ -513,6 +513,36 @@ export async function waitForMainBrowserWindow(
   return nativeWindow;
 }
 
+async function waitForExpectedNativeWindowState(
+  electronApp,
+  rendererUrl,
+  windowMode,
+  { timeout = DEFAULT_MAIN_WINDOW_TIMEOUT } = {},
+) {
+  let latest = null;
+  const expectedVisible = windowMode !== "hidden";
+  await expect.poll(async () => {
+    latest = await electronApp.evaluate(({ BrowserWindow }, expectedRendererUrl) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => (
+        !candidate.isDestroyed()
+        && candidate.webContents.getURL() === expectedRendererUrl
+      ));
+      if (!window) return null;
+      return {
+        focused: window.isFocused(),
+        visible: window.isVisible(),
+      };
+    }, rendererUrl);
+    return Boolean(latest)
+      && latest.visible === expectedVisible
+      && (windowMode === "foreground" || latest.focused === false);
+  }, {
+    timeout,
+    message: `Stemmio ${windowMode} window did not settle to its expected visibility/focus policy. Last state: ${JSON.stringify(latest)}`,
+  }).toBe(true);
+  return latest;
+}
+
 const DEFAULT_RENDERER_MOUNT_TIMEOUT = 20_000;
 const RENDERER_MOUNT_POLL_MS = 100;
 const READINESS_POLL_MS = 250;
@@ -698,7 +728,6 @@ export async function launchStemmio({
     diagnosticTimeout: diagnosticOperationTimeout,
   };
   let page = null;
-  let nativeWindow;
   try {
     page = await waitForFirstWindow(electronApp, { timeout: firstWindowTimeout });
     // A fatal render error can unmount the React root while leaving a live
@@ -719,7 +748,7 @@ export async function launchStemmio({
     await page.waitForLoadState("domcontentloaded");
     const mainRendererUrl = page.url();
     launchDiagnostics.mainRendererUrl = mainRendererUrl;
-    nativeWindow = await waitForMainBrowserWindow(electronApp, mainRendererUrl);
+    await waitForMainBrowserWindow(electronApp, mainRendererUrl);
     await page.waitForFunction(() => document.visibilityState === "visible");
     await page.evaluate(() => new Promise((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -739,12 +768,29 @@ export async function launchStemmio({
     }
     throw failure;
   }
-  const foreground = (
+  const explicitWindowModeValue = injectedEnv.STEMMIO_E2E_WINDOW_MODE
+    ?? process.env.STEMMIO_E2E_WINDOW_MODE;
+  const explicitWindowMode = String(explicitWindowModeValue || "").trim().toLowerCase() || null;
+  const legacyForeground = (
     injectedEnv.STEMMIO_E2E_FOREGROUND
     ?? process.env.STEMMIO_E2E_FOREGROUND
   ) === "1";
-  expect(nativeWindow.visible).toBe(foreground);
-  if (!foreground) expect(nativeWindow.focused).toBe(false);
+  if (legacyForeground && explicitWindowMode && explicitWindowMode !== "foreground") {
+    throw new Error("STEMMIO_E2E_FOREGROUND=1 conflicts with a non-foreground E2E window mode.");
+  }
+  const windowMode = explicitWindowMode || (legacyForeground ? "foreground" : "hidden");
+  expect(["hidden", "visible-background", "foreground"]).toContain(windowMode);
+  // BrowserWindow becomes discoverable as soon as its renderer URL is known,
+  // while the ready-to-show handler may still be presenting it. Reconcile the
+  // eventual native state instead of treating that startup race as a product
+  // policy failure. This keeps visible-background strict: it must become
+  // visible without acquiring system focus.
+  await waitForExpectedNativeWindowState(
+    electronApp,
+    launchDiagnostics.mainRendererUrl,
+    windowMode,
+    { timeout: firstWindowTimeout },
+  );
   return {
     electronApp,
     page,

@@ -162,13 +162,67 @@ Qoder process, so it must not be repurposed for real user Requests. See
 
 ## Test lanes
 
-Private real-HTML execution is currently migrating to reviewed local manifests.
-The old `local-html-corpus.mjs` entry allows read-only `capability-preflight-only`
-and rejects automatic-discovery qualification. The frozen micro entry
-is `node tests/e2e/electron/frozen-html-operation.mjs`, with the local manifest
-path and independent SHA-256 supplied through `STEMMIO_FROZEN_MANIFEST` and
-`STEMMIO_FROZEN_MANIFEST_SHA256`. Reviewed plans choose either one selection or
-the fixed native text chain (activate, type, Backspace, save, undo, redo).
+Private real-HTML execution is now fronted by the thin frozen scenario entry
+`tests/e2e/electron/frozen-html-scenarios.mjs`. It has four explicit modes:
+
+```bash
+# describe A/B/C without starting Electron
+npm run test:real-html:electron -- --list
+
+# validate the same composite plan that execution will consume
+npm run test:real-html:electron -- --plan \
+  --manifest "$FROZEN_SCENARIO_PLAN" \
+  --manifest-sha256 "$FROZEN_SCENARIO_PLAN_SHA256"
+
+# execute A → B → C; each scenario keeps its own first failure
+npm run test:real-html:electron -- \
+  --manifest "$FROZEN_SCENARIO_PLAN" \
+  --manifest-sha256 "$FROZEN_SCENARIO_PLAN_SHA256"
+
+# explicit read-only capability preflight for a user-designated corpus
+STEMMIO_REAL_HTML_DIR="/absolute/private/corpus" \
+  npm run test:real-html:electron -- --preflight
+```
+
+The composite manifest is reviewed, SHA-256 bound, source-version bound and
+contains exactly three distinct nested manifests: A for ordinary text/
+format/history continuity, B for the three-cycle edit/history/copy/comment
+flow, and C for the small closed loop that forces a rebuild, proves takeover,
+continues with input and save, and reopens. The path-race and 20/50/100-cycle
+lanes remain specialized evidence; they do not qualify as the complete C
+contract. `--list` and
+`--plan` never start Electron. Execution dispatches only to the existing
+`frozen-html-operation.mjs` executor; it does not discover or substitute a
+target, retry a failed child, or merge separate sessions into one result. The
+old `local-html-corpus.mjs` entry remains available only through `--preflight`
+with `capability-preflight-only`; automatic-discovery qualification remains
+retired.
+
+Parent acceptance reconciles every planned stage, cycle, target and operation
+in exact order from the child result rather than searching arbitrary nested
+fields. A zero exit code or a partial report is insufficient; each scenario
+also retains its child report path, complete operation-ledger summary, bounded
+stdout/stderr tails plus the full per-scenario log paths, lifecycle and reopen
+summary, and first failure. If an owned process group cannot be
+confirmed gone after a timeout, the current scenario is recorded as an
+environment block and later scenarios do not start.
+
+The public infrastructure chain can be exercised without private HTML with
+the opt-in synthetic sample below. It builds the renderer, runs the real A
+executor, writes its child report and lets the parent entry reconcile it; B and
+C remain protocol-complete fixtures in that unit test. This is engineering
+plumbing evidence, not private real-document acceptance:
+
+```bash
+STEMMIO_RUN_PUBLIC_FROZEN_ENTRY=1 \
+  node --test tests/frozen-html-scenarios-entry.test.mjs \
+  --test-name-pattern='public opt-in entry smoke'
+```
+
+The low-level frozen executor still accepts a single reviewed manifest through
+`STEMMIO_FROZEN_MANIFEST` and `STEMMIO_FROZEN_MANIFEST_SHA256` for focused
+diagnostics. Reviewed plans choose either one selection or the fixed native
+text chain (activate, type, Backspace, save, undo, redo).
 The `core-text-format` scope adds explicit unbold preparation, bold and restart
 verification on the same frozen target. Its manifest fixes the expected history
 adoption path and source/contract basis before execution. History waits for
@@ -330,13 +384,21 @@ use a personal or project secret API key.
 
 Electron product suites run their BrowserWindow hidden by default and keep
 background timers and frame commits enabled, so local automation does not
-activate Stemmio or cover other applications. Background mode still keeps the
-macOS Dock icon: click it to bring the window forward, inspect the run, and
-minimize it again. Every E2E mode suppresses automatically triggered native
-dialogs and logs them instead of popping up, including
-`STEMMIO_E2E_FOREGROUND=1` visual debugging. The hosted-macOS environment
-preflight uses a visible inactive accessory window because that suite must
-prove WindowServer painting without stealing keyboard focus.
+activate Stemmio or cover other applications. The isolated frozen real-HTML
+entry uses `STEMMIO_E2E_WINDOW_MODE=visible-background` by default: it shows
+the test window with `showInactive()` so the run is inspectable without
+stealing the current application's focus. Use `hidden` for CI or
+`foreground` only for deliberate debugging; the legacy
+`STEMMIO_E2E_FOREGROUND=1` still maps to `foreground` and conflicts with any
+other explicit mode. The mode applies at initial launch and every reopen.
+Formal launches without an isolated E2E user-data directory keep the original
+hidden-until-`ready-to-show` timing; the E2E mode only changes isolated test
+windows.
+Every E2E mode suppresses automatically triggered native dialogs and logs them
+instead of popping up. Expected delete confirmations are handled by the
+scenario helper, while unexpected dialogs fail the scenario. The hosted-macOS
+environment preflight uses a visible inactive accessory window because that
+suite must prove WindowServer painting without stealing keyboard focus.
 
 Draft Pull Request opens, updates and reopens first freeze one impact plan in a lightweight Job. Ubuntu Node/Browser and any selected macOS Electron/AI lane then consume that exact plan in parallel. Within each runtime, capability tags and changed specs are discovered together, deduplicated by project, file and full title path, then executed once from a Playwright test list. The reconciliation evidence distinguishes passed, failed, skipped and not-executed tests; missing selectors or planned tests fail closed. Draft failures and cancellations upload `output/playwright`. Local `gate:edit` remains Node-only. Returning to Draft skips the full matrix. Ready or a PR opened already Ready starts the complete source matrix: `branch-policy`, `candidate-context`, `baseline-policy`, `linux-deps` / `macos-deps`, Linux Node/Browser, both macOS Electron lanes, optional credential-free Release Dry Run, and `release-gate`. `codex-review` posts at most one `@codex review` comment for the current head and writes an informational thread snapshot; it is `continue-on-error` and is not a merge hard gate. Linux builds and shares only the Web renderer used by Node and Browser, and those jobs skip the Electron binary download. Each macOS job restores one OS/lockfile `node_modules` cache populated by `macos-deps`, builds the Electron renderer locally, runs the hosted-window preflight, then owns either the native Electron suite or the AI suite. Playwright and Electron downloads remain cached by lockfile identity. Clean successes upload only flaky evidence; full Playwright diagnostics upload on failure. The native Electron and AI lanes do not retry product tests. Hosted-window preflight is `@infra-sensitive` and may retry once in CI. `release-gate` downloads flaky evidence and refuses attestation when a product suite is flaky, retried, or the same SHA has an untriaged product failure. Dependency, Playwright and Electron downloads are cached by lockfile identity.
 

@@ -88,6 +88,7 @@ import {
   assertRuntimeEnvironment,
   createRuntimeEnvironment,
   resolveRuntimeChannel,
+  resolveE2EWindowMode,
 } from "./runtime-environment.mjs";
 import { registerUpdateIpc, unregisterUpdateIpc } from "./ipc/update-ipc.mjs";
 import { registerWindowIpc, unregisterWindowIpc } from "./ipc/window-ipc.mjs";
@@ -192,10 +193,10 @@ const e2eUserDataPath = (() => {
   }
   return resolved;
 })();
-const e2eWindowForeground = Boolean(e2eUserDataPath)
-  && process.env.STEMMIO_E2E_FOREGROUND === "1";
-const e2eWindowRunsInBackground = Boolean(e2eUserDataPath)
-  && !e2eWindowForeground;
+const e2eWindowMode = resolveE2EWindowMode({
+  environment: process.env,
+  e2eUserDataPath,
+});
 // 前台调试只改变测试窗口的可见性，不应允许自动化测试弹出任何
 // macOS 原生对话框并打断用户；所有 E2E 启动方式都记录错误而不弹窗。
 const e2eNativeDialogsSuppressed = Boolean(e2eUserDataPath);
@@ -405,8 +406,7 @@ const desktopRuntime = {
   get editRuntimeProtocolController() { return editRuntimeProtocolController; },
   set editRuntimeProtocolController(value) { editRuntimeProtocolController = value; },
   get previewProtocolController() { return previewProtocolController; },
-  e2eWindowForeground,
-  e2eWindowRunsInBackground,
+  e2eWindowMode,
   directory,
   applicationName,
   bridgeAuthToken,
