@@ -38,6 +38,7 @@ import {
   readHtmlFile,
 } from "./project-files.mjs";
 import { WELCOME_LOGO_RELATIVE_PATH } from "./welcome-project-content.mjs";
+import { PROJECT_CONTROL_DIRECTORY_NAME } from "../shared/project-storage-contract.mjs";
 import {
   exportHtmlCopyToFile,
   createExportRevealAccess,
@@ -3393,7 +3394,7 @@ async function revealVersionFile(payload) {
       || relativeWorkingCopyPath.startsWith(`..${path.sep}`)
       || relativeWorkingCopyPath === ".."
       || path.isAbsolute(relativeWorkingCopyPath)
-      || relativeWorkingCopyPath.split(path.sep).includes(".stemmio")
+      || relativeWorkingCopyPath.split(path.sep).includes(PROJECT_CONTROL_DIRECTORY_NAME)
       || !HTML_EXTENSIONS.has(path.extname(resolvedWorkingCopyPath).toLowerCase())
     ) {
       throw new ProjectFileError(

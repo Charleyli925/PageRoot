@@ -4,7 +4,8 @@ export type ContinuityEventName =
   | "framePromoted"
   | "frameCleared"
   | "runtimeRefreshRequested"
-  | "candidateCreated";
+  | "candidateCreated"
+  | "structuralProjection";
 
 export type ContinuityVisualSample = {
   t: number;
@@ -70,6 +71,7 @@ export function summarizeRuntimeContinuity(trace: ContinuityTrace): {
   framePrepared: number;
   frameCleared: number;
   framePromoted: number;
+  structuralProjection: number;
   insufficientSamples: boolean;
   maxCanvasWidthDelta: number;
   railDisappeared: boolean;

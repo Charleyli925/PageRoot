@@ -590,6 +590,13 @@
         "to": "shared/project-storage-contract.mjs"
       },
       {
+        "from": "node_modules/acorn",
+        "to": "node_modules/acorn",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "node_modules/parse5",
         "to": "node_modules/parse5",
         "filter": [

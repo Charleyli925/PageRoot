@@ -1,6 +1,5 @@
 // Preflight submission receipts are not Requests and grant no execution authority.
 // ProjectFileRepository invokes these helpers under its existing serial writer.
-import path from "node:path";
 import { safePublicAgentSummary } from "../agent/agent-session-projector.mjs";
 import { readFile } from "node:fs/promises";
 import { ensureCurrentConversation, rotateConversationAtLimit, readConversation, mutateConversation } from "../conversation-repository.mjs";
@@ -9,6 +8,7 @@ import { sha256 } from "../lifecycle-core.mjs";
 import { normalizeAgentDelivery } from "../../shared/agent-delivery.mjs";
 import { compileTaskSpec } from "../../shared/task-spec.mjs";
 import { atomicWriteProjectJson, readJsonFile } from "./path-safety.mjs";
+import { projectControlPath } from "../../shared/project-storage-contract.mjs";
 import { ProjectFileRepositoryError } from "./errors.mjs";
 
 function submissionRequirementText(snapshot) {
@@ -20,7 +20,7 @@ function receiptPath(loaded, operationId) {
   if (!/^submission_[a-f0-9]{32}$/u.test(String(operationId || ""))) {
     throw new ProjectFileRepositoryError("SUBMISSION_ID_INVALID", "Submission identity is invalid.");
   }
-  return path.join(loaded.paths.projectRootPath, ".stemmio", "submissions", `${operationId}.json`);
+  return projectControlPath(loaded.paths.projectRootPath, "submissions", `${operationId}.json`);
 }
 
 export async function readSubmissionReceipt(loaded, operationId) {
@@ -68,7 +68,7 @@ export async function saveSubmissionReceipt(loaded, { operationId, input, projec
     return existing;
   }
   const suffix = operationId.slice("submission_".length);
-  const conversationContext = { projectRoot: path.join(loaded.paths.projectRootPath, ".stemmio"),
+  const conversationContext = { projectRoot: projectControlPath(loaded.paths.projectRootPath),
     projectId: loaded.project.projectId, documentId: loaded.project.documentId };
   const conversation = await rotateConversationAtLimit(conversationContext,
     await ensureCurrentConversation(conversationContext),
@@ -105,7 +105,7 @@ export async function finishSubmissionReceipt(loaded, { operationId, status, err
 // The receipt is the recovery record. If projection fails, replay this same
 // record; never infer that the Agent should run again.
 export async function projectSubmissionReceipt(loaded, receipt) {
-  const context = { projectRoot: path.join(loaded.paths.projectRootPath, ".stemmio"),
+  const context = { projectRoot: projectControlPath(loaded.paths.projectRootPath),
     projectId: receipt.projectId, documentId: receipt.documentId };
   const conversation = await readConversation(context, receipt.conversationId);
   if (!conversation) throw new ProjectFileRepositoryError("SUBMISSION_CONVERSATION_MISSING", "Submission history requires recovery.");

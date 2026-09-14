@@ -10,7 +10,8 @@ import { prepareCandidateSourceIdentity } from "./project-file-repository/candid
 import { PROJECT_FILE_SCHEMA_VERSION } from "./project-file-repository.mjs";
 import {
   PROJECT_CONTROL_DIRECTORY_NAME,
-  PROJECT_REGISTRY_FILE_NAME,
+  projectControlPath,
+  projectRegistryPath,
 } from "../shared/project-storage-contract.mjs";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,160}$/u;
@@ -646,7 +647,7 @@ async function validateRegistryAuthority({
 }) {
   const configuredRoot = normalizedPath(projectsRoot || path.dirname(projectRoot));
   const expectedRegistryPath = normalizedPath(
-    registryPath || path.join(configuredRoot, PROJECT_REGISTRY_FILE_NAME),
+    registryPath || projectRegistryPath(configuredRoot),
   );
   if (!samePath(path.dirname(projectRoot), configuredRoot)) {
     throw new ProjectFileFinalizerError(
@@ -799,7 +800,7 @@ export async function finalizeProjectFileAttempt({
   const request = safeId(requestId, "requestId");
   const attempt = safeId(attemptId, "attemptId");
   await regularDirectory(root, "project root");
-  const controlRoot = path.join(root, PROJECT_CONTROL_DIRECTORY_NAME);
+  const controlRoot = projectControlPath(root);
   await regularDirectory(controlRoot, PROJECT_CONTROL_DIRECTORY_NAME, { projectRoot: root });
   const identity = await readJson(path.join(controlRoot, "project.json"), "project.json", {
     projectRoot: root,

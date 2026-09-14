@@ -27,6 +27,7 @@ import {
 } from "../bridge/qoder-acp-client.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
+import { projectControlPath } from "../shared/project-storage-contract.mjs";
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
 const finalizerPath = fileURLToPath(new URL("../bridge/finalize-attempt.mjs", import.meta.url));
@@ -190,7 +191,7 @@ async function run() {
     });
     const requestId = `req_qoder_acp_${randomUUID().replaceAll("-", "")}`;
     const attemptId = "attempt_001";
-    const requestPath = path.join(projectRoot, ".stemmio", "requests", requestId);
+    const requestPath = projectControlPath(projectRoot, "requests", requestId);
     const outputPath = path.join(
       requestPath,
       "attempts",

@@ -10,6 +10,7 @@ import { createHttpRuntime } from "../bridge/agent/runtimes/http-runtime.mjs";
 import { createRuntimeRegistry } from "../bridge/agent/runtimes/runtime-registry.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
+import { projectControlPath } from "../shared/project-storage-contract.mjs";
 import { SUPPORTED_AGENT_MODELS } from "../shared/supported-agent-models.mjs";
 import { openaiCompatibleVendor } from "../shared/openai-compatible-vendors.mjs";
 
@@ -105,7 +106,7 @@ async function runFormalChainSmoke(model, apiKey) {
         },
         prompt: "Apply the frozen task and produce one complete HTML Candidate.",
       });
-      const requestRoot = path.join(imported.target.projectRootPath, ".stemmio", "requests", request.requestId);
+      const requestRoot = projectControlPath(imported.target.projectRootPath, "requests", request.requestId);
       authority = {
         run: {
           projectId: imported.target.projectId,
@@ -116,7 +117,7 @@ async function runFormalChainSmoke(model, apiKey) {
           status: "processing",
           requestPath: requestRoot,
           promptPath: path.join(requestRoot, "PROMPT.md"),
-          outputPath: path.join(imported.target.projectRootPath, ".stemmio", ...request.outputRelativePath.split("/")),
+          outputPath: projectControlPath(imported.target.projectRootPath, ...request.outputRelativePath.split("/")),
           completionPath: path.join(requestRoot, "attempts", request.attemptId, "completion.json"),
         },
         request: { request: { agentDelivery: request.request.agentDelivery } },

@@ -1,4 +1,4 @@
-# ADR 0074: Stemmio identity and local-storage boundary
+# ADR 0075: Stemmio identity and local-storage boundary
 
 Status: Accepted.
 

@@ -390,12 +390,16 @@ test("source structure toolbar duplicates with fresh IDs and deletes only the se
   expect(duplicatedIds.every(Boolean)).toBe(true);
   expect(new Set(duplicatedIds).size).toBe(2);
 
+  // The selection toolbar is anchored over the duplicated source node; dismiss
+  // it before selecting a covered copy so the pointer event reaches the iframe.
+  await page.keyboard.press("Escape");
   await copies.nth(1).click();
   page.once("dialog", (dialog) => dialog.dismiss());
   await editor.getByRole("button", { name: "删除元素", exact: true }).click();
   await expect(copies).toHaveCount(2);
   await editor.getByRole("button", { name: "复制元素", exact: true }).click();
   await expect(copies).toHaveCount(3);
+  await page.keyboard.press("Escape");
   await copies.nth(1).click();
   page.once("dialog", (dialog) => dialog.accept());
   await editor.getByRole("button", { name: "删除元素", exact: true }).click();

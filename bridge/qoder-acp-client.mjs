@@ -16,6 +16,7 @@ import {
   runAcpTask as runGenericAcpTask,
 } from "./agent/runtimes/acp-protocol.mjs";
 import { runAcpProcessTask } from "./agent/runtimes/acp-process.mjs";
+import { projectControlPath } from "../shared/project-storage-contract.mjs";
 import {
   prepareVerifiedJavaScriptExecution,
   runVerifiedJavaScript,
@@ -170,7 +171,7 @@ export async function captureQoderAcpReviewBoundary({
       "The Working Copy evidence workspace could not be loaded.",
     );
   }
-  const controlRoot = path.join(verifiedProjectRoot, ".stemmio");
+  const controlRoot = projectControlPath(verifiedProjectRoot);
   const manifestFile = await readVerifiedRegularFile(
     path.join(controlRoot, "manifest.json"),
     verifiedProjectRoot,

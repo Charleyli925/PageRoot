@@ -24,18 +24,23 @@ import {
   setTextSelection,
   withBomAndCrLf,
 } from "../browser/stemmio-driver.mjs";
+import { stagePackagedApplicationForLaunch } from "./helpers/packaged-app-launch.mjs";
 const packageVersion = JSON.parse(
   readFileSync(path.join(productRoot, "package.json"), "utf8"),
 ).version;
 
-function packagedExecutable() {
-  const appPath = process.env.STEMMIO_PACKAGED_APP_PATH;
+function packagedApplication(appPath = process.env.STEMMIO_PACKAGED_APP_PATH) {
   if (!appPath || !path.isAbsolute(appPath) || path.extname(appPath) !== ".app") {
     throw new Error("STEMMIO_PACKAGED_APP_PATH must name the absolute packaged Stemmio.app path.");
   }
-  const executable = path.join(appPath, "Contents/MacOS/Stemmio");
+  const executable = path.join(
+    appPath,
+    "Contents",
+    "MacOS",
+    path.basename(appPath, ".app"),
+  );
   if (!existsSync(executable)) throw new Error(`Packaged Stemmio executable is missing: ${executable}`);
-  return executable;
+  return { appPath, executable };
 }
 
 function seedActiveDiskProject(isolatedUserData, sourcePath) {
@@ -54,10 +59,10 @@ function seedActiveDiskProject(isolatedUserData, sourcePath) {
   );
 }
 
-async function launchPackaged(isolatedUserData) {
+async function launchPackaged(isolatedUserData, packagedApp) {
   const electronApp = await electron.launch({
-    executablePath: packagedExecutable(),
-    cwd: productRoot,
+    executablePath: packagedApp.executable,
+    cwd: packagedApp.cwd,
     env: {
       ...process.env,
       STEMMIO_E2E: "1",
@@ -142,6 +147,15 @@ function removeIsolatedDirectory(directory) {
 test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft revision before close", async () => {
   test.setTimeout(120_000);
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "stemmio-native-e2e-packaged-"));
+  const sourcePackagedApp = packagedApplication();
+  const stagedPackagedApp = stagePackagedApplicationForLaunch({
+    appPath: sourcePackagedApp.appPath,
+    isolationRoot: isolatedUserData,
+  });
+  const packagedApp = {
+    ...packagedApplication(stagedPackagedApp.appPath),
+    cwd: stagedPackagedApp.cwd,
+  };
   const sourcePathAlias = path.join(isolatedUserData, "packaged-source.html");
   const exportedPath = path.join(isolatedUserData, "packaged-export.html");
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
@@ -158,7 +172,7 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
   let sourcePath = "";
   let electronApp = null;
   try {
-    let launched = await launchPackaged(isolatedUserData);
+    let launched = await launchPackaged(isolatedUserData, packagedApp);
     electronApp = launched.electronApp;
     let page = launched.page;
     const runtime = await page.evaluate(() => window.stemmioRuntime);
@@ -258,7 +272,7 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     await closePackagedGracefully(electronApp, page);
     electronApp = null;
 
-    launched = await launchPackaged(isolatedUserData);
+    launched = await launchPackaged(isolatedUserData, packagedApp);
     electronApp = launched.electronApp;
     page = launched.page;
     await expect.poll(
@@ -274,7 +288,7 @@ test("packaged Stemmio imports pre-v4 shell state as V1 and reconciles draft rev
     await closePackagedGracefully(electronApp, page);
     electronApp = null;
 
-    launched = await launchPackaged(isolatedUserData);
+    launched = await launchPackaged(isolatedUserData, packagedApp);
     electronApp = launched.electronApp;
     page = launched.page;
     const reopenedAfterClose = await bridgeJson(page, "/workspace", { sourcePath });

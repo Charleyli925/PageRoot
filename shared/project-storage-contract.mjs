@@ -19,6 +19,17 @@ export function projectControlRoot(projectRoot) {
   return path.join(path.resolve(projectRoot), PROJECT_CONTROL_DIRECTORY_NAME);
 }
 
+/** Return a path below the project control directory without repeating its
+ * product-owned name at each call site. Callers still own validation of the
+ * relative segments through the existing path-safety layer. */
+export function projectControlPath(projectRoot, ...segments) {
+  return path.join(projectControlRoot(projectRoot), ...segments);
+}
+
+export function projectSubmissionsRoot(projectRoot) {
+  return projectControlPath(projectRoot, "submissions");
+}
+
 export function projectRegistryPath(projectsRoot) {
   return path.join(path.resolve(projectsRoot), PROJECT_REGISTRY_FILE_NAME);
 }

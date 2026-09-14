@@ -27,6 +27,7 @@ import {
   readPackagedPlistIdentity,
 } from "../../../scripts/packaged-app-identity.mjs";
 import { waitForProjectReady } from "./helpers/stemmio-app-fixture.mjs";
+import { stagePackagedApplicationForLaunch } from "./helpers/packaged-app-launch.mjs";
 
 const productRoot = path.resolve(import.meta.dirname, "../../..");
 const packageJson = JSON.parse(
@@ -37,8 +38,7 @@ const expectedIdentity = expectedPackagedAppIdentity({
   environment: process.env,
 });
 
-function packagedApplication() {
-  const appPath = process.env.STEMMIO_PACKAGED_APP_PATH;
+function packagedApplication(appPath = process.env.STEMMIO_PACKAGED_APP_PATH) {
   if (!appPath || !path.isAbsolute(appPath) || path.extname(appPath) !== ".app") {
     throw new Error("STEMMIO_PACKAGED_APP_PATH must name an absolute packaged .app path.");
   }
@@ -142,12 +142,17 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
   const liveSourcePath = realpathSync(liveAlias);
   const startupOriginal = readFileSync(startupSourcePath);
   const liveOriginal = readFileSync(liveSourcePath);
-  const packagedApp = packagedApplication();
+  const sourcePackagedApp = packagedApplication();
+  const stagedPackagedApp = stagePackagedApplicationForLaunch({
+    appPath: sourcePackagedApp.appPath,
+    isolationRoot: isolatedUserData,
+  });
+  const packagedApp = packagedApplication(stagedPackagedApp.appPath);
   let electronApp = null;
   try {
     electronApp = await electron.launch({
       executablePath: packagedApp.executable,
-      cwd: productRoot,
+      cwd: stagedPackagedApp.cwd,
       args: [startupSourcePath],
       env: {
         ...process.env,
@@ -260,7 +265,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     expect(migratedMembers).toHaveLength(2);
     electronApp = await electron.launch({
       executablePath: packagedApp.executable,
-      cwd: productRoot,
+      cwd: stagedPackagedApp.cwd,
       args: [],
       env: {
         ...process.env,

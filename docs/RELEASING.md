@@ -53,7 +53,9 @@ not copied from the application root.
 
 The second clean macOS job downloads and hash-verifies that checkpoint, restores
 the embedded build and telemetry metadata, rebuilds the renderer comparison
-oracle, revalidates the unchanged payload, then launches the App and compares
+oracle, revalidates the unchanged payload, then copies the App to a temporary
+directory outside the checkout and every ancestor `node_modules`, launches that
+staged App, and compares
 `app.getName()`, `app.getVersion()` and `CFBundleIdentifier` with the source
 package contract. Missing renderer output or telemetry metadata therefore fails
 before merge.
@@ -78,7 +80,11 @@ available in the local macOS keychain. The preview
 requires that signature and stops if the certificate is missing or signing
 fails; it never falls back to ad-hoc. Notarization remains optional for this
 personal test package. It verifies packaged contents and performs one isolated
-startup, while its automatic update checks and installation path stay disabled.
+startup from a staged copy outside the checkout and every ancestor
+`node_modules`, while its automatic update checks and installation path stay
+disabled. The packaged verifier derives the required production-module closure
+from imports in every Stemmio-owned packaged JavaScript file; adding a runtime
+import without its declared, locked and copied closure fails before launch.
 Its Actions artifact is retained for seven days and its
 `developer-preview.json` always says `releaseEligible: false`.
 

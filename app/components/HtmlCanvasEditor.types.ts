@@ -333,6 +333,8 @@ export type HtmlCanvasEditorHandle = {
     operation?: Readonly<{
       kind: HtmlCanvasMutation["kind"];
       property?: string;
+      identityDelta?: import("../lib/semantic-operation-kernel.js").SemanticIdentityDelta;
+      semanticOperation?: import("../lib/semantic-operation-kernel.js").SemanticOperation;
     }>,
   ) => boolean;
   /** Restores the pre-action target/caret when a history request fails or becomes ineligible. */

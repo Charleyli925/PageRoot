@@ -31,8 +31,9 @@ import {
   ProjectFileRepositoryError,
 } from "./errors.mjs";
 import {
-  PROJECT_CONTROL_DIRECTORY_NAME,
-  PROJECT_NON_REPLACE_TEMP_PREFIX,
+  projectControlRoot as sharedProjectControlRoot,
+  projectControlPath,
+  nonReplaceTemporaryName,
 } from "../../shared/project-storage-contract.mjs";
 import { PRODUCT_ENV, PRODUCT_PROJECTS_DIRECTORY_NAME } from "../../shared/product-identity.mjs";
 
@@ -519,7 +520,7 @@ export async function writeFileNoReplace(filePath, buffer, expectedSha256, label
   }
   const temporary = path.join(
     parent,
-    `${PROJECT_NON_REPLACE_TEMP_PREFIX}${process.pid}-${randomUUID()}.tmp`,
+    nonReplaceTemporaryName(`${process.pid}-${randomUUID()}.tmp`),
   );
   await atomicWriteFile(temporary, buffer);
   try {
@@ -634,8 +635,10 @@ export async function ensureProjectDirectory(projectRootPath, directoryPath, lab
 }
 
 export function projectControlRoot(projectRootPath) {
-  return path.join(projectRootPath, PROJECT_CONTROL_DIRECTORY_NAME);
+  return sharedProjectControlRoot(projectRootPath);
 }
+
+export { projectControlPath };
 
 export function projectPaths(projectRootPath) {
   const controlRoot = projectControlRoot(projectRootPath);

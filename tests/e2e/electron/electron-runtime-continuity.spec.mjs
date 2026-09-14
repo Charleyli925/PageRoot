@@ -14,6 +14,7 @@ import {
   activateNativeEdit,
   closeStemmioGracefully,
   currentEditorFrame,
+  disableStructuralInPlace,
   documentToken,
   ECHARTS_STUB,
   expectCheckpointPersisted,
@@ -365,6 +366,7 @@ test("successful Candidate retirement does not retain a growing Document chain",
   const source = '<!doctype html><html><head><title>Retirement memory</title></head><body><p data-native-case="retirement-copy">Fixed copy target</p><script>window.authoredReady=true;</script></body></html>';
   await withRuntimeProject("stemmio-retirement-memory-e2e-", { "runtime-report.html": source }, async ({ page, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, "retirement-copy");
+    await disableStructuralInPlace(page);
     const editor = page.getByTestId("html-canvas-editor").filter({ visible: true });
     await waitForRuntimeHandoffSettled(page);
     const active = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
@@ -746,6 +748,7 @@ test("failed chart refresh keeps the latest static source quietly editable acros
     let { frame } = await loadedDiskFrame(page, sourcePath, 'format-chart');
     const editor = page.getByTestId('html-canvas-editor').filter({ visible: true }).first();
     await expect(frame.locator('#chart canvas')).toHaveCount(1);
+    await disableStructuralInPlace(page);
     await activateNativeEdit(frame, 'format-chart');
     await frame.locator('[data-native-case="format-chart"]').press('End');
     await page.keyboard.insertText(' FAIL_CHART');
@@ -924,6 +927,7 @@ test("owned composition snapshots keep formatted source nodes editable but autho
 test("the read-only recovery notice reloads source authority even when dynamic preparation fails", async ({}, testInfo) => {
   await withRuntimeProject("stemmio-static-reload-e2e-", { "runtime-report.html": DELAYED_CHART_PAGE }, async ({ page, electronApp, sourcePath }) => {
     await loadedDiskFrame(page, sourcePath, 'format-chart');
+    await disableStructuralInPlace(page);
     const editor = page.getByTestId('html-canvas-editor');
     const frame = editor.frameLocator('iframe[data-runtime-slot-role="active"]');
     const target = frame.locator('[data-native-case="format-chart"]').first();

@@ -8,6 +8,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { sha256 } from "../../lifecycle-core.mjs";
+import {
+  PROJECT_CONTROL_DIRECTORY_NAME,
+  projectControlPath,
+} from "../../../shared/project-storage-contract.mjs";
 
 export const MAX_HTML_BYTES = 20 * 1024 * 1024;
 export const MAX_PROMPT_BYTES = 256 * 1024;
@@ -232,7 +236,7 @@ export function projectRootForRequest(requestRoot, requestId) {
   if (
     path.basename(requestRoot) !== requestId
     || path.basename(requestsRoot) !== "requests"
-    || path.basename(controlRoot) !== ".stemmio"
+    || path.basename(controlRoot) !== PROJECT_CONTROL_DIRECTORY_NAME
   ) {
     throw policyError(
       "REQUEST_LAYOUT_INVALID",
@@ -343,7 +347,7 @@ export async function loadExecutionPolicy(options) {
     throw policyError("REQUEST_ID_INVALID", "The Request root has an invalid Request identity.");
   }
   const projectRoot = projectRootForRequest(requestRoot, requestId);
-  const controlRoot = path.join(projectRoot, ".stemmio");
+  const controlRoot = projectControlPath(projectRoot);
   const requestAuthority = await verifiedJsonFile(
     path.join(requestRoot, "request.json"),
     requestRoot,

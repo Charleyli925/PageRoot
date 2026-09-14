@@ -277,6 +277,8 @@ test("kernel text, space, blank-line, style and structure actions keep identity 
   const undone = session.apply(context, "undo", deleted.html, 2);
   assert.equal(undone.html, moved.html);
   assert.equal(undone.sourceSha256, moved.sourceSha256);
+  assert.ok(undone.identityDelta);
+  assert.ok(Array.isArray(undone.identityDelta.addedElementIds));
   assert.deepEqual(
     session.acknowledge(context, session.pendingOperations, moved.sourceSha256),
     { status: "accepted-head" },

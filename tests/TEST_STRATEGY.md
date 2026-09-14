@@ -42,12 +42,12 @@ turn into a zero-work green result.
 | PR `pr-feedback` | Draft PR 的 `opened/synchronize/reopened` | 轻量 Job 冻结一次计划，Linux Node/Browser 与按需 macOS Electron/AI 并行消费 | 普通 Draft 推送不消费完整矩阵；失败或取消保留 Playwright 诊断 |
 | PR 完整矩阵 + `release-gate` | Ready（含直接以 Ready 开 PR） | 全量 Node、三分片 Browser、独立 Native Electron、独立 AI 闭环、DOM 编辑兼容性扫描、依赖基线、按需 dry run、exact-tree 凭证 | `release-gate` 是唯一合并硬门；私人真实 HTML 验收单独运行；Codex 评审只展示、不阻断 |
 | `codex-review` | 与完整矩阵相同的触发条件 | 为当前 head 至多发一条 `@codex review`，并写 informational 线程快照 | `continue-on-error`；不在 `release-gate.needs` 中 |
-| `baseline-policy` | 完整矩阵路径上，分支策略通过后 | 全局依赖 advisory policy 与 packaged-runtime closure，并写下 lockfile 快照 | 基线红时不启动 Linux build、Browser 或 macOS Electron runner；`release-gate` 只核验快照 |
+| `baseline-policy` | 完整矩阵路径上，分支策略通过后 | 在干净 checkout 中以 `--omit=dev --ignore-scripts` 安装策略解析器，校验全局依赖 advisory policy 与 packaged-runtime closure，并写下 lockfile 快照 | 基线红时不启动 Linux build、Browser 或 macOS Electron runner；`release-gate` 只核验快照 |
 | `linux-deps` / `macos-deps` | 完整矩阵路径上，基线通过后 | 按 OS + lockfile + 是否包含 Electron 填充一次 `node_modules` 缓存 | 后续分片只恢复缓存，不再各自 `npm ci`；Ubuntu 跳过 Electron 二进制 |
-| 一次性晋升 `release-gate` | baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量源码车道汇合后签发 Tree Hash 凭证 | 每个 Ready head 跑一次；后续新 SHA 重新跑完整矩阵 |
+| 一次性晋升 `release-gate` | baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 在干净 checkout 中安装同一无脚本策略解析器，核验依赖快照未漂移，再汇合全量源码车道并签发 Tree Hash 凭证 | 每个 Ready head 跑一次；后续新 SHA 重新跑完整矩阵 |
 | `Release Dry Run` | `candidate-context` 判定完整矩阵候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 生成 stable `app-update.yml`、组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复精确 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater 制品、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
-| 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、稳定 Developer ID DMG、独立运行目录、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 缺少签名身份直接失败；不成为正式门禁、不检查或安装更新 |
+| 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、稳定 Developer ID DMG、源码导入推导的包依赖闭包、独立运行目录、仓库外无父级 `node_modules` 的安装态副本启动、精确 PR/内容交付报告 | 缺少签名身份直接失败；不成为正式门禁、不检查或安装更新 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |
 | `Release` | 候选包通过且不超过 72 小时 | 重新校验候选凭证和每个文件 Hash，创建 tag 并发布原字节 | 发布阶段不重新构建、不悄悄替换文件 |
 
@@ -214,15 +214,18 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Workbench 订阅边界：`tests/workspace-controller.test.mjs` 对真实 Controller facet 计数，证明草稿/Agent narration/clock/bytes 只通知局部消费者；Shell 不含这些字段且引用稳定，评论结构、空/非空、run phase/error/lifecycle、规则 composition/save/restore 仍通知。Conversation facet 与实时 aggregate 引用一致，切文档拒绝旧响应，unsubscribe/dispose 不续发；草稿 flush 保留原文档与最后文本。类型合同禁止 shell 访问省略正文。`tests/ai-conversation-sidebar.test.mjs` 验证新文档载入前不显示旧消息与草稿，关闭输入锁保留正文。ProjectRules/Conversation Workflow 既有故障与 drain 测试继续拥有持久化边界；真实 IME、caret、滚动及侧栏 UI 仍须 Electron 验收，不能由订阅计数代替。
 - 通知合同：TypeScript 封闭 `GlobalInterruption` kind 联合拥有允许的中断事实；文案只来自 `globalInterruptionPresentation()`。Node 测试拥有产品错误清洗与工作区安全状态优先级。Browser 测试拥有 `aria-live`、键盘、按钮和 hover/focus pause。不得再扫描 Workbench AST 或内部 helper 名称来证明某个 `setToast` 调用是否合法；生产 `setToast` 创建调用必须保持为 0。
 - 源码字符串合同只保留显式 architecture/security/packaging/dependency/workflow boundary。应用架构形状由 `scripts/check-architecture.mjs` 唯一拥有，`tests/architecture-boundaries.test.mjs` 只执行该 checker；当前显式清单为层级 import/retired operation，Workbench Bridge 调用为 0、final runtime factory、aggregate Session observer、唯一 Session construction owner、typed drain owner、Controller 反向 UI import 和 generic Bridge escape，及 SourcePatch + SourceTransaction 发布、精确 source freeze 及 AI 请求绑定、Edit runtime projection 禁止、native user/system priority、DOM replacement 前 lease retirement，以及 pointer capability 不得引用 `isNativeDirectEditRoot`。该集还必须保留 View Bridge call、Controller React import、generic Bridge escape、duplicate Session owner、missing drain command 的负 fixture。业务测试不得读取、拼接 Workbench/Canvas 大文件或扫描 JSX/CSS/copy/callback 顺序；它们使用 Session、算法、Browser 或 Electron 的可观察结果。`tests/rendered-html.test.mjs` 是独立例外：它必须执行真实 `dist/server/index.js`/`worker.fetch`，只验证公开 SSR 入口与已退役托管/编辑器 surface，不读取生产实现源码。`tests/workbench-css.test.mjs` 拥有 Workbench 级联入口：`app/globals.css` 必须只含固定顺序的 `@import`，拼接后的 `app/styles/` 字节保留顶栏与 tooltip 的源码顺序合同。
-- 交付合同按 owner 分层：desktop-package.test.mjs 只拥有 package.json allowlist、Bridge/Schema/资源闭包、CSP、entitlements、Info.plist 清理和固定包身份；任何被打包 Bridge provider 或其 shared runtime import 变更都必须选中该闭包 owner。packaged-artifact-gate.test.mjs 必须调用真实 verifier，拥有 app.asar、Bridge、Schema、metadata、retired closure、签名 profile 和 DMG/ZIP 边界；预加载 IPC、更新、Preview、窗口、Bridge 生命周期、遥测和 Workbench 行为必须留在各自 Node 或 Electron owner，不能因它们被打包而回流到 package 测试。
+- 交付合同按 owner 分层：desktop-package.test.mjs 拥有 package.json allowlist、Stemmio 自有打包 JavaScript 导入推导的生产包闭包、Bridge/Schema/资源闭包、安装态启动目录隔离、CSP、entitlements、Info.plist 清理和固定包身份；任何被打包 Bridge provider 或其 shared runtime import 变更都必须选中该闭包 owner。packaged-artifact-gate.test.mjs 必须调用真实 verifier，拥有 app.asar、源码推导的 `node_modules`、Bridge、Schema、metadata、retired closure、签名 profile 和 DMG/ZIP 边界；packaged startup/runtime 必须复制 `.app` 到仓库外且无父级 `node_modules` 的临时目录后启动。预加载 IPC、更新、Preview、窗口、Bridge 生命周期、遥测和 Workbench 行为必须留在各自 Node 或 Electron owner，不能因它们被打包而回流到 package 测试。
 - Developer Preview、Release Dry Run、Candidate 和 Release 是四个显式 trust profile。公共 release fixture 每次创建独立 package/build-info/telemetry/application-update/identity 值和独立临时目录；它不签名、不调用 Apple 命令、不访问网络，也不能以无 profile 的宽泛对象混淆正式与非正式通道。fixture Hash 期望值必须继续由测试侧独立 crypto 计算，不能调用被测 evaluator。
 - Workflow 源码扫描只证明凭证、exact Tree、权限和阶段顺序等 release architecture 边界；普通步骤文案和已由 verifier/owner 覆盖的行为不得作为第二个字符串 oracle。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。裸文本片段结束会话后必须仍能把工具条/快捷键格式写入源码，不能把已拆除的 fragment 宿主当成失连而阻断。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `STEMMIO_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
 - 交互预览与 Edit 可丢弃 Script 页：Electron 用四类真实用例证明普通脚本
-  持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及语义
-  结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。运行时后代必须
+  持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及无法
+  证明原地条件的语义结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。
+  已证明的普通源码复制、删除、插入和受支持移动必须保持当前 Document 身份，
+  并为本次事务创建或恢复的节点授予合法编辑权限；撤销/重做走同一证明。
+  运行时后代必须
   映射到最近源码宿主，只保留评论能力，不暴露文字/样式/结构编辑。元素复制要同时
   证明整个选中子树：运行生成内容及包含它的外层容器隐藏复制入口，保留评论和
   其他结构动作，并且旧的按钮引用或其他调用者也必须在公共命令边界被拒绝；同页独立的
@@ -543,10 +546,21 @@ generation、提升身份、Runtime ready 和源码一致性后重新定位同�
 把两者强制视为同一 ID，也不能据现场结果重新推断映射。缺失见证、错落点、空属性或
 源码证据不符须失败并输出全部条件；没有适用拒绝样本必须保留具体不适用依据。
 `core-structure-leaf` 仅接收已核对的纯文字 span 或 p 结构样本，冻结父级、后续兄弟和源码插入字节位置。
+独立 `core-structure-path-race` 在同一会话先复制混合内容子节点（Candidate），再复制普通叶节点（原地），
+结算后源码与画布都必须各有两份身份，且不得留下过期 Candidate 覆盖。复制顺序冻结为「后插入点先执行」，
+避免第一份复制移动第二份的 byte offset。
 副本 ID 只能来自该位置新增且与原件身份无关字节等价的唯一叶节点；禁止 DOM 扫描或寻找相似副本。
 复制、选中副本、激活、输入、保存、重新选中副本、确认删除逐项记账；静态重建与动态 Candidate
 采用分别判断，文字修改不得重建。保存只允许副本区域变化，删除后原始种子字节必须恢复，
 重开核验原件身份和副本不存在。这是 B 的可复制部分证据。
+独立 `core-structure-closed-loop` 在同一冻结叶节点上追加改样式、跨父移动、删除后 Undo、
+编辑恢复对象、恢复基线再 Redo 回已保存恢复态，以及保存后重开。移动目标父级必须预先冻结且
+不得等于复制插入父级；插入/跨父移动只走 Editor 命令端口。`expectedProjection` 为默认独立预期，
+`projectionByOperation` 可按操作覆盖，产品改标不能降低该组门槛。
+结构 Harness 预先冻结 `expectedProjection`：`in-place`、`candidate`、`recovered` 或 `refuse`。
+必须原地的普通源码操作不得因为产品改标 Candidate 而放宽；必须重建、必须拒绝和接受后恢复
+同样按冻结组核对。计划属性 `data-structural-projection-kind` 不能代替结果
+`data-structural-projection-outcome`，重建次数只计实际 Document 替换。
 独立 `core-copy-denied` 只消费已核对的 Runtime 额外属性及源码缺失依据，验证同一冻结目标的
 UI/实时能力与精确原因、新鲜 probe 回执、复制按钮不存在、Document/generation/源码不变。
 不强行调用隐藏命令，不把拒绝验证记为复制成功；其他未冻结的拒绝样本仍不算覆盖完成。

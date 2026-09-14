@@ -9,10 +9,11 @@ import {
   assertId, copyFileIdentity, ensureProjectDirectory, regularInformation,
   readHtmlFile, sameFileIdentity, samePath,
 } from "./path-safety.mjs";
+import { projectControlPath } from "../../shared/project-storage-contract.mjs";
 
 export function sourceBindingPath(projectRootPath, workingCopyId) {
   assertId(workingCopyId, WORKING_COPY_ID, "workingCopyId");
-  return path.join(projectRootPath, ".stemmio", "source-bindings", `${workingCopyId}.ref`);
+  return projectControlPath(projectRootPath, "source-bindings", `${workingCopyId}.ref`);
 }
 
 export async function readSourceBinding(projectRootPath, workingCopyId) {

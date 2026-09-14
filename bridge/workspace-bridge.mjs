@@ -53,6 +53,9 @@ import {
 import {
   compileTaskSpec,
 } from "../shared/task-spec.mjs";
+import {
+  projectControlPath,
+} from "../shared/project-storage-contract.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -641,9 +644,8 @@ async function versionRequirement(cacheScope, projectRootPath, requestId) {
   let requirement = "";
   try {
     const raw = await readFile(
-      path.join(
+      projectControlPath(
         projectRootPath,
-        ".stemmio",
         "requests",
         String(requestId),
         "change-request.json",
@@ -744,16 +746,14 @@ function projectFileRunForRequest({ request, candidate = null, target }) {
     : null;
   const status = candidateReady ? "ready-to-open" : terminalStatus || "processing";
   const sourcePath = target.exactSourcePath;
-  const requestPath = path.join(
+  const requestPath = projectControlPath(
     target.projectRootPath,
-    ".stemmio",
     "requests",
     request.requestId,
   );
   const attemptPath = path.join(requestPath, "attempts", request.attemptId);
-  const outputPath = path.join(
+  const outputPath = projectControlPath(
     target.projectRootPath,
-    ".stemmio",
     ...String(request.outputRelativePath || "").split("/"),
   );
   const completion = candidateReady
@@ -1186,9 +1186,8 @@ function promptListItem(value) {
 }
 
 function projectFilePromptForRequest(target, request, taskSpec) {
-  const requestRoot = path.join(
+  const requestRoot = projectControlPath(
     target.projectRootPath,
-    ".stemmio",
     "requests",
     request.requestId,
   );
@@ -1197,9 +1196,8 @@ function projectFilePromptForRequest(target, request, taskSpec) {
   const changeRequestPath = path.join(requestRoot, "change-request.json");
   const projectRulesPath = path.join(requestRoot, "input", "PROJECT.md");
   const annotationsPath = path.join(requestRoot, "input", "annotations", "records.json");
-  const outputPath = path.join(
+  const outputPath = projectControlPath(
     target.projectRootPath,
-    ".stemmio",
     ...String(request.outputRelativePath || "").split("/"),
   );
   const objective = promptListItem(taskSpec.objective);
@@ -1302,8 +1300,8 @@ function projectFileReadyPayload({ request, candidate: candidateInput, target })
       attemptId: candidate.attemptId,
       status: "ready-to-open",
       sourcePath: target.exactSourcePath,
-      requestPath: path.join(target.projectRootPath, ".stemmio", "requests", candidate.requestId),
-      attemptPath: path.join(target.projectRootPath, ".stemmio", "requests", candidate.requestId, "attempts", candidate.attemptId),
+      requestPath: projectControlPath(target.projectRootPath, "requests", candidate.requestId),
+      attemptPath: projectControlPath(target.projectRootPath, "requests", candidate.requestId, "attempts", candidate.attemptId),
       handoffMessage: String(request.request?.handoffMessage || ""),
       agentDelivery: request.request?.agentDelivery || { mode: "clipboard" },
       baseSnapshotSha256: candidate.expectedSourceSha256,
@@ -1399,9 +1397,8 @@ async function createProjectFileRequest(body) {
     attemptId,
     outputRelativePath: `requests/${requestId}/attempts/${attemptId}/output/candidate.html`,
   };
-  const handoffMessage = `请执行 ${path.join(
+  const handoffMessage = `请执行 ${projectControlPath(
     target.projectRootPath,
-    ".stemmio",
     "requests",
     requestId,
     "PROMPT.md",
@@ -1435,9 +1432,8 @@ async function createProjectFileRequest(body) {
       candidateVersionId: durable.proposedVersionId,
       candidateDisplayVersionLabel: `版本 ${durable.proposedVersionOrdinal}`,
       projectRoot: target.projectRootPath,
-      inputPath: path.join(
+      inputPath: projectControlPath(
         target.projectRootPath,
-        ".stemmio",
         "requests",
         requestId,
         "input",
@@ -2305,7 +2301,7 @@ function conversationContext(workspace) {
   return {
     // The repository's `projectRoot` is the managed control root, matching the
     // convention already used by the source-history service.
-    projectRoot: path.join(workspace.target.projectRootPath, ".stemmio"),
+    projectRoot: projectControlPath(workspace.target.projectRootPath),
     projectId: workspace.project.projectId,
     documentId: workspace.project.documentId,
   };

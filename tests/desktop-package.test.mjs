@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import semver from "semver";
@@ -8,7 +17,9 @@ import {
   REQUIRED_APP_SOURCE_FILES,
   REQUIRED_SHARED_FILES,
 } from "../scripts/verify-packaged-artifact.mjs";
+import { evaluatePackagedSourceRuntimeClosure } from "../scripts/packaged-runtime-closure.mjs";
 import { APP_SOURCE_FILES } from "./helpers/release-evidence-fixtures.mjs";
+import { stagePackagedApplicationForLaunch } from "./e2e/electron/helpers/packaged-app-launch.mjs";
 
 const APP_FILE_ALLOWLIST = [
   "desktop/main.mjs",
@@ -130,29 +141,6 @@ const BRIDGE_FILES = [
   "conversation-repository.mjs",
 ];
 
-const PACKAGED_MODULES = [
-  "@agentclientprotocol/sdk",
-  "parse5",
-  "entities",
-  "electron-updater",
-  "builder-util-runtime",
-  "fs-extra",
-  "js-yaml",
-  "lazy-val",
-  "lodash.escaperegexp",
-  "lodash.isequal",
-  "semver",
-  "tiny-typed-emitter",
-  "debug",
-  "sax",
-  "ms",
-  "argparse",
-  "graceful-fs",
-  "jsonfile",
-  "universalify",
-  "zod",
-];
-
 const SHARED_FILES = [
   "draft-aggregate.mjs",
   "direct-edit-compatibility.mjs",
@@ -230,11 +218,29 @@ function readPackage(text) {
 }
 
 test("desktop package manifest owns the exact application and Bridge resource closure", async () => {
-  const [packageText, mainProcess] = await Promise.all([
+  const [packageText, packageLockText, mainProcess] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../package-lock.json", import.meta.url), "utf8"),
     readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
   ]);
   const packageJson = readPackage(packageText);
+  const runtimeClosure = evaluatePackagedSourceRuntimeClosure(
+    path.resolve(import.meta.dirname, ".."),
+    packageJson,
+    readPackage(packageLockText),
+  );
+  assert.equal(runtimeClosure.passed, true);
+  assert.ok(runtimeClosure.directModules.includes("acorn"));
+  const missingAcornPackage = structuredClone(packageJson);
+  missingAcornPackage.build.extraResources = missingAcornPackage.build.extraResources
+    .filter((entry) => entry.to !== "node_modules/acorn");
+  const missingAcornClosure = evaluatePackagedSourceRuntimeClosure(
+    path.resolve(import.meta.dirname, ".."),
+    missingAcornPackage,
+    readPackage(packageLockText),
+  );
+  assert.equal(missingAcornClosure.passed, false);
+  assert.deepEqual(missingAcornClosure.missingResources, ["acorn"]);
   assert.deepEqual(sorted(packageJson.build.files), sorted(APP_FILE_ALLOWLIST));
 
   // Package owner: this source-side import closure catches a new main-process
@@ -256,7 +262,7 @@ test("desktop package manifest owns the exact application and Bridge resource cl
     sorted([
       ...BRIDGE_FILES.map((fileName) => "bridge/" + fileName),
       ...SHARED_FILES.map((fileName) => "shared/" + fileName),
-      ...PACKAGED_MODULES.map((moduleName) => "node_modules/" + moduleName),
+      ...runtimeClosure.requiredModules.map((moduleName) => "node_modules/" + moduleName),
       "edit-runtime-libraries/echarts/5.4.3/echarts.min.js",
       "edit-runtime-libraries/echarts/5.4.3/LICENSE",
       "edit-runtime-libraries/echarts/5.4.3/NOTICE",
@@ -322,6 +328,33 @@ test("desktop package manifest owns the exact application and Bridge resource cl
       retiredFile + " must not re-enter the package allowlist",
     );
   }
+});
+
+test("packaged launch staging refuses every ancestor development dependency tree", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "stemmio-package-isolation-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourceRoot = path.join(temporaryRoot, "source");
+  const appPath = path.join(sourceRoot, "release", "Synthetic.app");
+  const executable = path.join(appPath, "Contents", "MacOS", "Synthetic");
+  await mkdir(path.dirname(executable), { recursive: true });
+  await mkdir(path.join(sourceRoot, "node_modules", "acorn"), { recursive: true });
+  await writeFile(executable, "synthetic packaged executable", "utf8");
+
+  const isolationRoot = path.join(temporaryRoot, "isolated");
+  await mkdir(isolationRoot);
+  const staged = stagePackagedApplicationForLaunch({ appPath, isolationRoot });
+  assert.equal(staged.cwd, await realpath(isolationRoot));
+  assert.equal(
+    await readFile(path.join(staged.appPath, "Contents", "MacOS", "Synthetic"), "utf8"),
+    "synthetic packaged executable",
+  );
+
+  const contaminatedRoot = path.join(sourceRoot, "output", "launch");
+  await mkdir(contaminatedRoot, { recursive: true });
+  assert.throws(
+    () => stagePackagedApplicationForLaunch({ appPath, isolationRoot: contaminatedRoot }),
+    /ancestor node_modules directory/u,
+  );
 });
 
 test("desktop package identity and artifact profile stay fixed", async () => {

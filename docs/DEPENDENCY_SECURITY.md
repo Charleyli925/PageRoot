@@ -81,8 +81,12 @@ all native Codex packages. Codex's adapter/native closure remains available only
 through the catalog-managed ACP installer under `userData/agents`, where its
 separate package identities and integrity pins are checked. `semver` is pinned
 at the package root so the updater closure has no hidden nested runtime copy.
-The dependency audit rejects missing, nested or undeclared modules in this exact
-packaged allowlist.
+The dependency audit parses every Stemmio-owned JavaScript file selected for
+`app.asar`, Bridge or shared resources, derives its direct bare-package imports,
+expands their locked production and required peer dependencies, and requires
+that exact hoisted set in `extraResources`. It rejects missing, nested,
+undeclared or unreachable modules, so a new main-process import cannot be
+hidden by forgetting to update a second hand-maintained allowlist.
 The artifact verifier also walks every Stemmio-owned Resources subtree with
 `lstat`, rejects symlinks and all non-regular entries (including FIFOs and Unix
 sockets), rejects ASAR link entries, and byte-compares each allowlisted package

@@ -3,6 +3,7 @@ import { expect } from "@playwright/test";
 
 const ID = /^sm1_[a-f0-9]{32}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
+const PROJECTION_EXPECTATIONS = new Set(["in-place", "candidate", "recovered", "refuse"]);
 export const frozenDigest = (value) => createHash("sha256").update(value).digest("hex");
 export const FROZEN_TEXT_OPERATIONS = Object.freeze([
   "activate", "input", "backspace", "save", "undo", "redo",
@@ -18,6 +19,14 @@ export const FROZEN_REENTRY_ELEMENT_OPERATIONS = Object.freeze([
 ]);
 export const FROZEN_STRUCTURE_OPERATIONS = Object.freeze([
   "copy", "select-copy", "activate-copy", "input-copy", "save-copy", "select-copy-for-delete", "delete-copy",
+]);
+export const FROZEN_STRUCTURE_COPY_OPERATIONS = Object.freeze(["copy"]);
+export const FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS = Object.freeze([
+  "copy", "select-copy", "activate-copy", "input-copy", "save-copy",
+  "style-copy", "move-copy",
+  "select-copy-for-delete", "delete-copy",
+  "undo-delete", "activate-restored", "input-restored", "save-restored",
+  "restore-baseline", "redo-to-restored",
 ]);
 export const FROZEN_COPY_DENIED_OPERATIONS = Object.freeze(["verify-copy-denied"]);
 export const FROZEN_STRUCTURE_PROBE_OPERATIONS = Object.freeze([
@@ -73,9 +82,32 @@ export function readFrozenSelection(bytes, expectedDigest) {
     Object.freeze(plan.original); Object.freeze(plan.seed);
     return Object.freeze(plan);
   }
+  if (plan.scope === "core-structure-path-race") {
+    requireFact(plan.operation === "structure" && ["runtime", "static"].includes(plan.initialRuntime) && plan.reopen === true
+      && Array.isArray(plan.targets) && plan.targets.length === 2,
+    "FROZEN_STRUCTURE_PATH_RACE_PLAN_INVALID");
+    const checked = plan.targets.map((target) => {
+      const bytes = Buffer.from(JSON.stringify({
+        ...plan, scope: "core-structure-leaf", targets: [{ ...target, operations: [...FROZEN_STRUCTURE_COPY_OPERATIONS] }],
+      }));
+      return readFrozenSelection(bytes, frozenDigest(bytes)).targets[0];
+    });
+    requireFact(checked[0].expectedProjection === "candidate"
+      && checked[1].expectedProjection === "in-place"
+      && checked[0].selectedId !== checked[1].selectedId
+      && checked[0].copyBinding.byteOffset >= checked[1].copyBinding.byteOffset
+      && JSON.stringify(checked[0].operations) === JSON.stringify(FROZEN_STRUCTURE_COPY_OPERATIONS)
+      && JSON.stringify(checked[1].operations) === JSON.stringify(FROZEN_STRUCTURE_COPY_OPERATIONS),
+    "FROZEN_STRUCTURE_PATH_RACE_CONTRACT_INVALID");
+    plan.targets = Object.freeze(checked);
+    Object.freeze(plan.original); Object.freeze(plan.seed);
+    return Object.freeze(plan);
+  }
   const elementCore = plan.scope === "element-text-format";
   const formatCore = plan.scope === "core-text-format" || elementCore;
-  const structureCore = plan.scope === "core-structure-leaf";
+  const structureLeaf = plan.scope === "core-structure-leaf";
+  const structureClosedLoop = plan.scope === "core-structure-closed-loop";
+  const structureCore = structureLeaf || structureClosedLoop;
   const copyDenied = plan.scope === "core-copy-denied";
   const textMicro = plan.scope === "native-text-core-micro" || formatCore;
   requireFact(plan.schemaVersion === 1 && (plan.scope === "single-selection-micro" || textMicro || structureCore || copyDenied)
@@ -148,9 +180,40 @@ export function readFrozenSelection(bytes, expectedDigest) {
       && HASH.test(binding.originalElementSha256 || "")
       && ["runtime-candidate", "static-rebuild"].includes(target.rebuildPath)
       && (target.continuationProbe === undefined || target.continuationProbe === "session-ended-no-refocus")
-      && JSON.stringify(target.operations) === JSON.stringify(target.continuationProbe
-        ? FROZEN_STRUCTURE_PROBE_OPERATIONS : FROZEN_STRUCTURE_OPERATIONS),
+      && JSON.stringify(target.operations) === JSON.stringify(structureClosedLoop
+        ? FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS
+        : target.continuationProbe ? FROZEN_STRUCTURE_PROBE_OPERATIONS
+        : JSON.stringify(target.operations) === JSON.stringify(FROZEN_STRUCTURE_COPY_OPERATIONS)
+          ? FROZEN_STRUCTURE_COPY_OPERATIONS
+          : FROZEN_STRUCTURE_OPERATIONS),
     "FROZEN_STRUCTURE_CONTRACT_INVALID");
+    if (JSON.stringify(target.operations) === JSON.stringify(FROZEN_STRUCTURE_COPY_OPERATIONS)) {
+      requireFact(PROJECTION_EXPECTATIONS.has(target.expectedProjection)
+        && target.continuationProbe === undefined && !structureClosedLoop,
+      "FROZEN_STRUCTURE_COPY_ONLY_CONTRACT_INVALID");
+    }
+    const overrides = target.projectionByOperation || {};
+    requireFact(typeof overrides === "object"
+      && Object.keys(overrides).every((operation) => target.operations.includes(operation)
+        && PROJECTION_EXPECTATIONS.has(overrides[operation])),
+    "FROZEN_STRUCTURE_PROJECTION_OVERRIDE_INVALID");
+    Object.freeze(overrides);
+    if (target.expectedProjection !== undefined && !structureClosedLoop) {
+      requireFact(PROJECTION_EXPECTATIONS.has(target.expectedProjection),
+        "FROZEN_STRUCTURE_PROJECTION_OVERRIDE_INVALID");
+    }
+    if (structureClosedLoop) {
+      requireFact(PROJECTION_EXPECTATIONS.has(target.expectedProjection)
+        && ID.test(target.destinationParentId || "")
+        && target.destinationParentId !== binding.parentId
+        && target.initialBold === false
+        && target.formatCapability?.expected === "AVAILABLE"
+        && target.formatCapability?.scope === "element"
+        && target.formatCapability?.basis === "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER"
+        && target.continuationProbe === undefined,
+      "FROZEN_STRUCTURE_CLOSED_LOOP_CONTRACT_INVALID");
+      Object.freeze(target.formatCapability);
+    }
     for (const value of [binding, target.copyCapability, target.textCapability, target.operations]) Object.freeze(value);
   }
   if (textMicro) {
@@ -269,6 +332,7 @@ export async function verifyFrozenHostPoint(handle, point) {
 
 export async function executeFrozenSelection({ access, keyboard, mouse, target, calls, priorSelectionId = null }) {
   const started = performance.now();
+  const selectionCallStart = calls.length;
   const clickTarget = access.target(target.clickId);
   const selectedTarget = access.target(target.selectedId);
   for (const [locator, tag] of [[clickTarget, target.clickTag], [selectedTarget, target.selectedTag]]) {
@@ -361,7 +425,11 @@ export async function executeFrozenSelection({ access, keyboard, mouse, target, 
   } finally {
     await handle.dispose();
   }
-  const issues = selectionExecutionIssues(calls, target);
+  // `calls` is also the aggregate ledger for multi-target probes such as the
+  // path-race. Validate only this invocation's activity; prior target
+  // selections remain useful evidence but must not make the next invocation
+  // appear to have extra lookups or clicks.
+  const issues = selectionExecutionIssues(calls.slice(selectionCallStart), target);
   requireFact(issues.length === 0, "FROZEN_EXECUTION_ACTIVITY_INVALID", { issues });
   return { state: "PASS", operation: "select", expected: target.selectedId,
     actual: target.selectedId, initialSelectionCount: initialCount, initialSelectionId: initialId,

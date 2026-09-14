@@ -237,6 +237,10 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(baselinePolicy, /name: baseline-policy/u);
   assert.match(baselinePolicy, /needs:[\s\S]*- branch-policy/u);
   assert.doesNotMatch(baselinePolicy, /review-policy|codex-review/u);
+  assert.match(
+    baselinePolicy,
+    /npm ci --omit=dev --ignore-scripts --no-audit --no-fund[\s\S]*check-dependency-audit\.mjs/u,
+  );
   assert.match(baselinePolicy, /check-dependency-audit\.mjs/u);
   assert.match(baselinePolicy, /--write-snapshot output\/ci-evidence\/dependency-audit\.json/u);
   assert.match(ci, /name: linux-deps/u);
@@ -267,6 +271,10 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(releaseGate, /needs:[\s\S]*- candidate-context[\s\S]*- release-dry-run/u);
   assert.match(releaseGate, /BASELINE_RESULT: \$\{\{ needs\.baseline-policy\.result \}\}/u);
   assert.doesNotMatch(releaseGate, /Revalidate frozen head\/base|--mode revalidate/u);
+  assert.match(
+    releaseGate,
+    /npm ci --omit=dev --ignore-scripts --no-audit --no-fund[\s\S]*Verify dependency and packaged-runtime baseline is unchanged/u,
+  );
   assert.match(releaseGate, /Verify dependency and packaged-runtime baseline is unchanged/u);
   assert.match(releaseGate, /--verify-snapshot output\/ci-evidence\/dependency-audit\.json/u);
   assert.doesNotMatch(releaseGate, /npm run audit:dependencies/u);

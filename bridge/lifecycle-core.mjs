@@ -19,7 +19,7 @@ import {
   semanticVersionLabel,
   workingCopyFileName,
 } from "./product-contract.mjs";
-import { PRODUCT_NON_REPLACE_TEMP_PREFIX } from "../shared/product-identity.mjs";
+import { nonReplaceTemporaryName } from "../shared/project-storage-contract.mjs";
 
 export const LIFECYCLE_SCHEMA_VERSION = "3.0.0";
 export const COMPLETION_SCHEMA_VERSION = "1.0.0";
@@ -189,7 +189,7 @@ export async function atomicWriteFile(filePath, content, options = {}) {
   // 255-byte budget, so the temporary sibling must not include that name.
   const temporary = path.join(
     parent,
-    `${PRODUCT_NON_REPLACE_TEMP_PREFIX.replace(/-$/u, "-write-")}${process.pid}-${randomUUID()}.tmp`,
+    nonReplaceTemporaryName(`write-${process.pid}-${randomUUID()}.tmp`),
   );
   const handle = await open(temporary, "wx", options.mode ?? 0o600);
   try {

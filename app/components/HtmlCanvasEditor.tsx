@@ -109,13 +109,20 @@ import {
 } from "./html-canvas-selection";
 import {
   SOURCE_ELEMENT_ATTRIBUTE,
+  createBoundSourceElementProof,
   registerProvedStableSourceElements,
   sourceElementId,
   uniqueSourceElement,
 } from "./html-canvas-source-element";
 import {
+  applyStructuralProjectionObservation,
+  decideStructuralProjection,
+  executeVerifiedStructuralProjection,
+} from "./html-canvas-structural-projection.js";
+import {
   insertStructureCommand,
   selectedStructureCommand,
+  sourceSelectionForElementId,
   type SelectedStructureAction,
   type StructureDestination,
 } from "./html-canvas-structure-commands";
@@ -1308,35 +1315,58 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return analysis;
   }, []);
 
-  const currentRuntimeSourceProof = useCallback(() => {
+  const structuralProjectionObservationRef = useRef({
+    kind: "",
+    reason: "",
+    planned: "",
+    outcome: "",
+  });
+  const publishStructuralProjectionObservation = useCallback((
+    patch: Partial<{
+      kind: string;
+      reason: string;
+      planned: string;
+      outcome: string;
+    }>,
+  ) => {
+    const current = structuralProjectionObservationRef.current;
+    const next = {
+      kind: patch.kind ?? current.kind,
+      reason: patch.reason ?? current.reason,
+      planned: patch.planned ?? patch.kind ?? current.planned,
+      outcome: patch.outcome ?? current.outcome,
+    };
+    structuralProjectionObservationRef.current = next;
+    applyStructuralProjectionObservation(containerRef.current, next);
+  }, []);
+  useLayoutEffect(() => {
+    applyStructuralProjectionObservation(
+      containerRef.current,
+      structuralProjectionObservationRef.current,
+    );
+  });
+
+  const boundRuntimeSourceProof = useCallback((
+    sourceIndex: SourceIndexValue | null | undefined,
+  ) => {
     const runtimeFrame = runtimeFrameRef.current;
     if (
       !runtimeFrame?.settled
       || runtimeFrame.elementGeneration !== frameLoadGenerationRef.current
     ) return null;
-    const registered = runtimeSourceElementsRef.current;
-    return (element: HTMLElement) => {
-      const registeredStemmioId = registered?.stemmioIds.get(element);
-      const liveStemmioId = element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
-      const liveSourceEntry = liveStemmioId
-        ? sourceIndexRef.current?.byStemmioId.get(liveStemmioId)
-        : null;
-      return Boolean(
-        registered
-        && registered.elementGeneration === runtimeFrame.elementGeneration
-        && registered.executionId === runtimeFrame.grant.executionId
-        && registered.elements.has(element)
-        && element.isConnected
-        && registeredStemmioId
-        && registeredStemmioId === liveStemmioId
-        && registeredStemmioId === element.getAttribute(
-          EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-        )
-        && liveSourceEntry?.type === "element"
-        && liveSourceEntry.tagName === element.localName
-      );
-    };
+    return createBoundSourceElementProof({
+      authority: runtimeSourceElementsRef.current,
+      sourceIndex,
+      expectedGeneration: frameLoadGenerationRef.current,
+      expectedExecutionId: runtimeFrame.grant.executionId,
+      markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+    });
   }, []);
+
+  const currentRuntimeSourceProof = useCallback(
+    () => boundRuntimeSourceProof(sourceIndexRef.current),
+    [boundRuntimeSourceProof],
+  );
 
   const currentRuntimeShadowProof = useCallback(() => {
     const runtimeFrame = runtimeFrameRef.current;
@@ -3908,13 +3938,40 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       const currentRuntimeAnalysis = runtimeDocumentAnalysis(currentSource);
       const nextRuntimeAnalysis = analyzeEditRuntimeDocument(result.html);
+      const programIdentityChanged = (
+        currentRuntimeAnalysis.programIdentity
+        !== nextRuntimeAnalysis.programIdentity
+      );
+      const structuralDecision = mutation.kind === "structure"
+        ? decideStructuralProjection({
+          operationId: semanticOperation.operationId,
+          operationType: semanticOperation.type,
+          mutationProperty: mutation.property,
+          beforeSourceSha256: sourceIndex.sourceSha256,
+          afterSourceSha256: result.sourceSha256,
+          beforeIndex: sourceIndex,
+          afterIndex: result.sourceIndex,
+          identityDelta: semanticResult.identityDelta,
+          frameGeneration: frameLoadGenerationRef.current,
+          executionId: currentRuntime?.grant.executionId ?? null,
+          programIdentityChanged,
+        })
+        : null;
       const refreshDecision = decideEditRuntimeRefresh({
         hasRuntime: runtimeIsCurrent,
         mutationKind: mutation.kind,
-        programIdentityChanged: (
-          currentRuntimeAnalysis.programIdentity
-          !== nextRuntimeAnalysis.programIdentity
-        ),
+        programIdentityChanged,
+        structuralProjection: structuralDecision,
+      });
+      recordRuntimeContinuityEvent("structuralProjection", {
+        reason: `${structuralDecision?.kind || mutation.kind}:${structuralDecision?.reason || refreshDecision.reason}`,
+      });
+      const plannedProjection = structuralDecision?.kind || mutation.kind;
+      publishStructuralProjectionObservation({
+        kind: plannedProjection,
+        reason: structuralDecision?.reason || refreshDecision.reason,
+        planned: plannedProjection,
+        outcome: structuralDecision?.kind === "in-place" ? "pending" : plannedProjection,
       });
       const targetUpdates = deterministicTargetUpdates(result, originalTargets);
       const targetUpdatesById = new Map(
@@ -4125,15 +4182,86 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           "V2 文字会话只能提交当前受控文字命令。",
         );
       }
+      const applyStructuralInPlace = () => {
+        if (
+          mutation.kind !== "structure"
+          || structuralDecision?.kind !== "in-place"
+          || !iframeRef.current?.contentDocument
+        ) return false;
+        const documentNode = iframeRef.current.contentDocument;
+        if (
+          window.stemmioRuntime?.diagnostics?.e2eRuntimeCommitHooks === true
+          && window.__STEMMIO_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ === true
+        ) {
+          window.__STEMMIO_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = false;
+          throw new Error("结构原地投影失败：injected-projection-failure");
+        }
+        const executed = executeVerifiedStructuralProjection({
+          plan: structuralDecision.plan,
+          nextHtml: result.html,
+          afterIndex: result.sourceIndex,
+          live: {
+            documentNode,
+            frameGeneration: frameLoadGenerationRef.current,
+            executionId: runtimeFrameRef.current?.grant.executionId ?? null,
+            authority: runtimeSourceElementsRef.current,
+            markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+            isProvenSourceElement: boundRuntimeSourceProof(sourceIndex),
+          },
+        });
+        if (!executed.ok) {
+          throw new Error(`结构原地投影失败：${executed.reason}`);
+        }
+        publishStructuralProjectionObservation({ outcome: "in-place" });
+        if (executed.selectedElementId) {
+          const nextSelection = sourceSelectionForElementId(
+            result.sourceIndex,
+            executed.selectedElementId,
+            mutation.property === "delete" ? null : appliedMutation.target,
+          );
+          const liveSelected = uniqueSourceElement(
+            documentNode,
+            executed.selectedElementId,
+          );
+          selectedSourceSelectionRef.current = nextSelection;
+          pendingSelectionRef.current = nextSelection;
+          pendingToolbarVisibleRef.current = true;
+          setSelection(nextSelection);
+          onSelectRef.current?.(nextSelection);
+          if (liveSelected) {
+            selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+            selectedElementRef.current = liveSelected;
+            liveSelected.setAttribute("data-html-canvas-selected", "true");
+          }
+          setMoveAvailability(
+            sourceMoveAvailability(result.sourceIndex, nextSelection),
+          );
+        } else {
+          pendingSelectionRef.current = null;
+          pendingToolbarVisibleRef.current = false;
+          selectedSourceSelectionRef.current = null;
+          selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+          selectedElementRef.current = null;
+          setSelection(null);
+          onSelectRef.current?.(null);
+          setMoveAvailability({ up: false, down: false });
+        }
+        publishRenderedProjectionIdentity(result.html, result.sourceIndex.sourceSha256);
+        requestAnimationFrame(() => updateOverlayPosition());
+        return true;
+      };
       const previewStayedMounted = renderedProjectionWasCurrent
         && refreshDecision.synchronizeCurrentFrame
-        && synchronizeStablePreview(
-          sourceIndex,
-          result,
-          forwardPlan,
-          mutation,
-          appliedMutation,
-          provedRuntimeMutationElement,
+        && (
+          applyStructuralInPlace()
+          || synchronizeStablePreview(
+            sourceIndex,
+            result,
+            forwardPlan,
+            mutation,
+            appliedMutation,
+            provedRuntimeMutationElement,
+          )
         );
       const staleCandidate = runtimeCandidateRef.current;
       if (
@@ -4203,6 +4331,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           "data-source-command-projection",
           "refresh-required",
         );
+        if (structuralProjectionObservationRef.current.outcome === "pending") {
+          publishStructuralProjectionObservation({ outcome: "recovered" });
+        }
         containerRef.current?.setAttribute(
           "data-source-command-projection-detail",
           (cause instanceof Error ? cause.message : String(cause || "")).slice(0, 240),
@@ -4244,6 +4375,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     advanceLastKnownGoodRuntimeProjection,
     advanceRuntimeRefreshPending,
     currentRuntimeSourceProof,
+    boundRuntimeSourceProof,
+    publishStructuralProjectionObservation,
     loadFrameSource,
     publishRenderedProjectionIdentity,
     recordRuntimeRefreshDecision,
@@ -4251,6 +4384,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     requestDynamicRuntimeRefresh,
     runtimeDocumentAnalysis,
     synchronizeStablePreview,
+    updateOverlayPosition,
   ]);
 
   const clearNativeEditCheckpointTimer = useCallback(() => {
@@ -5780,7 +5914,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         operation,
       }, mutation);
       if (!result) return false;
-      if (action === "delete") clearSelection();
+      if (action === "delete" && result.projection !== "current") clearSelection();
       return true;
     } catch (cause) {
       reportBlockedEdit(cause);
@@ -5855,6 +5989,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return false;
     }
   }, [applySourceCommand, finishNativeEditing, reportBlockedEdit]);
+
+  const canvasCommandsRef = useRef({
+    insertElement,
+    moveSelectedTo,
+    duplicateSelected,
+    deleteSelected,
+  });
+  canvasCommandsRef.current = {
+    insertElement,
+    moveSelectedTo,
+    duplicateSelected,
+    deleteSelected,
+  };
 
   const selectInsertionPoint = useCallback(
     (
@@ -6620,6 +6767,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     operation?: Readonly<{
       kind: HtmlCanvasMutation["kind"];
       property?: string;
+      identityDelta?: import("../lib/semantic-operation-kernel.js").SemanticIdentityDelta;
+      semanticOperation?: import("../lib/semantic-operation-kernel.js").SemanticOperation;
     }>,
   ): boolean => {
     if (activeNativeEditRef.current) detachNativeEditForFence();
@@ -6648,6 +6797,100 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       operation?.kind === "style"
       && adoptElementStyleHistoryInPlace(source, resumeTarget)
     ) return true;
+    if (
+      operation?.kind === "structure"
+      && operation.identityDelta
+      && iframeRef.current?.contentDocument
+    ) {
+      try {
+        const previousIndex = sourceIndexRef.current;
+        const previousSource = frameSourceHtmlRef.current;
+        if (
+          previousIndex
+          && previousIndex.source === previousSource
+          && renderedSourceHtmlRef.current === previousSource
+        ) {
+          const nextIndex = buildSourceIndex(source);
+          const decision = decideStructuralProjection({
+            operationId: operation.identityDelta.operationId,
+            operationType: operation.semanticOperation?.type,
+            mutationProperty: operation.property,
+            beforeSourceSha256: previousIndex.sourceSha256,
+            afterSourceSha256: nextIndex.sourceSha256,
+            beforeIndex: previousIndex,
+            afterIndex: nextIndex,
+            identityDelta: operation.identityDelta,
+            frameGeneration: frameLoadGenerationRef.current,
+            executionId: runtimeFrameRef.current?.grant.executionId ?? null,
+          });
+          if (decision.kind === "in-place") {
+            const documentNode = iframeRef.current.contentDocument;
+            const executed = executeVerifiedStructuralProjection({
+              plan: decision.plan,
+              nextHtml: source,
+              afterIndex: nextIndex,
+              live: {
+                documentNode,
+                frameGeneration: frameLoadGenerationRef.current,
+                executionId: runtimeFrameRef.current?.grant.executionId ?? null,
+                authority: runtimeSourceElementsRef.current,
+                markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+                isProvenSourceElement: boundRuntimeSourceProof(previousIndex),
+              },
+            });
+            if (executed.ok) {
+              sourceIndexRef.current = nextIndex;
+              frameSourceHtmlRef.current = source;
+              latestSourceProjectionRef.current = { source, sourceIndex: nextIndex };
+              const nextSelection = executed.selectedElementId
+                ? sourceSelectionForElementId(
+                  nextIndex,
+                  executed.selectedElementId,
+                  resumeTarget,
+                )
+                : null;
+              selectedSourceSelectionRef.current = nextSelection;
+              setSelection(nextSelection);
+              onSelectRef.current?.(nextSelection);
+              pendingSelectionRef.current = nextSelection;
+              pendingToolbarVisibleRef.current = Boolean(nextSelection);
+              if (executed.selectedElementId) {
+                const liveSelected = uniqueSourceElement(
+                  documentNode,
+                  executed.selectedElementId,
+                );
+                selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+                selectedElementRef.current = liveSelected;
+                liveSelected?.setAttribute("data-html-canvas-selected", "true");
+                setMoveAvailability(
+                  sourceMoveAvailability(nextIndex, nextSelection),
+                );
+              } else {
+                selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+                selectedElementRef.current = null;
+                setMoveAvailability({ up: false, down: false });
+              }
+              containerRef.current?.setAttribute(
+                "data-history-adopt-path",
+                "structural-in-place",
+              );
+              publishStructuralProjectionObservation({
+                kind: decision.kind,
+                reason: decision.reason,
+                planned: decision.kind,
+                outcome: "in-place",
+              });
+              publishRenderedProjectionIdentity(source, nextIndex.sourceSha256);
+              supersedeRuntimeRefreshPending();
+              requestAnimationFrame(() => updateOverlayPosition());
+              return true;
+            }
+          }
+        }
+      } catch {
+        // Fall through to island in-place or Candidate recovery.
+      }
+    }
     if (adoptEditableIslandHistoryInPlace(
       source,
       bookmark,
@@ -6691,10 +6934,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     advanceLastKnownGoodRuntimeProjection,
     adoptEditableIslandHistoryInPlace,
     adoptElementStyleHistoryInPlace,
+    boundRuntimeSourceProof,
+    publishStructuralProjectionObservation,
     detachNativeEditForFence,
     loadFrameSource,
+    publishRenderedProjectionIdentity,
     queueNativeFenceReload,
     requestDynamicRuntimeRefresh,
+    supersedeRuntimeRefreshPending,
+    updateOverlayPosition,
   ]);
 
   const cancelHistoryAction = useCallback((
@@ -8740,8 +8988,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         activeNativeEditRef.current ? "false" : "true",
       );
     };
+    (root as HTMLElement & {
+      __STEMMIO_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
+    }).__STEMMIO_E2E_STRUCTURE_COMMANDS__ = {
+      insertElement: (options) => canvasCommandsRef.current.insertElement(options),
+      moveSelectedTo: (options) => canvasCommandsRef.current.moveSelectedTo(options),
+      duplicateSelected: () => canvasCommandsRef.current.duplicateSelected(),
+      deleteSelected: () => canvasCommandsRef.current.deleteSelected(),
+    };
     root.addEventListener("stemmio:e2e-copy-capability-probe", probe);
-    return () => root.removeEventListener("stemmio:e2e-copy-capability-probe", probe);
+    return () => {
+      delete (root as HTMLElement & {
+        __STEMMIO_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
+      }).__STEMMIO_E2E_STRUCTURE_COMMANDS__;
+      root.removeEventListener("stemmio:e2e-copy-capability-probe", probe);
+    };
   }, [currentRuntimeShadowProof, currentRuntimeSourceProof]);
   const selectionCapability = selection && !interactionLocked
     ? canvasPointerCapabilityFromProof({

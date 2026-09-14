@@ -144,6 +144,7 @@ const BRIDGE_FILES = [
 
 const PACKAGED_MODULES = [
   "@agentclientprotocol/sdk",
+  "acorn",
   "argparse",
   "builder-util-runtime",
   "debug",
@@ -743,6 +744,7 @@ export async function createSyntheticAppBundle(t, {
     applicationUpdate: structuredClone(applicationUpdate),
     buildInfo: structuredClone(effectiveBuildInfo),
     packageJson: structuredClone(packageJson),
+    packagedRuntimeModules: [...PACKAGED_MODULES],
     productRoot,
     resourcesPath,
     telemetry: structuredClone(telemetry),

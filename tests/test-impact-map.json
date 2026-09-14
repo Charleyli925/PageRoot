@@ -1126,6 +1126,8 @@
       "patterns": [
         "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|comment-text-locator|editable-island|edit-pipeline-counters|native-dom-logical-index|page-(?:presentation-dom|view-context)|stemmio-element-identity|semantic-operation-kernel|source-(?:index|patch-core|patch-engine|structure-edit|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^app/components/html-canvas-structure-commands\\.ts$",
+        "^app/components/html-canvas-structural-projection\\.(?:js|d\\.ts)$",
+        "^app/components/html-canvas-source-authority\\.(?:js|d\\.ts)$",
         "^app/components/html-canvas-source-commands\\.(?:js|d\\.ts)$",
         "^shared/stemmio-element-identity\\.mjs$",
         "^shared/semantic-identity-delta\\.mjs$",
@@ -1149,6 +1151,9 @@
         "tests/source-patch-engine.test.mjs",
         "tests/source-structure-edit.test.mjs",
         "tests/html-canvas-source-commands.test.mjs",
+        "tests/html-canvas-structural-projection.test.mjs",
+        "tests/structural-projection-baseline.test.mjs",
+        "tests/runtime-source-element-grant.test.mjs",
         "tests/semantic-operation-kernel.test.mjs",
         "tests/semantic-identity-save-contract.test.mjs",
         "tests/project-semantic-identity-save.test.mjs",
@@ -1255,7 +1260,7 @@
     {
       "id": "runtime-continuity",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-presentation-scroll|runtime-continuity-probe)\\.(?:tsx|ts|js|css|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-presentation-scroll|html-canvas-structural-projection|runtime-continuity-probe)\\.(?:tsx|ts|js|css|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
@@ -1267,13 +1272,15 @@
         "tests/html-canvas-runtime-startup.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
         "tests/runtime-continuity-probe.test.mjs",
+        "tests/html-canvas-structural-projection.test.mjs",
+        "tests/structural-projection-baseline.test.mjs",
         "tests/seeded-fault-oracles.test.mjs"
       ]
     },
     {
       "id": "selection-hit-testing",
       "patterns": [
-        "^app/components/html-canvas-(?:selection-chrome(?:-contract)?|source-element)\\.(?:tsx|ts)$"
+        "^app/components/html-canvas-(?:selection-chrome(?:-contract)?|source-element|source-authority)\\.(?:tsx|ts|js)$"
       ],
       "suites": [
         "typecheck",
@@ -1281,6 +1288,7 @@
       ],
       "nodeTests": [
         "tests/html-canvas-selection-chrome-contract.test.mjs",
+        "tests/runtime-source-element-grant.test.mjs",
         "tests/source-text-map.test.mjs"
       ]
     },
@@ -2271,7 +2279,7 @@
       "patterns": [
         "^package(?:-lock)?\\.json$",
         "^\\.github/dependabot\\.yml$",
-        "^scripts/check-dependency-audit\\.mjs$",
+        "^scripts/(?:check-dependency-audit|packaged-runtime-closure)\\.mjs$",
         "^tests/dependency-audit-policy\\.test\\.mjs$",
         "^docs/DEPENDENCY_SECURITY\\.md$"
       ],
@@ -2316,7 +2324,8 @@
         "^desktop/after-pack\\.mjs$",
         "^desktop/renderer/index\\.html$",
         "^desktop/resources/(?:entitlements\\.mac\\.plist|icon\\.icns)$",
-        "^Stemmio \u7528\u6237\u58f0\u660e\u4e0e\u514d\u8d23\u58f0\u660e\\.txt$"
+        "^tests/e2e/electron/helpers/packaged-app-launch\\.mjs$",
+        "^源页 \u7528\u6237\u58f0\u660e\u4e0e\u514d\u8d23\u58f0\u660e\\.txt$"
       ],
       "suites": [],
       "nodeTests": [
@@ -2342,7 +2351,7 @@
     {
       "id": "package-verifier-contract",
       "patterns": [
-        "^scripts/verify-packaged-artifact\\.mjs$"
+        "^scripts/(?:verify-packaged-artifact|packaged-runtime-closure)\\.mjs$"
       ],
       "suites": [],
       "nodeTests": [
@@ -2514,7 +2523,7 @@
     {
       "id": "packaged-runtime-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?:packaged-runtime-smoke\\.spec|packaged-startup-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config)\\.mjs$"
+        "^tests/e2e/electron/(?:packaged-runtime-smoke\\.spec|packaged-startup-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|helpers/packaged-app-launch)\\.mjs$"
       ],
       "suites": [],
       "nodeTests": []
@@ -2522,7 +2531,7 @@
     {
       "id": "electron-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?!ai-|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|real-html/).*\\.mjs$"
+        "^tests/e2e/electron/(?!ai-|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config|helpers/packaged-app-launch\\.mjs|real-html/).*\\.mjs$"
       ],
       "suites": [
         "electron-editing-smoke"

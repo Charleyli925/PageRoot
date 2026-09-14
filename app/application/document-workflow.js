@@ -2951,6 +2951,10 @@ export class DocumentWorkflow {
       {
         kind: applied.kind,
         ...(applied.property ? { property: applied.property } : {}),
+        ...(applied.identityDelta ? { identityDelta: applied.identityDelta } : {}),
+        ...(applied.semanticOperation
+          ? { semanticOperation: applied.semanticOperation }
+          : {}),
       },
     );
     if (this.#documentSession.beginEdit(canonicalHtml, {

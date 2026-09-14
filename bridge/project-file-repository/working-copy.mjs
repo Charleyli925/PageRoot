@@ -30,6 +30,7 @@ import {
   createSemanticIdentitySnapshot,
   verifySemanticIdentityTransition,
 } from "../../shared/semantic-identity-delta.mjs";
+import { nonReplaceTemporaryName } from "../../shared/project-storage-contract.mjs";
 
 import {
   PROJECT_FILE_SCHEMA_VERSION,
@@ -829,7 +830,7 @@ export async function compareAndSwapWorkingCopyFile({
 }) {
   const parent = path.dirname(sourcePath);
   await assertRealPathInsideProject(projectRootPath, parent, "Working Copy parent", { expectedKind: "directory" });
-  const temporary = path.join(parent, `.stemmio-save-${process.pid}-${randomUUID()}.tmp`);
+  const temporary = path.join(parent, nonReplaceTemporaryName(`save-${process.pid}-${randomUUID()}.tmp`));
   await atomicWriteFile(temporary, nextBuffer);
   let swapped = false;
   try {

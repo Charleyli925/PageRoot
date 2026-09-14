@@ -53,7 +53,12 @@ import {
   isValidStemmioElementId,
   STEMMIO_ELEMENT_ID_SCHEMA_VERSION,
 } from "../shared/stemmio-element-identity.mjs";
-import { PROJECT_REGISTRY_FILE_NAME } from "../shared/project-storage-contract.mjs";
+import {
+  PROJECT_CONTROL_DIRECTORY_NAME,
+  importTemporaryName,
+  projectControlPath,
+  projectRegistryPath,
+} from "../shared/project-storage-contract.mjs";
 import {
   assertTaskSpec,
   compileTaskSpec,
@@ -278,7 +283,7 @@ export class ProjectFileRepository {
 
   constructor({
     projectsRoot = defaultProjectsRoot(),
-    registryPath = path.join(projectsRoot, PROJECT_REGISTRY_FILE_NAME),
+    registryPath = projectRegistryPath(projectsRoot),
     clock = Date.now,
     deviceId = null,
     agentDeliveryNormalizer = normalizeNewAgentDelivery,
@@ -835,13 +840,13 @@ export class ProjectFileRepository {
   }
 
   async #recoverSubmissionHistory(loaded, { restart = false } = {}) {
-    const submissionsRoot = path.join(loaded.paths.projectRootPath, ".stemmio", "submissions");
+    const submissionsRoot = projectControlPath(loaded.paths.projectRootPath, "submissions");
     if (!await directoryInformation(submissionsRoot, "submissions", { projectRootPath: loaded.paths.projectRootPath })) return;
     const entries = await listProjectDirectory(loaded.paths.projectRootPath, submissionsRoot, "submissions");
     for (const entry of entries) {
       if (!entry.isFile() || !/^submission_[a-f0-9]{32}\.json$/u.test(entry.name)) continue;
       const operationId = entry.name.slice(0, -5);
-      const raw = await readJsonFile(path.join(loaded.paths.projectRootPath, ".stemmio", "submissions", entry.name), "submission", { projectRootPath: loaded.paths.projectRootPath });
+      const raw = await readJsonFile(projectControlPath(loaded.paths.projectRootPath, "submissions", entry.name), "submission", { projectRootPath: loaded.paths.projectRootPath });
       const workingCopy = loaded.manifest.workingCopies.find((value) => value.workingCopyId === raw?.workingCopyId);
       if (!workingCopy) continue;
       const bound = { ...loaded, workingCopy };
@@ -4679,7 +4684,7 @@ export class ProjectFileRepository {
     const allocated = await this.#allocateProjectRoot(stem);
     const stagingRoot = path.join(
       this.#projectsRoot,
-      `.${allocated.directoryName}.stemmio-import-${randomUUID()}`,
+      importTemporaryName(`${allocated.directoryName}-${randomUUID()}`),
     );
     const paths = projectPaths(stagingRoot);
     let published = false;
@@ -4918,7 +4923,7 @@ export class ProjectFileRepository {
         { projectRootPath: root },
       );
     }
-    if (!(await directoryInformation(paths.controlRoot, ".stemmio", {
+    if (!(await directoryInformation(paths.controlRoot, PROJECT_CONTROL_DIRECTORY_NAME, {
       projectRootPath: root,
     }))) {
       throw new ProjectFileRepositoryError(
@@ -4989,7 +4994,7 @@ export class ProjectFileRepository {
         // invalid/unavailable project rather than being mistaken for absence.
         try {
           const project = assertProjectIdentity(await readJsonFile(
-            path.join(candidatePath, ".stemmio", "project.json"), "project.json",
+            projectControlPath(candidatePath, "project.json"), "project.json",
             { projectRootPath: candidatePath },
           ));
           const paths = incompletePathsByProjectId.get(project.projectId) || [];
@@ -5149,7 +5154,7 @@ export class ProjectFileRepository {
         // can import that HTML as a fresh V1 instead of migrating or repairing
         // pre-v4 state.
         if (!pathInside(record.registeredProjectRootPath, exactSourcePath)) {
-          const candidate = await readJsonFile(path.join(path.dirname(exactSourcePath), ".stemmio", "project.json"), "project.json").catch(() => null);
+          const candidate = await readJsonFile(projectControlPath(path.dirname(exactSourcePath), "project.json"), "project.json").catch(() => null);
           if (candidate?.projectId !== projectId) continue;
         }
         if (invalidRegisteredProjectError(cause)) continue;
@@ -7399,7 +7404,7 @@ export class ProjectFileRepository {
         changeEvents: [], deletedCommentIds: [], appliedOperationIds: [], updatedAt: transaction.createdAt,
       } : null;
       if (retainedDraft) await atomicWriteProjectJson(loaded.paths.projectRootPath,
-        path.join(loaded.paths.projectRootPath, ".stemmio", draftRelativePathFor(nextWorkingCopy)), retainedDraft, "retained Working Copy draft");
+        projectControlPath(loaded.paths.projectRootPath, draftRelativePathFor(nextWorkingCopy)), retainedDraft, "retained Working Copy draft");
       const statePath = workingCopyStatePath(loaded.paths, nextWorkingCopy);
       await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,

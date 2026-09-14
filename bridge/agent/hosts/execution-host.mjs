@@ -22,6 +22,7 @@ import {
   readVerifiedRegularFile,
   verifiedOutputParent,
 } from "../policies/execution-policy.mjs";
+import { projectControlPath } from "../../../shared/project-storage-contract.mjs";
 
 const DEFAULT_TERMINAL_OUTPUT_BYTES = 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -683,7 +684,7 @@ export function createExecutionHost(policy, {
           );
         }
         const projectRoot = projectRootForRequest(policy.requestRoot, policy.requestId);
-        const controlRoot = path.join(projectRoot, ".stemmio");
+        const controlRoot = projectControlPath(projectRoot);
         const outputRelativePath = path.relative(controlRoot, policy.outputPath).split(path.sep).join("/");
         if (
           completion?.projectId !== policy.projectId

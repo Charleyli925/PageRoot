@@ -362,7 +362,7 @@ async function runTarget({ electronApp, page, editor, target, targetIndex, round
       const rows = target.operations.map(operation => ({ operation, targetId: target.selectedId,
         state: "NOT_EXECUTED", reason: "DEPENDENCY_NOT_COMPLETED", durationMs: null }));
       const value = await executeFrozenStructure({ frame: await activeFrame(editor), target, page, editor,
-        fileId: `${fileId}_R${round}`, readSource, rows, calls });
+        electronApp, fileId: `${fileId}_R${round}`, readSource, rows, calls });
       return { value, rows };
     });
     actual.push({ behavior: "structure-rebuild", result: result.value, operations: result.rows });
