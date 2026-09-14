@@ -162,13 +162,43 @@ Qoder process, so it must not be repurposed for real user Requests. See
 
 ## Test lanes
 
-Private real-HTML execution is currently migrating to reviewed local manifests.
-The old `local-html-corpus.mjs` entry allows read-only `capability-preflight-only`
-and rejects automatic-discovery qualification. The frozen micro entry
-is `node tests/e2e/electron/frozen-html-operation.mjs`, with the local manifest
-path and independent SHA-256 supplied through `STEMMIO_FROZEN_MANIFEST` and
-`STEMMIO_FROZEN_MANIFEST_SHA256`. Reviewed plans choose either one selection or
-the fixed native text chain (activate, type, Backspace, save, undo, redo).
+Private real-HTML execution is now fronted by the thin frozen scenario entry
+`tests/e2e/electron/frozen-html-scenarios.mjs`. It has four explicit modes:
+
+```bash
+# describe A/B/C without starting Electron
+npm run test:real-html:electron -- --list
+
+# validate the same composite plan that execution will consume
+npm run test:real-html:electron -- --plan \
+  --manifest "$FROZEN_SCENARIO_PLAN" \
+  --manifest-sha256 "$FROZEN_SCENARIO_PLAN_SHA256"
+
+# execute A → B → C; each scenario keeps its own first failure
+npm run test:real-html:electron -- \
+  --manifest "$FROZEN_SCENARIO_PLAN" \
+  --manifest-sha256 "$FROZEN_SCENARIO_PLAN_SHA256"
+
+# explicit read-only capability preflight for a user-designated corpus
+STEMMIO_REAL_HTML_DIR="/absolute/private/corpus" \
+  npm run test:real-html:electron -- --preflight
+```
+
+The composite manifest is reviewed, SHA-256 bound, source-version bound and
+contains exactly three distinct nested manifests: A for ordinary text/
+format/history continuity, B for the three-cycle edit/history/copy/comment
+flow, and C for the rebuild/takeover/continuation/reopen flow. `--list` and
+`--plan` never start Electron. Execution dispatches only to the existing
+`frozen-html-operation.mjs` executor; it does not discover or substitute a
+target, retry a failed child, or merge separate sessions into one result. The
+old `local-html-corpus.mjs` entry remains available only through `--preflight`
+with `capability-preflight-only`; automatic-discovery qualification remains
+retired.
+
+The low-level frozen executor still accepts a single reviewed manifest through
+`STEMMIO_FROZEN_MANIFEST` and `STEMMIO_FROZEN_MANIFEST_SHA256` for focused
+diagnostics. Reviewed plans choose either one selection or the fixed native
+text chain (activate, type, Backspace, save, undo, redo).
 The `core-text-format` scope adds explicit unbold preparation, bold and restart
 verification on the same frozen target. Its manifest fixes the expected history
 adoption path and source/contract basis before execution. History waits for
