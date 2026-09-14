@@ -1056,7 +1056,6 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
     { destinationParentId: structurePlan.targets[0].copyBinding.parentId },
     { expectedProjection: "AUTO" },
     { initialBold: true },
-    { projectionByOperation: { copy: "AUTO" } },
   ]) {
     const bytes = Buffer.from(JSON.stringify({
       ...closedLoopPlan,
@@ -1066,6 +1065,25 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
       code: "FROZEN_STRUCTURE_CLOSED_LOOP_CONTRACT_INVALID",
     });
   }
+  assert.throws(() => readFrozenSelection(Buffer.from(JSON.stringify({
+    ...closedLoopPlan,
+    targets: [{ ...closedLoopPlan.targets[0], projectionByOperation: { copy: "AUTO" } }],
+  })), frozenDigest(Buffer.from(JSON.stringify({
+    ...closedLoopPlan,
+    targets: [{ ...closedLoopPlan.targets[0], projectionByOperation: { copy: "AUTO" } }],
+  })))), { code: "FROZEN_STRUCTURE_PROJECTION_OVERRIDE_INVALID" });
+  const mixedLeafBytes = Buffer.from(JSON.stringify({
+    ...structurePlan,
+    targets: [{
+      ...structurePlan.targets[0],
+      expectedProjection: "candidate",
+      projectionByOperation: { "delete-copy": "in-place" },
+    }],
+  }));
+  assert.equal(
+    readFrozenSelection(mixedLeafBytes, frozenDigest(mixedLeafBytes)).targets[0].projectionByOperation["delete-copy"],
+    "in-place",
+  );
   const probeBytes = Buffer.from(JSON.stringify({ ...structurePlan, targets: [{ ...structurePlan.targets[0],
     continuationProbe: "session-ended-no-refocus", operations: FROZEN_STRUCTURE_PROBE_OPERATIONS }] }));
   assert.doesNotThrow(() => readFrozenSelection(probeBytes, frozenDigest(probeBytes)));

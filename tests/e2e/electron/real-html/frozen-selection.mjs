@@ -162,8 +162,17 @@ export function readFrozenSelection(bytes, expectedDigest) {
         ? FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS
         : target.continuationProbe ? FROZEN_STRUCTURE_PROBE_OPERATIONS : FROZEN_STRUCTURE_OPERATIONS),
     "FROZEN_STRUCTURE_CONTRACT_INVALID");
+    const overrides = target.projectionByOperation || {};
+    requireFact(typeof overrides === "object"
+      && Object.keys(overrides).every((operation) => target.operations.includes(operation)
+        && PROJECTION_EXPECTATIONS.has(overrides[operation])),
+    "FROZEN_STRUCTURE_PROJECTION_OVERRIDE_INVALID");
+    Object.freeze(overrides);
+    if (target.expectedProjection !== undefined && !structureClosedLoop) {
+      requireFact(PROJECTION_EXPECTATIONS.has(target.expectedProjection),
+        "FROZEN_STRUCTURE_PROJECTION_OVERRIDE_INVALID");
+    }
     if (structureClosedLoop) {
-      const overrides = target.projectionByOperation || {};
       requireFact(PROJECTION_EXPECTATIONS.has(target.expectedProjection)
         && ID.test(target.destinationParentId || "")
         && target.destinationParentId !== binding.parentId
@@ -171,12 +180,9 @@ export function readFrozenSelection(bytes, expectedDigest) {
         && target.formatCapability?.expected === "AVAILABLE"
         && target.formatCapability?.scope === "element"
         && target.formatCapability?.basis === "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER"
-        && target.continuationProbe === undefined
-        && typeof overrides === "object"
-        && Object.keys(overrides).every((operation) => target.operations.includes(operation)
-          && PROJECTION_EXPECTATIONS.has(overrides[operation])),
+        && target.continuationProbe === undefined,
       "FROZEN_STRUCTURE_CLOSED_LOOP_CONTRACT_INVALID");
-      Object.freeze(overrides); Object.freeze(target.formatCapability);
+      Object.freeze(target.formatCapability);
     }
     for (const value of [binding, target.copyCapability, target.textCapability, target.operations]) Object.freeze(value);
   }
