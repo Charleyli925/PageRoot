@@ -207,11 +207,21 @@ summary, and first failure. If an owned process group cannot be
 confirmed gone after a timeout, the current scenario is recorded as an
 environment block and later scenarios do not start.
 
+Copy rows are independently bound to the source transaction: the parent checks
+the fresh Stable ID, exact source-proof conditions (including a single source
+leaf) and the declared per-cycle output ID before accepting any follow-up
+target. C additionally requires the
+same output ID on `input-restored`, `save-restored` and the reopen result, plus
+candidate/generation/Active/runtime records that are actually associated with
+that candidate. The lifecycle `records` array must equal the ordered
+candidate-plus-lifecycle arrays; a count alone is not evidence. Qualification
+therefore proceeds as P0--P3 (fixed combination, corpus calibration, harness
+self-checks) before private A/B/C or pressure lanes. Without a user-designated
+corpus, preflight and real-document acceptance remain explicitly incomplete.
+
 The public infrastructure chain can be exercised without private HTML with
-the opt-in synthetic sample below. It builds the renderer, runs the real A
-executor, writes its child report and lets the parent entry reconcile it; B and
-C remain protocol-complete fixtures in that unit test. This is engineering
-plumbing evidence, not private real-document acceptance:
+the opt-in synthetic sample below. This is engineering plumbing evidence, not
+private real-document acceptance:
 
 ```bash
 STEMMIO_RUN_PUBLIC_FROZEN_ENTRY=1 \
@@ -219,7 +229,9 @@ STEMMIO_RUN_PUBLIC_FROZEN_ENTRY=1 \
   --test-name-pattern='public opt-in entry smoke'
 ```
 
-The low-level frozen executor still accepts a single reviewed manifest through
+The opt-in fixture uses the real child executor for A, B and C (A/B are a
+small static page and C is a small scripted Runtime page), including child
+reports and aggregate reconciliation. The low-level frozen executor still accepts a single reviewed manifest through
 `STEMMIO_FROZEN_MANIFEST` and `STEMMIO_FROZEN_MANIFEST_SHA256` for focused
 diagnostics. Reviewed plans choose either one selection or the fixed native
 text chain (activate, type, Backspace, save, undo, redo).

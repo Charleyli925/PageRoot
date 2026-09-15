@@ -4,6 +4,7 @@ import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { readPublishedWorkingCopy } from "./e2e/electron/helpers/working-copy-publication.mjs";
+import { buildSourceIndex } from "../app/lib/source-index.js";
 
 import {
   createRealHtmlPlan,
@@ -54,9 +55,28 @@ test("cumulative Undo binds only a previously verified exact-target bookmark", (
     { ...b, actual: { ...b.actual, collapsed: false } }])
     assert.throws(() => verifiedUndoTail(bad, "fixed"), { code: "FROZEN_PRIOR_BOOKMARK_INVALID" });
 });
-import { requireIndependentProjectionExpectation, verifyFrozenCopyCapability, verifyFrozenDenialWitness, verifyFrozenEndedContinuation, verifyFrozenStructureLifecycle } from "./e2e/electron/real-html/frozen-structure.mjs";
+import { requireIndependentProjectionExpectation, resolveFrozenDeleteSelectionLanding, verifyFrozenCopyCapability, verifyFrozenDenialWitness, verifyFrozenEndedContinuation, verifyFrozenStructureLifecycle } from "./e2e/electron/real-html/frozen-structure.mjs";
 import { publicDiagnosticValue } from "./e2e/electron/real-html/diagnostic-sanitizer.mjs";
 import { verifyMixedMarkers, bindMixedSource, verifyFrozenComment, mixedCycleRows, mixedCheckpointOperations, verifyFreshCommentStorage } from "./e2e/electron/real-html/frozen-mixed.mjs";
+
+test("frozen delete landing uses an independent source rule for next, previous, parent and none", () => {
+  const id = (suffix) => `sm1_${suffix.repeat(12)}4${suffix.repeat(3)}8${suffix.repeat(15)}`;
+  const nextSource = `<div data-stemmio-id="${id("a")}"><p data-stemmio-id="${id("b")}">remove</p><p data-stemmio-id="${id("c")}">next</p></div>`;
+  const nextIndex = buildSourceIndex(nextSource);
+  assert.equal(resolveFrozenDeleteSelectionLanding(nextIndex, id("b")), id("c"));
+
+  const previousSource = `<div data-stemmio-id="${id("a")}"><p data-stemmio-id="${id("b")}">previous</p><p data-stemmio-id="${id("c")}">remove</p></div>`;
+  const previousIndex = buildSourceIndex(previousSource);
+  assert.equal(resolveFrozenDeleteSelectionLanding(previousIndex, id("c")), id("b"));
+
+  const parentSource = `<div data-stemmio-id="${id("a")}"><p data-stemmio-id="${id("b")}">remove</p><table data-stemmio-id="${id("c")}"><tr><td>unsupported</td></tr></table></div>`;
+  const parentIndex = buildSourceIndex(parentSource);
+  assert.equal(resolveFrozenDeleteSelectionLanding(parentIndex, id("b")), id("a"));
+
+  const noneSource = `<body><table data-stemmio-id="${id("a")}"><tr><td>remove</td></tr></table></body>`;
+  const noneIndex = buildSourceIndex(noneSource);
+  assert.equal(resolveFrozenDeleteSelectionLanding(noneIndex, id("a")), null);
+});
 
 test("mixed newline markers retain both edits and reject either missing half", () => {
   const content = "PRCORE_H02_C1PRLINE_H02_C1 PRCORE_H02_C1_RESUME";

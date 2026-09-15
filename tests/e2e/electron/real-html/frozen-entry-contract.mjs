@@ -71,6 +71,7 @@ export const FROZEN_SCENARIO_DEFINITIONS = Object.freeze([
 const DEFINITION_BY_ID = new Map(FROZEN_SCENARIO_DEFINITIONS.map((definition) => [definition.id, definition]));
 const SHA256 = /^[a-f0-9]{64}$/u;
 const SHA1 = /^[a-f0-9]{40}$/u;
+const STABLE_ELEMENT_ID = /^sm1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u;
 const VALID_MODES = new Set(["list", "plan", "run", "preflight"]);
 
 function contractError(code, message, details = {}) {
@@ -302,6 +303,7 @@ export function validateFrozenNestedScenarioShape(scenario, nestedPlan) {
       const target = Array.isArray(nestedPlan.targets) ? nestedPlan.targets[0] : null;
       const operations = Array.isArray(target?.operations) ? target.operations : [];
       const forcedRebuild = target?.projectionByOperation?.["move-copy"];
+      const copyProjection = target?.projectionByOperation?.copy || target?.expectedProjection;
       if (nestedPlan.scope !== "core-structure-closed-loop"
         || nestedPlan.operation !== "structure"
         || !["runtime", "static"].includes(nestedPlan.initialRuntime)
@@ -311,6 +313,7 @@ export function validateFrozenNestedScenarioShape(scenario, nestedPlan) {
         || !operations.includes("input-restored")
         || !operations.includes("save-restored")
         || !["candidate", "recovered"].includes(forcedRebuild)
+        || !["candidate", "recovered"].includes(copyProjection)
         || !["runtime-candidate", "static-rebuild"].includes(target?.rebuildPath)) {
         contractError(
           "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID",
@@ -397,6 +400,73 @@ function normalizeSelectionOperation(row) {
   };
 }
 
+function copyOutputId(row) {
+  const actual = row?.actual;
+  const source = actual?.source || actual?.result?.source;
+  const id = source?.copyId || actual?.copyId || actual?.result?.copyId;
+  return typeof id === "string" && id.trim() !== "" ? id : null;
+}
+
+function copyOutputRows(rows, sourceId) {
+  return Array.isArray(rows)
+    ? rows.filter((row) => row?.operation === "copy" && row?.targetId === sourceId)
+    : [];
+}
+
+const COPY_SOURCE_CONDITIONS = Object.freeze([
+  "originalUnique", "originalBytesMatch", "originalLeaf", "parentMatches", "siblingMatches", "offsetMatches",
+  "positiveInsertion", "prefixUnchanged", "suffixUnchanged", "oneLeafInserted", "freshId",
+  "idsUnique", "exactlyOneAdded", "copyAttributeShape", "equivalentBytes", "copyParentMatches",
+]);
+
+function validateOutputBindings(scenario, nestedPlan, report) {
+  const mismatches = [];
+  const bindings = [];
+  const check = ({ cycle = null, rows, sourceId, declaredId }) => {
+    const candidates = copyOutputRows(rows, sourceId);
+    const row = candidates.length === 1 ? candidates[0] : null;
+    const actualId = copyOutputId(row);
+    const conditions = row?.actual?.source?.conditions || row?.actual?.result?.source?.conditions;
+    const conditionsMatch = COPY_SOURCE_CONDITIONS.every((key) => conditions?.[key] === true);
+    if (candidates.length !== 1 || !row) {
+      mismatches.push({ cycle, reason: "COPY_ROW_MISSING_OR_DUPLICATE", sourceId, count: candidates.length });
+    }
+    if (!STABLE_ELEMENT_ID.test(actualId || "") || actualId === sourceId) {
+      mismatches.push({ cycle, reason: "COPY_OUTPUT_ID_INVALID", sourceId, actualId });
+    }
+    if (!conditionsMatch) {
+      mismatches.push({ cycle, reason: "COPY_SOURCE_PROOF_INCOMPLETE", conditions: conditions || null });
+    }
+    if (declaredId !== actualId) {
+      mismatches.push({ cycle, reason: "COPY_OUTPUT_SUMMARY_MISMATCH", declaredId, actualId });
+    }
+    bindings.push({ cycle, sourceId, id: actualId });
+  };
+  if (scenario.id === "B") {
+    const structureTarget = nestedPlan?.targets?.[1];
+    const cycles = Array.isArray(report.mixed?.cycles) ? report.mixed.cycles : [];
+    for (let index = 0; index < (nestedPlan?.cycles || 0); index += 1) {
+      check({ cycle: index + 1, rows: cycles[index]?.structure, sourceId: structureTarget?.selectedId,
+        declaredId: report.mixed?.copyIds?.[index] });
+    }
+    if (!Array.isArray(report.mixed?.copyIds)
+      || report.mixed.copyIds.length !== nestedPlan.cycles
+      || new Set(report.mixed.copyIds).size !== report.mixed.copyIds.length) {
+      mismatches.push({ reason: "COPY_OUTPUT_SUMMARY_SHAPE_INVALID", copyIds: report.mixed?.copyIds || null });
+    }
+  } else if (scenario.id === "C") {
+    const target = nestedPlan?.targets?.[0];
+    check({ rows: report.structureOperations, sourceId: target?.selectedId, declaredId: report.structure?.copyId });
+  }
+  if (mismatches.length > 0) {
+    contractError("FROZEN_ENTRY_CHILD_OUTPUT_BINDING_MISMATCH",
+      `Scenario ${scenario.id} report does not bind the copy output to its verified source transaction.`, {
+        scenarioId: scenario.id, mismatches,
+      });
+  }
+  return bindings;
+}
+
 function operationGroups(scenario, nestedPlan, report) {
   const groups = [];
   const add = (stage, expectedOperations, actualRows, cycle = null, actualCycle = null) => {
@@ -414,7 +484,7 @@ function operationGroups(scenario, nestedPlan, report) {
     const cycles = Array.isArray(report.mixed?.cycles) ? report.mixed.cycles : [];
     for (let index = 0; index < (nestedPlan?.cycles || 0); index += 1) {
       const actual = cycles[index];
-      const copyId = report.mixed?.copyIds?.[index] || null;
+      const copyId = copyOutputId(copyOutputRows(actual?.structure, structureTarget?.selectedId)[0]);
       add("control", FROZEN_MIXED_CONTROL_OPERATIONS.map((operation) => ({
         operation,
         targetId: operation === "select-structure" ? structureTarget?.selectedId : textTarget?.selectedId,
@@ -424,7 +494,8 @@ function operationGroups(scenario, nestedPlan, report) {
       })), actual?.text, index + 1, actual?.cycle);
       add("structure", (structureTarget?.operations || []).map((operation, operationIndex) => ({
         operation,
-        targetId: operationIndex === 0 ? structureTarget?.selectedId : copyId,
+        targetId: operationIndex === 0 || operation.startsWith("probe-")
+          ? structureTarget?.selectedId : copyId,
       })), actual?.structure, index + 1, actual?.cycle);
       add("continuation", continuationOperations(textTarget).map((operation) => ({
         operation, targetId: textTarget?.selectedId,
@@ -434,7 +505,7 @@ function operationGroups(scenario, nestedPlan, report) {
       { length: nestedPlan?.cycles || 0 }, (_, index) => `delete-comment-${index + 1}`,
     )].map((operation) => ({ operation, targetId: textTarget?.selectedId })), report.mixed?.checkpoint);
   } else if (scenario.id === "C") {
-    const copyId = report.structure?.copyId || null;
+    const copyId = copyOutputId(copyOutputRows(report.structureOperations, target?.selectedId)[0]);
     add("selection", [{ operation: "select", targetId: target?.selectedId }], [normalizeSelectionOperation(report.operation)]);
     add("structure", (target?.operations || []).map((operation, operationIndex) => ({
       operation,
@@ -474,15 +545,6 @@ function reconcileOperationLedger(scenario, nestedPlan, report) {
       }
     }
   }
-  if (scenario.id === "B") {
-    const copyIds = report.mixed?.copyIds;
-    if (!Array.isArray(copyIds)
-      || copyIds.length !== nestedPlan.cycles
-      || copyIds.some((id) => typeof id !== "string" || id.length === 0)
-      || new Set(copyIds).size !== copyIds.length) {
-      mismatches.push({ stage: "structure-output", expectedCycles: nestedPlan.cycles, actualCopyIds: copyIds || null });
-    }
-  }
   if (mismatches.length > 0) {
     contractError(
       "FROZEN_ENTRY_CHILD_OPERATION_LEDGER_MISMATCH",
@@ -490,7 +552,8 @@ function reconcileOperationLedger(scenario, nestedPlan, report) {
       { scenarioId: scenario.id, mismatches },
     );
   }
-  return groups.flatMap((group) => group.actualRows);
+  const outputBindings = validateOutputBindings(scenario, nestedPlan, report);
+  return { rows: groups.flatMap((group) => group.actualRows), outputBindings };
 }
 
 function requireCompleteEvidence(condition, code, details) {
@@ -499,18 +562,48 @@ function requireCompleteEvidence(condition, code, details) {
 
 function validateOperationEvidence(rows, scenario) {
   for (const [index, row] of rows.entries()) {
+    const actual = row?.actual;
+    const actualObject = actual && typeof actual === "object" && !Array.isArray(actual)
+      && Object.keys(actual).length > 0;
+    const actualScalar = typeof actual === "string" && actual.trim() !== "";
+    const operationFact = (() => {
+      if (["input", "input-copy", "input-restored"].includes(row?.operation)) {
+        return actualObject && typeof actual.appended === "string" && actual.appended.length > 0;
+      }
+      if (["backspace", "delete-forward"].includes(row?.operation)) {
+        return actualObject && typeof actual.removed === "string" && actual.removed.length > 0;
+      }
+      if (["save", "save-copy", "save-restored", "save-newline"].includes(row?.operation)) {
+        return actualObject && (
+          SHA256.test(actual.sourceSha256 || "")
+          || SHA256.test(actual.restoredSha256 || "")
+          || typeof actual.sourceContains === "string"
+          || (actual.changedRanges && typeof actual.changedRanges === "object")
+          || typeof actual.outsideUnchanged === "boolean"
+        );
+      }
+      if (row?.operation === "copy") {
+        return actualObject && (actual.source || actual.copyId || actual.result);
+      }
+      if (row?.operation === "move-copy") {
+        return actualObject && (actual.runtime || actual.outcome || actual.planned);
+      }
+      return actualObject || actualScalar;
+    })();
     requireCompleteEvidence(row?.state === "PASS"
       && typeof row.reason === "string" && row.reason.trim() !== ""
-      && Number.isFinite(row.durationMs) && row.durationMs >= 0,
+      && Number.isFinite(row.durationMs) && row.durationMs >= 0
+      && operationFact,
     "FROZEN_ENTRY_CHILD_OPERATION_EVIDENCE_INVALID", {
       scenarioId: scenario.id, sequence: index + 1,
       operation: row?.operation || null,
+      actual: actual ?? null,
       reason: row?.reason || null, durationMs: row?.durationMs ?? null,
     });
   }
 }
 
-function validateSourceEvidence(report, scenario) {
+function validateSourceEvidence(report, scenario, nestedPlan) {
   const source = report.source;
   const finalSource = report.finalSource;
   const display = report.display;
@@ -527,21 +620,53 @@ function validateSourceEvidence(report, scenario) {
       && Number.isFinite(report.reopen.durationMs) && report.reopen.durationMs >= 0
       && report.reopen.source?.hashMatches === true && report.reopen.source?.sizeMatches === true
       && report.reopen.display?.workingMatches === true
-      && report.reopen.display?.displayedMatches === true,
+      && report.reopen.display?.displayedMatches === true
+      && report.reopen.target?.id === nestedPlan?.targets?.[0]?.selectedId
+      && report.reopen.target?.tag === nestedPlan?.targets?.[0]?.selectedTag,
     "FROZEN_ENTRY_CHILD_REOPEN_EVIDENCE_INVALID", {
       scenarioId: scenario.id, reopen: report.reopen,
     });
   }
 }
 
-function validateLifecycleEvidence(report, scenario, nestedPlan) {
+function validateRuntimeConfiguration(report, scenario, nestedPlan) {
+  const initial = report.runtimeConfig;
+  const reopened = report.reopen?.runtimeConfig;
+  const expectedStructuralInPlace = scenario.id === "C"
+    && ["candidate", "recovered"].includes(nestedPlan?.targets?.[0]
+      ?.projectionByOperation?.["move-copy"])
+    ? "disabled" : "enabled";
+  const validWindowMode = ["hidden", "visible-background", "foreground"].includes(initial?.windowMode);
+  requireCompleteEvidence(validWindowMode
+    && initial.structuralInPlace === expectedStructuralInPlace
+    && (!report.reopen || (reopened?.windowMode === initial.windowMode
+      && reopened?.structuralInPlace === initial.structuralInPlace)),
+  "FROZEN_ENTRY_RUNTIME_CONFIGURATION_INVALID", {
+    scenarioId: scenario.id, expectedStructuralInPlace, initial, reopened,
+  });
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function validateLifecycleEvidence(report, scenario, nestedPlan, rebuildRow = null) {
   const lifecycle = report.lifecycle;
+  const candidateRecords = lifecycle?.candidateRecords;
+  const lifecycleRecords = lifecycle?.lifecycleRecords;
+  const expectedRecords = Array.isArray(candidateRecords) && Array.isArray(lifecycleRecords)
+    ? [...candidateRecords, ...lifecycleRecords] : [];
   requireCompleteEvidence(lifecycle && typeof lifecycle === "object"
     && Array.isArray(lifecycle.records)
-    && Array.isArray(lifecycle.candidateRecords)
-    && Array.isArray(lifecycle.lifecycleRecords)
-    && lifecycle.records.length === lifecycle.candidateRecords.length + lifecycle.lifecycleRecords.length
-    && [...lifecycle.records, ...lifecycle.candidateRecords, ...lifecycle.lifecycleRecords]
+    && Array.isArray(candidateRecords)
+    && Array.isArray(lifecycleRecords)
+    && lifecycle.records.length === expectedRecords.length
+    && lifecycle.records.every((record, index) => canonicalJson(record) === canonicalJson(expectedRecords[index]))
+    && [...candidateRecords, ...lifecycleRecords]
       .every((record) => record && typeof record === "object"
         && typeof record.kind === "string" && record.kind.trim() !== ""),
   "FROZEN_ENTRY_CHILD_LIFECYCLE_EVIDENCE_INVALID", {
@@ -549,13 +674,31 @@ function validateLifecycleEvidence(report, scenario, nestedPlan) {
   });
   if (scenario.id !== "C") return;
   const expectedPath = nestedPlan.targets?.[0]?.rebuildPath;
-  if (expectedPath !== "runtime-candidate") return;
-  const kinds = new Set(lifecycle.lifecycleRecords.map((record) => record?.kind));
+  if (expectedPath !== "runtime-candidate") {
+    requireCompleteEvidence(candidateRecords.length === 0,
+      "FROZEN_ENTRY_CHILD_STATIC_LIFECYCLE_INVALID", { scenarioId: scenario.id, lifecycle });
+    return;
+  }
+  const kinds = new Set(lifecycleRecords.map((record) => record?.kind));
+  const runtime = rebuildRow?.actual?.runtime;
+  const candidateId = runtime?.candidateId;
+  const generation = String(runtime?.generation || "");
+  const generationRecord = lifecycleRecords.find((record) => record?.kind === "generation"
+    && String(record.afterGeneration || record.generation || "") === generation
+    && record.candidateId === candidateId);
   requireCompleteEvidence(
     ["rebuild-request", "generation", "runtime-terminal"].every((kind) => kinds.has(kind))
-      && lifecycle.candidateRecords.some((record) => record?.kind === "candidate-created")
-      && lifecycle.lifecycleRecords.some((record) => record?.kind === "candidate-terminal")
-      && lifecycle.lifecycleRecords.some((record) => record?.kind === "active-identity"),
+      && typeof candidateId === "string" && candidateId.trim() !== ""
+      && candidateRecords.some((record) => record?.kind === "candidate-created"
+        && record.candidateId === candidateId)
+      && lifecycleRecords.some((record) => record?.kind === "candidate-terminal"
+        && record.candidateId === candidateId && record.terminal === "ready")
+      && Boolean(generationRecord)
+      && lifecycleRecords.some((record) => record?.kind === "active-identity"
+        && record.candidateId === candidateId && String(record.generation || "") === generation)
+      && lifecycleRecords.some((record) => record?.kind === "runtime-terminal"
+        && record.candidateId === candidateId && String(record.generation || "") === generation
+        && record.phase === "settled" && (record.outcome === "ready" || record.terminal === "ready")),
     "FROZEN_ENTRY_CHILD_REBUILD_LIFECYCLE_INVALID",
     { scenarioId: scenario.id, expectedPath, lifecycle },
   );
@@ -592,6 +735,17 @@ function validateRebuildEvidence(row, nestedPlan) {
   });
 }
 
+function validateRebuildContinuation(rows, copyId) {
+  const input = rows.find((row) => row?.operation === "input-restored");
+  const save = rows.find((row) => row?.operation === "save-restored");
+  requireCompleteEvidence(input?.actual?.id === copyId
+    && typeof input.actual.appended === "string" && input.actual.appended.length > 0
+    && SHA256.test(save?.actual?.restoredSha256 || "")
+    && Number.isSafeInteger(save?.actual?.persistedRevision)
+    && save.actual.persistedRevision >= 0,
+  "FROZEN_ENTRY_CHILD_REBUILD_CONTINUATION_INVALID", { copyId, input: input?.actual, save: save?.actual });
+}
+
 /**
  * Validate the child result protocol before a parent scenario may become PASS.
  * This keeps exit code as a necessary signal, not the result oracle.
@@ -614,7 +768,12 @@ export function summarizeFrozenScenarioReport(report, scenario, nestedPlan, curr
     contractError("FROZEN_ENTRY_CHILD_REPORT_STATE_INVALID", `Scenario ${scenario.id} child report has an invalid state.`);
   }
   let rows = knownOperationRows(scenario, nestedPlan, report);
-  if (report.state === "PASS") rows = reconcileOperationLedger(scenario, nestedPlan, report);
+  let outputBindings = null;
+  if (report.state === "PASS") {
+    const reconciled = reconcileOperationLedger(scenario, nestedPlan, report);
+    rows = reconciled.rows;
+    outputBindings = reconciled.outputBindings;
+  }
   const failures = rows.filter((row) => row?.state !== "PASS");
   if (report.state === "PASS") {
     if (rows.length === 0 || failures.length > 0 || report.cleanup !== "PASS") {
@@ -632,16 +791,17 @@ export function summarizeFrozenScenarioReport(report, scenario, nestedPlan, curr
       contractError("FROZEN_ENTRY_CHILD_MIXED_CYCLES_MISSING", "Scenario B PASS report is missing one report group per frozen cycle.");
     }
     validateOperationEvidence(rows, scenario);
-    validateSourceEvidence(report, scenario);
-    validateLifecycleEvidence(report, scenario, nestedPlan);
+    validateSourceEvidence(report, scenario, nestedPlan);
+    validateRuntimeConfiguration(report, scenario, nestedPlan);
+    const rebuildRow = rows.find((candidate) => candidate.operation === "move-copy");
+    validateLifecycleEvidence(report, scenario, nestedPlan, rebuildRow);
     if (scenario.id === "C") {
-      validateRebuildEvidence(rows.find((candidate) => candidate.operation === "move-copy"), nestedPlan);
-      requireCompleteEvidence(
-        rows.some((candidate) => candidate.operation === "input-restored" && candidate.state === "PASS")
-          && rows.some((candidate) => candidate.operation === "save-restored" && candidate.state === "PASS"),
-        "FROZEN_ENTRY_CHILD_REBUILD_CONTINUATION_MISSING",
-        { scenarioId: scenario.id },
-      );
+      validateRebuildEvidence(rebuildRow, nestedPlan);
+      const outputId = copyOutputId(copyOutputRows(report.structureOperations, nestedPlan.targets?.[0]?.selectedId)[0]);
+      validateRebuildContinuation(rows, outputId);
+      requireCompleteEvidence(report.reopen?.output?.id === outputId
+        && report.reopen.output.present === (report.structure?.reopenCopyPresent === true),
+      "FROZEN_ENTRY_CHILD_REBUILD_REOPEN_INVALID", { outputId, reopen: report.reopen?.output });
     }
   } else if (report.state === "FAIL" && !report.firstFailure) {
     contractError("FROZEN_ENTRY_CHILD_FAILURE_EVIDENCE_MISSING", `Scenario ${scenario.id} FAIL report is missing firstFailure.`);
@@ -667,6 +827,7 @@ export function summarizeFrozenScenarioReport(report, scenario, nestedPlan, curr
       reason: row.reason || null,
       durationMs: Number.isFinite(row.durationMs) ? row.durationMs : null,
     })),
+    outputBindings,
     source: report.source,
     display: report.display?.conditions || null,
     finalSource: report.finalSource,
