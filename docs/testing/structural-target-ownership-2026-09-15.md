@@ -143,3 +143,33 @@ PR 只包含源码、测试和本报告；用户 HTML、附件、截图、私有
 | 任意 HTML 插入与 action/destination 别名 | 无消费者 | 已删除接线与兼容别名 |
 
 本节不构成私有真实语料签收，也不改变本 PR 的 Draft、未合并、未 Ready、未打包发布状态。
+
+## #558 追加 Node identity 与 authority canary 收口（2026-09-16）
+
+本节追加记录评审评论 `5686070658` 指出的合并前阻断，源码修正绑定提交
+`1063b16a`，并已用普通 merge 同步 `origin/main` 的 `9d7e03ce`（同步提交
+`0ca8b1c1`）。不改写上节针对前一源码树的历史证据。
+
+- Native Edit 的 rebase 回调现在先在受控 mutation 内为本次 kernel 分配的准确
+  `<br>` DOM 对象完成严格 creation-ticket grant，再由
+  `IslandEditingController` 克隆 `baselineChildren` 与 `lastValidatedChildren`。
+  缺失、断连、代次/执行身份不符或对象集合不完整时返回失败，沿用已接受源码的
+  统一恢复路径；静态页不虚构 Runtime 授权，也不再通过新 ID 重新扫描授信。
+- 复制、删除、移动的 UI 预判对当前有效 Native Edit lease 拥有的 dirty 草稿采用
+  同一暂时放行语义；命令执行仍会先 checkpoint，再进行完整 Runtime↔Source
+  proof，作者漂移仍 fail closed。
+- 旧的 tab-remount canary 已改名以限定证明范围；新增真实“从磁盘重新载入 HTML”
+  的 explicit same-byte authority canary，分别验证新 Document/generation、相同
+  Working HTML Hash 和 Stable ID。二者不混写成同一种 authority 入口。
+
+### 本轮定向证据
+
+| 验证 | 结果 |
+| --- | --- |
+| `npm run typecheck`、结构策略/投影/Runtime grant Node 定向测试 | 通过；25/25 Node 用例 |
+| 变更 Electron 用例：Enter checkpoint 后同 ID 作者替身、dirty UI 上移/下移/删除、tab-remount、explicit reload | 通过；4/4 |
+| 既有 Electron 回归：立即复制、Enter 立即复制、composition 复制、accepted rebase recovery | 通过；4/4 |
+| 私有八文件语料 | 未执行/阻断：仍为 discovery 阶段 `DISCOVERY_ERROR`，没有合成替代或换目标 |
+
+该追加记录不把公共 canary 或定向回归扩大为私有真实语料签收；最终合并仍以最终
+exact head 的任务门禁、`release-gate` 和线上 required checks 为准。
