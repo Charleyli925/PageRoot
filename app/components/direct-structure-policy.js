@@ -147,7 +147,11 @@ const SPECIAL_STRUCTURE_TAGS = new Set([
 ]);
 
 const MOVE_BLOCKED_PARENT_TAGS = new Set([
-  ...ROOT_TAGS,
+  // `body` is a valid ordinary container for adjacent source children.  The
+  // target itself may not be a document root, but body-owned paragraphs and
+  // headings remain eligible for same-parent reorder.
+  "html",
+  "head",
   "caption",
   "col",
   "colgroup",
@@ -252,36 +256,14 @@ const REASON_MESSAGES = Object.freeze({
   "delete-target-root": "Document roots and source containers cannot be deleted directly.",
   "delete-special-structure": "Special structure cannot be deleted through the direct path.",
   "delete-mixed-content": "Text or comments make the delete/undo boundary ambiguous.",
-  "delete-landing-unavailable": "No legal source selection landing can be proven after deletion.",
   "delete-supported": "The source element is eligible for direct deletion.",
   "direct-html-insert-unsupported": "Direct HTML insertion is not admitted by this policy.",
   "action-unsupported": "This structure action is not admitted by the direct policy.",
 });
 
-const ACTION_ALIASES = new Map([
-  ["copy", "copy"],
-  ["copy-element", "copy"],
-  ["duplicate", "copy"],
-  ["duplicate-element", "copy"],
-  ["duplicateelement", "copy"],
-  ["move", "move"],
-  ["move-element", "move"],
-  ["moveelement", "move"],
-  ["reorder", "move"],
-  ["sibling-reorder", "move"],
-  ["delete", "delete"],
-  ["delete-element", "delete"],
-  ["deleteelement", "delete"],
-  ["remove", "delete"],
-  ["insert", "insert"],
-  ["insert-element", "insert"],
-  ["insertelement", "insert"],
-  ["html-insert", "insert"],
-]);
-
 function normalizeAction(action) {
   const value = String(action ?? "").trim().toLowerCase();
-  return ACTION_ALIASES.get(value) ?? null;
+  return DIRECT_STRUCTURE_ACTIONS.includes(value) ? value : null;
 }
 
 function decision(status, reason, details = {}) {
@@ -579,9 +561,11 @@ function unsupportedAncestorReason(sourceIndex, target, operation) {
   let parentId = target?.parentId ?? null;
   while (parentId) {
     const parent = sourceIndex.byNodeId.get(parentId);
-    if (!parent || parent.type !== "element") return operation === "copy"
-      ? "copy-invalid-source"
-      : "delete-special-structure";
+    if (!parent || parent.type !== "element") {
+      if (operation === "copy") return "copy-invalid-source";
+      if (operation === "move") return "move-target-special";
+      return "delete-special-structure";
+    }
     const tag = normalizedTag(parent);
     const blocked = !isHtmlElement(parent)
       || hasCustomizedBuiltIn(parent)
@@ -589,9 +573,11 @@ function unsupportedAncestorReason(sourceIndex, target, operation) {
       || (SPECIAL_STRUCTURE_TAGS.has(tag)
         && !ROOT_TAGS.has(tag)
         && !NESTED_LIST_TAGS.has(tag));
-    if (blocked) return operation === "copy"
-      ? "copy-parent-special-structure"
-      : "delete-special-structure";
+    if (blocked) {
+      if (operation === "copy") return "copy-parent-special-structure";
+      if (operation === "move") return "move-target-special";
+      return "delete-special-structure";
+    }
     parentId = parent.parentId;
   }
   return null;
@@ -599,15 +585,6 @@ function unsupportedAncestorReason(sourceIndex, target, operation) {
 
 function canonicalElementId(element) {
   return element?.stemmioId ? String(element.stemmioId) : null;
-}
-
-function destinationValue(destination, ...names) {
-  for (const name of names) {
-    if (destination && Object.prototype.hasOwnProperty.call(destination, name)) {
-      return destination[name];
-    }
-  }
-  return undefined;
 }
 
 function directMoveDestination(sourceIndex, target, destination) {
@@ -623,11 +600,7 @@ function directMoveDestination(sourceIndex, target, destination) {
   const currentIndex = siblings.indexOf(target);
   if (currentIndex < 0) return { kind: "unsupported", reason: "move-destination-invalid" };
 
-  let destinationParentId = destinationValue(
-    destination,
-    "parentElementId",
-    "parentId",
-  );
+  let destinationParentId = destination.parentElementId;
   if (destinationParentId == null && destination.direction) {
     destinationParentId = canonicalElementId(sourceParent);
   }
@@ -645,14 +618,12 @@ function directMoveDestination(sourceIndex, target, destination) {
     return { kind: "unsupported", reason: "move-cross-parent" };
   }
 
-  const direction = destinationValue(destination, "direction");
-  const requestedIndex = destinationValue(destination, "index", "toIndex", "siblingIndex");
-  let beforeElementId = destinationValue(
-    destination,
-    "beforeElementId",
-    "beforeId",
-  );
-  if (beforeElementId === undefined && !direction && requestedIndex === undefined) {
+  const direction = destination.direction;
+  if (direction !== undefined && direction !== "up" && direction !== "down") {
+    return { kind: "unsupported", reason: "move-destination-invalid" };
+  }
+  let beforeElementId = destination.beforeElementId;
+  if (beforeElementId === undefined && !direction) {
     return { kind: "temporary", reason: "move-destination-unavailable" };
   }
   if (beforeElementId !== undefined && beforeElementId !== null) {
@@ -664,20 +635,6 @@ function directMoveDestination(sourceIndex, target, destination) {
       beforeElementId = canonicalElementId(siblings[currentIndex + 2]) ?? null;
     } else {
       return { kind: "unsupported", reason: "move-destination-invalid" };
-    }
-  } else if (requestedIndex !== undefined) {
-    if (!Number.isInteger(requestedIndex)) {
-      return { kind: "unsupported", reason: "move-destination-invalid" };
-    }
-    if (requestedIndex < 0 || requestedIndex >= siblings.length) {
-      return { kind: "unsupported", reason: "move-destination-invalid" };
-    }
-    if (requestedIndex < currentIndex) {
-      beforeElementId = canonicalElementId(siblings[requestedIndex]);
-    } else if (requestedIndex > currentIndex) {
-      beforeElementId = canonicalElementId(siblings[requestedIndex + 1]) ?? null;
-    } else {
-      return { kind: "unsupported", reason: "move-noop" };
     }
   }
 
@@ -740,6 +697,8 @@ function isDescendant(sourceIndex, ancestor, candidate) {
 function moveDecision(sourceIndex, target, destination) {
   const tag = normalizedTag(target);
   if (!target.parentId || ROOT_TAGS.has(tag)) return unsupported("move-target-root");
+  const ancestorReason = unsupportedAncestorReason(sourceIndex, target, "move");
+  if (ancestorReason) return unsupported(ancestorReason);
   if (!isHtmlElement(target) || hasCustomizedBuiltIn(target) || isCustomElement(target)
     || SPECIAL_STRUCTURE_TAGS.has(tag) || target.explicitEndTag === false) {
     return unsupported("move-target-special");
@@ -804,6 +763,17 @@ function landingElement(sourceIndex, element) {
   return null;
 }
 
+/**
+ * Resolve the one source-backed element that should own selection after a
+ * direct delete.  The structural projection and the admission policy both
+ * consume this helper so a control/custom/special sibling cannot be admitted
+ * by one path and selected by another.
+ */
+export function resolveDirectDeleteSelectionLanding(sourceIndex, removedRootElementId) {
+  const target = sourceElementById(sourceIndex, removedRootElementId);
+  return target ? canonicalElementId(landingElement(sourceIndex, target)) : null;
+}
+
 function deleteSubtreeIsSafe(sourceIndex, target) {
   const subtree = descendants(sourceIndex, target);
   if (!subtree) return false;
@@ -828,10 +798,14 @@ function deleteDecision(sourceIndex, target) {
     return unsupported("delete-mixed-content");
   }
   if (!deleteSubtreeIsSafe(sourceIndex, target)) return unsupported("delete-special-structure");
-  const landing = landingElement(sourceIndex, target);
-  if (!landing) return unsupported("delete-landing-unavailable");
   return supported("delete-supported", {
-    landingElementId: canonicalElementId(landing),
+    // A safe delete may legitimately leave no selectable source element.  The
+    // command then clears selection; source/history safety is independent of
+    // whether a post-delete landing exists.
+    landingElementId: resolveDirectDeleteSelectionLanding(
+      sourceIndex,
+      canonicalElementId(target),
+    ),
   });
 }
 
@@ -874,11 +848,7 @@ export function evaluateDirectStructurePolicy({
   return unsupported("action-unsupported");
 }
 
-/**
- * Copy-only convenience entry point for pointer/UI capability and command
- * callers.  `copy` is an alias kept intentionally small for callers that
- * already name their operation by verb.
- */
+/** Copy-only entry point for pointer/UI capability and command callers. */
 export function directCopyPolicyForElement({
   sourceIndex,
   selection,
@@ -897,5 +867,3 @@ export function directCopyPolicyForElement({
     copyPolicy: result.copyPolicy ?? result.status,
   });
 }
-
-export const copy = directCopyPolicyForElement;

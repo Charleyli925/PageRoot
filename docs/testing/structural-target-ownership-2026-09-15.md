@@ -107,3 +107,39 @@ npm run test:real-html:electron
 ## 隐私与交付边界
 
 PR 只包含源码、测试和本报告；用户 HTML、附件、截图、私有绝对路径、项目记录和生成二进制均留在本机临时目录。此 PR 保持 Draft，不执行 Ready、合并、打包或发布。
+
+## #558 评审修正记录（2026-09-16）
+
+本节独立记录本轮收窄直接编辑能力与重建闭环的修正，不改写上文针对此前提交的历史结果。最终提交 exact head 将由包含本节的修正提交固定；在提交前，所有验证均绑定当前隔离 worktree 的同一源码树。
+
+### 本轮范围与结果
+
+- 复制的完整 Runtime↔Source 子树证明移到当前 Native Edit lease 完成 checkpoint 之后；已知不支持的源码范围仍在收束前拒绝，作者脚本造成的漂移仍拒绝。
+- C 场景的同父移动参数改为单个序列化对象，真实公共 A/B/C smoke 已完成 C recovery 全链；另有独立 Electron canary 覆盖同字节 authority reload、重新绑定、续写、保存和重开。
+- 删除准入与投影落点共用 `resolveDirectDeleteSelectionLanding`；没有合法后续对象时允许准确删除并清空选择。body 可作为普通子元素的同父移动父级，但 `html/head` 与 body 本身仍不是移动目标。
+- 复制、移动、删除共用特殊祖先边界；UI reorder 与结构命令都执行有限 Runtime 子树证明，覆盖运行时生成的 Canvas/表格和 closed Shadow DOM 宿主。
+- 删除无消费者的 action/destination 别名与泛用兼容参数；共享源码原语、Native Edit、Undo/Redo、Candidate 恢复和输入优先协调器保留。
+
+### 修正后验证（当前源码树）
+
+| 验证 | 结果 |
+| --- | --- |
+| `npm run gate:edit` | 通过：2,413 passed、1 skipped、0 failed；保留既有架构预算 advisory |
+| 结构策略、投影与真实语料契约 Node 定向测试 | 通过：81/81 |
+| 变更 `.mjs` `node --check` | 通过 |
+| 变更文件 ESLint | 通过：0 errors；仅既有 warning |
+| Electron 立即复制、Enter、composition、动态宿主、null 落点、authority reload | 通过：各定向用例通过 |
+| 真实公共 A/B/C opt-in smoke | 通过：A/H99、B/H97、C/H98 全链完成 |
+| 私有八文件语料 | 未执行/阻断：仍为 discovery 阶段 `DISCOVERY_ERROR`，没有合成替代或换目标 |
+
+### 消费者与退役口径
+
+| 责任 | 当前 owner | 处置 |
+| --- | --- | --- |
+| 直接结构准入与有限 Runtime 证明 | `direct-structure-policy.js` + `HtmlCanvasEditor.tsx` | 保留；入口拒绝已知不支持范围 |
+| 删除后落点 | `resolveDirectDeleteSelectionLanding` | 保留单一生产事实；策略、投影和输出选择复用 |
+| 共享源码物化、历史和恢复 | 既有 SourcePatch/结构命令与统一恢复路径 | 保留；没有新增专用重建分支 |
+| C recovery / C authority | 冻结公共 C 的 accepted-projection-failure；独立 authority canary | 分开记录，不把注入失败当作普通闭环前提 |
+| 任意 HTML 插入与 action/destination 别名 | 无消费者 | 已删除接线与兼容别名 |
+
+本节不构成私有真实语料签收，也不改变本 PR 的 Draft、未合并、未 Ready、未打包发布状态。

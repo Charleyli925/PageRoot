@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  copy,
   directCopyPolicyForElement,
   evaluateDirectStructurePolicy,
 } from "../app/components/direct-structure-policy.js";
@@ -58,7 +57,6 @@ test("copy admits only safe text roots and keeps ID allocation with the kernel",
   assert.equal(result.status, "supported");
   assert.equal(result.reason, "copy-supported");
   assert.equal(result.copyPolicy, "supported");
-  assert.equal(copy({ sourceIndex, elementId: ids.first }).status, "supported");
   assert.equal(sourceIndex.byStemmioId.get(ids.first).stemmioId, ids.first);
 });
 
@@ -200,6 +198,18 @@ test("move admits one adjacent same-parent step and rejects cross-parent/non-adj
   });
   assert.equal(nonAdjacent.status, "unsupported");
   assert.equal(nonAdjacent.reason, "move-non-adjacent");
+
+  const bodyChildren = fixture(
+    `<p data-stemmio-id="${ids.first}">A</p><p data-stemmio-id="${ids.second}">B</p>`,
+  );
+  const bodyMove = evaluateDirectStructurePolicy({
+    action: "move",
+    sourceIndex: bodyChildren.sourceIndex,
+    elementId: ids.first,
+    destination: { parentElementId: ids.body, beforeElementId: null },
+  });
+  assert.equal(bodyMove.status, "supported");
+  assert.equal(bodyMove.direction, "down");
 });
 
 test("move rejects special parents, roots and mixed-content sibling boundaries", () => {
@@ -223,9 +233,23 @@ test("move rejects special parents, roots and mixed-content sibling boundaries",
   });
   assert.equal(mixed.status, "unsupported");
   assert.equal(mixed.reason, "move-mixed-content");
+
+  const widgetId = "sm1_00000000000040008000000000000020";
+  const innerId = "sm1_00000000000040008000000000000021";
+  const nestedWidget = fixture(
+    `<x-widget data-stemmio-id="${widgetId}"><div data-stemmio-id="${innerId}"><p data-stemmio-id="${ids.first}">A</p><p data-stemmio-id="${ids.second}">B</p></div></x-widget>`,
+  );
+  const nestedWidgetMove = evaluateDirectStructurePolicy({
+    action: "move",
+    sourceIndex: nestedWidget.sourceIndex,
+    elementId: ids.second,
+    destination: { parentElementId: innerId, beforeElementId: ids.first },
+  });
+  assert.equal(nestedWidgetMove.status, "unsupported");
+  assert.equal(nestedWidgetMove.reason, "move-target-special");
 });
 
-test("delete is wider than copy but requires a legal source landing", () => {
+test("delete uses one source landing rule and can clear selection when none exists", () => {
   const { sourceIndex } = fixture(`<section data-stemmio-id="${ids.section}"><div data-stemmio-id="${ids.first}"><p>nested block</p></div><p data-stemmio-id="${ids.second}">B</p></section>`);
   const result = evaluateDirectStructurePolicy({
     action: "delete",
@@ -250,8 +274,20 @@ test("delete is wider than copy but requires a legal source landing", () => {
     sourceIndex: noLanding.sourceIndex,
     elementId: ids.first,
   });
-  assert.equal(noLandingResult.status, "unsupported");
-  assert.equal(noLandingResult.reason, "delete-landing-unavailable");
+  assert.equal(noLandingResult.status, "supported");
+  assert.equal(noLandingResult.reason, "delete-supported");
+  assert.equal(noLandingResult.landingElementId, null);
+
+  const controlNext = fixture(
+    `<section data-stemmio-id="${ids.section}"><p data-stemmio-id="${ids.first}">remove</p><button data-stemmio-id="${ids.second}">action</button></section>`,
+  );
+  const controlNextResult = evaluateDirectStructurePolicy({
+    action: "delete",
+    sourceIndex: controlNext.sourceIndex,
+    elementId: ids.first,
+  });
+  assert.equal(controlNextResult.status, "supported");
+  assert.equal(controlNextResult.landingElementId, ids.section);
 });
 
 test("missing/stale source facts are temporary, while direct HTML insertion is always rejected", () => {
@@ -275,6 +311,39 @@ test("missing/stale source facts are temporary, while direct HTML insertion is a
   });
   assert.equal(insertion.status, "unsupported");
   assert.equal(insertion.reason, "direct-html-insert-unsupported");
+});
+
+test("direct structure policy keeps its internal action and destination surface closed", () => {
+  const { sourceIndex } = fixture();
+  const aliasAction = evaluateDirectStructurePolicy({
+    action: "duplicate",
+    sourceIndex,
+    elementId: ids.first,
+  });
+  assert.equal(aliasAction.status, "unsupported");
+  assert.equal(aliasAction.reason, "action-unsupported");
+
+  const aliasDestination = evaluateDirectStructurePolicy({
+    action: "move",
+    sourceIndex,
+    elementId: ids.first,
+    destination: {
+      parentId: ids.section,
+      beforeId: ids.second,
+      index: 1,
+    },
+  });
+  assert.equal(aliasDestination.status, "temporarily-unavailable");
+  assert.equal(aliasDestination.reason, "move-destination-unavailable");
+
+  const invalidDirection = evaluateDirectStructurePolicy({
+    action: "move",
+    sourceIndex,
+    elementId: ids.first,
+    destination: { parentElementId: ids.section, direction: "sideways" },
+  });
+  assert.equal(invalidDirection.status, "unsupported");
+  assert.equal(invalidDirection.reason, "move-destination-invalid");
 });
 
 test("incomplete source identity fails closed before direct structure admission", () => {

@@ -535,8 +535,9 @@ Authored structure edits use the same boundary, but the direct Canvas surface is
 deliberately narrower than the shared kernel. Direct duplicate accepts only an
 independent source-backed `p`, `h1`–`h6`, simple `li`, or directly inline-content
 `blockquote`; it allocates fresh IDs for the copied subtree. Direct delete accepts
-only a source-backed target with a provable legal undo landing and rejects roots,
-special/runtime surfaces, unsafe subtrees and mixed text/comment parents. Direct
+only a source-backed target with a provable source delete/undo boundary (the
+post-delete selection landing may be empty) and rejects roots, special/runtime
+surfaces, unsafe subtrees and mixed text/comment parents. Direct
 move is only adjacent reorder within the selected element's current parent and
 preserves IDs. Complex containers, full lists/tables/forms/widgets, authored
 programs, generated descendants, custom elements, references/resources and

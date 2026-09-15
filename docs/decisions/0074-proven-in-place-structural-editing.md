@@ -78,8 +78,8 @@ Frozen support matrix for this round:
 | Host / parent | Direct copy / insert / move | Direct delete |
 | --- | --- | --- |
 | Safe `p` / heading / simple `li` / inline `blockquote` under a plain parent | In-place | n/a |
-| Ordinary source subtree with a legal landing | n/a | In-place |
-| `body` as destination parent | No direct insert entry | n/a for `body` itself |
+| Ordinary source subtree with a provable delete/undo boundary | n/a | In-place; selection may clear when no legal landing remains |
+| `body` as destination parent | Same-parent move of ordinary children only; no direct insert entry | n/a for `body` itself |
 | Mixed text/comment parent | Reject | Reject |
 | `is="…"` or autonomous custom element | Reject | Reject |
 | Table/SVG/script and other unsupported tags | Reject | Reject |
@@ -120,8 +120,9 @@ Those mechanisms stay retired.
 ### Scope
 
 The direct Canvas/command scope is intentionally narrower than the shared
-semantic kernel: safe authored text-block duplicate, deletions with a legal
-landing, supported same-parent adjacent reorder, and the matching Undo/Redo.
+semantic kernel: safe authored text-block duplicate, deletions with a provable
+source delete/undo boundary (with an optional selection landing), supported
+same-parent adjacent reorder, and the matching Undo/Redo.
 Arbitrary HTML insertion and cross-parent move are not direct product commands.
 Duplicate continues to reuse the shared `createInsertElementOperation` primitive;
 there is no second public copy protocol. The shared insert/move primitives remain

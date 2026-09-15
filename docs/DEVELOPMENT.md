@@ -281,8 +281,9 @@ its source insertion offset. Copy output identity is bound only after an indepen
 byte oracle proves a single fresh leaf at that offset; edit/delete never discover
 or substitute another target. Static rebuild and Runtime Candidate adoption are
 separate declared paths. Direct structure entry is intentionally narrower than the
-shared semantic kernel: safe authored text-block copy, deletions with a legal landing,
-and adjacent same-parent reorder stay in-place; arbitrary HTML insertion, cross-parent
+shared semantic kernel: safe authored text-block copy, deletions with a provable
+source delete/undo boundary (the selection landing may be empty), and adjacent
+same-parent reorder stay in-place; arbitrary HTML insertion, cross-parent
 move, special structures, and direct plans that would require Candidate are rejected
 before a source receipt. The separate `core-copy-denied` scope binds one reviewed
 Runtime-added attribute absent from source and verifies exact UI/live refusal,

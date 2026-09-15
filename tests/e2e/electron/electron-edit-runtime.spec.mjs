@@ -674,6 +674,12 @@ test("fixed structure samples prove expected-copyable and expected-non-copyable 
 
     await frame.locator(nonCopyableSelector).click();
     await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "上移", exact: true })).toBeDisabled();
+    await expect(toolbar.getByRole("button", { name: "下移", exact: true })).toBeDisabled();
+    const nonCopyableSource = readFileSync(sourcePath, "utf8");
+    expect(await invokeStructureCommand(page, "deleteSelected")).toBe(false);
+    expect(readFileSync(sourcePath, "utf8")).toBe(nonCopyableSource);
     expect(await frame.locator(nonCopyableSelector).evaluate(
       (element) => element.isContentEditable,
     )).toBe(false);
@@ -809,7 +815,12 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await frame.locator("#runtime-closed-chart").click();
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
-    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "上移", exact: true })).toBeDisabled();
+    await expect(toolbar.getByRole("button", { name: "下移", exact: true })).toBeDisabled();
+    const closedChartSource = readFileSync(sourcePath, "utf8");
+    expect(await invokeStructureCommand(page, "deleteSelected")).toBe(false);
+    expect(await readFileSync(sourcePath, "utf8")).toBe(closedChartSource);
 
     await page.keyboard.press("Escape");
     await frame.locator('[data-native-case="source-copy-safe"]').evaluate((element) => {
@@ -883,7 +894,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
     });
     await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
-    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
 
     await page.keyboard.press("Escape");
     await frame.locator("#source-id-forged").click();
@@ -1833,6 +1844,36 @@ test("runtime source delete stays in the current document and does not recover f
   });
 });
 
+test("safe delete clears selection when no legal post-delete landing remains", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Delete without landing</title>
+<script>document.addEventListener("DOMContentLoaded", () => { document.body.dataset.runtimeReady = "true"; });</script>
+</head><body><p data-native-case="delete-only-target">Only source target</p></body></html>`;
+
+  await withRuntimeProject("stemmio-runtime-delete-no-landing-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    let frame = (await loadedDiskFrame(page, sourcePath, "delete-only-target")).frame;
+    await frame.locator('[data-native-case="delete-only-target"]').click();
+    const deleteButton = page.getByRole("button", { name: "删除元素", exact: true });
+    await expect(deleteButton).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await deleteButton.click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-delete" });
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="delete-only-target"]')).toHaveCount(0);
+    await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+    await expect(page.getByRole("toolbar")).toHaveCount(0);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .not.toContain("Only source target");
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
 test("body-child duplication stays in the current Runtime document", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -1869,6 +1910,239 @@ test("body-child duplication stays in the current Runtime document", {
       .toHaveAttribute("data-frame-generation", beforeGeneration);
     frame = await currentEditorFrame(page);
     await expect(frame.locator('[data-native-case="body-copy"]')).toHaveCount(2);
+  });
+});
+
+test("native dirty text checkpoints before an immediate direct copy", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html><head><title>Immediate native copy</title></head><body>
+  <main><p data-native-case="immediate-copy">Alpha</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("stemmio-runtime-immediate-copy-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "immediate-copy")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const target = await activateNativeEdit(frame, "immediate-copy");
+    await setTextSelection(frame, "immediate-copy", "Alpha".length);
+    await page.keyboard.insertText(" 立即复制");
+    expect(await target.textContent()).toContain("Alpha 立即复制");
+
+    const originalId = await target.getAttribute("data-stemmio-id");
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    // Deliberately do not wait for the 700ms Native Edit checkpoint timer.
+    await duplicateButton.click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+
+    frame = await currentEditorFrame(page);
+    const copies = frame.locator('[data-native-case="immediate-copy"]');
+    await expect(copies).toHaveCount(2);
+    expect(await copies.allTextContents()).toEqual(["Alpha 立即复制", "Alpha 立即复制"]);
+    const copyIds = await copies.evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-stemmio-id"))
+    ));
+    expect(copyIds).toHaveLength(2);
+    expect(new Set(copyIds).size).toBe(2);
+    expect(copyIds).toContain(originalId);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+    await expect.poll(async () => readPublishedWorkingCopy(
+      await managedWorkingCopyPath(page, sourcePath),
+      "utf8",
+    )).toContain("立即复制");
+  });
+});
+
+test("an uncheckpointed Enter is preserved by an immediate direct copy", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html><head><title>Immediate line-break copy</title></head><body>
+  <main><p data-native-case="immediate-enter-copy">Alpha</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("stemmio-runtime-immediate-enter-copy-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "immediate-enter-copy")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const target = await activateNativeEdit(frame, "immediate-enter-copy");
+    await setTextSelection(frame, "immediate-enter-copy", "Alpha".length);
+    await page.keyboard.press("Enter");
+    await page.keyboard.insertText("第二行");
+    expect(await target.locator("br").count()).toBe(1);
+    expect(await target.textContent()).toContain("第二行");
+
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    // The copy request must finish the Native Edit checkpoint itself.
+    await duplicateButton.click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+
+    frame = await currentEditorFrame(page);
+    const copies = frame.locator('[data-native-case="immediate-enter-copy"]');
+    await expect(copies).toHaveCount(2);
+    expect(await copies.evaluateAll((elements) => elements.map((element) => ({
+      text: element.textContent,
+      breaks: element.querySelectorAll("br").length,
+      breakIds: Array.from(element.querySelectorAll("br"))
+        .map((lineBreak) => lineBreak.getAttribute("data-stemmio-id")),
+    })))).toEqual([
+      { text: "Alpha第二行", breaks: 1, breakIds: [expect.any(String)] },
+      { text: "Alpha第二行", breaks: 1, breakIds: [expect.any(String)] },
+    ]);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("copy requested during composition waits for the existing composition boundary", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html><head><title>Composition direct copy</title></head><body>
+  <main><p data-native-case="composition-copy">Alpha</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("stemmio-runtime-composition-copy-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "composition-copy")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const target = await activateNativeEdit(frame, "composition-copy");
+    await setTextSelection(frame, "composition-copy", "Alpha".length);
+    await target.evaluate((element) => {
+      const text = element.firstChild;
+      if (!(text instanceof Text)) throw new Error("Composition copy text is missing.");
+      const selection = document.getSelection();
+      const range = document.createRange();
+      range.setStart(text, text.data.length);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.dispatchEvent(new CompositionEvent("compositionstart", {
+        bubbles: true,
+        data: "pinyin",
+      }));
+      text.data += "临时";
+      element.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: false,
+        data: "临时",
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+      element.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data: "临时",
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+    });
+    expect(await target.textContent()).toContain("临时");
+
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    // Composition keeps the command queued and must not materialize a copy or
+    // move focus away before the IME confirms its text.
+    expect(await frame.locator('[data-native-case="composition-copy"]').count()).toBe(1);
+    await target.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionend", {
+        bubbles: true,
+        data: "确认",
+      }));
+    });
+
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+    frame = await currentEditorFrame(page);
+    const copies = frame.locator('[data-native-case="composition-copy"]');
+    await expect(copies).toHaveCount(2);
+    expect(await copies.allTextContents()).toEqual(["Alpha确认", "Alpha确认"]);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+    await expect.poll(async () => readPublishedWorkingCopy(
+      await managedWorkingCopyPath(page, sourcePath),
+      "utf8",
+    )).toContain("确认");
+  });
+});
+
+test("same-byte authority reload rebinds a Native Edit target before continuing", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html><head><title>Same byte authority</title></head><body>
+  <main><p data-native-case="authority-target">Authority text</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("stemmio-runtime-authority-reload-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    let frame = (await loadedDiskFrame(page, sourcePath, "authority-target")).frame;
+    const originalHtml = readFileSync(sourcePath, "utf8");
+    const originalId = await frame.locator('[data-native-case="authority-target"]')
+      .getAttribute("data-stemmio-id");
+    const firstToken = await documentToken(page);
+    const firstGeneration = await activeFrameGeneration(editor);
+    const firstWorkingHash = await editor.getAttribute("data-working-source-sha256");
+    const firstRenderedHash = await editor.getAttribute("data-rendered-projection-sha256");
+    expect(firstWorkingHash).toBeTruthy();
+    expect(firstRenderedHash).toBe(firstWorkingHash);
+
+    // Switching away and back through the existing document tab performs the
+    // workbench-owned same-byte authority reload. The source bytes and stable
+    // target identity must survive, while the physical Document/generation is
+    // replaced and re-authorized.
+    const tablist = page.getByRole("tablist", { name: "已打开的页面" });
+    const documentTab = tablist.getByRole("tab").first();
+    await page.getByRole("button", { name: "新标签页" }).click();
+    await documentTab.click();
+    frame = (await loadedDiskFrame(page, sourcePath, "authority-target")).frame;
+    await expect.poll(() => documentToken(page)).not.toBe(firstToken);
+    await expect.poll(() => activeFrameGeneration(editor)).not.toBe(firstGeneration);
+    await expect(editor).toHaveAttribute("data-working-source-sha256", firstWorkingHash);
+    await expect(editor).toHaveAttribute("data-rendered-projection-sha256", firstRenderedHash);
+    const reboundId = await frame.locator('[data-native-case="authority-target"]')
+      .getAttribute("data-stemmio-id");
+    expect(reboundId).toBe(originalId);
+    expect(readFileSync(sourcePath, "utf8")).toBe(originalHtml);
+
+    // Re-enter the exact source target after the authority boundary and prove
+    // that the next native input is accepted and persisted to the managed copy.
+    await activateNativeEdit(frame, "authority-target");
+    await setTextSelection(frame, "authority-target", "Authority text".length);
+    const revisionBefore = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await page.keyboard.insertText(" 已接管");
+    await page.keyboard.press(keyShortcut("s"));
+    await expectCheckpointPersisted(page, revisionBefore);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("Authority text 已接管");
+    expect(readFileSync(sourcePath, "utf8")).toBe(originalHtml);
+
+    // Reopen the same project once more so the saved bytes and Stable ID are
+    // checked on a new authority generation, not only in the live edit frame.
+    const secondToken = await documentToken(page);
+    await page.getByRole("button", { name: "新标签页" }).click();
+    await documentTab.click();
+    frame = (await loadedDiskFrame(page, sourcePath, "authority-target")).frame;
+    await expect.poll(() => documentToken(page)).not.toBe(secondToken);
+    await expect(frame.locator('[data-native-case="authority-target"]'))
+      .toHaveText("Authority text 已接管");
+    await expect(frame.locator('[data-native-case="authority-target"]'))
+      .toHaveAttribute("data-stemmio-id", originalId);
   });
 });
 

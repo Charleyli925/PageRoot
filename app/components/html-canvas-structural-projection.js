@@ -6,6 +6,9 @@ import {
   sealEditorCreatedSourceElements,
   uniqueSourceElement,
 } from "./html-canvas-source-authority.js";
+import {
+  resolveDirectDeleteSelectionLanding,
+} from "./direct-structure-policy.js";
 
 const VERIFIED_PLANS = new WeakSet();
 
@@ -118,40 +121,7 @@ function removedRoots(delta, beforeIndex) {
 }
 
 export function resolveDeleteSelectionLanding(beforeIndex, removedRootElementId) {
-  const target = sourceElement(beforeIndex, removedRootElementId);
-  if (!target) return null;
-  const next = target.nextElementSiblingId
-    ? beforeIndex.byNodeId.get(target.nextElementSiblingId)
-    : null;
-  if (
-    next?.type === "element"
-    && next.stemmioId
-    && !isUnsupportedInPlaceTag(next.tagName)
-    && !["html", "head", "body"].includes(next.tagName)
-  ) {
-    return next.stemmioId;
-  }
-  const previous = target.previousElementSiblingId
-    ? beforeIndex.byNodeId.get(target.previousElementSiblingId)
-    : null;
-  if (
-    previous?.type === "element"
-    && previous.stemmioId
-    && !isUnsupportedInPlaceTag(previous.tagName)
-    && !["html", "head", "body"].includes(previous.tagName)
-  ) {
-    return previous.stemmioId;
-  }
-  const parentId = parentStemmioId(beforeIndex, target);
-  const parent = sourceElement(beforeIndex, parentId);
-  if (
-    parent?.stemmioId
-    && !isUnsupportedInPlaceTag(parent.tagName)
-    && !["html", "head", "body"].includes(parent.tagName)
-  ) {
-    return parent.stemmioId;
-  }
-  return null;
+  return resolveDirectDeleteSelectionLanding(beforeIndex, removedRootElementId);
 }
 
 function subtreeHasUnsupportedTag(index, rootId) {

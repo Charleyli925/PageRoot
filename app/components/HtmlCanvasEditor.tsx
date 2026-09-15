@@ -201,6 +201,7 @@ import {
   canvasPointerCapabilityFromProof,
   createCanvasTargetIdentityScope,
   elementCopyAssessmentForTarget,
+  assessRuntimeSubtreeAgainstSource,
   resolveCanvasTarget,
   type CanvasTargetIdentityScope,
   type ElementCopyAssessment,
@@ -1393,6 +1394,66 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || registered.executionId !== runtimeFrame.grant.executionId
     ) return null;
     return (element: HTMLElement) => registered.runtimeShadowHosts.has(element);
+  }, []);
+
+  // A Runtime host can be source-authorized while its authored program adds a
+  // Canvas, table, or closed Shadow subtree. Structure commands must use the
+  // same trusted live-subtree proof as copy so delete/move cannot operate on a
+  // source range that no longer describes the visible object.
+  const runtimeStructureTargetAssessment = useCallback((
+    action: "move" | "delete",
+    element: HTMLElement | null = selectedElementRef.current,
+  ): Pick<DirectStructurePolicyDecision, "status" | "reason" | "message"> & {
+    diagnostic?: string;
+  } => {
+    const runtime = runtimeFrameRef.current;
+    if (!runtime) return { status: "supported", reason: "runtime-not-present", message: "" };
+    const sourceIndex = sourceIndexRef.current;
+    if (!sourceIndex || !element?.isConnected) {
+      return {
+        status: "temporarily-unavailable",
+        reason: `${action}-runtime-source-proof-pending`,
+        message: "Runtime source proof is not ready.",
+      };
+    }
+    const sourceProof = currentRuntimeSourceProof();
+    if (!sourceProof) {
+      return {
+        status: "temporarily-unavailable",
+        reason: `${action}-runtime-source-proof-pending`,
+        message: "Runtime source proof is not ready.",
+      };
+    }
+    const assessment = assessRuntimeSubtreeAgainstSource(
+      element,
+      sourceIndex,
+      sourceProof,
+      currentRuntimeShadowProof(),
+    );
+    if (assessment === "match") {
+      return { status: "supported", reason: "runtime-subtree-match", message: "" };
+    }
+    const diagnostic = assessment.startsWith("runtime-subtree-diverged:")
+      ? assessment.slice("runtime-subtree-diverged:".length)
+      : assessment;
+    return {
+      status: "unsupported",
+      reason: `${action}-runtime-subtree-diverged`,
+      message: "The Runtime subtree no longer matches the authored source.",
+      diagnostic,
+    };
+  }, [currentRuntimeShadowProof, currentRuntimeSourceProof]);
+
+  // A Native Edit draft is allowed to lead the committed source briefly. It
+  // may bypass the pre-check's expensive live-subtree proof only when the
+  // current lease owns the exact selected source element; the command always
+  // re-runs the complete proof after that lease has checkpointed.
+  const nativeEditOwnsSelectedTarget = useCallback(() => {
+    const active = activeNativeEditRef.current;
+    const selected = selectedElementRef.current;
+    if (!active || !selected || active.selectionElement !== selected) return false;
+    const selectedId = selected.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
+    return Boolean(selectedId && active.target.elementId === selectedId);
   }, []);
 
   // Snapshots and canonical remounts create new objects. Only these private,
@@ -3231,6 +3292,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setMoveAvailability({ up: false, down: false });
       return;
     }
+    const runtimeDecision = runtimeStructureTargetAssessment("move", element);
+    if (runtimeDecision.status !== "supported") {
+      setMoveAvailability({ up: false, down: false });
+      return;
+    }
     const sourceIndex = sourceIndexRef.current;
     const logicalSelection = sourceIndex && element.isConnected
       ? selectionForElement(
@@ -3244,7 +3310,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? sourceMoveAvailability(sourceIndex, logicalSelection)
         : { up: false, down: false },
     );
-  }, []);
+  }, [runtimeStructureTargetAssessment]);
 
   const updateOverlayPosition = useCallback((
     options: { allowRuntimeHandoff?: boolean } = {},
@@ -4292,6 +4358,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (!rebased) {
           throw new Error("V2 可编辑岛已写入源码，但实时编辑会话无法推进到新版本。");
         }
+        // A native Enter can allocate fresh <br> identities while the
+        // existing Runtime document remains mounted.  Register only the
+        // identities allocated by this accepted semantic operation; never
+        // promote arbitrary author-created nodes that merely carry a valid
+        // source ID into Runtime mutation authority.
+        const allocatedRuntimeElements = (semanticResult.allocatedElementIds ?? [])
+          .map((elementId) => uniqueSourceElement(
+            activeNativeEdit.rootElement.ownerDocument,
+            elementId,
+          ))
+          .filter((element): element is HTMLElement => (
+            Boolean(element)
+            && element !== activeNativeEdit.rootElement
+            && activeNativeEdit.rootElement.contains(element)
+          ));
+        registerRestoredRuntimeElements(
+          activeNativeEdit.rootElement,
+          allocatedRuntimeElements,
+          result.sourceIndex,
+        );
         activeNativeEdit.projection = refreshedProjection;
         activeNativeEdit.sourceInnerHtml = nextSourceInnerHtml;
         activeNativeEdit.selection = options.islandTextCommit.selection;
@@ -4527,6 +4613,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     recordRuntimeRefreshDecision,
     reportBlockedEdit,
     requestDynamicRuntimeRefresh,
+    registerRestoredRuntimeElements,
     runtimeDocumentAnalysis,
     synchronizeStablePreview,
     updateOverlayPosition,
@@ -5958,7 +6045,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || !enableReorderRef.current
       ) return false;
 
-      const preflightMove = () => {
+      const preflightMove = ({ includeRuntimeProof = true } = {}) => {
         const sourceIndex = sourceIndexRef.current;
         const element = selectedElementRef.current;
         const logicalSelection = sourceIndex && element?.isConnected
@@ -5987,12 +6074,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           reportDirectStructureBlocked(decision);
           return null;
         }
+        if (includeRuntimeProof) {
+          const runtimeDecision = runtimeStructureTargetAssessment("move");
+          if (runtimeDecision.status !== "supported") {
+            containerRef.current?.setAttribute(
+              "data-structure-command-reason",
+              runtimeDecision.reason,
+            );
+            reportDirectStructureBlocked(runtimeDecision);
+            return null;
+          }
+        }
         return { sourceIndex, logicalSelection };
       };
 
       // Scope-check before finishing Native Edit so an unsupported move does
       // not steal the user's current composition/caret.
-      if (!preflightMove()) return false;
+      if (!preflightMove({ includeRuntimeProof: !nativeEditOwnsSelectedTarget() })) return false;
       if (activeNativeEditRef.current) {
         if (deferNativeCommandRef.current(
           "target-switch",
@@ -6009,7 +6107,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         });
         if (!committed.ok || committed.frameReloading) return false;
       }
-      const latest = preflightMove();
+      const latest = preflightMove({ includeRuntimeProof: true });
       if (!latest) return false;
       const { sourceIndex, logicalSelection } = latest;
       if (
@@ -6109,6 +6207,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       finishNativeEditing,
       reportDirectStructureBlocked,
       reportBlockedEdit,
+      nativeEditOwnsSelectedTarget,
+      runtimeStructureTargetAssessment,
       selectedElementHasSourceMutationAuthority,
     ],
   );
@@ -6168,7 +6268,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return assessment;
     };
 
-    const preflight = () => {
+    const preflight = ({ includeRuntimeProof = true } = {}) => {
       const resolved = resolveCurrentStructureSelection();
       if (!resolved) return null;
       const decision = evaluateDirectStructurePolicy({
@@ -6189,7 +6289,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         reportDirectStructureBlocked(decision);
         return null;
       }
-      if (action === "duplicate") {
+      if (action === "duplicate" && includeRuntimeProof) {
         const assessment = assessCopy();
         if (assessment.availability !== "available") {
           if (assessment.availability === "unsupported") {
@@ -6202,13 +6302,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           return null;
         }
       }
+      if (action !== "duplicate" && includeRuntimeProof) {
+        const runtimeDecision = runtimeStructureTargetAssessment(action);
+        if (runtimeDecision.status !== "supported") {
+          containerRef.current?.setAttribute(
+            "data-structure-command-reason",
+            runtimeDecision.reason,
+          );
+          reportDirectStructureBlocked(runtimeDecision);
+          return null;
+        }
+      }
       return resolved;
     };
 
     // Reject known unsupported or transient structure work before ending a
     // Native Edit session. A queued command will repeat this same preflight
     // after the edit checkpoint and therefore rebinds to the latest target.
-    if (!preflight()) return false;
+    if (!preflight({ includeRuntimeProof: !nativeEditOwnsSelectedTarget() })) return false;
     if (activeNativeEditRef.current) {
       if (deferNativeCommandRef.current(
         "target-switch",
@@ -6227,7 +6338,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       if (!committed.ok || committed.frameReloading) return false;
     }
-    const latest = preflight();
+    // Native Edit has now either checkpointed or been retired. Re-run the
+    // complete proof against the freshly committed source before materializing
+    // the duplicate; author/runtime drift must still fail closed here.
+    const latest = preflight({ includeRuntimeProof: true });
     if (!latest) return false;
     const { sourceIndex, logicalSelection } = latest;
     try {
@@ -6259,6 +6373,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     currentRuntimeSourceProof,
     currentRuntimeShadowProof,
     finishNativeEditing,
+    nativeEditOwnsSelectedTarget,
+    runtimeStructureTargetAssessment,
     reportDirectStructureBlocked,
     reportBlockedEdit,
     selectedElementHasSourceMutationAuthority,
@@ -9230,6 +9346,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     transientBusy: canvasTransitionActive,
     isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
     hasRuntimeShadowRoot: currentRuntimeShadowProof(),
+    skipRuntimeSubtreeProof: nativeEditOwnsSelectedTarget(),
   }), [
     activeRuntimeSlotId,
     canvasTransitionActive,
@@ -9237,6 +9354,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     currentRuntimeSourceProof,
     frameRender.elementGeneration,
     html,
+    isEditing,
+    nativeEditOwnsSelectedTarget,
     runtimeGeneratedSelection,
     selection,
   ]);
@@ -9248,15 +9367,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceIndex: sourceIndexRef.current,
       selection,
     });
-    return decision.status === "supported"
+    if (decision.status !== "supported") {
+      return decision.status === "temporarily-unavailable"
+        ? "busy" as const
+        : "unsupported" as const;
+    }
+    const runtimeDecision = runtimeStructureTargetAssessment("delete");
+    return runtimeDecision.status === "supported"
       ? "available" as const
-      : decision.status === "temporarily-unavailable"
+      : runtimeDecision.status === "temporarily-unavailable"
         ? "busy" as const
         : "unsupported" as const;
   }, [
+    activeRuntimeSlotId,
     frameRender.elementGeneration,
     html,
     runtimeGeneratedSelection,
+    runtimeStructureTargetAssessment,
     selection,
   ]);
   useEffect(() => {
@@ -9274,6 +9401,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ),
         isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
         hasRuntimeShadowRoot: currentRuntimeShadowProof(),
+        skipRuntimeSubtreeProof: nativeEditOwnsSelectedTarget(),
       });
       root.setAttribute(
         "data-e2e-copy-probe-sequence",
@@ -9309,7 +9437,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }).__STEMMIO_E2E_STRUCTURE_COMMANDS__;
       root.removeEventListener("stemmio:e2e-copy-capability-probe", probe);
     };
-  }, [currentRuntimeShadowProof, currentRuntimeSourceProof]);
+  }, [
+    currentRuntimeShadowProof,
+    currentRuntimeSourceProof,
+    isEditing,
+    nativeEditOwnsSelectedTarget,
+  ]);
   const selectionCapability = selection && !interactionLocked
     ? canvasPointerCapabilityFromProof({
       canStartTextEdit: selectedNativeEditAvailable,

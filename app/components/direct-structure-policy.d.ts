@@ -6,6 +6,8 @@ export type DirectStructurePolicyStatus =
   | "unsupported"
   | "temporarily-unavailable";
 
+export type DirectStructureAction = "copy" | "move" | "delete" | "insert";
+
 export type DirectStructurePolicyDecision = Readonly<{
   status: DirectStructurePolicyStatus;
   reason: string;
@@ -17,11 +19,15 @@ export type DirectStructurePolicyDecision = Readonly<{
 }>;
 
 export function evaluateDirectStructurePolicy(input?: Readonly<{
-  action?: string | null;
+  action?: DirectStructureAction | null;
   sourceIndex?: SourceIndexValue | null;
   selection?: HtmlCanvasSelection | null;
   elementId?: string | null;
-  destination?: Readonly<Record<string, unknown>> | null;
+  destination?: Readonly<{
+    parentElementId?: string | null;
+    beforeElementId?: string | null;
+    direction?: "up" | "down";
+  }> | null;
   html?: string | null;
 }>): DirectStructurePolicyDecision;
 
@@ -32,4 +38,7 @@ export function directCopyPolicyForElement(input?: Readonly<{
   html?: string | null;
 }>): DirectStructurePolicyDecision & { copyPolicy: string };
 
-export const copy: typeof directCopyPolicyForElement;
+export function resolveDirectDeleteSelectionLanding(
+  sourceIndex: SourceIndexValue,
+  removedRootElementId: string,
+): string | null;
