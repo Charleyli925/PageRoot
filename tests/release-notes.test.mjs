@@ -47,7 +47,7 @@ const packageJson = {
       {
         provider: "github",
         owner: "Charleyli925",
-        repo: "PageRoot",
+        repo: "Stemmio",
         releaseType: "release",
       },
     ],
@@ -132,7 +132,7 @@ test("a neighbouring longer version never leaks into the notes", () => {
 test("published notes carry the full changelog permalink for skipped versions", () => {
   assert.equal(
     changelogPermalink({ packageJson, version: "1.2.3" }),
-    "https://github.com/Charleyli925/PageRoot/blob/v1.2.3/CHANGELOG.md",
+    "https://github.com/Charleyli925/Stemmio/blob/v1.2.3/CHANGELOG.md",
   );
   assert.equal(
     composeReleaseNotes({ changelog: CHANGELOG, packageJson, version: "1.2.2" }),
@@ -142,7 +142,7 @@ test("published notes carry the full changelog permalink for skipped versions", 
       "---",
       "",
       "完整更新记录 / Full changelog:"
-      + " https://github.com/Charleyli925/PageRoot/blob/v1.2.2/CHANGELOG.md",
+      + " https://github.com/Charleyli925/Stemmio/blob/v1.2.2/CHANGELOG.md",
       "",
     ].join("\n"),
   );

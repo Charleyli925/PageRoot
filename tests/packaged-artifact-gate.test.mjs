@@ -413,7 +413,7 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   assert.equal(result.legalResourceCount, 5);
   assert.deepEqual(result.applicationUpdate, {
     owner: "Charleyli925",
-    repo: "PageRoot",
+    repo: "Stemmio",
     provider: "github",
     releaseType: "release",
     updaterCacheDirName: "stemmio-updater",

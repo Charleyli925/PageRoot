@@ -20,6 +20,11 @@ const CURRENT_CONTRACT_ROOTS = [
   "scripts/",
   "schemas/",
   ".github/workflows/",
+  ".github/actions/",
+  ".github/ISSUE_TEMPLATE/",
+  ".codex/",
+  ".agents/",
+  ".qoder/",
   "docs/",
 ];
 
@@ -90,6 +95,10 @@ const SURGICAL_CONTENT_EXCEPTIONS = Object.freeze({
     // Existing annotated release tags retain their immutable pre-cutover message.
     /PageRoot \$\{version\}/gu,
   ],
+  "scripts/capability-context.json": [
+    // Capability routing keeps the historical ADR filename as a stable reference.
+    /docs\/decisions\/0069-pageroot-native-openai-compatible-agent\.md/gu,
+  ],
   "AGENTS.md": [],
   "TRADEMARKS.md": [
     // The former brand is named once to identify historical builds only.
@@ -110,7 +119,6 @@ const LEGACY_CONTENT_PATHS = new Set([
   "docs/COMPATIBILITY.md",
   "docs/DESIGN_DECISIONS.md",
   "docs/DEVELOPER_PREVIEW_PLAYBOOK.md",
-  "docs/GIT_WORKFLOW.md",
   "docs/IMPORT_CONFIRMATION_PLAN.md",
   "docs/MVP_PRD.md",
   "docs/NOTIFICATION_AND_STARTUP_POLICY.md",
@@ -134,15 +142,10 @@ const LEGACY_PATH_EXCEPTIONS = new Set([
 ]);
 
 const RETIRED_PRODUCT_IDENTIFIERS = /(?:PageRoot|pageroot|PAGEROOT|HTML AI|HTML_AI|pr1_|htmlAI|com\.htmlai\.workbench|pageroot\.local|html-change\.local|html-app:|x-html-ai-bridge-token)/u;
+const CURRENT_REPOSITORY_URL = "https://github.com/Charleyli925/Stemmio";
 
 function removeContractExceptions(contents, relativePath = "") {
-  let normalized = String(contents)
-    // The public source repository intentionally keeps its historical name.
-    .replace(/https:\/\/github\.com\/Charleyli925\/PageRoot[^\s"'`)]*/gu, "")
-    .replace(/Charleyli925\/PageRoot/gu, "")
-    .replace(/\bcd PageRoot\b/gu, "")
-    .replace(/docs\/decisions\/0069-pageroot-native-openai-compatible-agent\.md/gu, "")
-    .replace(/"repo"\s*:\s*"PageRoot"/gu, "");
+  let normalized = String(contents);
 
   for (const pattern of SURGICAL_CONTENT_EXCEPTIONS[relativePath] || []) {
     normalized = normalized.replace(pattern, "");
@@ -193,6 +196,33 @@ test("current Stemmio contracts have no unexplained retired product identifiers"
   }
 });
 
+test("current repository endpoints and provenance use the renamed GitHub source", async () => {
+  const [packageText, desktopLinks, workbench, provenance, candidate, checkpoint, issueTemplate, ciIncidentTemplate, readme] = await Promise.all([
+    source("package.json"),
+    source("desktop/product-links.mjs"),
+    source("app/workbench.tsx"),
+    source("scripts/release-provenance.mjs"),
+    source("scripts/release-candidate-provenance.mjs"),
+    source("scripts/release-app-checkpoint.mjs"),
+    source(".github/ISSUE_TEMPLATE/config.yml"),
+    source(".github/ISSUE_TEMPLATE/ci_incident.yml"),
+    source("README.md"),
+  ]);
+  const packageJson = JSON.parse(packageText);
+  assert.equal(packageJson.homepage, `${CURRENT_REPOSITORY_URL}#readme`);
+  assert.equal(packageJson.repository.url, `git+${CURRENT_REPOSITORY_URL}.git`);
+  assert.equal(packageJson.bugs.url, `${CURRENT_REPOSITORY_URL}/issues`);
+  assert.equal(packageJson.build.publish[0].repo, "Stemmio");
+  for (const contents of [desktopLinks, workbench, provenance, issueTemplate, ciIncidentTemplate, readme]) {
+    assert.match(contents, /Charleyli925\/Stemmio/u);
+    assert.doesNotMatch(contents, /Charleyli925\/PageRoot/u);
+  }
+  for (const contents of [candidate, checkpoint]) {
+    assert.match(contents, /SOURCE_REPOSITORY_URL/u);
+    assert.doesNotMatch(contents, /Charleyli925\/PageRoot/u);
+  }
+});
+
 test("retired-identifier exceptions are surgical rather than file-wide", async () => {
   for (const relativePath of Object.keys(SURGICAL_CONTENT_EXCEPTIONS)) {
     const contents = await source(relativePath);
@@ -206,6 +236,15 @@ test("retired-identifier exceptions are surgical rather than file-wide", async (
       `${relativePath} must reject a new retired identifier outside its exact exception`,
     );
   }
+});
+
+test("current repository values are not globally exempt from retired-name scanning", () => {
+  const injected = removeContractExceptions(
+    "homepage: https://github.com/Charleyli925/PageRoot",
+    "package.json",
+  );
+  assert.match(injected, /Charleyli925\/PageRoot/u);
+  assert.match(injected, RETIRED_PRODUCT_IDENTIFIERS);
 });
 
 test("the frozen Stemmio identity and storage contracts are packaged atomically", async () => {

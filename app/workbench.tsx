@@ -279,9 +279,9 @@ import type {
   Version,
   WorkspaceIssue,
 } from "./workbench/types";
-const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/PageRoot";
+const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/Stemmio";
 const LATEST_RELEASE_PAGE_URL =
-  "https://github.com/Charleyli925/PageRoot/releases/latest";
+  "https://github.com/Charleyli925/Stemmio/releases/latest";
 class DeferredEditorCommandDiscardedError extends Error {
   readonly reason: NativeDeferredCommandDiscardReason;
 
