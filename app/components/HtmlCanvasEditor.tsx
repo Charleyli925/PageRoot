@@ -110,7 +110,9 @@ import {
 import {
   SOURCE_ELEMENT_ATTRIBUTE,
   createBoundSourceElementProof,
+  grantEditorCreatedSourceElements,
   registerProvedStableSourceElements,
+  sealEditorCreatedSourceElements,
   sourceElementId,
   uniqueSourceElement,
 } from "./html-canvas-source-element";
@@ -321,7 +323,12 @@ function reconcileAllocatedLineBreakIds(
   hostElement: HTMLElement,
   previousSourceInnerHtml: string,
   nextSourceInnerHtml: string,
-) {
+  expectedElementIds: readonly string[] = [],
+): HTMLElement[] {
+  const expectedIds = [...expectedElementIds];
+  if (new Set(expectedIds).size !== expectedIds.length) {
+    throw new Error("源码换行身份分配结果包含重复节点。");
+  }
   const liveDraft = editableIslandDraftHtml(hostElement.innerHTML, {
     baselineInnerHtml: previousSourceInnerHtml,
   });
@@ -354,13 +361,19 @@ function reconcileAllocatedLineBreakIds(
     }
     const liveId = liveElement.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
     const sourceId = sourceElement.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE);
-    if (liveId === sourceId) continue;
+    if (liveId === sourceId) {
+      if (sourceId && expectedIds.includes(sourceId) && !previousIds.has(sourceId)) {
+        throw new Error("新分配的源码身份已经存在于实时节点，无法确认对象来源。");
+      }
+      continue;
+    }
     if (
       liveId !== null
       || sourceElement.localName !== "br"
       || typeof sourceId !== "string"
       || !isValidStemmioElementId(sourceId)
       || previousIds.has(sourceId)
+      || !expectedIds.includes(sourceId)
       || assignedIds.has(sourceId)
     ) {
       throw new Error("已保存的源码身份无法安全同步到实时换行节点。");
@@ -368,12 +381,38 @@ function reconcileAllocatedLineBreakIds(
     assignedIds.add(sourceId);
     assignments.push({ element: liveElement, elementId: sourceId });
   }
+  const sourceIds = new Set(
+    sourceElements
+      .map((element) => element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE))
+      .filter((elementId): elementId is string => Boolean(elementId)),
+  );
+  if (expectedIds.some((elementId) => (
+    !sourceIds.has(elementId)
+    || sourceElements.find(
+      (element) => element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE) === elementId,
+    )?.localName !== "br"
+  ))) {
+    throw new Error("源码换行身份分配结果缺少准确的 br 节点。");
+  }
   for (const assignment of assignments) {
     assignment.element.setAttribute(
       STEMMIO_ELEMENT_ID_ATTRIBUTE,
       assignment.elementId,
     );
   }
+  const liveById = new Map(
+    liveElements
+      .map((element) => [
+        element.getAttribute(STEMMIO_ELEMENT_ID_ATTRIBUTE),
+        element,
+      ] as const)
+      .filter((entry): entry is readonly [string, Element] => Boolean(entry[0])),
+  );
+  const allocatedElements = expectedIds.map((elementId) => liveById.get(elementId));
+  if (allocatedElements.some((element): element is undefined => !element)) {
+    throw new Error("实时换行节点身份无法保留为准确对象。");
+  }
+  return allocatedElements as HTMLElement[];
 }
 
 function directStructureBlockedMessage(
@@ -1403,6 +1442,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const runtimeStructureTargetAssessment = useCallback((
     action: "move" | "delete",
     element: HTMLElement | null = selectedElementRef.current,
+    options: { skipRuntimeSubtreeProof?: boolean } = {},
   ): Pick<DirectStructurePolicyDecision, "status" | "reason" | "message"> & {
     diagnostic?: string;
   } => {
@@ -1423,6 +1463,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         reason: `${action}-runtime-source-proof-pending`,
         message: "Runtime source proof is not ready.",
       };
+    }
+    if (options.skipRuntimeSubtreeProof) {
+      return { status: "supported", reason: "native-edit-draft-owned", message: "" };
     }
     const assessment = assessRuntimeSubtreeAgainstSource(
       element,
@@ -1502,6 +1545,55 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       registered.stemmioIds.set(element as HTMLElement, id);
       element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, id);
     }
+  }, []);
+
+  const registerNativeAllocatedRuntimeElements = useCallback((
+    authorityRoot: HTMLElement,
+    elements: readonly HTMLElement[],
+    allowedElementIds: readonly string[],
+    sourceIndex = sourceIndexRef.current,
+  ): boolean => {
+    const registered = runtimeSourceElementsRef.current;
+    const runtime = runtimeFrameRef.current;
+    const documentNode = iframeRef.current?.contentDocument;
+    const expectedIds = [...allowedElementIds];
+    if (expectedIds.length === 0) return elements.length === 0;
+    // Static Canvas has no Runtime mutation authority to extend. The
+    // controller still carries the exact objects into its recovery snapshots,
+    // but no grant is needed until a later Runtime frame is authorized.
+    if (!runtime) return true;
+    if (
+      !registered
+      || !sourceIndex
+      || !documentNode
+      || !registered.elements.has(authorityRoot)
+      || registered.elementGeneration !== runtime.elementGeneration
+      || registered.executionId !== runtime.grant.executionId
+      || runtime.elementGeneration !== frameLoadGenerationRef.current
+      || authorityRoot.ownerDocument !== documentNode
+      || elements.length !== expectedIds.length
+      || new Set(expectedIds).size !== expectedIds.length
+    ) return false;
+    if (elements.some((element) => (
+      !element
+      || element.ownerDocument !== documentNode
+      || !element.isConnected
+      || element === authorityRoot
+      || !authorityRoot.contains(element)
+    ))) return false;
+    const creationTicket = sealEditorCreatedSourceElements(elements);
+    const granted = grantEditorCreatedSourceElements({
+      authority: registered,
+      documentNode,
+      sourceIndex,
+      expectedGeneration: runtime.elementGeneration,
+      expectedExecutionId: runtime.grant.executionId,
+      createdElements: elements,
+      allowedElementIds: expectedIds,
+      markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+      creationTicket,
+    });
+    return granted.ok;
   }, []);
 
   const selectedElementHasSourceMutationAuthority = useCallback(() => {
@@ -3292,7 +3384,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setMoveAvailability({ up: false, down: false });
       return;
     }
-    const runtimeDecision = runtimeStructureTargetAssessment("move", element);
+    const runtimeDecision = runtimeStructureTargetAssessment(
+      "move",
+      element,
+      { skipRuntimeSubtreeProof: nativeEditOwnsSelectedTarget() },
+    );
     if (runtimeDecision.status !== "supported") {
       setMoveAvailability({ up: false, down: false });
       return;
@@ -3310,7 +3406,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? sourceMoveAvailability(sourceIndex, logicalSelection)
         : { up: false, down: false },
     );
-  }, [runtimeStructureTargetAssessment]);
+  }, [nativeEditOwnsSelectedTarget, runtimeStructureTargetAssessment]);
 
   const updateOverlayPosition = useCallback((
     options: { allowRuntimeHandoff?: boolean } = {},
@@ -4339,6 +4435,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (failNextNativeRebase) {
           window.__STEMMIO_E2E_FAIL_NEXT_NATIVE_REBASE__ = false;
         }
+        const allocatedElementIds = semanticResult.allocatedElementIds ?? [];
         const rebased = failNextNativeRebase
           ? false
           : activeNativeEdit.session.applyExternalIslandBaseline({
@@ -4349,35 +4446,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }, {
               preserveLiveSelection: true,
               lease: nextLease,
-              reconcileDomBeforeRebase: () => reconcileAllocatedLineBreakIds(
-                activeNativeEdit.session.hostElement,
-                activeNativeEdit.sourceInnerHtml,
-                nextSourceInnerHtml,
-              ),
+              reconcileDomBeforeRebase: () => {
+                const allocatedRuntimeElements = reconcileAllocatedLineBreakIds(
+                  activeNativeEdit.session.hostElement,
+                  activeNativeEdit.sourceInnerHtml,
+                  nextSourceInnerHtml,
+                  allocatedElementIds,
+                );
+                return registerNativeAllocatedRuntimeElements(
+                  activeNativeEdit.rootElement,
+                  allocatedRuntimeElements,
+                  allocatedElementIds,
+                  result.sourceIndex,
+                );
+              },
             });
         if (!rebased) {
           throw new Error("V2 可编辑岛已写入源码，但实时编辑会话无法推进到新版本。");
         }
-        // A native Enter can allocate fresh <br> identities while the
-        // existing Runtime document remains mounted.  Register only the
-        // identities allocated by this accepted semantic operation; never
-        // promote arbitrary author-created nodes that merely carry a valid
-        // source ID into Runtime mutation authority.
-        const allocatedRuntimeElements = (semanticResult.allocatedElementIds ?? [])
-          .map((elementId) => uniqueSourceElement(
-            activeNativeEdit.rootElement.ownerDocument,
-            elementId,
-          ))
-          .filter((element): element is HTMLElement => (
-            Boolean(element)
-            && element !== activeNativeEdit.rootElement
-            && activeNativeEdit.rootElement.contains(element)
-          ));
-        registerRestoredRuntimeElements(
-          activeNativeEdit.rootElement,
-          allocatedRuntimeElements,
-          result.sourceIndex,
-        );
         activeNativeEdit.projection = refreshedProjection;
         activeNativeEdit.sourceInnerHtml = nextSourceInnerHtml;
         activeNativeEdit.selection = options.islandTextCommit.selection;
@@ -4613,7 +4699,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     recordRuntimeRefreshDecision,
     reportBlockedEdit,
     requestDynamicRuntimeRefresh,
-    registerRestoredRuntimeElements,
+    registerNativeAllocatedRuntimeElements,
     runtimeDocumentAnalysis,
     synchronizeStablePreview,
     updateOverlayPosition,
@@ -9372,7 +9458,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? "busy" as const
         : "unsupported" as const;
     }
-    const runtimeDecision = runtimeStructureTargetAssessment("delete");
+    const runtimeDecision = runtimeStructureTargetAssessment(
+      "delete",
+      selectedElementRef.current,
+      { skipRuntimeSubtreeProof: nativeEditOwnsSelectedTarget() },
+    );
     return runtimeDecision.status === "supported"
       ? "available" as const
       : runtimeDecision.status === "temporarily-unavailable"
@@ -9384,6 +9474,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     html,
     runtimeGeneratedSelection,
     runtimeStructureTargetAssessment,
+    nativeEditOwnsSelectedTarget,
     selection,
   ]);
   useEffect(() => {

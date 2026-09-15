@@ -2002,6 +2002,151 @@ test("an uncheckpointed Enter is preserved by an immediate direct copy", {
   });
 });
 
+test("a checkpointed Enter keeps Runtime identity after an author DOM replacement", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html><head><title>Restored line-break identity</title></head><body>
+  <main><p data-native-case="restored-enter-identity">Alpha</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("stemmio-runtime-restored-enter-identity-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "restored-enter-identity")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const target = await activateNativeEdit(frame, "restored-enter-identity");
+    await setTextSelection(frame, "restored-enter-identity", "Alpha".length);
+    await page.keyboard.press("Enter");
+    await page.keyboard.insertText("第二行");
+
+    const revisionBefore = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    // Wait for the real checkpoint receipt instead of sleeping for the timer;
+    // the assertion below proves the recovery snapshot was made after Enter.
+    await expectCheckpointPersisted(page, revisionBefore);
+    await expect(target.locator("br[data-stemmio-id]")).toHaveCount(1);
+    const breakId = await target.locator("br[data-stemmio-id]").getAttribute("data-stemmio-id");
+    expect(breakId).toBeTruthy();
+
+    const forgedMarker = await target.evaluate((element, id) => {
+      const current = element.querySelector(`br[data-stemmio-id="${id}"]`);
+      if (!current) throw new Error("Restored identity test line break is missing.");
+      const replacement = element.ownerDocument.createElement("br");
+      replacement.setAttribute("data-stemmio-id", id);
+      current.replaceWith(replacement);
+      return replacement.getAttribute("data-stemmio-edit-runtime-source");
+    }, breakId);
+    // A same-ID author node never receives private Runtime authority. The
+    // controller must restore its last-validated clone before the next command.
+    expect(forgedMarker).toBeNull();
+    await expect.poll(() => target.locator("br[data-stemmio-edit-runtime-source]").count())
+      .toBe(1);
+    await expect(target).toContainText("第二行");
+
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-insert" });
+
+    frame = await currentEditorFrame(page);
+    const copies = frame.locator('[data-native-case="restored-enter-identity"]');
+    await expect(copies).toHaveCount(2);
+    await expect(copies).toContainText(["Alpha第二行", "Alpha第二行"]);
+    const copiedBreakIds = await copies.evaluateAll((elements) => (
+      elements.map((element) => element.querySelector("br")?.getAttribute("data-stemmio-id"))
+    ));
+    expect(copiedBreakIds).toHaveLength(2);
+    expect(copiedBreakIds.every(Boolean)).toBe(true);
+    expect(new Set(copiedBreakIds).size).toBe(2);
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toMatch(/restored-enter-identity[\s\S]*restored-enter-identity/u);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("dirty Native Edit keeps UI move and delete actions available until checkpoint", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html><head><title>Dirty structure controls</title></head><body>
+  <main>
+    <p data-native-case="dirty-structure-move">甲</p>
+    <p data-native-case="dirty-structure-delete">乙</p>
+    <p data-native-case="dirty-structure-keep">丙</p>
+  </main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("stemmio-runtime-dirty-structure-controls-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "dirty-structure-move")).frame;
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const moveDown = page.getByRole("button", { name: "下移", exact: true });
+    const moveUp = page.getByRole("button", { name: "上移", exact: true });
+    const deleteButton = page.getByRole("button", { name: "删除元素", exact: true });
+
+    await activateNativeEdit(frame, "dirty-structure-move");
+    await setTextSelection(frame, "dirty-structure-move", 1);
+    await page.keyboard.insertText("改");
+    await expect(moveDown).toBeEnabled();
+    await moveDown.click();
+    await expect.poll(async () => ({
+      kind: await editor.getAttribute("data-structural-projection-kind"),
+      outcome: await editor.getAttribute("data-structural-projection-outcome"),
+      reason: await editor.getAttribute("data-structural-projection-reason"),
+    })).toMatchObject({ kind: "reorder", outcome: "reorder", reason: "runtime-reorder" });
+    frame = await currentEditorFrame(page);
+    const movedOrder = await frame.locator("main > p").evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-native-case"))
+    ));
+    expect(movedOrder).toEqual([
+      "dirty-structure-delete",
+      "dirty-structure-move",
+      "dirty-structure-keep",
+    ]);
+    await expect(frame.locator('[data-native-case="dirty-structure-move"]'))
+      .toHaveText("甲改");
+
+    await activateNativeEdit(frame, "dirty-structure-move");
+    await setTextSelection(frame, "dirty-structure-move", "甲改".length);
+    await page.keyboard.insertText("再");
+    await expect(moveUp).toBeEnabled();
+    await moveUp.click();
+    await expect.poll(async () => ({
+      kind: await editor.getAttribute("data-structural-projection-kind"),
+      outcome: await editor.getAttribute("data-structural-projection-outcome"),
+      reason: await editor.getAttribute("data-structural-projection-reason"),
+    })).toMatchObject({ kind: "reorder", outcome: "reorder", reason: "runtime-reorder" });
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator("main > p").first())
+      .toHaveAttribute("data-native-case", "dirty-structure-move");
+    await expect(frame.locator('[data-native-case="dirty-structure-move"]'))
+      .toHaveText("甲改再");
+
+    await activateNativeEdit(frame, "dirty-structure-delete");
+    await setTextSelection(frame, "dirty-structure-delete", 1);
+    await page.keyboard.insertText("删前");
+    await expect(deleteButton).toBeEnabled();
+    page.once("dialog", (dialog) => dialog.accept());
+    await deleteButton.click();
+    await waitForIndependentProjection(editor, "in-place", { reason: "verified-delete" });
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="dirty-structure-delete"]')).toHaveCount(0);
+    await expect(frame.locator('[data-native-case="dirty-structure-move"]'))
+      .toHaveText("甲改再");
+    await expect.poll(() => readPublishedWorkingCopy(workingCopyPath, "utf8"))
+      .toContain("甲改再");
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
 test("copy requested during composition waits for the existing composition boundary", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -2075,7 +2220,7 @@ test("copy requested during composition waits for the existing composition bound
   });
 });
 
-test("same-byte authority reload rebinds a Native Edit target before continuing", {
+test("same-byte tab remount rebinds a Native Edit target before continuing", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   test.setTimeout(120_000);
@@ -2101,9 +2246,9 @@ test("same-byte authority reload rebinds a Native Edit target before continuing"
     expect(firstWorkingHash).toBeTruthy();
     expect(firstRenderedHash).toBe(firstWorkingHash);
 
-    // Switching away and back through the existing document tab performs the
-    // workbench-owned same-byte authority reload. The source bytes and stable
-    // target identity must survive, while the physical Document/generation is
+    // Switching away and back through the existing document tab performs a
+    // workbench-owned same-byte tab remount. The source bytes and stable target
+    // identity must survive, while the physical Document/generation is
     // replaced and re-authorized.
     const tablist = page.getByRole("tablist", { name: "已打开的页面" });
     const documentTab = tablist.getByRole("tab").first();
@@ -2143,6 +2288,46 @@ test("same-byte authority reload rebinds a Native Edit target before continuing"
       .toHaveText("Authority text 已接管");
     await expect(frame.locator('[data-native-case="authority-target"]'))
       .toHaveAttribute("data-stemmio-id", originalId);
+  });
+});
+
+test("explicit same-byte source reload creates a fresh Runtime authority", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html><head><title>Explicit same byte reload</title></head><body>
+  <main><p data-native-case="explicit-authority-target">Authority text</p></main>
+  <script>document.body.dataset.runtimeReady = "true";</script>
+</body></html>`;
+
+  await withRuntimeProject("stemmio-runtime-explicit-authority-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    let frame = (await loadedDiskFrame(page, sourcePath, "explicit-authority-target")).frame;
+    const beforeToken = await documentToken(page);
+    const beforeGeneration = await activeFrameGeneration(editor);
+    const beforeLastKnownGood = await editor.getAttribute("data-runtime-last-known-good-id");
+    const beforeHash = await editor.getAttribute("data-working-source-sha256");
+    const beforeId = await frame.locator('[data-native-case="explicit-authority-target"]')
+      .getAttribute("data-stemmio-id");
+    expect(beforeHash).toBeTruthy();
+    expect(beforeId).toMatch(/^sm1_[a-f0-9]{32}$/u);
+
+    await page.getByRole("button", { name: "更多", exact: true }).click();
+    await page.getByRole("menuitem", { name: "从磁盘重新载入 HTML", exact: true }).click();
+    await expect(page.locator(".workbench-chrome-status"))
+      .toHaveText("页面已重新加载，可以继续编辑");
+    await expect.poll(() => documentToken(page)).not.toBe(beforeToken);
+    await expect.poll(() => activeFrameGeneration(editor)).not.toBe(beforeGeneration);
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .not.toBe(beforeLastKnownGood);
+    await expect(editor).toHaveAttribute("data-working-source-sha256", beforeHash);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="explicit-authority-target"]'))
+      .toHaveAttribute("data-stemmio-id", beforeId);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });
 

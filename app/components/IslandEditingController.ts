@@ -85,6 +85,11 @@ export type IslandEditingControllerOptions = {
 export type IslandExternalBaselineOptions = {
   preserveLiveSelection?: boolean;
   lease?: NativeEditLeaseStamp;
+  /**
+   * Reconcile the live island and any controller-owned identity before the
+   * recovery snapshots are cloned. Returning false aborts the rebase so the
+   * caller can use the existing accepted-source recovery path.
+   */
   reconcileDomBeforeRebase?: () => unknown;
 };
 
@@ -1515,7 +1520,10 @@ export class IslandEditingController {
         if (this.serializeLiveCanonical() !== this.ownedCanonicalInnerHtml) {
           return false;
         }
-        this.runExpectedMutation(() => options.reconcileDomBeforeRebase?.());
+        const reconciled = this.runExpectedMutation(
+          () => options.reconcileDomBeforeRebase?.(),
+        );
+        if (reconciled === false) return false;
         if (this.serializeLiveCanonical() !== canonical) return false;
       } else if (
         this.ownedCanonicalInnerHtml !== canonical
