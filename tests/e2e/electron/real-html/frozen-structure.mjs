@@ -66,10 +66,15 @@ function sourceNodes(source) {
 // projection planner. Keep the frozen rule explicit so a shared production
 // regression cannot make the harness agree with the bug it is meant to catch.
 const FROZEN_DELETE_UNSUPPORTED_TAGS = new Set([
+  "button", "datalist", "fieldset", "form", "input", "label", "legend", "meter",
+  "optgroup", "option", "output", "progress", "select", "textarea",
+  "area", "audio", "canvas", "embed", "img", "map", "object", "picture", "source", "track", "video",
+  "ul", "ol", "menu", "dl", "dt", "dd",
   "table", "thead", "tbody", "tfoot", "tr", "td", "th", "col", "colgroup", "caption",
-  "template", "slot", "iframe", "object", "embed", "applet", "script", "style", "link",
+  "template", "slot", "iframe", "applet", "script", "style", "link",
   "meta", "svg", "math", "html", "head", "body", "frameset", "frame", "noscript",
 ]);
+const FROZEN_DELETE_NESTED_LIST_TAGS = new Set(["ul", "ol", "menu", "dl", "dt", "dd"]);
 
 function frozenSourceElement(index, id) {
   if (!id) return null;
@@ -77,10 +82,18 @@ function frozenSourceElement(index, id) {
   return element?.type === "element" ? element : null;
 }
 
-function frozenLandingCandidate(element) {
+function frozenLandingCandidate(element, role = "sibling") {
+  const tag = String(element?.tagName || "").toLowerCase();
+  const customized = element?.attrs?.some(attribute => (
+    String(attribute.name || "").toLowerCase() === "is"
+      && String(attribute.value || "").trim() !== ""
+  ));
   return Boolean(element?.type === "element" && element.stemmioId
-    && !FROZEN_DELETE_UNSUPPORTED_TAGS.has(String(element.tagName || "").toLowerCase())
-    && !["html", "head", "body"].includes(String(element.tagName || "").toLowerCase()));
+    && !tag.includes("-")
+    && !customized
+    && !(FROZEN_DELETE_UNSUPPORTED_TAGS.has(tag)
+      && !(role === "parent" && FROZEN_DELETE_NESTED_LIST_TAGS.has(tag)))
+    && !["html", "head", "body"].includes(tag));
 }
 
 export function resolveFrozenDeleteSelectionLanding(beforeIndex, removedRootElementId) {
@@ -88,12 +101,12 @@ export function resolveFrozenDeleteSelectionLanding(beforeIndex, removedRootElem
   if (!target) return null;
   const next = target.nextElementSiblingId
     ? beforeIndex.byNodeId.get(target.nextElementSiblingId) : null;
-  if (frozenLandingCandidate(next)) return next.stemmioId;
+  if (frozenLandingCandidate(next, "sibling")) return next.stemmioId;
   const previous = target.previousElementSiblingId
     ? beforeIndex.byNodeId.get(target.previousElementSiblingId) : null;
-  if (frozenLandingCandidate(previous)) return previous.stemmioId;
+  if (frozenLandingCandidate(previous, "sibling")) return previous.stemmioId;
   const parent = target.parentId ? beforeIndex.byNodeId.get(target.parentId) : null;
-  return frozenLandingCandidate(parent) ? parent.stemmioId : null;
+  return frozenLandingCandidate(parent, "parent") ? parent.stemmioId : null;
 }
 
 // Parse source to validate one predeclared insertion, never to choose a target.
@@ -156,13 +169,21 @@ export function bindFrozenMove(beforeBytes, afterBytes, { copyId, destinationPar
   const destination = afterNodes.filter(node => idOf(node) === destinationParentId);
   const beforeIds = beforeNodes.map(idOf).filter(Boolean).sort();
   const afterIds = afterNodes.map(idOf).filter(Boolean).sort();
+  const siblingIds = (node) => node?.parentNode?.childNodes?.filter(child => child.tagName).map(idOf) || [];
+  const beforeSiblingIds = siblingIds(beforeCopy[0]);
+  const afterSiblingIds = siblingIds(afterCopy[0]);
+  const beforeIndex = beforeSiblingIds.indexOf(copyId);
+  const afterIndex = afterSiblingIds.indexOf(copyId);
+  const adjacentSameParent = originalParentId === destinationParentId
+    && beforeIndex >= 0 && afterIndex >= 0 && Math.abs(afterIndex - beforeIndex) === 1;
   const conditions = {
     copyUniqueBefore: beforeCopy.length === 1,
     copyUniqueAfter: afterCopy.length === 1,
     destinationUnique: destination.length === 1,
     movedFromOriginal: idOf(beforeCopy[0]?.parentNode) === originalParentId,
     landedAtDestination: idOf(afterCopy[0]?.parentNode) === destinationParentId,
-    destinationChanged: originalParentId !== destinationParentId,
+    destinationChanged: originalParentId !== destinationParentId || adjacentSameParent,
+    adjacentSameParent: originalParentId !== destinationParentId || adjacentSameParent,
     sameIdentitySet: beforeIds.length === afterIds.length && JSON.stringify(beforeIds) === JSON.stringify(afterIds),
     sameNodeCount: beforeNodes.length === afterNodes.length,
   };
@@ -607,12 +628,26 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
         return { fontWeight: "700", outsideElementUnchanged: oracle.outsideElementUnchanged };
       });
       await record("move-copy", { parentId: target.destinationParentId }, async () => {
+        if (target.rebuildTrigger === "accepted-projection-failure") {
+          // The move is still a supported direct operation.  Inject failure
+          // only after the kernel has been accepted so C proves the unified
+          // recovery path rather than globally disabling structural in-place.
+          await page.evaluate(() => {
+            window.__STEMMIO_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = true;
+          });
+        }
         const result = await rebuild(async () => {
-          const moved = await page.getByTestId("html-canvas-editor").evaluate((element, parentElementId) => {
-            const run = element.__STEMMIO_E2E_STRUCTURE_COMMANDS__?.moveSelectedTo;
-            if (typeof run !== "function") throw new Error("STRUCTURE_COMMAND_UNAVAILABLE:moveSelectedTo");
-            return run({ parentElementId });
-          }, target.destinationParentId);
+          const moved = await page.getByTestId("html-canvas-editor").evaluate(
+            (element, { parentElementId, beforeElementId }) => {
+              const run = element.__STEMMIO_E2E_STRUCTURE_COMMANDS__?.moveSelectedTo;
+              if (typeof run !== "function") throw new Error("STRUCTURE_COMMAND_UNAVAILABLE:moveSelectedTo");
+              return run({ parentElementId, beforeElementId });
+            },
+            {
+              parentElementId: target.destinationParentId,
+              beforeElementId: target.destinationBeforeElementId,
+            },
+          );
           failUnless(moved === true, "FROZEN_MOVE_COMMAND_REFUSED", { moved });
         }, after => bindFrozenMove(currentBytes, after, {
           copyId: copyTarget.selectedId,

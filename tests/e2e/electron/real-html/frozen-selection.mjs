@@ -205,11 +205,16 @@ export function readFrozenSelection(bytes, expectedDigest) {
     if (structureClosedLoop) {
       requireFact(PROJECTION_EXPECTATIONS.has(target.expectedProjection)
         && ID.test(target.destinationParentId || "")
-        && target.destinationParentId !== binding.parentId
+        && target.rebuildTrigger === "accepted-projection-failure"
+        && target.destinationParentId === binding.parentId
+        && ID.test(target.destinationBeforeElementId || "")
+        && target.destinationBeforeElementId === target.selectedId
         && target.initialBold === false
         && target.formatCapability?.expected === "AVAILABLE"
         && target.formatCapability?.scope === "element"
         && target.formatCapability?.basis === "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER"
+        && target.projectionByOperation?.copy === "in-place"
+        && target.projectionByOperation?.["move-copy"] === "recovered"
         && target.continuationProbe === undefined,
       "FROZEN_STRUCTURE_CLOSED_LOOP_CONTRACT_INVALID");
       Object.freeze(target.formatCapability);

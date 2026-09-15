@@ -35,10 +35,10 @@ import {
   inferSelectionLevel,
   selectionForElement,
 } from "./html-canvas-selection";
+import { directCopyPolicyForElement } from "./direct-structure-policy.js";
 import { moduleHasSubstance } from "./html-canvas-pointer-hit.js";
 import {
   canvasPointerCapabilityFromProof,
-  elementCopyAvailabilityFromProof,
   type ElementCopyAvailability,
 } from "./html-canvas-pointer-proof.js";
 
@@ -67,6 +67,7 @@ export type ElementCopyAvailabilityReason =
   | "canonical-source-unavailable"
   | "canonical-target-unavailable"
   | "runtime-subtree-diverged"
+  | "direct-structure-unsupported"
   | "transition-busy";
 
 export type ElementCopyAssessment = Readonly<{
@@ -404,13 +405,13 @@ function runtimeNodeMatchesSource(
   return (liveChild === null && canonicalChild === null) || fail("child-count");
 }
 
-type RuntimeSubtreeAssessment =
+export type RuntimeSubtreeAssessment =
   | "match"
   | "canonical-source-unavailable"
   | "canonical-target-unavailable"
   | `runtime-subtree-diverged:${string}`;
 
-function assessRuntimeSubtreeAgainstSource(
+export function assessRuntimeSubtreeAgainstSource(
   root: HTMLElement,
   sourceIndex: SourceIndexValue,
   isProvenRuntimeSourceElement: ((element: HTMLElement) => boolean) | null,
@@ -447,6 +448,7 @@ export function elementCopyAssessmentForTarget({
   transientBusy = false,
   isProvenRuntimeSourceElement = null,
   hasRuntimeShadowRoot = null,
+  skipRuntimeSubtreeProof = false,
 }: {
   element: HTMLElement | null;
   sourceIndex: SourceIndexValue | null;
@@ -455,6 +457,13 @@ export function elementCopyAssessmentForTarget({
   transientBusy?: boolean;
   isProvenRuntimeSourceElement?: ((element: HTMLElement) => boolean) | null;
   hasRuntimeShadowRoot?: ((element: HTMLElement) => boolean) | null;
+  /**
+   * The selected source element is owned by the current Native Edit lease. Its
+   * live subtree may contain a legitimate, not-yet-checkpointed text draft;
+   * the command boundary must checkpoint it before running the full proof.
+   * Callers must only set this for that exact leased target.
+   */
+  skipRuntimeSubtreeProof?: boolean;
 }): ElementCopyAssessment {
   const inspection = TRUSTED_DOM_INSPECTION;
   if (runtimeGenerated) {
@@ -485,24 +494,47 @@ export function elementCopyAssessmentForTarget({
       reason: "source-mutation-authority-missing",
     });
   }
-  const subtreeAssessment = assessRuntimeSubtreeAgainstSource(
-    element,
+  // Keep the cheap product-range check ahead of the canonical subtree walk.
+  // The pointer path must not spend time proving a complex target that the
+  // direct Canvas command will reject anyway.
+  const directPolicy = directCopyPolicyForElement({
     sourceIndex,
-    runtimeExpected ? isProvenRuntimeSourceElement : null,
-    runtimeExpected ? hasRuntimeShadowRoot : null,
-  );
-  if (subtreeAssessment !== "match") {
-    const runtimeDivergence = subtreeAssessment.startsWith("runtime-subtree-diverged:");
-    const reason: ElementCopyAvailabilityReason = runtimeDivergence
-      ? "runtime-subtree-diverged"
-      : subtreeAssessment as "canonical-source-unavailable" | "canonical-target-unavailable";
+    elementId: inspection.attributeValue(element, STEMMIO_ELEMENT_ID_ATTRIBUTE),
+  });
+  if (directPolicy.status === "unsupported") {
     return Object.freeze({
       availability: "unsupported",
-      reason,
-      diagnostic: runtimeDivergence
-        ? subtreeAssessment.slice("runtime-subtree-diverged:".length)
-        : undefined,
+      reason: "direct-structure-unsupported",
+      diagnostic: directPolicy.reason,
     });
+  }
+  if (directPolicy.status === "temporarily-unavailable") {
+    return Object.freeze({
+      availability: "busy",
+      reason: "transition-busy",
+      diagnostic: directPolicy.reason,
+    });
+  }
+  if (!skipRuntimeSubtreeProof) {
+    const subtreeAssessment = assessRuntimeSubtreeAgainstSource(
+      element,
+      sourceIndex,
+      runtimeExpected ? isProvenRuntimeSourceElement : null,
+      runtimeExpected ? hasRuntimeShadowRoot : null,
+    );
+    if (subtreeAssessment !== "match") {
+      const runtimeDivergence = subtreeAssessment.startsWith("runtime-subtree-diverged:");
+      const reason: ElementCopyAvailabilityReason = runtimeDivergence
+        ? "runtime-subtree-diverged"
+        : subtreeAssessment as "canonical-source-unavailable" | "canonical-target-unavailable";
+      return Object.freeze({
+        availability: "unsupported",
+        reason,
+        diagnostic: runtimeDivergence
+          ? subtreeAssessment.slice("runtime-subtree-diverged:".length)
+          : undefined,
+      });
+    }
   }
   if (transientBusy) {
     return Object.freeze({ availability: "busy", reason: "transition-busy" });

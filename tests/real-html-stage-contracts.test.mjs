@@ -1053,14 +1053,16 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
       selectedTag: "p",
       operations: FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS,
       expectedProjection: "in-place",
-      destinationParentId: capabilityId(399),
+      rebuildTrigger: "accepted-projection-failure",
+      destinationParentId: structurePlan.targets[0].copyBinding.parentId,
+      destinationBeforeElementId: structurePlan.targets[0].selectedId,
       initialBold: false,
       formatCapability: {
         expected: "AVAILABLE",
         scope: "element",
         basis: "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER",
       },
-      projectionByOperation: { copy: "candidate", "move-copy": "candidate" },
+      projectionByOperation: { copy: "in-place", "move-copy": "recovered" },
     }],
   };
   const closedLoopBytes = Buffer.from(JSON.stringify(closedLoopPlan));
@@ -1070,8 +1072,9 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
     targets: [{ ...closedLoopPlan.targets[0], expectedProjection: "in-place",
       projectionByOperation: { copy: "in-place", "move-copy": "in-place" } }],
   }));
-  assert.equal(readFrozenSelection(inPlaceClosedLoopBytes, frozenDigest(inPlaceClosedLoopBytes))
-    .targets[0].projectionByOperation["move-copy"], "in-place");
+  assert.throws(() => readFrozenSelection(inPlaceClosedLoopBytes, frozenDigest(inPlaceClosedLoopBytes)), {
+    code: "FROZEN_STRUCTURE_CLOSED_LOOP_CONTRACT_INVALID",
+  });
   assert.throws(() => readFrozenSelection(Buffer.from(JSON.stringify({
     ...closedLoopPlan,
     targets: [{ ...closedLoopPlan.targets[0], operations: FROZEN_STRUCTURE_OPERATIONS }],
@@ -1080,7 +1083,9 @@ test("frozen executor ingress binds reviewed single target, seed bytes and manif
     targets: [{ ...closedLoopPlan.targets[0], operations: FROZEN_STRUCTURE_OPERATIONS }],
   })))), { code: "FROZEN_STRUCTURE_CONTRACT_INVALID" });
   for (const change of [
-    { destinationParentId: structurePlan.targets[0].copyBinding.parentId },
+    { destinationParentId: capabilityId(399) },
+    { destinationBeforeElementId: capabilityId(399) },
+    { rebuildTrigger: "legacy-global-disable" },
     { expectedProjection: "AUTO" },
     { initialBold: true },
   ]) {

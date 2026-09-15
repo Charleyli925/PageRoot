@@ -57,6 +57,7 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
     enableReorder,
     moveAvailability,
     elementCopyAvailability,
+    elementDeleteAvailability,
     deleteCommentCount,
     deleteCommentDraftIncluded,
     spacingMenuRef,
@@ -496,29 +497,32 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                   <CopySimpleIcon size={15} weight="bold" aria-hidden="true" />
                 </button>
               ) : null}
-              <button
-                type="button"
-                className={styles.iconButton}
-                aria-label="删除元素"
-                data-tooltip="删除元素"
-                data-tooltip-side="below"
-                onClick={() => {
-                  const commentWarning = deleteCommentCount > 0
-                    ? `\n\n关联的 ${deleteCommentCount} 条评论${deleteCommentDraftIncluded
-                      ? "和未保存草稿"
-                      : ""}也会一起删除。`
-                    : deleteCommentDraftIncluded
-                      ? "\n\n未保存的评论草稿也会一起删除。"
-                      : "";
-                  if (window.confirm(
-                    `确定删除“${selection.label}”及其全部内容吗？${commentWarning}`,
-                  )) {
-                    onDeleteSelected();
-                  }
-                }}
-              >
-                <TrashIcon size={15} weight="bold" aria-hidden="true" />
-              </button>
+              {elementDeleteAvailability !== "unsupported" ? (
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  aria-label="删除元素"
+                  data-tooltip="删除元素"
+                  data-tooltip-side="below"
+                  disabled={elementDeleteAvailability === "busy"}
+                  onClick={() => {
+                    const commentWarning = deleteCommentCount > 0
+                      ? `\n\n关联的 ${deleteCommentCount} 条评论${deleteCommentDraftIncluded
+                        ? "和未保存草稿"
+                        : ""}也会一起删除。`
+                      : deleteCommentDraftIncluded
+                        ? "\n\n未保存的评论草稿也会一起删除。"
+                        : "";
+                    if (window.confirm(
+                      `确定删除“${selection.label}”及其全部内容吗？${commentWarning}`,
+                    )) {
+                      onDeleteSelected();
+                    }
+                  }}
+                >
+                  <TrashIcon size={15} weight="bold" aria-hidden="true" />
+                </button>
+              ) : null}
             </div>
           ) : null}
           </div>

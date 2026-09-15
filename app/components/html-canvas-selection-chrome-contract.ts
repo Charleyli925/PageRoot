@@ -90,6 +90,7 @@ export type SelectionChromeModel = {
   enableReorder: boolean;
   moveAvailability: MoveAvailability;
   elementCopyAvailability: ElementCopyAvailability;
+  elementDeleteAvailability: ElementCopyAvailability;
   deleteCommentCount: number;
   deleteCommentDraftIncluded: boolean;
   spacingMenuRef: RefObject<HTMLDetailsElement | null>;
