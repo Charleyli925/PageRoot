@@ -316,12 +316,6 @@ export type HtmlCanvasEditorHandle = {
   duplicateSelected: () => boolean;
   /** Deletes the selected authored source element; document roots are protected. */
   deleteSelected: () => boolean;
-  /** Inserts one identity-free HTML element into an authored source parent. */
-  insertElement: (options: {
-    parentElementId: string;
-    beforeElementId?: string | null;
-    html: string;
-  }) => boolean;
   /** Moves the selected authored element, preserving its stable ID. */
   moveSelectedTo: (options: {
     parentElementId: string;

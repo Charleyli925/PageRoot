@@ -19,15 +19,18 @@ position on ordinary source copy, delete, insert and supported moves. Removing
 the structural Candidate branch without a grant path would insert a copy that
 cannot be edited: ADR 0065 seals the Runtime source-object set before author
 scripts run, so a new DOM node cannot gain edit authority merely by carrying a
-  valid `data-stemmio-id`.
+  valid `data-stemmio-id`. This ADR therefore distinguishes the narrow direct
+Canvas command surface from shared semantic operations used by history and
+recovery.
 
 ## Decision
 
 Structure edits default to attempting an in-place Canvas projection. Only when
 source identity, current node identity and the local update result are all
-proven may the current iframe be reused. Source-legal operations that cannot
-prove a safe local update still accept the semantic result and rebuild through
-the existing Candidate path.
+proven may the current iframe be reused. New direct Canvas commands are
+admitted only for the narrow policy scope below; if their plan would require a
+Candidate, they are rejected before a source receipt. Existing history,
+authority replacement and accepted-source recovery retain the Candidate path.
 
 ### A. In-place is a projection strategy, not a source channel
 
@@ -59,24 +62,27 @@ only that sealed ticket; a later `querySelector` of the live tree cannot
 nominate replacements. Duplicate, stale-frame, old-Document, forged-ID,
 disconnected, extra-identity and author-created same-ID objects fail closed.
 
-Customized built-in elements (`is="…"`) and autonomous custom elements stay on
-Candidate for this round: a `div` with `is` is still a `div` by tag name, but
-its `connectedCallback` can replace children with author clones that carry the
-legal IDs. Mixed-content parents that contain non-whitespace text or comments
-also stay on Candidate for insert and move, because element-sibling placement
-cannot prove the text/comment boundary. `html`/`head`/`body` remain
+Customized built-in elements (`is="…"`) and autonomous custom elements are
+rejected by the direct command policy: a `div` with `is` is still a `div` by
+tag name, but its `connectedCallback` can replace children with author clones
+that carry the legal IDs. Mixed-content parents that contain non-whitespace
+text or comments are likewise rejected for direct copy/delete/move, because
+element-sibling placement and exact undo cannot prove the text/comment
+boundary. Internal history/recovery may still use the Candidate path.
+`html`/`head`/`body` remain
 non-targets for delete/move of themselves; `body` may be a proven destination
 parent for ordinary source children. `html` and `head` may not.
 
 Frozen support matrix for this round:
 
-| Host / parent | Copy / insert / move | Delete |
+| Host / parent | Direct copy / insert / move | Direct delete |
 | --- | --- | --- |
-| Ordinary `main` / `section` / `div` with element children | In-place | In-place |
-| `body` as destination parent | In-place | n/a for `body` itself |
-| Mixed text/comment parent | Candidate | In-place |
-| `is="…"` or autonomous custom element | Candidate | Candidate |
-| Table/SVG/script and other unsupported tags | Candidate | Candidate |
+| Safe `p` / heading / simple `li` / inline `blockquote` under a plain parent | In-place | n/a |
+| Ordinary source subtree with a legal landing | n/a | In-place |
+| `body` as destination parent | No direct insert entry | n/a for `body` itself |
+| Mixed text/comment parent | Reject | Reject |
+| `is="…"` or autonomous custom element | Reject | Reject |
+| Table/SVG/script and other unsupported tags | Reject | Reject |
 
 Pre-mutation proof binds the current Document, current Runtime authority and
 the *before* SourceIndex. Post-mutation proof binds the accepted after-index,
@@ -93,8 +99,8 @@ success.
 
 | Situation | Outcome |
 | --- | --- |
-| Source preconditions fail, target identity is untrusted, or the operation is illegal | **Reject.** Source and history stay unchanged. |
-| The source operation is legal but in-place proof is incomplete | **Accept** the source operation and use the existing **Candidate** rebuild. |
+| Source preconditions fail, target identity is untrusted, or a new direct operation is outside policy | **Reject.** Source and history stay unchanged. |
+| A retained internal/history operation is legal but in-place proof is incomplete | **Accept** the source operation and use the existing **Candidate** rebuild. |
 | Source is already accepted and later in-place projection fails | Keep accepted source and history; enter **Canvas recovery**. Do not claim the edit was rejected. |
 
 Untrusted target identity must not become “rebuild and try again”. Rebuild
@@ -113,9 +119,13 @@ Those mechanisms stay retired.
 
 ### Scope
 
-In this round: element duplicate, delete, insert, supported same-parent and
-cross-parent move, and the matching Undo/Redo. Duplicate continues to reuse
-`insertElement`; there is no second public copy protocol.
+The direct Canvas/command scope is intentionally narrower than the shared
+semantic kernel: safe authored text-block duplicate, deletions with a legal
+landing, supported same-parent adjacent reorder, and the matching Undo/Redo.
+Arbitrary HTML insertion and cross-parent move are not direct product commands.
+Duplicate continues to reuse the shared `createInsertElementOperation` primitive;
+there is no second public copy protocol. The shared insert/move primitives remain
+available to history, recovery and other controlled internal consumers.
 
 Out of this round by default: `replaceSubtree`, whole-document source replace,
 script/resource-closure/program-identity changes, and authority receipts.
@@ -157,7 +167,7 @@ frozen independently of the product's plan label:
 
 | Group | Requirement |
 | --- | --- |
-| Must in-place | Ordinary supported source copy/delete/insert/move. Candidate labelling cannot lower the bar. |
+| Must in-place | Safe direct copy/delete and same-parent adjacent move. Candidate labelling cannot lower the bar. |
 | Must rebuild | Authority replace, program-identity change, and currently unprovable hosts. |
 | Must refuse | Illegal targets, wrong identity, cyclic moves. Source and history stay unchanged. |
 | Recover after accept | Injected local projection failure keeps accepted source and history. |

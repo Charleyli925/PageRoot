@@ -9,7 +9,7 @@
 
 当前结论不是“全部真实语料通过”：源码级、合成 Electron 和既有定向 Electron 验收已经通过；用户指定的私有 HTML 语料已运行能力预检，但 8 个文件均在 discovery 阶段被 Harness 拒绝，尚未形成可签收的 A/B/C 冻结结果。旧身份前缀的冻结计划也被当前 Stemmio 身份校验以 `FROZEN_IDENTITY_INVALID` 拒绝，因此没有通过替换目标或修改操作顺序来制造通过结果。
 
-这保留了新结构原地路径的 fail-closed 行为：能够证明身份、源码、父节点和宿主关系时才原地执行，不能证明时仍走 Candidate；本次修复没有把回退开关变成用户设置。
+这保留了新结构原地路径的 fail-closed 行为：能够证明身份、源码、父节点和宿主关系时才原地执行；新的直接命令若会要求 Candidate，则在宿主接受前拒绝。已接受后的投影失败、历史回放和权威替换继续走既有恢复路径；本次修复没有把回退开关变成用户设置。
 
 ## 本次修复范围
 
@@ -19,9 +19,9 @@
 - 删除后的选择不再被无条件清空；Harness 也从删除前冻结源码推导并核验新落点，随后把已核验的落点传给继续编辑步骤。
 - 增加一个合成 Electron 回归：复制后不重新点击直接评论、格式化，再删除并不重新点击直接评论删除落点。
 - 增加 Save/flush 外部焦点回归：Native Edit 中触发 Cmd/Ctrl+S，在保存未完成时把焦点交给评论输入框，保存完成后输入框仍保持焦点。
-- 增加测试专用的 `STEMMIO_DISABLE_STRUCTURAL_IN_PLACE=1` 回退入口，仅用于冻结测试 C 组；产品没有新增设置或开关。
+- 保留测试专用的 `STEMMIO_DISABLE_STRUCTURAL_IN_PLACE=1` 回退入口，仅供需要 Candidate 生命周期的专用 lane；公开 C 不依赖它，产品没有新增设置或开关。
 
-现有交互契约仍由 `docs/INTERACTION_FLOW.md` 第 5 节负责，本次没有改变用户可见的产品边界。
+现有交互契约仍由 `docs/INTERACTION_FLOW.md` 第 5 节负责；本次同步收窄了直接结构命令的用户可见边界。
 
 ## 已执行验证
 
@@ -37,9 +37,9 @@
 | 变更文件定向 ESLint | 通过 | 0 errors；8 warnings，均为既有规则/代码风格提示 |
 | 新增合成 Electron 回归 | 通过 | 1 passed；覆盖 copy → direct comment → direct format → delete landing → direct comment |
 | Save/flush 外部焦点 Electron 回归 | 通过 | 1 passed；覆盖 Native Edit → Cmd/Ctrl+S 等待 → 评论 textbox → flush 完成后焦点保持 |
-| 既有 Electron 定向回归 | 通过 | 14 passed；覆盖复制、删除、混合内容 Undo、跨父移动、Runtime 编辑、Native Edit rebase、Candidate commit failure 等 |
+| 既有 Electron 定向回归 | 通过 | 覆盖安全复制、删除、同父相邻移动、明确拒绝跨父/复杂操作、Runtime 编辑、Native Edit rebase、Candidate commit failure 等 |
 | 收尾门禁第一轮 | 发现并修正测试契约 | `task:finish` 的 74 个 Electron 用例中 72 passed、2 failed；失败都集中在 Candidate handoff 后仍按旧元素断言选择。定向复验这 2 个用例在新提交上 2/2 passed，随后重新执行完整收尾门禁。 |
-| 收尾门禁第二轮（最终） | 通过 | `npm run task:finish`：465 Node、66 Browser、84 Electron、15 AI 全部通过，0 failed、0 skipped、0 not executed。 |
+| 收尾门禁第三轮（最终） | 通过 | `npm run task:finish`：2,412 Node 通过、1 skipped，66 Browser、85 Electron 全部通过；9/9 任务门禁通过，0 failed、0 not executed。 |
 
 关键门禁的机器可读结果位于 worktree 的 `output/test-runs/`（生成目录不提交）。
 
@@ -64,7 +64,7 @@ npm run test:real-html:electron
 
 ## 门禁失败的纠偏记录
 
-第一轮 `task:finish` 没有被用重复运行来洗绿。两个失败分别是 Candidate handoff 的呈现锚点断言和慢 Runtime 场景的旧元素选择断言；实际产品行为已经把结构操作输出选择交给新副本，正是本次目标所有权修复所要求的契约。测试随后改为等待并断言操作输出的 Stable ID（呈现锚点取新的已选元素，重复副本取最后一个输出节点），没有放宽源码、焦点、结构或连续性校验。新提交上两个失败用例单独 2/2 通过，随后以该新提交重新执行完整 `task:finish`，最终 465 Node、66 Browser、83 Electron、15 AI 全部通过。
+第一轮 `task:finish` 没有被用重复运行来洗绿。两个失败分别是 Candidate handoff 的呈现锚点断言和慢 Runtime 场景的旧元素选择断言；实际产品行为已经把结构操作输出选择交给新副本，正是本次目标所有权修复所要求的契约。测试随后改为等待并断言操作输出的 Stable ID（呈现锚点取新的已选元素，重复副本取最后一个输出节点），没有放宽源码、焦点、结构或连续性校验。新提交上两个失败用例单独 2/2 通过，第二轮又修复了两个连续性用例的测试夹具契约，最终以当前固定源码重新执行完整 `task:finish`：2,412 Node 通过、1 skipped，66 Browser、85 Electron 全部通过。
 
 ## 目标所有权回归覆盖
 
@@ -75,7 +75,7 @@ npm run test:real-html:electron
 3. 原元素、副本和删除落点的评论锚点分别解析到各自元素；结构操作输出选择与评论锚点同步。
 4. Native Edit 重新进入时必须验证 session lease、目标元素、`activeElement`、`contenteditable` 与 Selection；无法证明时不报告成功。
 5. Save/flush 的异步完成只可恢复当前 lease 的 Native Edit 目标，不能把旧 session 的焦点拉回另一个 Stable ID；用户已经主动聚焦的评论输入框、工具栏或侧栏控件保持焦点。
-6. C 组开关只改变结构原地路径选择，不改变目标身份、源码校验、保存和恢复语义。
+6. C 组专用开关只改变合法操作的结构原地路径选择，不改变目标身份、源码校验、保存和恢复语义；公开 C 不使用该开关。
 
 ## 重建比例的报告口径
 
@@ -87,7 +87,7 @@ npm run test:real-html:electron
 - 作者脚本重新激活；
 - 局部更新接受、投影失败后的恢复。
 
-同一次交接的多个观测信号只计一次用户画布重建；隐藏 Candidate 失败或 inactive 槽清空不另算一次。普通编辑、复制、删除、插入、跨父移动、结构 Undo/Redo 将分别以冻结的“已接受编辑操作”为分母。必须原地的样本另报意外重建率，非法拒绝和投影失败恢复不能算作“成功避免重建”。
+同一次交接的多个观测信号只计一次用户画布重建；隐藏 Candidate 失败或 inactive 槽清空不另算一次。普通编辑、复制、删除、同父相邻移动、结构 Undo/Redo 将分别以冻结的“已接受编辑操作”为分母；跨父移动、任意 HTML 插入和复杂直接操作属于拒绝负例，不纳入成功操作分母。必须原地的样本另报意外重建率，非法拒绝和投影失败恢复不能算作“成功避免重建”。
 
 此外，`working` 与 `rendered` hash 一致不能单独证明没有整页重写；验收还要读取实际保存字节、受影响节点文字/样式/结构、原元素与副本身份以及评论锚点。
 

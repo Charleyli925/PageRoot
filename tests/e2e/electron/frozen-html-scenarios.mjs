@@ -272,14 +272,15 @@ function scenarioChild(scenario) {
 
 function childEnvironment(scenario, { reportPath, reportDirectory, nestedPlan } = {}) {
   const env = { ...process.env, STEMMIO_FROZEN_SCENARIO_ID: scenario.id };
-  // Structural fallback is a frozen scenario fact. Never let a caller's
-  // process-wide switch leak into A/B; only C's reviewed rebuild contract may
-  // opt into the test-only path.
+  // C uses an accepted same-parent move with one injected post-acceptance
+  // projection failure.  No process-wide structural switch may broaden the
+  // direct product surface or turn a rejected operation into a Candidate.
+  delete env.STEMMIO_DISABLE_STRUCTURAL_IN_PLACE;
   if (scenario.id === "C"
-    && ["candidate", "recovered"].includes(nestedPlan?.targets?.[0]?.projectionByOperation?.["move-copy"])) {
-    env.STEMMIO_DISABLE_STRUCTURAL_IN_PLACE = "1";
+    && nestedPlan?.targets?.[0]?.rebuildTrigger === "accepted-projection-failure") {
+    env.STEMMIO_E2E_RUNTIME_COMMIT_HOOKS = "1";
   } else {
-    delete env.STEMMIO_DISABLE_STRUCTURAL_IN_PLACE;
+    delete env.STEMMIO_E2E_RUNTIME_COMMIT_HOOKS;
   }
   if (!env.STEMMIO_E2E_WINDOW_MODE && env.STEMMIO_E2E_FOREGROUND !== "1") {
     // Real-HTML local runs should be inspectable without activating Stemmio.

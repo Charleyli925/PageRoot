@@ -9,6 +9,7 @@ import {
 } from "../lib/canvas-target-rebind.js";
 import { sourceElementFromDom } from "./html-canvas-source-element";
 import { selectorForElement } from "./html-canvas-dom";
+import { evaluateDirectStructurePolicy } from "./direct-structure-policy.js";
 import type {
   HtmlCanvasSelection,
   HtmlCanvasSelectionLevel,
@@ -165,8 +166,20 @@ export function sourceMoveAvailability(
       ? sourceIndex.byNodeId.get(element.nextElementSiblingId)
       : null;
     return {
-      up: previous?.type === "element",
-      down: next?.type === "element",
+      up: previous?.type === "element"
+        && evaluateDirectStructurePolicy({
+          action: "move",
+          sourceIndex,
+          selection,
+          destination: { direction: "up" },
+        }).status === "supported",
+      down: next?.type === "element"
+        && evaluateDirectStructurePolicy({
+          action: "move",
+          sourceIndex,
+          selection,
+          destination: { direction: "down" },
+        }).status === "supported",
     };
   } catch {
     return { up: false, down: false };

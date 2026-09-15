@@ -312,8 +312,9 @@ export function validateFrozenNestedScenarioShape(scenario, nestedPlan) {
         || !operations.includes("move-copy")
         || !operations.includes("input-restored")
         || !operations.includes("save-restored")
-        || !["candidate", "recovered"].includes(forcedRebuild)
-        || !["candidate", "recovered"].includes(copyProjection)
+        || target?.rebuildTrigger !== "accepted-projection-failure"
+        || forcedRebuild !== "recovered"
+        || copyProjection !== "in-place"
         || !["runtime-candidate", "static-rebuild"].includes(target?.rebuildPath)) {
         contractError(
           "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID",
@@ -629,13 +630,12 @@ function validateSourceEvidence(report, scenario, nestedPlan) {
   }
 }
 
-function validateRuntimeConfiguration(report, scenario, nestedPlan) {
+function validateRuntimeConfiguration(report, scenario) {
   const initial = report.runtimeConfig;
   const reopened = report.reopen?.runtimeConfig;
-  const expectedStructuralInPlace = scenario.id === "C"
-    && ["candidate", "recovered"].includes(nestedPlan?.targets?.[0]
-      ?.projectionByOperation?.["move-copy"])
-    ? "disabled" : "enabled";
+  // C uses an accepted same-parent move plus an injected projection failure;
+  // it must not disable the production structural-in-place policy globally.
+  const expectedStructuralInPlace = "enabled";
   const validWindowMode = ["hidden", "visible-background", "foreground"].includes(initial?.windowMode);
   requireCompleteEvidence(validWindowMode
     && initial.structuralInPlace === expectedStructuralInPlace

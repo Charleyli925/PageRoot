@@ -222,9 +222,10 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化。冻结 real-HTML 入口的本地运行默认使用 `STEMMIO_E2E_WINDOW_MODE=visible-background`，通过 `showInactive()` 可见但不激活，且该策略贯穿首次启动、重开和错误处理；`hidden` 用于 CI，`foreground` 仅用于明确的前台调试，`STEMMIO_E2E_FOREGROUND=1` 是兼容别名。自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志；预期删除确认由用例助手逐次核对并处理，未预期弹窗使场景失败。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
 - 交互预览与 Edit 可丢弃 Script 页：Electron 用四类真实用例证明普通脚本
   持续运行、`async`/`defer` 属性保留、本地 ECharts 生成真实 Canvas，以及无法
-  证明原地条件的语义结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。
-  已证明的普通源码复制、删除、插入和受支持移动必须保持当前 Document 身份，
-  并为本次事务创建或恢复的节点授予合法编辑权限；撤销/重做走同一证明。
+  证明原地条件的既有权威替换或接受后恢复会用完整 next HTML 重建 iframe 并重跑作者程序。
+  直接结构入口只承认安全正文复制、删除落点和同父相邻移动；任意 HTML 插入、跨父移动、
+  特殊结构和会要求 Candidate 的复杂复制在接受前拒绝，不伪装成普通编辑能力。
+  共享语义原语仍由历史、恢复和受控内部消费者使用；撤销/重做走同一身份与恢复证明。
   运行时后代必须
   映射到最近源码宿主，只保留评论能力，不暴露文字/样式/结构编辑。元素复制要同时
   证明整个选中子树：运行生成内容及包含它的外层容器隐藏复制入口，保留评论和
@@ -511,11 +512,13 @@ source Hash，包含三个不同的嵌套清单，并在启动 Electron 前完�
 C 对应必要重建→接管→继续编辑→重开。场景失败保留首个失败，但不阻止独立后续场景取证。
 父报告必须关联每个子 `result.json`，核对场景/清单摘要、源码版本、操作行、重开和生命周期
 证据；子进程退出 0 但报告缺失、身份不符或关键步骤未完成时不得记为 PASS。C 只接受
-`core-structure-closed-loop`：必须实际执行预期为 candidate/recovered 的 `move-copy`，
-随后完成 `input-restored` 与 `save-restored` 并重开；`core-structure-path-race` 和压力场景
+`core-structure-closed-loop`：必须实际执行同父相邻 `move-copy`，并在接受后注入局部
+投影失败以验证 `recovered` 闭环，随后完成 `input-restored` 与 `save-restored` 并重开；
+任意跨父目标或直接 Candidate 计划属于明确拒绝负例。`core-structure-path-race` 和压力场景
 仍保留为独立专项证据，不能冒充完整 C。复制行还必须携带独立源码证明（含单一 source
-leaf）和本次事务产生的 fresh Stable ID；C 使用测试专用结构回退时，`copy` 与 `move-copy`
-的重建预期都必须事先冻结，不能让全局开关悄悄改变前置操作。B 的每轮副本摘要、C 的续写/保存/重开目标都必须与该 ID 对账。生命周期
+leaf）和本次事务产生的 fresh Stable ID；C 的 `copy` 必须保持 in-place，`move-copy`
+的 `recovered` 预期、故障注入和生命周期都必须事先冻结，不能让全局开关悄悄改变前置操作。
+B 的每轮副本摘要、C 的续写/保存/重开目标都必须与该 ID 对账。生命周期
 `records` 必须逐项等于有序的 Candidate 与 lifecycle 子数组，并把 candidate、generation、
 Active 和 Runtime terminal 绑定到同一候选；只有计数相等不能通过。真实语料验收前先完成
 固定组合、物料校准和 Harness 正反例自证（P0--P3），没有用户指定语料时只报告基础设施
@@ -571,9 +574,10 @@ generation、提升身份、Runtime ready 和源码一致性后重新定位同�
 复制、选中副本、激活、输入、保存、重新选中副本、确认删除逐项记账；静态重建与动态 Candidate
 采用分别判断，文字修改不得重建。保存只允许副本区域变化，删除后原始种子字节必须恢复，
 重开核验原件身份和副本不存在。这是 B 的可复制部分证据。
-独立 `core-structure-closed-loop` 在同一冻结叶节点上追加改样式、跨父移动、删除后 Undo、
+独立 `core-structure-closed-loop` 在同一冻结叶节点上追加改样式、同父相邻移动（并注入一次
+接受后的局部投影失败）、删除后 Undo、
 编辑恢复对象、恢复基线再 Redo 回已保存恢复态，以及保存后重开。移动目标父级必须预先冻结且
-不得等于复制插入父级；插入/跨父移动只走 Editor 命令端口。`expectedProjection` 为默认独立预期，
+不得离开复制插入父级；任意跨父移动或 HTML 插入只作为拒绝负例走 Editor 命令端口。`expectedProjection` 为默认独立预期，
 `projectionByOperation` 可按操作覆盖，产品改标不能降低该组门槛。
 结构 Harness 预先冻结 `expectedProjection`：`in-place`、`candidate`、`recovered` 或 `refuse`。
 必须原地的普通源码操作不得因为产品改标 Candidate 而放宽；必须重建、必须拒绝和接受后恢复

@@ -121,12 +121,15 @@ import {
   resolveDeleteSelectionLanding,
 } from "./html-canvas-structural-projection.js";
 import {
-  insertStructureCommand,
   selectedStructureCommand,
   sourceSelectionForElementId,
   type SelectedStructureAction,
   type StructureDestination,
 } from "./html-canvas-structure-commands";
+import {
+  evaluateDirectStructurePolicy,
+  type DirectStructurePolicyDecision,
+} from "./direct-structure-policy.js";
 import type {
   ActiveTextRange,
   SourceElementValue,
@@ -370,6 +373,17 @@ function reconcileAllocatedLineBreakIds(
       assignment.elementId,
     );
   }
+}
+
+function directStructureBlockedMessage(
+  decision: Pick<DirectStructurePolicyDecision, "reason" | "message">,
+): string {
+  const reason = decision.reason;
+  if (reason.startsWith("copy-")) return "暂不支持复制这类内容。可复制独立正文、标题、列表项或简单引用。";
+  if (reason.startsWith("move-")) return "只能在同一组内容内调整相邻顺序。";
+  if (reason.startsWith("delete-")) return "暂不支持删除这类结构，当前源码位置无法可靠恢复。";
+  if (reason === "direct-html-insert-unsupported") return "暂不提供直接插入任意 HTML。";
+  return "暂不支持这个结构操作。";
 }
 
 const GLOBAL_SELECTION_ATTRIBUTE = "data-html-canvas-global-selected";
@@ -1618,6 +1632,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     reason: string,
   ) => {
     const previous = runtimeRefreshPendingRef.current;
+    if (
+      previous
+      && previous.sourceRevision === sourceRevision
+      && previous.reason === reason
+    ) {
+      // Repeated notifications for the same source fact are disposable canvas
+      // work, not new user edits. Keep one pending record and avoid inflating
+      // the refresh queue/diagnostic count.
+      return;
+    }
     runtimeRefreshPendingRef.current = {
       sourceRevision,
       reason,
@@ -1727,6 +1751,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && latest.sourceIndex.sourceSha256 !== sourceRevision
       )
     ) return null;
+    const previous = deferredRuntimeCandidateRef.current;
+    if (
+      previous
+      && previous.source === source
+      && previous.sourceRevision === sourceRevision
+      && previous.kind === kind
+      && previous.predecessorCandidateId === predecessorCandidateId
+    ) {
+      // Keep the single latest request/lease. A newer handoff context may
+      // carry fresher selection or viewport intent, so merge it without
+      // creating a second candidate or replaying stale work.
+      if (handoffContext) {
+        deferredRuntimeCandidateRef.current = {
+          ...previous,
+          handoffContext,
+        };
+      }
+      return deferredRuntimeCandidateRef.current;
+    }
     const request: DeferredRuntimeCandidate = {
       lease: deferredRuntimeCandidateLeaseRef.current + 1,
       source,
@@ -3188,23 +3231,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setMoveAvailability({ up: false, down: false });
       return;
     }
-    const parent = element?.parentElement;
-    const isSafeParent = parent && !["HTML", "HEAD"].includes(parent.tagName);
-    const isSafeElement = element && !["BODY", "HTML"].includes(element.tagName);
-    setMoveAvailability({
-      up: Boolean(
-        enableReorderRef.current
-        && isSafeParent
-        && isSafeElement
-        && element.previousElementSibling
-      ),
-      down: Boolean(
-        enableReorderRef.current
-        && isSafeParent
-        && isSafeElement
-        && element.nextElementSibling
-      ),
-    });
+    const sourceIndex = sourceIndexRef.current;
+    const logicalSelection = sourceIndex && element.isConnected
+      ? selectionForElement(
+        element,
+        sourceIndex,
+        selectedSourceSelectionRef.current ?? undefined,
+      )
+      : selectedSourceSelectionRef.current;
+    setMoveAvailability(
+      enableReorderRef.current
+        ? sourceMoveAvailability(sourceIndex, logicalSelection)
+        : { up: false, down: false },
+    );
   }, []);
 
   const updateOverlayPosition = useCallback((
@@ -3776,6 +3815,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
   }, []);
 
+  const reportDirectStructureBlocked = useCallback((
+    decision: Pick<DirectStructurePolicyDecision, "status" | "reason" | "message">,
+  ) => {
+    const detail = `${decision.status}:${decision.reason}`;
+    containerRef.current?.setAttribute("data-edit-block-detail", detail.slice(0, 240));
+    // Temporary source/lease uncertainty is intentionally quiet. A local
+    // prompt is reserved for an explicit, known product-scope refusal.
+    if (decision.status !== "unsupported") return;
+    const message = directStructureBlockedMessage(decision);
+    setEditFeedback({
+      code: "canvas_c03_structure_scope",
+      title: "暂不支持这个结构操作",
+      message,
+      tone: "warning",
+      sticky: false,
+      recovery: "none",
+    });
+    onEditBlockedRef.current?.(message);
+  }, []);
+
   const reportInlineStyleOverrideFailure = useCallback(() => {
     const message = "这个样式无法通过当前元素的局部修改可靠生效。可以把修改要求交给 Agent，由 Agent 调整页面样式结构。";
     setEditFeedback({
@@ -3964,6 +4023,53 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         programIdentityChanged,
         structuralProjection: structuralDecision,
       });
+      // A new direct structure command is admitted only when the existing
+      // projection plan is verified in-place. Candidate would require a
+      // disposable frame replacement, so reject it before the host receives
+      // a receipt. History/authority replacement paths do not call this
+      // direct command boundary and therefore retain their existing fallback.
+      // The explicit structural-in-place disable hook is retained only for
+      // dedicated Candidate-lifecycle lanes. It is not reachable from the
+      // public C harness, which keeps the normal direct command path in-place.
+      const isTestOnlyStructuralFallback = Boolean(
+        mutation.kind === "structure"
+        && structuralDecision?.kind === "candidate"
+        && structuralDecision.reason === "structural-in-place-disabled"
+        && window.stemmioRuntime?.diagnostics?.e2eRuntimeCommitHooks === true,
+      );
+      const directStructureMutation = mutation.kind === "structure"
+        || mutation.kind === "reorder";
+      const directStructureNeedsCandidate = Boolean(
+        directStructureMutation
+        && (
+          structuralDecision?.kind === "candidate"
+          || mutation.kind === "reorder" && programIdentityChanged
+        )
+        && !isTestOnlyStructuralFallback,
+      );
+      if (
+        directStructureNeedsCandidate
+      ) {
+        const actionPrefix = mutation.kind === "reorder"
+          ? "move"
+          : mutation.property === "duplicate" ? "copy" : mutation.property || "structure";
+        const projectionReason = structuralDecision?.reason || refreshDecision.reason;
+        const reason = `${actionPrefix}-candidate:${projectionReason}`;
+        containerRef.current?.setAttribute("data-runtime-refresh-decision", "rejected");
+        containerRef.current?.setAttribute("data-runtime-refresh-reason", reason);
+        publishStructuralProjectionObservation({
+          kind: "candidate",
+          reason: projectionReason,
+          planned: "candidate",
+          outcome: "rejected",
+        });
+        reportDirectStructureBlocked({
+          status: "unsupported",
+          reason,
+          message: projectionReason,
+        });
+        return null;
+      }
       recordRuntimeContinuityEvent("structuralProjection", {
         reason: `${structuralDecision?.kind || mutation.kind}:${structuralDecision?.reason || refreshDecision.reason}`,
       });
@@ -4415,6 +4521,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     currentRuntimeSourceProof,
     boundRuntimeSourceProof,
     publishStructuralProjectionObservation,
+    reportDirectStructureBlocked,
     loadFrameSource,
     publishRenderedProjectionIdentity,
     recordRuntimeRefreshDecision,
@@ -5845,6 +5952,47 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
   const moveSelected = useCallback(
     (direction: "up" | "down"): boolean => {
+      if (
+        readOnlyRef.current
+        || !selectedElementHasSourceMutationAuthority()
+        || !enableReorderRef.current
+      ) return false;
+
+      const preflightMove = () => {
+        const sourceIndex = sourceIndexRef.current;
+        const element = selectedElementRef.current;
+        const logicalSelection = sourceIndex && element?.isConnected
+          ? selectionForElement(
+            element,
+            sourceIndex,
+            selectedSourceSelectionRef.current ?? undefined,
+          )
+          : selectedSourceSelectionRef.current;
+        if (!sourceIndex || !logicalSelection) return null;
+        const decision = evaluateDirectStructurePolicy({
+          action: "move",
+          sourceIndex,
+          selection: logicalSelection,
+          destination: { direction },
+        });
+        containerRef.current?.setAttribute(
+          "data-structure-command-availability",
+          decision.status,
+        );
+        containerRef.current?.setAttribute(
+          "data-structure-command-reason",
+          decision.reason,
+        );
+        if (decision.status !== "supported") {
+          reportDirectStructureBlocked(decision);
+          return null;
+        }
+        return { sourceIndex, logicalSelection };
+      };
+
+      // Scope-check before finishing Native Edit so an unsupported move does
+      // not steal the user's current composition/caret.
+      if (!preflightMove()) return false;
       if (activeNativeEditRef.current) {
         if (deferNativeCommandRef.current(
           "target-switch",
@@ -5861,24 +6009,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         });
         if (!committed.ok || committed.frameReloading) return false;
       }
-      const element = selectedElementRef.current;
-      if (
-        readOnlyRef.current
-        || !selectedElementHasSourceMutationAuthority()
-        || !enableReorderRef.current
-      ) {
-        return false;
-      }
-
-      const sourceIndex = sourceIndexRef.current;
-      const logicalSelection = element?.isConnected
-        ? selectionForElement(
-          element,
-          sourceIndex,
-          selectedSourceSelectionRef.current ?? undefined,
-        )
-        : selectedSourceSelectionRef.current;
-      if (!sourceIndex || !logicalSelection) return false;
+      const latest = preflightMove();
+      if (!latest) return false;
+      const { sourceIndex, logicalSelection } = latest;
       if (
         logicalSelection.level === "insertion"
         || logicalSelection.resolution === "ambiguous"
@@ -5974,6 +6107,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     [
       applySourceCommand,
       finishNativeEditing,
+      reportDirectStructureBlocked,
       reportBlockedEdit,
       selectedElementHasSourceMutationAuthority,
     ],
@@ -5983,30 +6117,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     action: SelectedStructureAction,
     destination?: StructureDestination,
   ): boolean => {
-    if (activeNativeEditRef.current) {
-      if (deferNativeCommandRef.current(
-        "target-switch",
-        () => {
-          const committed = finishNativeEditing(true, "manual", {
-            deferRuntimeRefresh: true,
-          });
-          if (committed.ok) {
-            window.queueMicrotask(() => applySelectedStructureOperation(action, destination));
-          }
-        },
-        { action, destination },
-      )) return true;
-      const committed = finishNativeEditing(true, "manual", {
-        deferRuntimeRefresh: true,
-      });
-      if (!committed.ok || committed.frameReloading) return false;
-    }
     if (
       readOnlyRef.current
       || !selectedElementHasSourceMutationAuthority()
       || !enableReorderRef.current
     ) return false;
-    if (action === "duplicate") {
+
+    const resolveCurrentStructureSelection = () => {
+      const sourceIndex = sourceIndexRef.current;
+      if (!sourceIndex) return null;
+      const liveElement = selectedElementRef.current;
+      const logicalSelection = liveElement?.isConnected
+        ? selectionForElement(
+          liveElement,
+          sourceIndex,
+          selectedSourceSelectionRef.current ?? undefined,
+        )
+        : selectedSourceSelectionRef.current;
+      return logicalSelection ? { sourceIndex, logicalSelection } : null;
+    };
+
+    const assessCopy = () => {
       const assessment = elementCopyAssessmentForTarget({
         element: selectedElementRef.current,
         sourceIndex: sourceIndexRef.current,
@@ -6034,19 +6165,71 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       } else {
         containerRef.current?.removeAttribute("data-element-copy-command-diagnostic");
       }
-      if (assessment.availability !== "available") return false;
+      return assessment;
+    };
+
+    const preflight = () => {
+      const resolved = resolveCurrentStructureSelection();
+      if (!resolved) return null;
+      const decision = evaluateDirectStructurePolicy({
+        action: action === "duplicate" ? "copy" : action,
+        sourceIndex: resolved.sourceIndex,
+        selection: resolved.logicalSelection,
+        destination,
+      });
+      containerRef.current?.setAttribute(
+        "data-structure-command-availability",
+        decision.status,
+      );
+      containerRef.current?.setAttribute(
+        "data-structure-command-reason",
+        decision.reason,
+      );
+      if (decision.status !== "supported") {
+        reportDirectStructureBlocked(decision);
+        return null;
+      }
+      if (action === "duplicate") {
+        const assessment = assessCopy();
+        if (assessment.availability !== "available") {
+          if (assessment.availability === "unsupported") {
+            reportDirectStructureBlocked({
+              status: "unsupported",
+              reason: `copy-runtime:${assessment.reason}`,
+              message: "copy-runtime",
+            });
+          }
+          return null;
+        }
+      }
+      return resolved;
+    };
+
+    // Reject known unsupported or transient structure work before ending a
+    // Native Edit session. A queued command will repeat this same preflight
+    // after the edit checkpoint and therefore rebinds to the latest target.
+    if (!preflight()) return false;
+    if (activeNativeEditRef.current) {
+      if (deferNativeCommandRef.current(
+        "target-switch",
+        () => {
+          const committed = finishNativeEditing(true, "manual", {
+            deferRuntimeRefresh: true,
+          });
+          if (committed.ok) {
+            window.queueMicrotask(() => applySelectedStructureOperation(action, destination));
+          }
+        },
+        { action, destination },
+      )) return true;
+      const committed = finishNativeEditing(true, "manual", {
+        deferRuntimeRefresh: true,
+      });
+      if (!committed.ok || committed.frameReloading) return false;
     }
-    const sourceIndex = sourceIndexRef.current;
-    if (!sourceIndex) return false;
-    const liveElement = selectedElementRef.current;
-    const logicalSelection = liveElement?.isConnected
-      ? selectionForElement(
-        liveElement,
-        sourceIndex,
-        selectedSourceSelectionRef.current ?? undefined,
-      )
-      : selectedSourceSelectionRef.current;
-    if (!logicalSelection) return false;
+    const latest = preflight();
+    if (!latest) return false;
+    const { sourceIndex, logicalSelection } = latest;
     try {
       const { operation, mutation } = selectedStructureCommand({
         sourceIndex,
@@ -6076,6 +6259,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     currentRuntimeSourceProof,
     currentRuntimeShadowProof,
     finishNativeEditing,
+    reportDirectStructureBlocked,
     reportBlockedEdit,
     selectedElementHasSourceMutationAuthority,
   ]);
@@ -6097,57 +6281,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     applySelectedStructureOperation,
   ]);
 
-  const insertElement = useCallback((options: {
-    parentElementId: string;
-    beforeElementId?: string | null;
-    html: string;
-  }): boolean => {
-    if (activeNativeEditRef.current) {
-      if (deferNativeCommandRef.current(
-        "target-switch",
-        () => {
-          const committed = finishNativeEditing(true, "manual", {
-            deferRuntimeRefresh: true,
-          });
-          if (committed.ok) window.queueMicrotask(() => insertElement(options));
-        },
-        options,
-      )) return true;
-      const committed = finishNativeEditing(true, "manual", {
-        deferRuntimeRefresh: true,
-      });
-      if (!committed.ok || committed.frameReloading) return false;
-    }
-    if (readOnlyRef.current || !enableReorderRef.current) return false;
-    const sourceIndex = sourceIndexRef.current;
-    if (!sourceIndex) return false;
-    try {
-      const { operation, mutation } = insertStructureCommand({
-        sourceIndex,
-        baseRevision: semanticRevisionRef.current,
-        parentElementId: options.parentElementId,
-        beforeElementId: options.beforeElementId ?? null,
-        html: options.html,
-        originalSelection: selectedSourceSelectionRef.current,
-      });
-      return Boolean(applySourceCommand({
-        type: "direct-semantic-operation",
-        operation,
-      }, mutation));
-    } catch (cause) {
-      reportBlockedEdit(cause);
-      return false;
-    }
-  }, [applySourceCommand, finishNativeEditing, reportBlockedEdit]);
-
   const canvasCommandsRef = useRef({
-    insertElement,
     moveSelectedTo,
     duplicateSelected,
     deleteSelected,
   });
   canvasCommandsRef.current = {
-    insertElement,
     moveSelectedTo,
     duplicateSelected,
     deleteSelected,
@@ -7345,7 +7484,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       moveSelected,
       duplicateSelected,
       deleteSelected,
-      insertElement,
       moveSelectedTo,
       adoptHistorySource,
       cancelHistoryAction,
@@ -7365,7 +7503,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       loadFrameSource,
       deleteSelected,
       duplicateSelected,
-      insertElement,
       moveSelected,
       moveSelectedTo,
       adoptHistorySource,
@@ -9104,6 +9241,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selection,
   ]);
   const elementCopyAvailability = elementCopyAssessment.availability;
+  const elementDeleteAvailability = useMemo(() => {
+    if (runtimeGeneratedSelection) return "unsupported" as const;
+    const decision = evaluateDirectStructurePolicy({
+      action: "delete",
+      sourceIndex: sourceIndexRef.current,
+      selection,
+    });
+    return decision.status === "supported"
+      ? "available" as const
+      : decision.status === "temporarily-unavailable"
+        ? "busy" as const
+        : "unsupported" as const;
+  }, [
+    frameRender.elementGeneration,
+    html,
+    runtimeGeneratedSelection,
+    selection,
+  ]);
   useEffect(() => {
     const root = containerRef.current;
     if (!root || window.stemmioRuntime?.diagnostics?.e2eCanvasCapabilityProbe !== true) return;
@@ -9143,7 +9298,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     (root as HTMLElement & {
       __STEMMIO_E2E_STRUCTURE_COMMANDS__?: typeof canvasCommandsRef.current;
     }).__STEMMIO_E2E_STRUCTURE_COMMANDS__ = {
-      insertElement: (options) => canvasCommandsRef.current.insertElement(options),
       moveSelectedTo: (options) => canvasCommandsRef.current.moveSelectedTo(options),
       duplicateSelected: () => canvasCommandsRef.current.duplicateSelected(),
       deleteSelected: () => canvasCommandsRef.current.deleteSelected(),
@@ -9511,6 +9665,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     enableReorder: enableReorder && !runtimeGeneratedSelection,
     moveAvailability,
     elementCopyAvailability,
+    elementDeleteAvailability,
     deleteCommentCount,
     deleteCommentDraftIncluded,
     spacingMenuRef,
@@ -9525,6 +9680,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     editFeedback,
     editFeedbackActionAvailable,
     elementCopyAvailability,
+    elementDeleteAvailability,
     enableReorder,
     frameRender.elementGeneration,
     hasTextRange,

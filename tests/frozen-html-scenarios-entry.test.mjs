@@ -109,8 +109,9 @@ function dispatcherFixture(version) {
       },
       {
         scope: "core-structure-closed-loop", operation: "structure", initialRuntime: "runtime", reopen: true,
-        targets: [{ selectedId: "c-target", selectedTag: "p", expectedProjection: "candidate", operations: ["copy", "move-copy", "input-restored", "save-restored"],
-          projectionByOperation: { "move-copy": "candidate" }, rebuildPath: "runtime-candidate" }],
+        targets: [{ selectedId: "c-target", selectedTag: "p", expectedProjection: "in-place", operations: ["copy", "move-copy", "input-restored", "save-restored"],
+          projectionByOperation: { copy: "in-place", "move-copy": "recovered" }, rebuildPath: "runtime-candidate",
+          rebuildTrigger: "accepted-projection-failure", destinationParentId: "c-parent", destinationBeforeElementId: "c-target" }],
       },
     ],
   };
@@ -143,7 +144,7 @@ function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) 
   const lifecycle = { candidateRecords: [], lifecycleRecords: [], records: [] };
   const runtimeConfig = {
     windowMode: env.STEMMIO_E2E_WINDOW_MODE || "visible-background",
-    structuralInPlace: env.STEMMIO_FROZEN_SCENARIO_ID === "C" ? "disabled" : "enabled",
+    structuralInPlace: "enabled",
   };
   const report = {
     schemaVersion: 1,
@@ -231,7 +232,7 @@ function passChildReport(env, version, nestedPlan, { incomplete = false } = {}) 
       : row)
     .map((row) => row.operation === "move-copy"
       ? { ...row, targetId: copyId, actual: {
-        planned: "candidate", outcome: "candidate", runtime: {
+        planned: "in-place", outcome: "recovered", runtime: {
           path: "runtime-candidate", conditions: runtimeConditions,
           terminalConditions: { phaseSettled: true, runtimeReady: true },
           candidateId: "c-candidate", generation: 2,
@@ -457,9 +458,10 @@ async function createPublicScenarioFixture(directory, { fileId, scope, operation
       operation, original: { ...identity, path: originalPath }, seed: identity, workspaceSourceSha256: version.workspaceSourceSha256,
       reopen: true,
       targets: [{ ...structureTarget, continuationProbe: undefined,
-        rebuildPath: "runtime-candidate",
-        operations: [...FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS], expectedProjection: "candidate",
-        projectionByOperation: { copy: "candidate", "move-copy": "candidate" }, destinationParentId: ids.destinationParent,
+        rebuildPath: "runtime-candidate", rebuildTrigger: "accepted-projection-failure",
+        operations: [...FROZEN_STRUCTURE_CLOSED_LOOP_OPERATIONS], expectedProjection: "in-place",
+        projectionByOperation: { copy: "in-place", "move-copy": "recovered" }, destinationParentId: ids.sourceParent,
+        destinationBeforeElementId: ids.structure,
         initialBold: false, formatCapability: {
           expected: "AVAILABLE", scope: "element", basis: "SOURCE_ELEMENT_STYLE_NO_NEW_WRAPPER",
         } }],

@@ -129,7 +129,7 @@ test("C rejects copy-only or descriptive-only rebuild plans", () => {
   const target = {
     rebuildPath: "runtime-candidate",
     operations: ["copy"],
-    expectedProjection: "candidate",
+    expectedProjection: "in-place",
     projectionByOperation: {},
   };
   assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
@@ -144,21 +144,30 @@ test("C rejects copy-only or descriptive-only rebuild plans", () => {
     targets: [{ ...target, operations: ["copy", "input-restored", "save-restored"],
       projectionByOperation: { "move-copy": "candidate" } }],
   }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
+  assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
+    scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
+    targets: [{ ...target, operations: ["copy", "move-copy", "input-restored", "save-restored"],
+      projectionByOperation: { copy: "in-place", "move-copy": "candidate" },
+      rebuildTrigger: "accepted-projection-failure" }],
+  }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
   assert.doesNotThrow(() => validateFrozenNestedScenarioShape(scenario, {
     scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
     targets: [{ ...target, operations: ["copy", "move-copy", "input-restored", "save-restored"],
-      projectionByOperation: { "move-copy": "candidate" } }],
+      projectionByOperation: { copy: "in-place", "move-copy": "recovered" },
+      rebuildTrigger: "accepted-projection-failure", destinationParentId: "c-parent",
+      destinationBeforeElementId: "c-target" }],
   }));
   assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
     scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
     targets: [{ ...target, expectedProjection: "in-place",
       operations: ["copy", "move-copy", "input-restored", "save-restored"],
-      projectionByOperation: { "move-copy": "candidate" } }],
+      projectionByOperation: { copy: "in-place", "move-copy": "recovered" } }],
   }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
   assert.throws(() => validateFrozenNestedScenarioShape(scenario, {
     scope: scenario.scope, operation: "structure", initialRuntime: "runtime", reopen: true,
     targets: [{ ...target, operations: ["copy", "move-copy", "input-restored", "save-restored"],
-      projectionByOperation: { "move-copy": "in-place" } }],
+      projectionByOperation: { copy: "in-place", "move-copy": "in-place" },
+      rebuildTrigger: "accepted-projection-failure" }],
   }), { code: "FROZEN_ENTRY_REBUILD_CONTRACT_INVALID" });
 });
 

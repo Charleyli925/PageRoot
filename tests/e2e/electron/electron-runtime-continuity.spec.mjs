@@ -392,6 +392,10 @@ test("successful Candidate retirement does not retain a growing Document chain",
       await testInfo.attach("retirement-dom-counts", { body: JSON.stringify(samples), contentType: "application/json" });
       await cdp.detach();
     }
+  }, {
+    injectedEnv: {
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
   });
 });
 
@@ -892,6 +896,10 @@ test("failed chart refresh keeps the latest static source quietly editable acros
     await page.keyboard.press('Escape');
     await expect.poll(() => readPublishedWorkingCopy(working, 'utf8')).toContain('STILL_EDITABLE');
     await page.screenshot({ path: testInfo.outputPath('chart-failed-refresh-editable.png') });
+  }, {
+    injectedEnv: {
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
   });
 });
 
@@ -1061,6 +1069,7 @@ test("the read-only recovery notice reloads source authority even when dynamic p
     await page.screenshot({ path: testInfo.outputPath('reload-editing-restored.png') });
   }, {
     injectedEnv: {
+      STEMMIO_E2E_RUNTIME_COMMIT_HOOKS: "1",
       STEMMIO_E2E_STATIC_CANDIDATE_FAILURE: "1",
     },
   });

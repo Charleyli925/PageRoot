@@ -531,25 +531,28 @@ inverse patches used by the current-open editing session. The renderer
 for one open HTML. A new forward edit truncates redo; switching HTML, closing
 the document or restarting clears the stack.
 
-Authored structure edits use the same boundary. Insert accepts one identity-free
-source element and allocates IDs for its whole subtree; duplicate first removes
-the selected subtree's IDs; delete retires them; same-parent and cross-parent
-move preserve them. Only current `SourceIndex` elements are eligible. Script-
-generated nodes and preview DOM are never structural inputs. Duplicate additionally
-compares the complete selected live subtree with its current canonical source
-subtree; a generated descendant, opaque runtime surface or authored program makes
-the parent selection unsupported. Known-unsupported copy is absent from the
-toolbar and rejected again at the common command boundary, while independent
-source-backed siblings, delete/move, text copy and complete-HTML save/export keep
-their existing contracts. After the kernel accepts complete HTML, Canvas may keep
-the current iframe when ADR 0074 proves source identity, live node identity and
-the local update; missing proof uses the existing Candidate rebuild. Insert and
-move into mixed text/comment parents, customized built-ins, and unprovable
-hosts stay on Candidate. `body` may receive proven child insert/move; it is
-still not itself a delete/move target. The visible toolbar keeps this deliberately small:
-duplicate, delete and sibling up/down; the Canvas port exposes raw insertion and
-cross-parent move for product workflows without adding a component or layout
-system. See ADR 0064 and ADR 0065.
+Authored structure edits use the same boundary, but the direct Canvas surface is
+deliberately narrower than the shared kernel. Direct duplicate accepts only an
+independent source-backed `p`, `h1`–`h6`, simple `li`, or directly inline-content
+`blockquote`; it allocates fresh IDs for the copied subtree. Direct delete accepts
+only a source-backed target with a provable legal undo landing and rejects roots,
+special/runtime surfaces, unsafe subtrees and mixed text/comment parents. Direct
+move is only adjacent reorder within the selected element's current parent and
+preserves IDs. Complex containers, full lists/tables/forms/widgets, authored
+programs, generated descendants, custom elements, references/resources and
+cross-parent moves are rejected before any source/history/revision receipt is
+created. Arbitrary direct HTML insertion is not a Canvas command.
+
+Only current `SourceIndex` elements are eligible; preview DOM and script-generated
+nodes never become structural inputs. The kernel still retains its identity-
+allocating insert primitive and cross-parent move path for history, recovery and
+other explicitly controlled internal consumers. After an accepted direct
+operation, Canvas may keep the current iframe only when ADR 0074 proves source
+identity, live node identity and the local update; an accepted projection failure
+enters the existing unified Candidate recovery without losing the source receipt.
+The visible toolbar and Canvas command port expose only duplicate, delete and
+same-parent sibling up/down (plus the existing text/style commands). See ADR
+0064, ADR 0065 and ADR 0074.
 
 Undo and redo first checkpoint any active editable island and drain the source
 queue. The renderer applies the exact inverse or forward patches locally, then

@@ -35,10 +35,10 @@ import {
   inferSelectionLevel,
   selectionForElement,
 } from "./html-canvas-selection";
+import { directCopyPolicyForElement } from "./direct-structure-policy.js";
 import { moduleHasSubstance } from "./html-canvas-pointer-hit.js";
 import {
   canvasPointerCapabilityFromProof,
-  elementCopyAvailabilityFromProof,
   type ElementCopyAvailability,
 } from "./html-canvas-pointer-proof.js";
 
@@ -67,6 +67,7 @@ export type ElementCopyAvailabilityReason =
   | "canonical-source-unavailable"
   | "canonical-target-unavailable"
   | "runtime-subtree-diverged"
+  | "direct-structure-unsupported"
   | "transition-busy";
 
 export type ElementCopyAssessment = Readonly<{
@@ -483,6 +484,27 @@ export function elementCopyAssessmentForTarget({
     return Object.freeze({
       availability: "unsupported",
       reason: "source-mutation-authority-missing",
+    });
+  }
+  // Keep the cheap product-range check ahead of the canonical subtree walk.
+  // The pointer path must not spend time proving a complex target that the
+  // direct Canvas command will reject anyway.
+  const directPolicy = directCopyPolicyForElement({
+    sourceIndex,
+    elementId: inspection.attributeValue(element, STEMMIO_ELEMENT_ID_ATTRIBUTE),
+  });
+  if (directPolicy.status === "unsupported") {
+    return Object.freeze({
+      availability: "unsupported",
+      reason: "direct-structure-unsupported",
+      diagnostic: directPolicy.reason,
+    });
+  }
+  if (directPolicy.status === "temporarily-unavailable") {
+    return Object.freeze({
+      availability: "busy",
+      reason: "transition-busy",
+      diagnostic: directPolicy.reason,
     });
   }
   const subtreeAssessment = assessRuntimeSubtreeAgainstSource(

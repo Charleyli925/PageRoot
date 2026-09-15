@@ -2,10 +2,10 @@ import { createTargetRef } from "../lib/source-patch-core.js";
 import {
   createDeleteElementOperation,
   createDuplicateElementOperation,
-  createInsertElementOperation,
   createMoveElementOperation,
 } from "../lib/source-structure-edit.js";
 import { selectionFromRefreshedTarget } from "./html-canvas-selection";
+import { evaluateDirectStructurePolicy } from "./direct-structure-policy.js";
 import type { SourceIndexValue, SourceTargetRef } from "./html-canvas-internal-types";
 import type {
   HtmlCanvasMutation,
@@ -65,6 +65,15 @@ export function selectedStructureCommand(options: {
   if (["html", "head", "body"].includes(selection.tagName)) {
     throw new Error("文档根和源码容器不能执行这个结构操作。");
   }
+  const policy = evaluateDirectStructurePolicy({
+    action: action === "duplicate" ? "copy" : action,
+    sourceIndex,
+    selection,
+    destination,
+  });
+  if (policy.status !== "supported") {
+    throw new Error(`${policy.reason}: ${policy.message}`);
+  }
   const operation = action === "duplicate"
     ? createDuplicateElementOperation(sourceIndex, {
       baseRevision,
@@ -91,39 +100,4 @@ export function selectedStructureCommand(options: {
       : { elementId: selection.elementId, ...(destination || {}) },
   };
   return { operation, mutation };
-}
-
-export function insertStructureCommand(options: {
-  sourceIndex: SourceIndexValue;
-  originalSelection?: HtmlCanvasSelection | null;
-  parentElementId: string;
-  beforeElementId?: string | null;
-  html: string;
-  baseRevision: number;
-}) {
-  const parentSelection = sourceSelectionForElementId(
-    options.sourceIndex,
-    options.parentElementId,
-    options.originalSelection?.elementId === options.parentElementId
-      ? options.originalSelection
-      : null,
-  );
-  return {
-    operation: createInsertElementOperation(options.sourceIndex, {
-      baseRevision: options.baseRevision,
-      parentElementId: options.parentElementId,
-      beforeElementId: options.beforeElementId ?? null,
-      html: options.html,
-    }),
-    mutation: {
-      kind: "structure",
-      target: parentSelection,
-      property: "insert",
-      before: null,
-      after: {
-        parentElementId: options.parentElementId,
-        beforeElementId: options.beforeElementId ?? null,
-      },
-    } satisfies HtmlCanvasMutation,
-  };
 }

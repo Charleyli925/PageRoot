@@ -156,13 +156,21 @@ export function bindFrozenMove(beforeBytes, afterBytes, { copyId, destinationPar
   const destination = afterNodes.filter(node => idOf(node) === destinationParentId);
   const beforeIds = beforeNodes.map(idOf).filter(Boolean).sort();
   const afterIds = afterNodes.map(idOf).filter(Boolean).sort();
+  const siblingIds = (node) => node?.parentNode?.childNodes?.filter(child => child.tagName).map(idOf) || [];
+  const beforeSiblingIds = siblingIds(beforeCopy[0]);
+  const afterSiblingIds = siblingIds(afterCopy[0]);
+  const beforeIndex = beforeSiblingIds.indexOf(copyId);
+  const afterIndex = afterSiblingIds.indexOf(copyId);
+  const adjacentSameParent = originalParentId === destinationParentId
+    && beforeIndex >= 0 && afterIndex >= 0 && Math.abs(afterIndex - beforeIndex) === 1;
   const conditions = {
     copyUniqueBefore: beforeCopy.length === 1,
     copyUniqueAfter: afterCopy.length === 1,
     destinationUnique: destination.length === 1,
     movedFromOriginal: idOf(beforeCopy[0]?.parentNode) === originalParentId,
     landedAtDestination: idOf(afterCopy[0]?.parentNode) === destinationParentId,
-    destinationChanged: originalParentId !== destinationParentId,
+    destinationChanged: originalParentId !== destinationParentId || adjacentSameParent,
+    adjacentSameParent: originalParentId !== destinationParentId || adjacentSameParent,
     sameIdentitySet: beforeIds.length === afterIds.length && JSON.stringify(beforeIds) === JSON.stringify(afterIds),
     sameNodeCount: beforeNodes.length === afterNodes.length,
   };
@@ -607,12 +615,20 @@ export async function executeFrozenStructure({ frame, target, page, editor, elec
         return { fontWeight: "700", outsideElementUnchanged: oracle.outsideElementUnchanged };
       });
       await record("move-copy", { parentId: target.destinationParentId }, async () => {
+        if (target.rebuildTrigger === "accepted-projection-failure") {
+          // The move is still a supported direct operation.  Inject failure
+          // only after the kernel has been accepted so C proves the unified
+          // recovery path rather than globally disabling structural in-place.
+          await page.evaluate(() => {
+            window.__STEMMIO_E2E_FAIL_NEXT_STRUCTURAL_PROJECTION__ = true;
+          });
+        }
         const result = await rebuild(async () => {
-          const moved = await page.getByTestId("html-canvas-editor").evaluate((element, parentElementId) => {
+          const moved = await page.getByTestId("html-canvas-editor").evaluate((element, parentElementId, beforeElementId) => {
             const run = element.__STEMMIO_E2E_STRUCTURE_COMMANDS__?.moveSelectedTo;
             if (typeof run !== "function") throw new Error("STRUCTURE_COMMAND_UNAVAILABLE:moveSelectedTo");
-            return run({ parentElementId });
-          }, target.destinationParentId);
+            return run({ parentElementId, beforeElementId });
+          }, target.destinationParentId, target.destinationBeforeElementId);
           failUnless(moved === true, "FROZEN_MOVE_COMMAND_REFUSED", { moved });
         }, after => bindFrozenMove(currentBytes, after, {
           copyId: copyTarget.selectedId,
