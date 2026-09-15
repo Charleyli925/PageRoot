@@ -5,13 +5,13 @@
   "author": "源页",
   "license": "Apache-2.0",
   "private": true,
-  "homepage": "https://github.com/Charleyli925/PageRoot#readme",
+  "homepage": "https://github.com/Charleyli925/Stemmio#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Charleyli925/PageRoot.git"
+    "url": "git+https://github.com/Charleyli925/Stemmio.git"
   },
   "bugs": {
-    "url": "https://github.com/Charleyli925/PageRoot/issues"
+    "url": "https://github.com/Charleyli925/Stemmio/issues"
   },
   "main": "desktop/main.mjs",
   "engines": {
@@ -830,7 +830,7 @@
       {
         "provider": "github",
         "owner": "Charleyli925",
-        "repo": "PageRoot",
+        "repo": "Stemmio",
         "releaseType": "release"
       }
     ],

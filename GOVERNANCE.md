@@ -1,7 +1,7 @@
 # Governance
 
 Stemmio currently uses a maintainer-led governance model. The public source
-repository remains `Charleyli925/PageRoot`.
+repository is `Charleyli925/Stemmio`.
 
 The repository owner is responsible for project direction, security releases, merge decisions, release signing policy and the use of project branding. Contributors participate through Issues, Discussions and Pull Requests. Significant protocol, persistence, security or compatibility changes should be proposed before implementation and documented as an architecture decision when accepted.
 

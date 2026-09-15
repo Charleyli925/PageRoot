@@ -88,7 +88,7 @@ test("delivery metadata is cached, bounded-concurrent and reports progress", asy
   const progress = [];
   const result = await collectPullRequests({
     root: productRoot,
-    repository: "Charleyli925/PageRoot",
+    repository: "Charleyli925/Stemmio",
     commits: [
       { sha: commitA, subject: "first" },
       { sha: commitB, subject: "second" },
@@ -102,7 +102,7 @@ test("delivery metadata is cached, bounded-concurrent and reports progress", asy
       if (arguments_[0] === "api") return [{ number: 10 }];
       return {
         number: 10,
-        url: "https://github.com/Charleyli925/PageRoot/pull/10",
+        url: "https://github.com/Charleyli925/Stemmio/pull/10",
         title: "Cached metadata",
         state: "MERGED",
         isDraft: false,
@@ -134,7 +134,7 @@ test("delivery metadata has an explicit overall deadline and useful timeout prog
   await assert.rejects(
     collectPullRequests({
       root: productRoot,
-      repository: "Charleyli925/PageRoot",
+      repository: "Charleyli925/Stemmio",
       commits: [{ sha: commitSha, subject: "deadline" }],
       deadlineAt: Date.now() - 1,
       deadlineMs: 123,
@@ -259,7 +259,7 @@ test("Pull Request status includes readiness, mergeability and live checks", () 
 test("delivery Markdown reports exact package bytes, every PR and direct commits", () => {
   const pullRequests = [{
     number: 84,
-    url: "https://github.com/Charleyli925/PageRoot/pull/84",
+    url: "https://github.com/Charleyli925/Stemmio/pull/84",
     title: "Distinguish developer preview packages and versions",
     summary: "Distinguish developer preview packages and versions",
     state: "OPEN",
@@ -287,7 +287,7 @@ test("delivery Markdown reports exact package bytes, every PR and direct commits
       size: 123,
       sha256: "f".repeat(64),
     },
-    repository: "Charleyli925/PageRoot",
+    repository: "Charleyli925/Stemmio",
     baseTag: "v0.9.5",
     headSha,
     treeSha,
@@ -320,7 +320,7 @@ test("delivery Markdown reports exact package bytes, every PR and direct commits
   const markdown = renderPackageDeliveryMarkdown(report);
   assert.match(markdown, /Stemmio-Developer-Preview-0\.9\.69993-arm64\.dmg/u);
   assert.match(markdown, /2 个提交、2 个文件（\+120 \/ -4）/u);
-  assert.match(markdown, /\[#84\]\(https:\/\/github\.com\/Charleyli925\/PageRoot\/pull\/84\)/u);
+  assert.match(markdown, /\[#84\]\(https:\/\/github\.com\/Charleyli925\/Stemmio\/pull\/84\)/u);
   assert.match(markdown, /开放 · 可审查 · 合并受阻 · 检查失败/u);
   assert.match(markdown, /chore: direct package adjustment/u);
   assert.match(markdown, /GitHub 元数据扫描：2\/2 个提交、1\/1 个 PR；8 并发/u);

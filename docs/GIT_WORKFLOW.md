@@ -2,7 +2,7 @@
 
 ## Single source of truth
 
-`https://github.com/Charleyli925/PageRoot` is the canonical repository and `main` is the canonical source branch. A local checkout is a working copy. Build folders and installed applications are outputs only.
+`https://github.com/Charleyli925/Stemmio` is the canonical repository and `main` is the canonical source branch. A local checkout is a working copy. Build folders and installed applications are outputs only.
 
 ```text
 GitHub main

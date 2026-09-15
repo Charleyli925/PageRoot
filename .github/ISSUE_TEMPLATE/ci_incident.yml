@@ -28,7 +28,7 @@ body:
     id: run
     attributes:
       label: Failed run or job URL
-      placeholder: https://github.com/Charleyli925/PageRoot/actions/runs/...
+      placeholder: https://github.com/Charleyli925/Stemmio/actions/runs/...
     validations:
       required: true
   - type: input
