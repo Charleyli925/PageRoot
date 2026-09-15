@@ -196,7 +196,7 @@ test("downloaded candidate verification rejects changed release bytes and malfor
   })));
   const attestation = {
     schemaVersion: 1,
-    repository: "Charleyli925/PageRoot",
+    repository: "Charleyli925/Stemmio",
     event: "workflow_dispatch",
     architecture: "arm64",
     candidateCommitSha: commitSha,
@@ -229,7 +229,7 @@ test("downloaded candidate verification rejects changed release bytes and malfor
     directory,
     identity,
     architecture: "arm64",
-    repository: "Charleyli925/PageRoot",
+    repository: "Charleyli925/Stemmio",
     runId: 501,
     runAttempt: 1,
   }));
@@ -293,7 +293,7 @@ test("downloaded candidate verification rejects changed release bytes and malfor
         directory,
         identity,
         architecture: "arm64",
-        repository: "Charleyli925/PageRoot",
+        repository: "Charleyli925/Stemmio",
         runId: 501,
         runAttempt: 1,
       }),

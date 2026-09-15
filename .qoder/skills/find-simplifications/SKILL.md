@@ -1,6 +1,6 @@
 ---
 name: find-simplifications
-description: Audits the PageRoot repository for over-design, dead code, duplicated implementations, documentation bloat/drift, and chain-of-thought leakage, then produces an evidence-based simplification proposal document. Use when the user asks to find simplifications, dead code, over-engineering, tech debt, redundant docs, or requests a cleanup/simplification audit.
+description: Audits the Stemmio repository for over-design, dead code, duplicated implementations, documentation bloat/drift, and chain-of-thought leakage, then produces an evidence-based simplification proposal document. Use when the user asks to find simplifications, dead code, over-engineering, tech debt, redundant docs, or requests a cleanup/simplification audit.
 ---
 
 # Find Simplifications

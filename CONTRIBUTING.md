@@ -1,7 +1,7 @@
 # Contributing to Stemmio
 
-Thank you for helping improve Stemmio. The public source repository remains
-`Charleyli925/PageRoot`.
+Thank you for helping improve Stemmio. The public source repository is
+`Charleyli925/Stemmio`.
 
 ## Before opening a change
 

@@ -1,7 +1,7 @@
 # Stemmio 更名与本地文件边界执行计划
 
-执行基线：`711f6c2e9e84ee57c3d3e59667a0aab54d167d5b`（`Charleyli925/PageRoot`）。
-本文件把 2026-09-14 的切换规划落成仓库内的执行清单；历史 ADR、CHANGELOG、第三方声明和真实 GitHub 地址仍按原文保留。
+执行基线：`711f6c2e9e84ee57c3d3e59667a0aab54d167d5b`（历史仓库 `Charleyli925/PageRoot`）。
+本文件把 2026-09-14 的切换规划落成仓库内的执行清单；历史 ADR、CHANGELOG 和第三方声明仍按原文保留，现行 GitHub 地址使用更名后的 Stemmio 仓库。
 
 ## 冻结合同
 
@@ -25,7 +25,7 @@
 | 对话 actor | `stemmio`（记录版本 3） |
 | 自有 Schema | `https://stemmio.local/schemas/` |
 | 自有环境变量 | `STEMMIO_*`；第三方标准变量不改 |
-| GitHub | 本轮保持 `Charleyli925/PageRoot` |
+| GitHub | 已改名为 `Charleyli925/Stemmio`；不回写旧 Release 与 tag |
 
 ## 渠道与隔离规则
 
@@ -33,7 +33,7 @@
 - 不读取、迁移、接管或删除旧 PageRoot 管理目录、Keychain 条目或旧 Registry。
 - 用户主动选择的旧 HTML 可以导入；导入创建新的 Stemmio 项目副本且不回写原文件。
 - Preview、source 和中间测试包不得承载正式 Stemmio 项目。
-- `isPageRootElement`、`isPageRootSelection` 等页面语义名称、历史资料、拒绝旧格式的负向测试和真实仓库地址是精确例外。
+- `isPageRootElement`、`isPageRootSelection` 等页面语义名称、历史资料和拒绝旧格式的负向测试是精确例外。
 
 ## 批次状态与合同归属
 

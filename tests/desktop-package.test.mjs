@@ -404,7 +404,7 @@ test("desktop package identity and artifact profile stay fixed", async () => {
     {
       provider: "github",
       owner: "Charleyli925",
-      repo: "PageRoot",
+      repo: "Stemmio",
       releaseType: "release",
     },
   ]);
@@ -430,7 +430,7 @@ test("desktop package identity and artifact profile stay fixed", async () => {
   assert.deepEqual(packageJson.build.publish, [{
     provider: "github",
     owner: "Charleyli925",
-    repo: "PageRoot",
+    repo: "Stemmio",
     releaseType: "release",
   }]);
   assert.equal(packageJson.dependencies["@openai/codex"], undefined);

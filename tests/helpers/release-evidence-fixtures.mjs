@@ -22,7 +22,7 @@ const FIXTURE_HEAD_SHA = "c".repeat(40);
 const FIXTURE_VERSION = "0.9.4";
 const FIXTURE_ARCHITECTURE = "arm64";
 const FIXTURE_BUILT_AT = "2026-07-29T00:00:00.000Z";
-const FIXTURE_REPOSITORY = "https://github.com/Charleyli925/PageRoot";
+const FIXTURE_REPOSITORY = "https://github.com/Charleyli925/Stemmio";
 
 export const APP_SOURCE_FILES = [
   "desktop/main.mjs",
@@ -291,7 +291,7 @@ export function fixturePackageJson(profile, overrides = {}) {
         {
           provider: "github",
           owner: "Charleyli925",
-          repo: "PageRoot",
+          repo: "Stemmio",
           releaseType: "release",
         },
       ],

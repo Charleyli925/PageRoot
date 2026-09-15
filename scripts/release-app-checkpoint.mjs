@@ -26,6 +26,7 @@ import {
 import {
   assertBuildInfo,
   readRepositoryIdentity,
+  SOURCE_REPOSITORY_URL,
 } from "./release-provenance.mjs";
 import { readPackageVersions } from "./source-gate-provenance.mjs";
 
@@ -247,7 +248,7 @@ export async function createReleaseAppCheckpoint({
       name: identity.packageJson.name,
       version: identity.packageVersion,
       architecture,
-      sourceRepository: "https://github.com/Charleyli925/PageRoot",
+      sourceRepository: SOURCE_REPOSITORY_URL,
       commitSha: identity.commitSha,
       treeSha: identity.treeSha,
     },
@@ -448,7 +449,7 @@ export async function createReleaseDryRunCheckpoint({
       name: identity.packageJson.name,
       version: identity.packageVersion,
       architecture,
-      sourceRepository: "https://github.com/Charleyli925/PageRoot",
+      sourceRepository: SOURCE_REPOSITORY_URL,
       commitSha: identity.commitSha,
       treeSha: identity.treeSha,
     },

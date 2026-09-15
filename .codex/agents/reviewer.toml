@@ -1,5 +1,5 @@
 name = "reviewer"
-description = "Read-only independent review of PageRoot correctness, regressions, UX, scope and validation gaps."
+description = "Read-only independent review of Stemmio correctness, regressions, UX, scope and validation gaps."
 sandbox_mode = "read-only"
 
 developer_instructions = """

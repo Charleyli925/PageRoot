@@ -1,6 +1,6 @@
 ---
 name: stemmio-product-design
-description: Design, improve, audit or review Stemmio (legacy PageRoot) user interfaces and flows, including layout, copy, navigation, visible states, Agent progress, Review and adoption. Use for user-facing changes and UI code review; skip internal-only changes without user-visible effects.
+description: Design, improve, audit or review Stemmio user interfaces and flows, including layout, copy, navigation, visible states, Agent progress, Review and adoption. Use for user-facing changes and UI code review; skip internal-only changes without user-visible effects.
 ---
 
 # Stemmio Product Design

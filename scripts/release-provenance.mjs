@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(import.meta.url);
 export const defaultProductRoot = path.resolve(path.dirname(scriptPath), "..");
 export const buildInfoRelativePath = "output/release-metadata/build-info.json";
+export const SOURCE_REPOSITORY_URL = "https://github.com/Charleyli925/Stemmio";
 
 function git(productRoot, args) {
   const result = spawnSync("git", args, {
@@ -55,7 +56,7 @@ export async function expectedBuildInfo({
     name: packageJson.name,
     version: effectiveVersion,
     architecture,
-    sourceRepository: "https://github.com/Charleyli925/PageRoot",
+    sourceRepository: SOURCE_REPOSITORY_URL,
     commitSha: repository.commitSha,
     treeSha: repository.treeSha,
   });
@@ -110,7 +111,7 @@ export function assertBuildInfo(value, expected) {
   if (!/^(?:arm64|x64)$/u.test(value.architecture || "")) {
     throw new Error("Packaged build provenance has an invalid architecture.");
   }
-  if (value.sourceRepository !== "https://github.com/Charleyli925/PageRoot") {
+  if (value.sourceRepository !== SOURCE_REPOSITORY_URL) {
     throw new Error("Packaged build provenance has an unexpected source repository.");
   }
   if (!/^[0-9a-f]{40}$/u.test(value.commitSha || "") || !/^[0-9a-f]{40}$/u.test(value.treeSha || "")) {
